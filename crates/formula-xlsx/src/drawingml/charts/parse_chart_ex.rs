@@ -229,7 +229,7 @@ fn parse_legend(
 }
 fn detect_chart_kind(
     doc: &Document<'_>,
-    root_ns: &str,
+    _root_ns: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> String {
     let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
