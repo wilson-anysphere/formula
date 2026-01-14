@@ -131,6 +131,8 @@ python3 scripts/desktop_binary_size_report.py --no-build
 The report is emitted as Markdown to stdout, and is also published to the GitHub Actions step summary in the
 `Performance` workflow.
 
+Tip: `pnpm perf:desktop-size` also includes this Rust binary breakdown alongside the existing dist/bundle size summaries.
+
 ### Optional: enforce a size budget
 
 The report is informational by default. To turn it into a regression gate (locally or in CI), set:
