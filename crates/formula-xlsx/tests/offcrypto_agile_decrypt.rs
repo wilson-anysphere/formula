@@ -14,7 +14,10 @@ use ms_offcrypto_writer::Ecma376AgileWriter;
 use sha1::Digest as _;
 use zip::write::FileOptions;
 
-use formula_xlsx::{decrypt_agile_encrypted_package, OffCryptoError};
+use formula_xlsx::{
+    decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_with_warnings, OffCryptoError,
+    OffCryptoWarning,
+};
 use formula_xlsx::offcrypto::{
     derive_iv, derive_key, hash_password, HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK,
     KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
@@ -306,3 +309,49 @@ fn agile_decrypt_ignores_trailing_padding_in_verifier_and_hmac_values() {
     assert_eq!(decrypted, plain_zip);
 }
 
+#[test]
+fn agile_decrypt_warns_on_multiple_password_key_encryptors() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+
+    let mut encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Duplicate the existing password `<keyEncryptor>` block in the XML.
+    let xml_start = encryption_info
+        .iter()
+        .position(|b| *b == b'<')
+        .expect("XML must be present");
+    let header = encryption_info[..xml_start].to_vec();
+    let xml = std::str::from_utf8(&encryption_info[xml_start..]).expect("EncryptionInfo XML is UTF-8");
+
+    let marker = "<keyEncryptor uri=\"http://schemas.microsoft.com/office/2006/keyEncryptor/password\"";
+    let start = xml
+        .find(marker)
+        .expect("expected password keyEncryptor");
+    let end_rel = xml[start..]
+        .find("</keyEncryptor>")
+        .expect("expected closing keyEncryptor tag");
+    let end = start + end_rel + "</keyEncryptor>".len();
+    let key_encryptor_block = &xml[start..end];
+
+    let insert_pos = xml
+        .rfind("</keyEncryptors>")
+        .expect("expected </keyEncryptors>");
+    let mut patched_xml = String::new();
+    patched_xml.push_str(&xml[..insert_pos]);
+    patched_xml.push_str(key_encryptor_block);
+    patched_xml.push_str(&xml[insert_pos..]);
+
+    encryption_info = header.into_iter().chain(patched_xml.into_bytes()).collect();
+
+    let (decrypted, warnings) =
+        decrypt_agile_encrypted_package_with_warnings(&encryption_info, &encrypted_package, password)
+            .expect("decrypt should succeed");
+    assert_eq!(decrypted, plain_zip);
+    assert!(
+        warnings.contains(&OffCryptoWarning::MultiplePasswordKeyEncryptors { count: 2 }),
+        "expected MultiplePasswordKeyEncryptors warning, got: {warnings:?}"
+    );
+}

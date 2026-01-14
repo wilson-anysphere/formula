@@ -60,6 +60,7 @@ mod ooxml;
 mod rc4;
 #[cfg(test)]
 mod standard_rc4;
+mod warning;
 
 #[allow(unused_imports)]
 pub use aes_cbc::{
@@ -78,7 +79,9 @@ pub use agile::{
 pub use agile_decrypt::{
     decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_stream,
     decrypt_agile_encrypted_package_with_options,
+    decrypt_agile_encrypted_package_with_warnings,
 };
+pub use warning::OffCryptoWarning;
 pub use crypto::{
     derive_iv, derive_key, derive_segment_iv, hash_password, segment_block_key, CryptoError,
     HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,

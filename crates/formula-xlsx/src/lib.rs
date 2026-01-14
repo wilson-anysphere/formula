@@ -84,8 +84,9 @@ pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
 pub use offcrypto::{
-    decrypt_agile_encrypted_package, decrypt_agile_ooxml_from_cfb, decrypt_agile_ooxml_from_ole_bytes,
-    decrypt_agile_ooxml_from_ole_reader, OffCryptoError,
+    decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_with_warnings,
+    decrypt_agile_ooxml_from_cfb, decrypt_agile_ooxml_from_ole_bytes, decrypt_agile_ooxml_from_ole_reader,
+    OffCryptoError, OffCryptoWarning,
 };
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{

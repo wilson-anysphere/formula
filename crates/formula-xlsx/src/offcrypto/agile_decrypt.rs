@@ -17,6 +17,7 @@ use super::encryption_info::{
     ParseOptions,
 };
 use super::error::{OffCryptoError, Result};
+use super::warning::OffCryptoWarning;
 
 const SEGMENT_SIZE: usize = 0x1000;
 const KEY_ENCRYPTOR_URI_PASSWORD: &str =
@@ -282,7 +283,40 @@ pub fn decrypt_agile_encrypted_package_with_options(
     password: &str,
     opts: &DecryptOptions,
 ) -> Result<Vec<u8>> {
-    let info = parse_agile_encryption_info(encryption_info, opts)?;
+    decrypt_agile_encrypted_package_impl(encryption_info, encrypted_package, password, opts, None)
+}
+
+/// Decrypt an MS-OFFCRYPTO Agile `EncryptedPackage` stream (OOXML password protection), collecting
+/// non-fatal parse/decrypt warnings.
+///
+/// This is identical to [`decrypt_agile_encrypted_package`], but returns a vector of
+/// [`OffCryptoWarning`] values that describe irregularities encountered while parsing the
+/// `EncryptionInfo` XML. These warnings are intended for diagnostics/telemetry and never include
+/// sensitive data (passwords, derived keys, decrypted bytes).
+pub fn decrypt_agile_encrypted_package_with_warnings(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<(Vec<u8>, Vec<OffCryptoWarning>)> {
+    let mut warnings = Vec::new();
+    let plaintext = decrypt_agile_encrypted_package_impl(
+        encryption_info,
+        encrypted_package,
+        password,
+        &DecryptOptions::default(),
+        Some(&mut warnings),
+    )?;
+    Ok((plaintext, warnings))
+}
+
+fn decrypt_agile_encrypted_package_impl(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+    decrypt_opts: &DecryptOptions,
+    warnings: Option<&mut Vec<OffCryptoWarning>>,
+) -> Result<Vec<u8>> {
+    let info = parse_agile_encryption_info(encryption_info, decrypt_opts, warnings)?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
@@ -489,7 +523,7 @@ pub fn decrypt_agile_encrypted_package_stream<R: Read + Seek, W: Write>(
     password: &str,
     out: &mut W,
 ) -> Result<u64> {
-    let info = parse_agile_encryption_info(encryption_info, &DecryptOptions::default())?;
+    let info = parse_agile_encryption_info(encryption_info, &DecryptOptions::default(), None)?;
 
     // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
     // ensure we can report which field was malformed.
@@ -742,6 +776,7 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
 fn parse_agile_encryption_info(
     encryption_info: &[u8],
     decrypt_opts: &DecryptOptions,
+    mut warnings: Option<&mut Vec<OffCryptoWarning>>,
 ) -> Result<AgileEncryptionInfo> {
     let parse_opts = ParseOptions::default();
     if encryption_info.len() < 8 {
@@ -759,6 +794,10 @@ fn parse_agile_encryption_info(
     let xml_bytes = extract_encryption_info_xml(encryption_info, &parse_opts)?;
     let xml = decode_encryption_info_xml_text(xml_bytes)?;
     let doc = roxmltree::Document::parse(xml.as_ref())?;
+
+    if let Some(w) = warnings.as_deref_mut() {
+        collect_xml_warnings(&doc, w);
+    }
 
     let key_data_node = doc
         .descendants()
@@ -806,6 +845,17 @@ fn parse_agile_encryption_info(
         }
     }
 
+    if let Some(w) = warnings.as_deref_mut() {
+        if password_encryptor_count > 1 {
+            push_warning_dedup(
+                w,
+                OffCryptoWarning::MultiplePasswordKeyEncryptors {
+                    count: password_encryptor_count,
+                },
+            );
+        }
+    }
+
     let Some(key_encryptor_node) = selected_password_encryptor else {
         let mut msg = String::new();
         msg.push_str("unsupported key encryptor in Agile EncryptionInfo: ");
@@ -834,9 +884,6 @@ fn parse_agile_encryption_info(
         });
     };
 
-    // `password_encryptor_count > 1` is unusual but legal; decryption remains deterministic by
-    // selecting the first password entry. We currently don't surface warnings from this helper.
-    let _ = password_encryptor_count;
     let encrypted_key_node = key_encryptor_node
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "encryptedKey")
@@ -844,9 +891,14 @@ fn parse_agile_encryption_info(
             element: "encryptedKey".to_string(),
         })?;
 
-    let key_data = parse_key_data(key_data_node, &parse_opts)?;
+    let key_data = parse_key_data(key_data_node, &parse_opts, warnings.as_deref_mut())?;
     let data_integrity = parse_data_integrity(data_integrity_node, &parse_opts)?;
-    let password_key = parse_password_key_encryptor(encrypted_key_node, &parse_opts, decrypt_opts)?;
+    let password_key = parse_password_key_encryptor(
+        encrypted_key_node,
+        &parse_opts,
+        decrypt_opts,
+        warnings.as_deref_mut(),
+    )?;
 
     Ok(AgileEncryptionInfo {
         key_data,
@@ -855,15 +907,28 @@ fn parse_agile_encryption_info(
     })
 }
 
-fn parse_key_data(node: roxmltree::Node<'_, '_>, opts: &ParseOptions) -> Result<KeyData> {
+fn parse_key_data(
+    node: roxmltree::Node<'_, '_>,
+    opts: &ParseOptions,
+    warnings: Option<&mut Vec<OffCryptoWarning>>,
+) -> Result<KeyData> {
     validate_cipher_settings(node)?;
 
+    let salt_value = parse_base64_attr(node, "saltValue", opts)?;
+    let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
+    let hash_size = parse_usize_attr(node, "hashSize")?;
+
+    if let Some(w) = warnings {
+        maybe_warn_hash_size(w, "keyData", hash_algorithm, hash_size);
+        maybe_warn_salt_size(w, "keyData", node.attribute("saltSize"), salt_value.len());
+    }
+
     Ok(KeyData {
-        salt_value: parse_base64_attr(node, "saltValue", opts)?,
-        hash_algorithm: parse_hash_algorithm(node, "hashAlgorithm")?,
+        salt_value,
+        hash_algorithm,
         block_size: parse_usize_attr(node, "blockSize")?,
         key_bits: parse_usize_attr(node, "keyBits")?,
-        hash_size: parse_usize_attr(node, "hashSize")?,
+        hash_size,
     })
 }
 
@@ -878,6 +943,7 @@ fn parse_password_key_encryptor(
     node: roxmltree::Node<'_, '_>,
     parse_opts: &ParseOptions,
     decrypt_opts: &DecryptOptions,
+    warnings: Option<&mut Vec<OffCryptoWarning>>,
 ) -> Result<PasswordKeyEncryptor> {
     validate_cipher_settings(node)?;
 
@@ -889,17 +955,188 @@ fn parse_password_key_encryptor(
         });
     }
 
+    let salt_value = parse_base64_attr(node, "saltValue", parse_opts)?;
+    let hash_algorithm = parse_hash_algorithm(node, "hashAlgorithm")?;
+    let hash_size = parse_usize_attr(node, "hashSize")?;
+
+    if let Some(w) = warnings {
+        maybe_warn_hash_size(w, "encryptedKey", hash_algorithm, hash_size);
+        maybe_warn_salt_size(w, "encryptedKey", node.attribute("saltSize"), salt_value.len());
+    }
+
     Ok(PasswordKeyEncryptor {
-        salt_value: parse_base64_attr(node, "saltValue", parse_opts)?,
-        hash_algorithm: parse_hash_algorithm(node, "hashAlgorithm")?,
+        salt_value,
+        hash_algorithm,
         spin_count,
         block_size: parse_usize_attr(node, "blockSize")?,
         key_bits: parse_usize_attr(node, "keyBits")?,
-        hash_size: parse_usize_attr(node, "hashSize")?,
-        encrypted_verifier_hash_input: parse_base64_attr(node, "encryptedVerifierHashInput", parse_opts)?,
-        encrypted_verifier_hash_value: parse_base64_attr(node, "encryptedVerifierHashValue", parse_opts)?,
+        hash_size,
+        encrypted_verifier_hash_input: parse_base64_attr(
+            node,
+            "encryptedVerifierHashInput",
+            parse_opts,
+        )?,
+        encrypted_verifier_hash_value: parse_base64_attr(
+            node,
+            "encryptedVerifierHashValue",
+            parse_opts,
+        )?,
         encrypted_key_value: parse_base64_attr(node, "encryptedKeyValue", parse_opts)?,
     })
+}
+
+fn push_warning_dedup(warnings: &mut Vec<OffCryptoWarning>, warning: OffCryptoWarning) {
+    if warnings.iter().any(|w| w == &warning) {
+        return;
+    }
+    warnings.push(warning);
+}
+
+fn maybe_warn_hash_size(
+    warnings: &mut Vec<OffCryptoWarning>,
+    element: &'static str,
+    hash_alg: HashAlgorithm,
+    hash_size: usize,
+) {
+    let expected = match hash_alg {
+        HashAlgorithm::Sha1 => 20,
+        HashAlgorithm::Sha256 => 32,
+        HashAlgorithm::Sha384 => 48,
+        HashAlgorithm::Sha512 => 64,
+    };
+    if hash_size > 0 && hash_size <= expected && hash_size != expected {
+        push_warning_dedup(
+            warnings,
+            OffCryptoWarning::NonStandardHashSize {
+                element,
+                hash_algorithm: hash_alg,
+                hash_size,
+                expected_size: expected,
+            },
+        );
+    }
+}
+
+fn maybe_warn_salt_size(
+    warnings: &mut Vec<OffCryptoWarning>,
+    element: &'static str,
+    salt_size_attr: Option<&str>,
+    salt_value_len: usize,
+) {
+    const DEFAULT_SALT_SIZE: usize = 16;
+    let Some(raw) = salt_size_attr else {
+        return;
+    };
+    let Ok(salt_size) = raw.trim().parse::<usize>() else {
+        return;
+    };
+
+    if salt_size != salt_value_len {
+        push_warning_dedup(
+            warnings,
+            OffCryptoWarning::SaltSizeMismatch {
+                element,
+                declared_salt_size: salt_size,
+                salt_value_len,
+            },
+        );
+        return;
+    }
+
+    if salt_size != DEFAULT_SALT_SIZE {
+        push_warning_dedup(
+            warnings,
+            OffCryptoWarning::NonStandardSaltSize {
+                element,
+                salt_size,
+                expected_size: DEFAULT_SALT_SIZE,
+            },
+        );
+    }
+}
+
+fn collect_xml_warnings(doc: &roxmltree::Document<'_>, warnings: &mut Vec<OffCryptoWarning>) {
+    // Best-effort schema/attribute validation.
+    //
+    // This intentionally does not attempt to validate values (which might contain sensitive base64
+    // data). It only reports *names* of elements/attributes we don't understand so callers can
+    // surface non-fatal anomalies for debugging/telemetry.
+
+    fn is_allowed_element(name: &str) -> bool {
+        matches!(
+            name,
+            "encryption"
+                | "keyData"
+                | "dataIntegrity"
+                | "keyEncryptors"
+                | "keyEncryptor"
+                | "encryptedKey"
+        )
+    }
+
+    fn allowed_attrs(name: &str) -> &'static [&'static str] {
+        match name {
+            "keyData" => &[
+                "saltSize",
+                "blockSize",
+                "keyBits",
+                "hashSize",
+                "cipherAlgorithm",
+                "cipherChaining",
+                "hashAlgorithm",
+                "saltValue",
+            ],
+            "dataIntegrity" => &["encryptedHmacKey", "encryptedHmacValue"],
+            "keyEncryptor" => &["uri"],
+            "encryptedKey" => &[
+                "saltSize",
+                "blockSize",
+                "keyBits",
+                "hashSize",
+                "spinCount",
+                "cipherAlgorithm",
+                "cipherChaining",
+                "hashAlgorithm",
+                "saltValue",
+                "encryptedVerifierHashInput",
+                "encryptedVerifierHashValue",
+                "encryptedKeyValue",
+            ],
+            // `encryption` and `keyEncryptors` typically only carry namespace declarations.
+            _ => &[],
+        }
+    }
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        let element = node.tag_name().name();
+        if !is_allowed_element(element) {
+            push_warning_dedup(
+                warnings,
+                OffCryptoWarning::UnrecognizedXmlElement {
+                    element: element.to_string(),
+                },
+            );
+        }
+
+        let allowed = allowed_attrs(element);
+        for attr in node.attributes() {
+            if attr.namespace() == Some("http://www.w3.org/2000/xmlns/")
+                || attr.name().starts_with("xmlns")
+            {
+                continue;
+            }
+            if allowed.iter().any(|a| a == &attr.name()) {
+                continue;
+            }
+            push_warning_dedup(
+                warnings,
+                OffCryptoWarning::UnrecognizedXmlAttribute {
+                    element: element.to_string(),
+                    attr: attr.name().to_string(),
+                },
+            );
+        }
+    }
 }
 
 fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<()> {
@@ -1181,8 +1418,8 @@ mod key_encryptor_tests {
         );
 
         let stream = build_encryption_info_stream(&xml);
-        let info =
-            parse_agile_encryption_info(&stream, &DecryptOptions::default()).expect("parse should succeed");
+        let info = parse_agile_encryption_info(&stream, &DecryptOptions::default(), None)
+            .expect("parse should succeed");
         assert_eq!(info.password_key.spin_count, 1);
     }
 
@@ -1203,7 +1440,7 @@ mod key_encryptor_tests {
         );
 
         let stream = build_encryption_info_stream(&xml);
-        let err = parse_agile_encryption_info(&stream, &DecryptOptions::default())
+        let err = parse_agile_encryption_info(&stream, &DecryptOptions::default(), None)
             .expect_err("expected error");
         match err {
             OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
