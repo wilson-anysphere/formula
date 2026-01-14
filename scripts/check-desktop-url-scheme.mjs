@@ -561,11 +561,27 @@ function main() {
   try {
     const plist = readFileSync(infoPlistPath, "utf8");
     const schemeBlocks = extractAllPlistArrayBlocks(plist, "CFBundleURLSchemes");
-    const schemeRe = new RegExp(`<string>\\s*${escapeRegExp(REQUIRED_SCHEME)}\\s*<\\/string>`, "i");
-    if (schemeBlocks.length === 0 || !schemeBlocks.some((block) => schemeRe.test(block))) {
+    const deepLinkConfig = config?.plugins?.["deep-link"];
+    const expectedSchemes = new Set(
+      [REQUIRED_SCHEME, ...extractDeepLinkSchemes(deepLinkConfig)]
+        .map((s) => String(s).trim().replace(/[:/]+$/, "").toLowerCase())
+        .filter(Boolean),
+    );
+    const observedSchemes = new Set(
+      schemeBlocks
+        .flatMap((block) => extractPlistStrings(block))
+        .map((s) => String(s).trim().replace(/[:/]+$/, "").toLowerCase())
+        .filter(Boolean),
+    );
+    const missingSchemes = Array.from(expectedSchemes).filter((s) => !observedSchemes.has(s));
+    if (schemeBlocks.length === 0 || missingSchemes.length > 0) {
       errBlock("Missing macOS URL scheme registration (Info.plist)", [
         "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleURLSchemes including:",
-        `  - ${REQUIRED_SCHEME}`,
+        ...Array.from(expectedSchemes)
+          .sort()
+          .map((s) => `  - ${s}`),
+        ...(missingSchemes.length > 0 ? [`Missing scheme(s): ${missingSchemes.sort().join(", ")}`] : []),
+        `Found scheme(s): ${Array.from(observedSchemes).sort().join(", ") || "(none)"}`,
         "Fix: add/update CFBundleURLTypes/CFBundleURLSchemes in Info.plist.",
       ]);
     }

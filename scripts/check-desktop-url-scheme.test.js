@@ -297,6 +297,15 @@ ${extsXml}
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("fails when tauri.conf.json deep-link schemes includes an extra scheme not declared in macOS Info.plist", () => {
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop.schemes = ["formula", "formula-extra"];
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Missing macOS URL scheme registration/i);
+  assert.match(proc.stderr, /formula-extra/i);
+});
+
 test("fails when tauri.conf.json deep-link schemes do not include formula", () => {
   const config = baseConfig();
   config.plugins["deep-link"].desktop.schemes = ["wrong"];
