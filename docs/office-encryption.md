@@ -349,9 +349,12 @@ Implementation nuance:
 
 ### Standard (CryptoAPI): RC4 `EncryptedPackage` decryption (0x200 blocks, CryptoAPI 40-bit padding)
 
-MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES). We do not currently
-plumb this through the primary `formula-io` open APIs, but the codebase contains RC4 CryptoAPI
-helpers and tests.
+MS-OFFCRYPTO Standard encryption can also use `CALG_RC4` (instead of AES).
+
+In this repo, `formula-io` (behind the `encrypted-workbooks` feature) can decrypt and open
+Standard/CryptoAPI RC4-encrypted `.xlsx`/`.xlsm`/`.xlsb` workbooks end-to-end. The streaming RC4
+decryptor lives in `crates/formula-io/src/rc4_cryptoapi.rs` and is exercised by
+`crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`.
 
 Critical nuance: for **40-bit** RC4 (`KeySize == 0` or `KeySize == 40`), CryptoAPI represents the
 key as a **16-byte**
