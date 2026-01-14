@@ -46,6 +46,9 @@ Options:
   --token          GitHub token. Defaults to $GITHUB_TOKEN / $GH_TOKEN (if set).
   --local-bundles  Also run any platform-specific local bundle validators (if present).
 
+Env passthrough (useful for GitHub Enterprise):
+  GITHUB_API_URL    GitHub API base URL (defaults to https://api.github.com)
+
 Verifier options (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
   --dry-run                Validate manifest/assets only (skip bundle hashing)
   --verify-assets          Download updater assets referenced in latest.json and verify their signatures (slow)
