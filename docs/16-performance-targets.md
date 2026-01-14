@@ -212,6 +212,9 @@ Frontend asset download size gating (web/desktop Vite `dist/assets`):
 - `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` to fail when the total exceeds the limit
   (reported by `scripts/frontend_asset_size_report.mjs`)
 
+CI wiring note: `.github/workflows/ci.yml` runs this report for both `apps/web/dist` and
+`apps/desktop/dist`, and passes these env vars via GitHub Actions **Variables** (unset by default).
+
 #### Renderer guardrails (Node/JSDOM)
 
 For rendering, we also run the real `@formula/grid` canvas renderer under Node (via JSDOM + a mocked

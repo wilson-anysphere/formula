@@ -273,7 +273,9 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
     `FORMULA_ENFORCE_BUNDLE_SIZE=1` and `FORMULA_BUNDLE_SIZE_LIMIT_MB=50`. Uploads a JSON report artifact for debugging.
 - **Frontend asset download size** (the WebView payload; built Vite `dist/`):
   - Measured by `node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist` (Brotli total of `dist/assets/**/*.{js,css,wasm}` by default; gzip optional via `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=gzip`).
-  - Optional CI gate in `.github/workflows/ci.yml` via `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` (budget `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10`).
+  - Optional CI gate in `.github/workflows/ci.yml` via GitHub Actions variables:
+    - `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1`
+    - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10`
   - Additional guardrail: `pnpm -C apps/desktop check:bundle-size` enforces tight JS bundle budgets (uncompressed KiB; reports gzip sizes; see `apps/desktop/scripts/bundle-size-check.mjs`).
   - Related (not the 10MB download metric): CI also publishes optional “desktop size” reports that can be gated via GitHub Actions variables:
     - `node scripts/desktop_dist_asset_report.mjs` → `FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB`, `FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB`
