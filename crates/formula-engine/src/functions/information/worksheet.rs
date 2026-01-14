@@ -44,7 +44,9 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
         // Deterministic & commonly used values.
         InfoType::Recalc => match ctx.calculation_mode() {
             CalculationMode::Automatic => Value::Text("Automatic".to_string()),
-            CalculationMode::AutomaticNoTable => Value::Text("Automatic except for tables".to_string()),
+            CalculationMode::AutomaticNoTable => {
+                Value::Text("Automatic except for tables".to_string())
+            }
             CalculationMode::Manual => Value::Text("Manual".to_string()),
         },
         InfoType::System => Value::Text("pcdos".to_string()),
@@ -67,6 +69,9 @@ enum CellInfoType {
     Row,
     Contents,
     Type,
+    Width,
+    Protect,
+    Prefix,
     Filename,
     Unsupported,
 }
@@ -78,13 +83,14 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "row" => Some(CellInfoType::Row),
         "contents" => Some(CellInfoType::Contents),
         "type" => Some(CellInfoType::Type),
+        "width" => Some(CellInfoType::Width),
+        "protect" => Some(CellInfoType::Protect),
+        "prefix" => Some(CellInfoType::Prefix),
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         // This engine does not currently track workbook file metadata, so always return "".
         "filename" => Some(CellInfoType::Filename),
         // Valid Excel keys that are not implemented yet.
-        "color" | "format" | "parentheses" | "prefix" | "protect" | "width" => {
-            Some(CellInfoType::Unsupported)
-        }
+        "color" | "format" | "parentheses" => Some(CellInfoType::Unsupported),
         _ => None,
     }
 }
@@ -117,9 +123,7 @@ fn quote_sheet_name(name: &str) -> String {
 
 fn abs_a1(addr: CellAddr) -> String {
     let a1 = addr.to_a1();
-    let split = a1
-        .find(|c: char| c.is_ascii_digit())
-        .unwrap_or(a1.len());
+    let split = a1.find(|c: char| c.is_ascii_digit()).unwrap_or(a1.len());
     let (col, row) = a1.split_at(split);
     format!("${col}${row}")
 }
@@ -153,6 +157,18 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
     let reference = reference.normalized();
     let addr = reference.start;
 
+    let record_explicit_cell = |ctx: &dyn FunctionContext| -> Reference {
+        let cell_ref = Reference {
+            sheet_id: reference.sheet_id.clone(),
+            start: addr,
+            end: addr,
+        };
+        if reference_provided {
+            ctx.record_reference(&cell_ref);
+        }
+        cell_ref
+    };
+
     match info_type {
         CellInfoType::Address => {
             let abs = abs_a1(addr);
@@ -179,14 +195,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         CellInfoType::Col => Value::Number((u64::from(addr.col) + 1) as f64),
         CellInfoType::Row => Value::Number((u64::from(addr.row) + 1) as f64),
         CellInfoType::Contents => {
-            let cell_ref = Reference {
-                sheet_id: reference.sheet_id.clone(),
-                start: addr,
-                end: addr,
-            };
-            if reference_provided {
-                ctx.record_reference(&cell_ref);
-            }
+            let cell_ref = record_explicit_cell(ctx);
 
             if let Some(formula) = ctx.get_cell_formula(&cell_ref.sheet_id, addr) {
                 let mut out = formula.to_string();
@@ -203,14 +212,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             }
         }
         CellInfoType::Type => {
-            let cell_ref = Reference {
-                sheet_id: reference.sheet_id.clone(),
-                start: addr,
-                end: addr,
-            };
-            if reference_provided {
-                ctx.record_reference(&cell_ref);
-            }
+            let cell_ref = record_explicit_cell(ctx);
 
             if ctx.get_cell_formula(&cell_ref.sheet_id, addr).is_some() {
                 return Value::Text("v".to_string());
@@ -222,6 +224,32 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 _ => "v",
             };
             Value::Text(code.to_string())
+        }
+        CellInfoType::Width => {
+            // `CELL("width")` consults column metadata but should avoid recording an implicit
+            // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
+            let _cell_ref = record_explicit_cell(ctx);
+
+            // This engine does not currently track per-column widths. Excel's default column width
+            // is 8.43 "character" units.
+            Value::Number(8.43)
+        }
+        CellInfoType::Protect => {
+            // `CELL("protect")` consults cell protection metadata but should avoid recording an
+            // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
+            let _cell_ref = record_explicit_cell(ctx);
+
+            // Excel's default cell style is locked, so return 1 ("locked").
+            Value::Number(1.0)
+        }
+        CellInfoType::Prefix => {
+            // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
+            // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
+            let _cell_ref = record_explicit_cell(ctx);
+
+            // This engine does not currently track per-cell alignment/prefix formatting, so return
+            // the empty string.
+            Value::Text(String::new())
         }
         CellInfoType::Filename => Value::Text(String::new()),
         CellInfoType::Unsupported => Value::Error(ErrorKind::NA),

@@ -44,15 +44,24 @@ fn cell_type_codes_match_excel() {
 
     // Blank.
     sheet.set("A1", Value::Blank);
-    assert_eq!(sheet.eval("=CELL(\"type\",A1)"), Value::Text("b".to_string()));
+    assert_eq!(
+        sheet.eval("=CELL(\"type\",A1)"),
+        Value::Text("b".to_string())
+    );
 
     // Number.
     sheet.set("A1", 1.0);
-    assert_eq!(sheet.eval("=CELL(\"type\",A1)"), Value::Text("v".to_string()));
+    assert_eq!(
+        sheet.eval("=CELL(\"type\",A1)"),
+        Value::Text("v".to_string())
+    );
 
     // Text.
     sheet.set("A1", "x");
-    assert_eq!(sheet.eval("=CELL(\"type\",A1)"), Value::Text("l".to_string()));
+    assert_eq!(
+        sheet.eval("=CELL(\"type\",A1)"),
+        Value::Text("l".to_string())
+    );
 }
 
 #[test]
@@ -127,7 +136,10 @@ fn info_recalc_reflects_calc_settings() {
         .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("Manual".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Manual".to_string())
+    );
 }
 
 #[test]
@@ -142,7 +154,10 @@ fn info_and_cell_keys_are_trimmed_and_case_insensitive() {
     assert_number(&sheet.eval("=CELL(\" cOl \",C1)"), 3.0);
 
     assert_eq!(sheet.eval("=INFO(\"\")"), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval("=CELL(\" \",A1)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=CELL(\" \",A1)"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -175,7 +190,10 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
     let mut sheet = TestSheet::new();
 
     // Excel returns "" until the workbook has been saved.
-    assert_eq!(sheet.eval("=CELL(\"filename\")"), Value::Text(String::new()));
+    assert_eq!(
+        sheet.eval("=CELL(\"filename\")"),
+        Value::Text(String::new())
+    );
 }
 
 #[test]
@@ -195,6 +213,32 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
     assert_eq!(
         sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"type\"))"),
         Value::Text("v".to_string())
+    );
+}
+
+#[test]
+fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles_for_metadata_keys() {
+    let mut sheet = TestSheet::new();
+
+    // Including INDIRECT marks the formula as dynamic-deps even though the IF short-circuits
+    // and the INDIRECT branch is never evaluated.
+    //
+    // CELL metadata keys should not record an implicit self-reference when `reference` is omitted;
+    // otherwise dynamic dependency updates can introduce a self-edge and force the cell into the
+    // engine's circular-reference handling.
+    match sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"width\"))") {
+        Value::Number(n) => assert!(n != 0.0, "expected non-zero width, got {n}"),
+        other => panic!("expected number for CELL(\"width\"), got {other:?}"),
+    }
+
+    match sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"protect\"))") {
+        Value::Number(n) => assert!(n != 0.0, "expected non-zero protect, got {n}"),
+        other => panic!("expected number for CELL(\"protect\"), got {other:?}"),
+    }
+
+    assert_eq!(
+        sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"prefix\"))"),
+        Value::Text(String::new())
     );
 }
 

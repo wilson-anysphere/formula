@@ -226,11 +226,7 @@ fn vlookup_updates_range_precedents_and_dependents_for_offset_table_array() {
     engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
     engine.set_cell_value("Sheet1", "B4", 30.0).unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "C1",
-            "=VLOOKUP(2, OFFSET(A1,1,0,3,2), 2, FALSE)",
-        )
+        .set_cell_formula("Sheet1", "C1", "=VLOOKUP(2, OFFSET(A1,1,0,3,2), 2, FALSE)")
         .unwrap();
     engine.recalculate();
 
@@ -432,12 +428,64 @@ fn indirect_dependency_switching_updates_graph_edges() {
 }
 
 #[test]
+fn cell_width_records_dynamic_dependencies_for_indirect_reference_arg() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "D1", "A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CELL(\"width\",INDIRECT(D1))")
+        .unwrap();
+
+    engine.recalculate();
+
+    let precedents_a1 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a1,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }, // A1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+        ]
+    );
+
+    // Switch the target.
+    engine.set_cell_value("Sheet1", "D1", "A2").unwrap();
+    engine.recalculate();
+
+    let precedents_a2 = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents_a2,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 3 }, // D1
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }, // A2
+            },
+        ]
+    );
+
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+    assert_eq!(
+        engine.dependents("Sheet1", "A2").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 2 } // C1
+        }]
+    );
+}
+
+#[test]
 fn indirect_updates_precedents_and_dependents_when_reference_is_dereferenced_by_array_lift() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=A1+1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1+1").unwrap();
     engine
         .set_cell_formula("Sheet1", "C1", r#"=ABS(INDIRECT("B1"))"#)
         .unwrap();
