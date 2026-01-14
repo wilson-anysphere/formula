@@ -95,11 +95,12 @@ async function resolveEntrypoint(extensionDir, manifest, explicitEntry) {
 }
 
 function resolveOutputPaths(extensionDir, manifest) {
-  const mainRel = typeof manifest.main === "string" && manifest.main.trim() ? manifest.main : "./dist/extension.js";
+  const mainRel =
+    typeof manifest.main === "string" && manifest.main.trim() ? manifest.main.trim() : "./dist/extension.js";
 
   const browserRel =
-    typeof manifest.browser === "string" && manifest.browser.trim() ? manifest.browser : null;
-  const moduleRel = typeof manifest.module === "string" && manifest.module.trim() ? manifest.module : null;
+    typeof manifest.browser === "string" && manifest.browser.trim() ? manifest.browser.trim() : null;
+  const moduleRel = typeof manifest.module === "string" && manifest.module.trim() ? manifest.module.trim() : null;
   /** @type {string[]} */
   const esmRels = [];
   if (browserRel && moduleRel) {

@@ -98,4 +98,15 @@ describe("ChartStore", () => {
     // Ensure onChange fired at least once for each successful arrange operation.
     expect(onChange).toHaveBeenCalled();
   });
+
+  it("normalizes position to a string before parsing (invalid non-string positions fail with a helpful error)", () => {
+    const store = new ChartStore({
+      defaultSheet: "Sheet1",
+      getCellValue: () => null,
+    });
+
+    expect(() => store.createChart({ chart_type: "bar", data_range: "Sheet1!A1:B2", position: 123 as any })).toThrow(
+      /Invalid position/i,
+    );
+  });
 });

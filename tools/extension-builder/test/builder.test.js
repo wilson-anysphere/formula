@@ -16,19 +16,23 @@ async function writeText(filePath, value) {
   await fs.writeFile(filePath, value, "utf8");
 }
 
-async function createFixtureExtension(t, { withBuiltinImport = false } = {}) {
+async function createFixtureExtension(t, { withBuiltinImport = false, paddedManifestPaths = false } = {}) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-builder-"));
   t.after(async () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
+  const main = paddedManifestPaths ? "  ./dist/extension.js  " : "./dist/extension.js";
+  const module = paddedManifestPaths ? "  ./dist/extension.mjs  " : "./dist/extension.mjs";
+  const browser = paddedManifestPaths ? "  ./dist/extension.mjs  " : "./dist/extension.mjs";
+
   await writeJson(path.join(tmp, "package.json"), {
     name: "fixture-extension",
     publisher: "publisher",
     version: "1.0.0",
-    main: "./dist/extension.js",
-    module: "./dist/extension.mjs",
-    browser: "./dist/extension.mjs",
+    main,
+    module,
+    browser,
     engines: { formula: "^1.0.0" },
   });
 
@@ -86,4 +90,15 @@ test("extension-builder: bundles relative dependencies", async (t) => {
 test("extension-builder: strict mode rejects Node builtin imports", async (t) => {
   const dir = await createFixtureExtension(t, { withBuiltinImport: true });
   await assert.rejects(() => buildExtension(dir, { strict: true }), /builtin/i);
+});
+
+test("extension-builder: trims manifest output paths before resolving", async (t) => {
+  const dir = await createFixtureExtension(t, { paddedManifestPaths: true });
+  await buildExtension(dir, { strict: true });
+
+  const cjsPath = path.join(dir, "dist", "extension.js");
+  const esmPath = path.join(dir, "dist", "extension.mjs");
+  await assert.doesNotReject(async () => {
+    await Promise.all([fs.readFile(cjsPath, "utf8"), fs.readFile(esmPath, "utf8")]);
+  });
 });

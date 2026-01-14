@@ -100,11 +100,12 @@ function formatPerfPath(p) {
 
 function resolvePerfHome() {
   const fromEnv = process.env.FORMULA_PERF_HOME;
-  if (fromEnv && fromEnv.trim() !== "") {
+  const trimmed = typeof fromEnv === "string" ? fromEnv.trim() : "";
+  if (trimmed !== "") {
     // Always normalize (collapse `..` segments) so safety checks below can't be bypassed by
     // path tricks like `target/perf-home/..` (which would otherwise resolve to `target` at
     // deletion time).
-    const candidate = path.isAbsolute(fromEnv) ? fromEnv : path.resolve(repoRoot, fromEnv);
+    const candidate = path.isAbsolute(trimmed) ? trimmed : path.resolve(repoRoot, trimmed);
     return path.resolve(candidate);
   }
   return path.resolve(repoRoot, "target", "perf-home");

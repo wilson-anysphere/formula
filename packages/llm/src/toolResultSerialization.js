@@ -71,7 +71,7 @@ function resolveMaxChars(params) {
  */
 function serializeReadRange(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
-  const tool = String(typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "read_range"));
+  const tool = normalizeToolName(base.tool, String(params.toolCall?.name ?? "read_range"));
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const values = /** @type {unknown} */ (data?.values);
   const formulas = /** @type {unknown} */ (data?.formulas);
@@ -141,7 +141,7 @@ function serializeReadRange(params) {
  */
 function serializeFilterRange(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
-  const tool = String(typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "filter_range"));
+  const tool = normalizeToolName(base.tool, String(params.toolCall?.name ?? "filter_range"));
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
   const rows = Array.isArray(data?.matching_rows) ? data.matching_rows : null;
@@ -194,9 +194,7 @@ function serializeFilterRange(params) {
  */
 function serializeDetectAnomalies(params) {
   const base = normalizeToolExecutionEnvelope(params.toolCall, params.result);
-  const tool = String(
-    typeof base.tool === "string" && base.tool.trim() ? base.tool : String(params.toolCall?.name ?? "detect_anomalies")
-  );
+  const tool = normalizeToolName(base.tool, String(params.toolCall?.name ?? "detect_anomalies"));
   const data = base.data && typeof base.data === "object" ? base.data : null;
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
   const method =

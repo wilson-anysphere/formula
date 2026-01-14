@@ -181,10 +181,9 @@ function candidateTargetDirs() {
   // Respect `CARGO_TARGET_DIR` if set, since some CI/caching setups override it.
   // Cargo interprets relative paths relative to the working directory used for the build.
   const cargoTargetDirEnv = process.env.CARGO_TARGET_DIR;
-  if (cargoTargetDirEnv && cargoTargetDirEnv.trim() !== "") {
-    const resolved = path.isAbsolute(cargoTargetDirEnv)
-      ? cargoTargetDirEnv
-      : path.join(repoRoot, cargoTargetDirEnv);
+  const cargoTargetDir = typeof cargoTargetDirEnv === "string" ? cargoTargetDirEnv.trim() : "";
+  if (cargoTargetDir !== "") {
+    const resolved = path.isAbsolute(cargoTargetDir) ? cargoTargetDir : path.join(repoRoot, cargoTargetDir);
     if (isDir(resolved)) candidates.push(resolved);
   }
 

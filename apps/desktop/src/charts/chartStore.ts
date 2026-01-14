@@ -392,10 +392,11 @@ export class ChartStore {
       }
     }
 
+    const positionText = spec.position == null ? "" : String(spec.position).trim();
     const positionParsed =
-      spec.position && String(spec.position).trim() !== ""
+      positionText !== ""
         ? (() => {
-            const parsedPosition = parseA1Range(spec.position);
+            const parsedPosition = parseA1Range(positionText);
             if (!parsedPosition) throw new Error(`Invalid position: ${spec.position}`);
             return parsedPosition;
           })()
