@@ -73,7 +73,7 @@ for workflow in "${workflow_files[@]}"; do
     }
     function normalize_toolchain(s) {
       s = strip_quotes(s)
-      sub(/^v/, "", s)
+      sub(/^[vV]/, "", s)
       return s
     }
     function note_rust_use(snippet) {
