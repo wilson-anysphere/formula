@@ -115,7 +115,7 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("boots startup metrics as early side effects (install listeners -> request host re-emit)", async () => {
+  it("boots startup metrics as early side effects (report -> install listeners -> report again)", async () => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});
     (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
@@ -129,11 +129,13 @@ describe("startupMetrics", () => {
     await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledTimes(2);
     expect(listen).toHaveBeenCalled();
 
-    // The host re-emit request should happen after listeners are registered.
-    expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[0]);
+    // The first report should happen before listener installation begins; the second should happen
+    // after listeners are registered to request a re-emit of cached timings.
+    expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
+    expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
   });
 
   it("treats a throwing __TAURI__ getter as \"missing\" (best-effort hardening)", async () => {

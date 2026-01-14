@@ -6,6 +6,15 @@ import { installStartupTimingsListeners, reportStartupWebviewLoaded } from "./st
 // initial navigation. Tauri does not guarantee events are queued before listeners are installed,
 // so we install listeners early and then ask the host to (re-)emit the cached timings once ready.
 
+// Call immediately (synchronously) to minimize skew for any host-side metrics recorded by this
+// IPC. This may emit `startup:*` events before listeners are registered; we call again after
+// listener installation to re-emit cached timings for late listeners.
+try {
+  reportStartupWebviewLoaded();
+} catch {
+  // Best-effort; instrumentation should never block startup.
+}
+
 void installStartupTimingsListeners()
   .catch(() => {
     // Best-effort; instrumentation should never block startup.
