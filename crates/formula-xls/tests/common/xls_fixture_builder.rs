@@ -1368,6 +1368,28 @@ pub fn build_formula_array_constant_continued_rgcb_string_compressed_fixture_xls
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared formula range in "wide" columns (`XFC1:XFD1`)
+/// where both cells store a **wide** `PtgExp` payload (row u32 + col u16).
+///
+/// This exercises the wide-`PtgExp` recovery path for base-cell coordinates whose column index is
+/// greater than 255 (requires `Ref8` headers in `SHRFMLA`).
+///
+/// Expected decoded formulas:
+/// - `XFC1`: `XFD1+1`
+/// - `XFD1`: `#REF!+1` (because the shifted reference goes to `XFE1`, which is out of bounds)
+pub fn build_shared_formula_ptgexp_wide_payload_high_col_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgexp_wide_payload_high_col_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -9190,6 +9212,77 @@ fn build_shared_formula_ptgexp_wide_payload_ptgref_relative_flags_sheet_stream(
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_ptgexp_wide_payload_high_col_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_ptgexp_wide_payload_high_col_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedWideHighCol", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_ptgexp_wide_payload_high_col_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula range XFC1:XFD1. Both formula cells use a wide (6-byte) PtgExp payload.
+    const ROW: u16 = 0;
+    const COL_FIRST: u16 = 0x3FFE; // XFC
+    const COL_LAST: u16 = 0x3FFF; // XFD
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [XFC, XFD+1).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&COL_FIRST.to_le_bytes()); // first col
+    dims.extend_from_slice(&(COL_LAST + 1).to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared rgce: XFD1 + 1, encoded using PtgRef with row/col-relative flags so filling right
+    // shifts the column and yields #REF! for XFD1.
+    let col_with_flags = pack_biff8_col_flags(COL_LAST, true, true);
+    let shared_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        ROW.to_le_bytes()[0],
+        ROW.to_le_bytes()[1],
+        col_with_flags.to_le_bytes()[0],
+        col_with_flags.to_le_bytes()[1],
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+
+    // SHRFMLA definition for range XFC1:XFD1 using a Ref8 header (u16 cols), omitting `cUse`:
+    //   [rwFirst:u16][rwLast:u16][colFirst:u16][colLast:u16][cce:u16][rgce]
+    let mut shrfmla = Vec::<u8>::new();
+    shrfmla.extend_from_slice(&ROW.to_le_bytes()); // rwFirst
+    shrfmla.extend_from_slice(&ROW.to_le_bytes()); // rwLast
+    shrfmla.extend_from_slice(&COL_FIRST.to_le_bytes()); // colFirst (u16)
+    shrfmla.extend_from_slice(&COL_LAST.to_le_bytes()); // colLast (u16)
+    shrfmla.extend_from_slice(&(shared_rgce.len() as u16).to_le_bytes()); // cce
+    shrfmla.extend_from_slice(&shared_rgce);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);
+
+    // Base and follower formula cells: both store PtgExp with a 6-byte payload (row u32 + col u16)
+    // referencing the shared formula base cell (XFC1).
+    let ptgexp_base = ptg_exp_row_u32_col_u16(ROW as u32, COL_FIRST);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(ROW, COL_FIRST, xf_cell, 0.0, &ptgexp_base),
+    );
+
+    let ptgexp_follower = ptg_exp_row_u32_col_u16(ROW as u32, COL_FIRST);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(ROW, COL_LAST, xf_cell, 0.0, &ptgexp_follower),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
 

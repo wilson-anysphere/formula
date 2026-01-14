@@ -1601,7 +1601,10 @@ impl<'a> FragmentCursor<'a> {
 //   normal BIFF8 encodings.
 
 const BIFF8_MAX_ROW0: u32 = u16::MAX as u32;
-const BIFF8_MAX_COL0: u32 = 0x00FF;
+// While classic BIFF8 `.xls` is commonly associated with 256 columns, we accept up to Excel's
+// modern 16,384-column sheet bounds here. Some producers emit BIFF8 streams that reference/write
+// columns beyond IV (255), and our model supports the full Excel column range.
+const BIFF8_MAX_COL0: u32 = EXCEL_MAX_COLS - 1;
 
 #[derive(Debug, Default)]
 pub(crate) struct ParsedWorksheetExpFormulas {
@@ -1619,7 +1622,8 @@ pub(crate) struct ParsedWorksheetExpFormulas {
 /// - row u32 + col u16 (6 bytes)
 /// - row u16 + col u16 (4 bytes)
 ///
-/// Candidates are filtered to BIFF8/Excel 2003 bounds (row <= 65535, col <= 255).
+/// Candidates are filtered to BIFF8 row bounds (row <= 65535) and Excel sheet column bounds
+/// (col <= 16383).
 pub(crate) fn ptgexp_candidates(payload: &[u8]) -> Vec<(u32, u32)> {
     const MAX_ROW: u32 = BIFF8_MAX_ROW0;
     const MAX_COL: u32 = BIFF8_MAX_COL0;
