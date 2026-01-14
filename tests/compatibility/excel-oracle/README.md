@@ -27,6 +27,8 @@ To merge both into a single markdown table, use:
 
 ```bash
 python tools/compat_scorecard.py --out-md compat_scorecard.md
+# or:
+python -m tools.compat_scorecard --out-md compat_scorecard.md
 ```
 
 By default it looks for:

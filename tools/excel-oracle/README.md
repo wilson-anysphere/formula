@@ -22,6 +22,8 @@ To merge both into a single markdown scorecard, run:
 
 ```bash
 python tools/compat_scorecard.py --out-md compat_scorecard.md
+# or:
+python -m tools.compat_scorecard --out-md compat_scorecard.md
 ```
 
 In CI, the repo also includes a workflow-run aggregator (`.github/workflows/compat-scorecard.yml`) that downloads the

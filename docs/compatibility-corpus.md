@@ -427,6 +427,8 @@ python tools/excel-oracle/compat_gate.py
 
 # 3) Merge into a single markdown scorecard
 python tools/compat_scorecard.py --out-md compat_scorecard.md
+# or:
+python -m tools.compat_scorecard --out-md compat_scorecard.md
 ```
 
 By default, `tools/compat_scorecard.py` looks for:
