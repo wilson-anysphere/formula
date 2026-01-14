@@ -331,6 +331,9 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     // Column names with spaces use nested bracket shorthand: `[@[Total Amount]]`.
     expect(evalPreview("[@[Total Amount]]")).toBe(200);
     expect(evalPreview("SUM([@[Total Amount]], 5)")).toBe(205);
+    // Explicit table-qualified form: `Table[@[Column Name]]`.
+    expect(evalPreview("TableThisRow[@[Total Amount]]")).toBe(200);
+    expect(evalPreview("SUM(TableThisRow[@[Total Amount]], 5)")).toBe(205);
 
     app.destroy();
     root.remove();

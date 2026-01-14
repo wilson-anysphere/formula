@@ -17635,7 +17635,8 @@ export class SpreadsheetApp {
       if (simpleMatch) {
         const item = unescapeStructuredRefItem(simpleMatch[2]!.trim());
         if (item.startsWith("@")) {
-          const columnName = item.slice(1).trim();
+          const columnName =
+            item.startsWith("@[") && item.endsWith("]") && item.length > 3 ? item.slice(2, -1).trim() : item.slice(1).trim();
           if (columnName) {
             const resolved = resolveThisRowStructuredRef(simpleMatch[1]!, columnName);
             if (resolved) return resolved;
@@ -17762,13 +17763,12 @@ export class SpreadsheetApp {
         }
 
         if (ch === "[" && input[i + 1] === "@") {
-          // `[@Col]` is an implicit-this-row reference. Avoid rewriting `Table[@Col]` (already qualified).
+          // `[@Col]` is an implicit-this-row reference. When the user writes the table-qualified
+          // form (`Table[@Col]`) we keep it as-is. For the nested-bracket form (`Table[@[Col Name]]`)
+          // we rewrite to `Table[[#This Row],[Col Name]]` because the structured-reference tokenizer
+          // does not currently recognize `@[` syntax.
           const prev = i > 0 ? (input[i - 1] ?? "") : "";
-          if (prev && isIdentifierPart(prev)) {
-            out += ch;
-            i += 1;
-            continue;
-          }
+          const hasExplicitTablePrefix = Boolean(prev && isIdentifierPart(prev));
           const start = i;
           let depth = 0;
           let j = i;
@@ -17799,11 +17799,22 @@ export class SpreadsheetApp {
             // using a nested bracket group: `[@[Total Amount]]`.
             if (segment.startsWith("[@[") && segment.endsWith("]]") && segment.length > 5) {
               const columnText = segment.slice(3, -2);
-              out += `${tableName}[[#This Row],[${columnText}]]`;
-            } else {
-              out += tableName + segment;
+              out += hasExplicitTablePrefix ? `[[#This Row],[${columnText}]]` : `${tableName}[[#This Row],[${columnText}]]`;
+              changed = true;
+              i = j;
+              continue;
             }
-            changed = true;
+
+            if (!hasExplicitTablePrefix) {
+              out += tableName + segment;
+              changed = true;
+              i = j;
+              continue;
+            }
+
+            // Explicit table prefix and non-nested syntax (e.g. `Table[@Col]`): leave as-is, but
+            // still skip scanning the contents so we don't accidentally rewrite nested refs inside.
+            out += segment;
             i = j;
             continue;
           }
