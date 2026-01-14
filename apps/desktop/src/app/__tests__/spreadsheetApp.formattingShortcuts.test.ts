@@ -414,7 +414,7 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     root.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(spy).not.toHaveBeenCalled();
-    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("formatting defaults");
 
     // Cleanup toast to avoid leaving timers running.
     (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
