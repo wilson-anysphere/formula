@@ -58,6 +58,7 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
 
     for name in [
         "standard.xlsx",
+        "standard-rc4.xlsx",
         "standard-large.xlsx",
         "standard-basic.xlsm",
     ] {

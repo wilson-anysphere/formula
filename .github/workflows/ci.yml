@@ -118,6 +118,8 @@ jobs:
         run: cargo test -p formula-xlsx --locked
       - name: Run formula-xls tests
         run: cargo test -p formula-xls --locked
+      - name: Run formula-io tests
+        run: cargo test -p formula-io --locked
 
   desktop-backend-tests:
     name: Desktop backend (Rust) tests

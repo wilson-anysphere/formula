@@ -27,6 +27,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard-rc4.xlsx` – Standard encrypted OOXML (RC4 CryptoAPI).
   - `EncryptionInfo` header version **Major 3 / Minor 2**
+  - `EncryptionHeader.algId` = `CALG_RC4` (`0x00006801`)
   - Decrypts to `plaintext.xlsx` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
@@ -117,6 +118,7 @@ You can inspect an encrypted OOXML container (and confirm Agile vs Standard) wit
 ```bash
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-rc4.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-large.xlsx
@@ -152,6 +154,15 @@ decrypting produces identical bytes.
 
 Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI
 5.2.5), but was not used to generate the committed fixture bytes above.
+
+`standard-rc4.xlsx` was generated using the in-repo Rust example
+`crates/formula-io/examples/generate_standard_rc4_ooxml_fixture.rs` (deterministic output):
+
+```bash
+cargo run -p formula-io --example generate_standard_rc4_ooxml_fixture -- \
+  fixtures/encrypted/ooxml/plaintext.xlsx \
+  fixtures/encrypted/ooxml/standard-rc4.xlsx
+```
 
 ## Regenerating with Apache POI (alternative)
 
