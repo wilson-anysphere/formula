@@ -926,3 +926,70 @@ fn delete_cols_strictly_before_table_shifts_range_but_preserves_columns() {
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col1", "Col2", "Col3", "Col4"]);
 }
+
+#[test]
+fn insert_cols_at_table_left_edge_inserts_column_and_preserves_named_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col1])")
+        .expect("formula");
+    engine
+        .set_cell_formula("Sheet2", "A2", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "A2"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Table starts at A; inserting at A is considered within the table span.
+            count: 1,
+        })
+        .expect("insert cols");
+    engine.recalculate_single_threaded();
+
+    // Named structured refs should still resolve the same underlying data.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "A2"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:E4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Column1", "Col1", "Col2", "Col3", "Col4"]);
+}
+
+#[test]
+fn delete_cols_at_table_left_edge_removes_column_and_causes_ref_error() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col1])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(6.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Delete the first table column (Col1).
+            count: 1,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:C4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col2", "Col3", "Col4"]);
+}
