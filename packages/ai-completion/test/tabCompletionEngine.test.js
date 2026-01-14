@@ -5046,6 +5046,57 @@ test("IMAGE height suggests a left-cell reference (value-like arg)", async () =>
   );
 });
 
+test("CHAR number suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHAR(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHAR(A1"),
+    `Expected CHAR to suggest A1 for number, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("UNICHAR number suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=UNICHAR(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=UNICHAR(A1"),
+    `Expected UNICHAR to suggest A1 for number, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("IMPOWER exponent suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=IMPOWER(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 2 }, // C1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=IMPOWER(A1, B1"),
+    `Expected IMPOWER to suggest B1 for exponent, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

@@ -3382,14 +3382,14 @@ const CURATED_FUNCTIONS = [
     name: "CHAR",
     description: "Returns the character specified by a number.",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
     ],
   },
   {
     name: "UNICHAR",
     description: "Returns the Unicode character referenced by the given numeric value.",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
     ],
   },
   {
@@ -3660,7 +3660,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns a complex number raised to an integer power.",
     args: [
       { name: "inumber", type: "range" },
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
     ],
   },
   {

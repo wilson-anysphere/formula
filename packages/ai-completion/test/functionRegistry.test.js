@@ -157,8 +157,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("EXACT", 0), "Expected EXACT text1 to be a range");
   assert.ok(registry.isRangeArg("CODE", 0), "Expected CODE text to be a range");
   assert.ok(registry.isRangeArg("UNICODE", 0), "Expected UNICODE text to be a range");
-  assert.equal(registry.getArgType("CHAR", 0), "number", "Expected CHAR number to be a number");
-  assert.equal(registry.getArgType("UNICHAR", 0), "number", "Expected UNICHAR number to be a number");
+  assert.equal(registry.getArgType("CHAR", 0), "value", "Expected CHAR number to be value-like");
+  assert.equal(registry.getArgType("UNICHAR", 0), "value", "Expected UNICHAR number to be value-like");
   assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
   assert.ok(registry.isRangeArg("DECIMAL", 0), "Expected DECIMAL text to be a range");
   assert.ok(registry.isRangeArg("BASE", 0), "Expected BASE number to be a range");
