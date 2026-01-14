@@ -4918,6 +4918,22 @@ impl WasmWorkbook {
             .map_err(|err| js_err(err.to_string()))
     }
 
+    #[wasm_bindgen(js_name = "getCellPhonetic")]
+    pub fn get_cell_phonetic(
+        &self,
+        address: String,
+        sheet: Option<String>,
+    ) -> Result<Option<String>, JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        let sheet = self.inner.require_sheet(sheet)?.to_string();
+        let address = WorkbookState::parse_address(&address)?.to_a1();
+        Ok(self
+            .inner
+            .engine
+            .get_cell_phonetic(&sheet, &address)
+            .map(|s| s.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "setCellRich")]
     pub fn set_cell_rich(
         &mut self,
@@ -6515,6 +6531,32 @@ mod tests {
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Number(2.0)
         );
+    }
+
+    #[test]
+    fn get_cell_phonetic_api_roundtrips() {
+        let mut wb = WasmWorkbook::new();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", serde_json::json!("漢字"))
+            .unwrap();
+        wb.set_cell_phonetic("A1".to_string(), Some("かんじ".to_string()), None)
+            .unwrap();
+
+        let phonetic = wb.get_cell_phonetic("A1".to_string(), None).unwrap();
+        assert_eq!(phonetic.as_deref(), Some("かんじ"));
+
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "B1", serde_json::json!("=PHONETIC(A1)"))
+            .unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("かんじ".to_string())
+        );
+
+        wb.set_cell_phonetic("A1".to_string(), None, None).unwrap();
+        let cleared = wb.get_cell_phonetic("A1".to_string(), None).unwrap();
+        assert!(cleared.is_none());
     }
 
     #[test]
