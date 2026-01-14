@@ -6,6 +6,8 @@ use crate::{DataModel, DaxEngine, Value};
 #[cfg(feature = "pivot-model")]
 use formula_model::pivots::PivotValue;
 use formula_columnar::BitVec;
+#[cfg(feature = "pivot-model")]
+use formula_model::pivots::PivotFieldRef;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -137,14 +139,33 @@ pub fn measures_from_pivot_model_value_fields(
     value_fields
         .iter()
         .map(|vf| {
+            let source_field = pivot_model_field_ref_to_dax_source(base_table, &vf.source_field);
             measure_from_value_field(
                 base_table,
-                &vf.source_field,
+                &source_field,
                 &vf.name,
                 ValueFieldAggregation::from(vf.aggregation),
             )
         })
         .collect()
+}
+
+#[cfg(feature = "pivot-model")]
+fn pivot_model_field_ref_to_dax_source(_base_table: &str, field: &PivotFieldRef) -> String {
+    match field {
+        PivotFieldRef::CacheFieldName(name) => name.clone(),
+        PivotFieldRef::DataModelMeasure(name) => format!("[{}]", name),
+        PivotFieldRef::DataModelColumn { table, column } => {
+            let table = dax_quote_table_name(table);
+            format!("{table}[{column}]")
+        }
+    }
+}
+
+#[cfg(feature = "pivot-model")]
+fn dax_quote_table_name(table: &str) -> String {
+    // Always single-quote table names for safety and escape internal quotes.
+    format!("'{}'", table.replace('\'', "''"))
 }
 
 fn measure_from_value_field(
@@ -2000,7 +2021,6 @@ fn pivot_planned_row_group_by(
     };
 
     if let Some(sets) = row_sets.as_ref() {
-        let base_table_key = normalize_ident(base_table);
         let allowed = sets
             .get(base_table_key.as_str())
             .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
@@ -2657,10 +2677,10 @@ mod tests {
     #[cfg(feature = "pivot-model")]
     #[test]
     fn measures_from_pivot_model_value_fields_maps_aggregation_types() {
-        use formula_model::pivots::{AggregationType, ValueField};
+        use formula_model::pivots::{AggregationType, PivotFieldRef, ValueField};
 
         let value_fields = vec![ValueField {
-            source_field: "Amount".into(),
+            source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
             name: "Count Amount".into(),
             aggregation: AggregationType::Count,
             number_format: None,

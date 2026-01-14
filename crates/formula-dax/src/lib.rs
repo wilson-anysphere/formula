@@ -41,6 +41,8 @@ mod model;
 mod parser;
 mod pivot;
 #[cfg(feature = "pivot-model")]
+mod pivot_adapter;
+#[cfg(feature = "pivot-model")]
 mod pivot_config;
 #[cfg(feature = "pivot-model")]
 mod pivot_value;
@@ -48,9 +50,7 @@ mod value;
 
 pub use crate::backend::{ColumnarTableBackend, InMemoryTableBackend, TableBackend};
 pub use crate::engine::DaxEngine;
-pub use crate::model::{
-    Cardinality, CrossFilterDirection, DataModel, Measure, Relationship, Table,
-};
+pub use crate::model::{Cardinality, CrossFilterDirection, DataModel, Measure, Relationship, Table};
 pub use crate::pivot::{
     measures_from_value_fields, pivot, pivot_crosstab, pivot_crosstab_with_options, GroupByColumn,
     PivotCrosstabOptions, PivotMeasure, PivotResult, PivotResultGrid, ValueFieldAggregation,
@@ -64,6 +64,8 @@ pub use crate::pivot_config::{pivot_crosstab_from_config, pivot_inputs_from_conf
 pub use crate::pivot::{PivotResultGridPivotValues, PivotResultPivotValues};
 #[cfg(feature = "pivot-model")]
 pub use crate::pivot_value::{dax_value_to_pivot_value, pivot_value_to_dax_value};
+#[cfg(feature = "pivot-model")]
+pub use crate::pivot_adapter::{build_data_model_pivot_plan, DataModelPivotPlan};
 pub use crate::value::Value;
 
 pub use crate::engine::{FilterContext, RowContext};

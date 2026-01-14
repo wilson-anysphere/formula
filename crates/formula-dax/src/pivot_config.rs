@@ -10,15 +10,15 @@
 //! - `filter_fields` as a `FilterContext`
 //!
 //! # Field identifier parsing (MVP)
-//! Pivot fields are identified by a string in one of two forms:
+//! `formula-model` pivot fields use [`formula_model::pivots::PivotFieldRef`] to distinguish
+//! worksheet/cache fields from Data Model columns/measures.
 //!
-//! - `Table[Column]` — explicit table and column.
-//! - `Column` — shorthand for `base_table[Column]`.
+//! For Data Model pivots, the canonical form is:
+//! - `PivotFieldRef::DataModelColumn { table, column }`
+//! - `PivotFieldRef::DataModelMeasure(name)`
 //!
-//! These rules apply to:
-//! - `PivotConfig.row_fields[*].source_field`
-//! - `PivotConfig.column_fields[*].source_field`
-//! - `PivotConfig.filter_fields[*].source_field`
+//! For backward compatibility, unstructured cache field names (`CacheFieldName("Column")`) are
+//! treated as shorthand for `base_table[Column]` when building DAX pivot inputs.
 //!
 //! Unknown tables/columns are validated eagerly and reported as `DaxError::UnknownTable` /
 //! `DaxError::UnknownColumn`.
@@ -26,7 +26,9 @@
 use crate::engine::{DaxError, DaxResult, FilterContext};
 use crate::pivot::{pivot_crosstab, GroupByColumn, PivotMeasure, PivotResultGrid};
 use crate::{DataModel, Value};
-use formula_model::pivots::{AggregationType, PivotConfig, PivotField, PivotKeyPart, ValueField};
+use formula_model::pivots::{
+    AggregationType, PivotConfig, PivotField, PivotFieldRef, PivotKeyPart, ValueField,
+};
 
 /// Inputs required by [`pivot_crosstab`] derived from a [`PivotConfig`].
 #[derive(Clone, Debug)]
@@ -98,7 +100,7 @@ fn parse_group_by_field(
     base_table: &str,
     field: &PivotField,
 ) -> DaxResult<GroupByColumn> {
-    let (table, column) = parse_column_identifier(&field.source_field, base_table)?;
+    let (table, column) = resolve_column_ref(&field.source_field, base_table)?;
     validate_table_column(model, &table, &column)?;
     Ok(GroupByColumn { table, column })
 }
@@ -113,7 +115,7 @@ fn filter_context_from_config(
         let Some(allowed) = &f.allowed else {
             continue;
         };
-        let (table, column) = parse_column_identifier(&f.source_field, base_table)?;
+        let (table, column) = resolve_column_ref(&f.source_field, base_table)?;
         validate_table_column(model, &table, &column)?;
         filter.set_column_in(&table, &column, allowed.iter().map(pivot_key_part_to_value));
     }
@@ -125,22 +127,31 @@ fn pivot_measure_from_value_field(
     base_table: &str,
     field: &ValueField,
 ) -> DaxResult<PivotMeasure> {
-    let source = field.source_field.trim();
-    if is_measure_reference(source) {
-        // Allow explicit measure references like `[Total Sales]`.
-        return PivotMeasure::new(field.name.clone(), source.to_string());
-    }
+    let (table, column) = match &field.source_field {
+        PivotFieldRef::DataModelMeasure(name) => {
+            return PivotMeasure::new(field.name.clone(), format_dax_measure_ref(name));
+        }
+        PivotFieldRef::DataModelColumn { table, column } => (table.as_str(), column.as_str()),
+        PivotFieldRef::CacheFieldName(name) => {
+            let name = name.trim();
+            if is_measure_reference(name) {
+                // Back-compat for configs that still carry explicit `[Measure]` strings.
+                return PivotMeasure::new(field.name.clone(), name.to_string());
+            }
+            (base_table, name)
+        }
+    };
 
-    let (table, column) = parse_column_identifier(source, base_table)?;
-    validate_table_column(model, &table, &column)?;
+    validate_table_column(model, table, column)?;
 
+    let col_ref = format_dax_column_ref(table, column);
     let expr = match field.aggregation {
-        AggregationType::Sum => format!("SUM({table}[{column}])"),
-        AggregationType::Count => format!("COUNTA({table}[{column}])"),
-        AggregationType::CountNumbers => format!("COUNT({table}[{column}])"),
-        AggregationType::Average => format!("AVERAGE({table}[{column}])"),
-        AggregationType::Min => format!("MIN({table}[{column}])"),
-        AggregationType::Max => format!("MAX({table}[{column}])"),
+        AggregationType::Sum => format!("SUM({col_ref})"),
+        AggregationType::Count => format!("COUNTA({col_ref})"),
+        AggregationType::CountNumbers => format!("COUNT({col_ref})"),
+        AggregationType::Average => format!("AVERAGE({col_ref})"),
+        AggregationType::Min => format!("MIN({col_ref})"),
+        AggregationType::Max => format!("MAX({col_ref})"),
         other => {
             return Err(DaxError::Eval(format!(
                 "unsupported aggregation {other:?} for pivot value field {}",
@@ -170,33 +181,44 @@ fn validate_table_column(model: &DataModel, table: &str, column: &str) -> DaxRes
     Ok(())
 }
 
-fn parse_column_identifier(field: &str, base_table: &str) -> DaxResult<(String, String)> {
-    let field = field.trim();
-    if field.is_empty() {
-        return Err(DaxError::Parse("empty pivot field identifier".to_string()));
+fn resolve_column_ref(field: &PivotFieldRef, base_table: &str) -> DaxResult<(String, String)> {
+    match field {
+        PivotFieldRef::CacheFieldName(name) => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(DaxError::Parse("empty pivot field identifier".to_string()));
+            }
+            if is_measure_reference(name) {
+                return Err(DaxError::Parse(format!(
+                    "expected a column identifier, got measure reference {name}"
+                )));
+            }
+            if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(name) {
+                return Ok((table, column));
+            }
+            Ok((base_table.to_string(), name.to_string()))
+        }
+        PivotFieldRef::DataModelColumn { table, column } => Ok((table.clone(), column.clone())),
+        PivotFieldRef::DataModelMeasure(name) => Err(DaxError::Parse(format!(
+            "expected a column identifier, got measure reference [{}]",
+            DataModel::normalize_measure_name(name)
+        ))),
     }
-    if field.starts_with('[') {
-        return Err(DaxError::Parse(format!(
-            "expected a column identifier (Table[Column] or Column), got {field}"
-        )));
-    }
+}
 
-    let Some(open) = field.find('[') else {
-        return Ok((base_table.to_string(), field.to_string()));
-    };
-    if !field.ends_with(']') {
-        return Err(DaxError::Parse(format!(
-            "invalid pivot field identifier {field}: missing closing ]"
-        )));
-    }
-    let table = field[..open].trim();
-    let column = field[open + 1..field.len() - 1].trim();
-    if table.is_empty() || column.is_empty() {
-        return Err(DaxError::Parse(format!(
-            "invalid pivot field identifier {field}: expected Table[Column]"
-        )));
-    }
-    Ok((table.to_string(), column.to_string()))
+fn format_dax_table_name(table: &str) -> String {
+    // Always quote table names to avoid edge cases with spaces/reserved words.
+    let escaped = table.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
+fn format_dax_column_ref(table: &str, column: &str) -> String {
+    format!("{}[{}]", format_dax_table_name(table), column)
+}
+
+fn format_dax_measure_ref(measure: &str) -> String {
+    let name = DataModel::normalize_measure_name(measure);
+    format!("[{name}]")
 }
 
 fn pivot_key_part_to_value(part: &PivotKeyPart) -> Value {
@@ -214,14 +236,14 @@ mod tests {
     use super::*;
     use crate::model::{Cardinality, CrossFilterDirection, Relationship, Table};
     use formula_model::pivots::{
-        FilterField, GrandTotals, Layout, PivotField, PivotKeyPart, SubtotalPosition,
+        FilterField, GrandTotals, Layout, PivotField, PivotFieldRef, PivotKeyPart, SubtotalPosition,
     };
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
     fn sum_amount_value_field() -> ValueField {
         ValueField {
-            source_field: "Amount".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
             name: "Sum of Amount".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
@@ -348,7 +370,7 @@ mod tests {
             column_fields: vec![],
             value_fields: vec![sum_amount_value_field()],
             filter_fields: vec![FilterField {
-                source_field: "Category".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Category".to_string()),
                 allowed: Some(allowed),
             }],
             calculated_fields: vec![],

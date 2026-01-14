@@ -11,87 +11,17 @@ mod schema;
 pub mod slicers;
 pub mod workbook;
 
+pub use schema::{
+    parse_dax_column_ref, parse_dax_measure_ref, CalculatedField, CalculatedItem, FilterField,
+    GrandTotals, Layout, PivotConfig, PivotFieldRef, SubtotalPosition,
+};
 pub use model::{
     DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
-};
-pub use schema::{
-    CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    SubtotalPosition,
 };
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
-/// Layout style used when rendering a pivot table.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    #[default]
-    Tabular,
-}
-
-/// Controls where subtotals appear for each pivot field.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    #[default]
-    None,
-}
-
-/// Enables/disables row/column grand totals in the rendered pivot output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    #[serde(default = "default_true")]
-    pub rows: bool,
-    #[serde(default = "default_true")]
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Report filter ("Filters" area) configuration for a pivot table.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed set of item values. `None` (or missing) means "(All)" / no filter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
-/// Canonical (serde-friendly) pivot configuration used by the engine + workbook model.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PivotConfig {
-    pub row_fields: Vec<PivotField>,
-    pub column_fields: Vec<PivotField>,
-    pub value_fields: Vec<ValueField>,
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calculated_items: Vec<CalculatedItem>,
-    pub layout: Layout,
-    pub subtotals: SubtotalPosition,
-    pub grand_totals: GrandTotals,
-}
-
 /// Sort order applied to pivot fields.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -317,7 +247,7 @@ impl From<bool> for PivotValue {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotField {
-    pub source_field: String,
+    pub source_field: PivotFieldRef,
     #[serde(default)]
     pub sort_order: SortOrder,
     #[serde(default)]
@@ -327,7 +257,7 @@ pub struct PivotField {
 impl PivotField {
     pub fn new(source_field: impl Into<String>) -> Self {
         Self {
-            source_field: source_field.into(),
+            source_field: PivotFieldRef::CacheFieldName(source_field.into()),
             sort_order: SortOrder::default(),
             manual_sort: None,
         }
@@ -369,6 +299,20 @@ pub enum AggregationType {
     VarP,
 }
 
+impl AggregationType {
+    /// Returns whether this aggregation is currently supported for Data Model pivots.
+    pub fn is_supported_for_data_model(&self) -> bool {
+        matches!(
+            self,
+            AggregationType::Sum
+                | AggregationType::Count
+                | AggregationType::Average
+                | AggregationType::Max
+                | AggregationType::Min
+                | AggregationType::CountNumbers
+        )
+    }
+}
 /// Excel-style "Show Values As" transformations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -391,7 +335,7 @@ pub enum ShowAsType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValueField {
-    pub source_field: String,
+    pub source_field: PivotFieldRef,
     pub name: String,
     pub aggregation: AggregationType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -399,11 +343,10 @@ pub struct ValueField {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_as: Option<ShowAsType>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_field: Option<String>,
+    pub base_field: Option<PivotFieldRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
 }
-
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())

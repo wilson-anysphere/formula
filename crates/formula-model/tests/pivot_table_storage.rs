@@ -1,6 +1,6 @@
 use formula_model::pivots::{
-    AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotSource,
-    PivotTableModel, SortOrder, SubtotalPosition, ValueField,
+    AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotFieldRef,
+    PivotSource, PivotTableModel, SortOrder, SubtotalPosition, ValueField,
 };
 use formula_model::{CellRef, Range, Workbook};
 
@@ -25,12 +25,12 @@ fn workbook_json_roundtrips_with_pivot_tables() {
         },
         config: PivotConfig {
             row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                 sort_order: SortOrder::default(),
                 manual_sort: None,
             }],
             value_fields: vec![ValueField {
-                source_field: "Sales".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -66,4 +66,3 @@ fn missing_pivot_tables_defaults_to_empty() {
     let wb: Workbook = serde_json::from_value(serde_json::json!({})).unwrap();
     assert!(wb.pivot_tables.is_empty());
 }
-

@@ -7,7 +7,6 @@ use crate::{CellRef, DefinedNameId, Range, WorksheetId};
 use super::{PivotConfig, PivotTableId};
 
 pub type PivotCacheId = Uuid;
-
 /// Identifier for a workbook defined name (named range) when used as a pivot source.
 ///
 /// We prefer stable ids, but allow string references for backward-compat / imported metadata

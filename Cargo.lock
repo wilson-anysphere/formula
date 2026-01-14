@@ -2237,6 +2237,7 @@ dependencies = [
  "formula-format",
  "getrandom 0.3.4",
  "ordered-float 4.6.0",
+ "pretty_assertions",
  "regex",
  "serde",
  "serde_json",

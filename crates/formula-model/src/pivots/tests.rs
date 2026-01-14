@@ -11,7 +11,7 @@ fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![PivotField::new("Product")],
         value_fields: vec![ValueField {
-            source_field: "Sales".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
@@ -20,7 +20,7 @@ fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
             base_item: None,
         }],
         filter_fields: vec![FilterField {
-            source_field: "Region".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
             allowed: Some(HashSet::from([PivotKeyPart::Text("East".to_string())])),
         }],
         calculated_fields: vec![CalculatedField {
