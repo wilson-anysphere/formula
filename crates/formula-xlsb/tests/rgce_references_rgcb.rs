@@ -86,6 +86,14 @@ fn rgce_str_literal_with_ptgarray_byte_sequence() -> Vec<u8> {
     vec![0x17, 0x01, 0x00, 0x20, 0x00]
 }
 
+fn rgce_ptgref_with_ptgarray_byte_sequence_in_row() -> Vec<u8> {
+    // PtgRef: [ptg=0x24][row:u32][col:u16]
+    //
+    // Set the row to 0x20 so the payload contains a `0x20` byte. A naive raw-byte scan would
+    // incorrectly interpret this as `PtgArray`.
+    vec![0x24, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00]
+}
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -266,6 +274,7 @@ fn patch_sheet_bin_streaming_errors_when_formula_requires_rgcb_but_new_rgcb_is_n
 fn patch_sheet_bin_streaming_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_payload() {
     assert_streaming_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
     assert_streaming_patch_does_not_require_rgcb(rgce_str_literal_with_ptgarray_byte_sequence());
+    assert_streaming_patch_does_not_require_rgcb(rgce_ptgref_with_ptgarray_byte_sequence_in_row());
 }
 
 #[test]
@@ -281,6 +290,14 @@ fn rgce_references_rgcb_does_not_false_positive_on_ptgstr_payload() {
 }
 
 #[test]
+fn rgce_references_rgcb_does_not_false_positive_on_ptgref_payload() {
+    let rgce = rgce_ptgref_with_ptgarray_byte_sequence_in_row();
+    assert!(!rgce_references_rgcb(&rgce));
+}
+
+#[test]
 fn patch_sheet_bin_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_payload() {
     assert_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
+    assert_patch_does_not_require_rgcb(rgce_str_literal_with_ptgarray_byte_sequence());
+    assert_patch_does_not_require_rgcb(rgce_ptgref_with_ptgarray_byte_sequence_in_row());
 }
