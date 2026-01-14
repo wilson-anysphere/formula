@@ -10,6 +10,111 @@ const DEFAULT_DATA_REGION_SCAN_CELL_LIMIT = 200_000;
 const DEFAULT_MAX_ANALYZE_ROWS = 500;
 const DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN = 3;
 
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isTypedValue(value) {
+  return isPlainObject(value) && typeof /** @type {any} */ (value).t === "string";
+}
+
+function typedValueToScalar(value) {
+  if (!isTypedValue(value)) return value;
+  const v = /** @type {any} */ (value);
+  switch (v.t) {
+    case "blank":
+      return null;
+    case "n":
+      return typeof v.v === "number" ? v.v : v.v == null ? null : Number(v.v);
+    case "s":
+      return v.v == null ? "" : String(v.v);
+    case "b":
+      return Boolean(v.v);
+    case "e":
+      return v.v == null ? "" : String(v.v);
+    case "arr":
+      // Avoid stringifying potentially huge spills; we only need a stable non-empty marker.
+      return "[array]";
+    default:
+      // Defensive: prefer embedded scalar payloads and otherwise fall back to stable JSON.
+      if (Object.prototype.hasOwnProperty.call(v, "v")) return v.v ?? null;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {{ imageId: string, altText: string | null } | null}
+ */
+function parseImageValue(value) {
+  if (!isPlainObject(value)) return null;
+  const obj = /** @type {any} */ (value);
+
+  let payload = null;
+  // DocumentController / formula-model envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    payload = obj;
+  }
+
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+
+  return { imageId, altText };
+}
+
+function valueToScalar(value) {
+  let out = typedValueToScalar(value);
+
+  // DocumentController rich text values: `{ text, runs }`.
+  if (isPlainObject(out) && typeof /** @type {any} */ (out).text === "string") {
+    return /** @type {any} */ (out).text;
+  }
+
+  const image = parseImageValue(out);
+  if (image) return image.altText ?? "[Image]";
+
+  // Treat `{}` as an empty cell; it's a common sparse representation.
+  if (isPlainObject(out) && out.constructor === Object && Object.keys(out).length === 0) return null;
+
+  return out;
+}
+
+function isCellEffectivelyEmpty(value) {
+  return isCellEmpty(valueToScalar(value));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function scalarToSampleString(value) {
+  if (isCellEmpty(value)) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  if (value && typeof value === "object") {
+    try {
+      const json = JSON.stringify(value);
+      if (json === "{}") return "";
+      return typeof json === "string" ? json : String(value);
+    } catch {
+      return "Object";
+    }
+  }
+  return String(value);
+}
+
 /**
  * Normalize a numeric limit option.
  *
@@ -30,12 +135,13 @@ function normalizeNonNegativeInt(value, fallback) {
  * @returns {InferredType}
  */
 export function inferCellType(value) {
-  if (isCellEmpty(value)) return "empty";
-  if (typeof value === "number" && Number.isFinite(value)) return "number";
-  if (typeof value === "boolean") return "boolean";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return "date";
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+  const scalar = valueToScalar(value);
+  if (isCellEmpty(scalar)) return "empty";
+  if (typeof scalar === "number" && Number.isFinite(scalar)) return "number";
+  if (typeof scalar === "boolean") return "boolean";
+  if (scalar instanceof Date && !Number.isNaN(scalar.getTime())) return "date";
+  if (typeof scalar === "string") {
+    const trimmed = scalar.trim();
     if (trimmed.startsWith("=")) return "formula";
 
     // Numeric-like strings are common in CSV imports. Treat them as numbers for schema purposes.
@@ -81,9 +187,10 @@ export function inferColumnType(values, options = {}) {
  * @param {unknown} value
  */
 function isHeaderCandidateValue(value) {
-  if (isCellEmpty(value)) return false;
-  if (typeof value !== "string") return false;
-  const trimmed = value.trim();
+  const scalar = valueToScalar(value);
+  if (isCellEmpty(scalar)) return false;
+  if (typeof scalar !== "string") return false;
+  const trimmed = scalar.trim();
   if (!trimmed) return false;
   if (trimmed.startsWith("=")) return false;
   // Disqualify pure numbers masquerading as strings.
@@ -96,7 +203,10 @@ function isHeaderCandidateValue(value) {
  * @param {unknown[] | undefined} nextRowValues
  */
 export function isLikelyHeaderRow(rowValues, nextRowValues) {
-  const nonEmpty = rowValues.filter((v) => !isCellEmpty(v));
+  const normalizedRow = rowValues.map(valueToScalar);
+  const normalizedNext = nextRowValues ? nextRowValues.map(valueToScalar) : undefined;
+
+  const nonEmpty = normalizedRow.filter((v) => !isCellEmpty(v));
   if (nonEmpty.length === 0) return false;
 
   const headerish = nonEmpty.filter(isHeaderCandidateValue);
@@ -106,8 +216,8 @@ export function isLikelyHeaderRow(rowValues, nextRowValues) {
   const unique = new Set(normalized);
   if (unique.size !== normalized.length) return false;
 
-  if (!nextRowValues) return true;
-  const nextNonEmpty = nextRowValues.filter((v) => !isCellEmpty(v));
+  if (!normalizedNext) return true;
+  const nextNonEmpty = normalizedNext.filter((v) => !isCellEmpty(v));
   if (nextNonEmpty.length === 0) return true;
 
   // If the next row is "more numeric" than the first row, it's likely data.
@@ -179,7 +289,7 @@ export function detectDataRegions(values, options = {}) {
       if (visited[startIdx]) continue;
       visited[startIdx] = 1;
 
-      if (isCellEmpty(row?.[c])) continue;
+      if (isCellEffectivelyEmpty(row?.[c])) continue;
 
       let minRow = r;
       let maxRow = r;
@@ -208,7 +318,7 @@ export function detectDataRegions(values, options = {}) {
           const idx = qRowOffset - colCount + qc;
           if (!visited[idx]) {
             visited[idx] = 1;
-          if (!isCellEmpty(values[qr - 1]?.[qc])) queue.push(qr - 1, qc);
+          if (!isCellEffectivelyEmpty(values[qr - 1]?.[qc])) queue.push(qr - 1, qc);
           }
         }
         // Down
@@ -216,7 +326,7 @@ export function detectDataRegions(values, options = {}) {
           const idx = qRowOffset + colCount + qc;
           if (!visited[idx]) {
             visited[idx] = 1;
-            if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push(qr + 1, qc);
+            if (!isCellEffectivelyEmpty(values[qr + 1]?.[qc])) queue.push(qr + 1, qc);
           }
         }
         // Left
@@ -224,7 +334,7 @@ export function detectDataRegions(values, options = {}) {
           const idx = qRowOffset + qc - 1;
           if (!visited[idx]) {
             visited[idx] = 1;
-            if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push(qr, qc - 1);
+            if (!isCellEffectivelyEmpty(values[qr]?.[qc - 1])) queue.push(qr, qc - 1);
           }
         }
         // Right
@@ -232,7 +342,7 @@ export function detectDataRegions(values, options = {}) {
           const idx = qRowOffset + qc + 1;
           if (!visited[idx]) {
             visited[idx] = 1;
-            if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push(qr, qc + 1);
+            if (!isCellEffectivelyEmpty(values[qr]?.[qc + 1])) queue.push(qr, qc + 1);
           }
         }
       }
@@ -302,7 +412,9 @@ function analyzeRegion(sheetValues, normalized, options = {}) {
     throwIfAborted(signal);
     const raw = headerRowValues[c];
     const fallback = `Column${c + 1}`;
-    headers.push(hasHeader && isHeaderCandidateValue(raw) ? String(raw).trim() : fallback);
+    const scalar = valueToScalar(raw);
+    const headerText = typeof scalar === "string" ? scalar : scalar == null ? "" : String(scalar);
+    headers.push(hasHeader && isHeaderCandidateValue(scalar) ? headerText.trim() : fallback);
   }
 
   /** @type {InferredType[]} */
@@ -392,13 +504,14 @@ function analyzeRegion(sheetValues, normalized, options = {}) {
       // Avoid per-cell abort checks; per-row is enough to remain responsive while keeping
       // overhead low for wide tables.
       const v = row[startCol + c];
-      if (v === undefined || isCellEmpty(v)) continue;
+      const scalar = valueToScalar(v);
+      if (scalar === undefined || isCellEmpty(scalar)) continue;
 
-      typeMaskByCol[c] |= typeToMask(inferCellType(v));
+      typeMaskByCol[c] |= typeToMask(inferCellType(scalar));
 
       const samples = sampleValuesByCol[c];
       if (samples.length < maxSampleValuesPerColumn) {
-        const s = String(v);
+        const s = scalarToSampleString(scalar);
         if (!samples.includes(s)) samples.push(s);
       }
     }

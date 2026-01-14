@@ -35,6 +35,39 @@ test("extractSheetSchema: detects a headered table region and infers column type
   assert.equal(schema.dataRegions[0].hasHeader, true);
 });
 
+test("extractSheetSchema: treats rich text + in-cell image values as strings", () => {
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      [
+        { text: "Product", runs: [{ start: 0, end: 7, style: { bold: true } }] },
+        { type: "image", value: { imageId: "img_1", altText: "Photo" } },
+        "Qty",
+      ],
+      ["Alpha", { imageId: "img_2" }, 3],
+    ],
+  };
+
+  const schema = extractSheetSchema(sheet);
+  assert.equal(schema.dataRegions.length, 1);
+  assert.equal(schema.dataRegions[0].hasHeader, true);
+  assert.deepStrictEqual(schema.dataRegions[0].headers, ["Product", "Photo", "Qty"]);
+
+  assert.equal(schema.tables.length, 1);
+  const table = schema.tables[0];
+  assert.deepStrictEqual(
+    table.columns.map((c) => ({ name: c.name, type: c.type })),
+    [
+      { name: "Product", type: "string" },
+      { name: "Photo", type: "string" },
+      { name: "Qty", type: "number" },
+    ],
+  );
+  const photoCol = table.columns.find((c) => c.name === "Photo");
+  assert.ok(photoCol, "expected Photo column");
+  assert.ok(photoCol.sampleValues.includes("[Image]"));
+});
+
 test("extractSheetSchema: detects multiple disconnected regions", () => {
   const sheet = {
     name: "Sheet1",
@@ -253,4 +286,3 @@ test("schema extraction: respects AbortSignal", () => {
   assert.ok(schemaError && typeof schemaError === "object");
   assert.equal(schemaError.name, "AbortError");
 });
-
