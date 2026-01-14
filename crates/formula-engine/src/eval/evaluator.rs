@@ -611,6 +611,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         value_locale: ValueLocaleConfig,
         locale: LocaleConfig,
     ) -> Self {
+        let text_codepage = resolver.text_codepage();
         Self {
             resolver,
             ctx,
@@ -623,8 +624,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             value_locale,
             rng_counter: Rc::new(Cell::new(0)),
             locale,
-            // Default to the engine's historical en-US assumptions (Windows-1252).
-            text_codepage: 1252,
+            // Default to the resolver's configured workbook text codepage.
+            //
+            // Most resolvers return 1252 (en-US / single-byte) which preserves the engine's
+            // historical behavior. Engine-backed resolvers (e.g. Snapshot) can override this so
+            // legacy DBCS functions (LENB/LEFTB/ASC/DBCS/...) respect workbook locale semantics.
+            text_codepage,
         }
     }
 

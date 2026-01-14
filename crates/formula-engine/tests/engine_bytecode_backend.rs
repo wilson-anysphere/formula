@@ -124,6 +124,10 @@ impl ValueResolver for EngineResolver<'_> {
         };
         self.engine.spill_range(sheet, &cell_addr_to_a1(origin))
     }
+
+    fn text_codepage(&self) -> u16 {
+        self.engine.text_codepage()
+    }
 }
 
 fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {

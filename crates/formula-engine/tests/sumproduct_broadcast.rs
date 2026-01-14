@@ -50,6 +50,10 @@ impl ValueResolver for EngineResolver<'_> {
     > {
         Err(ErrorKind::Name)
     }
+
+    fn text_codepage(&self) -> u16 {
+        self.engine.text_codepage()
+    }
 }
 
 fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
