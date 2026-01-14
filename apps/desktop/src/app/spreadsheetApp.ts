@@ -8081,10 +8081,10 @@ export class SpreadsheetApp {
     // switching between workbooks that both contain `Sheet1`).
     //
     // Clear the cache so the next outline update can re-sync hidden flags without being skipped
-    // due to an identical `${sheetId}:${hiddenCols}` key from the prior workbook.
+    // due to an identical per-sheet hidden-cols key from the prior workbook.
     this.lastSyncedHiddenColsEngine = null;
-    this.lastSyncedHiddenColsKey = null;
-    this.lastSyncedHiddenCols = null;
+    this.lastSyncedHiddenColsKeyBySheetId.clear();
+    this.lastSyncedHiddenColsBySheetId.clear();
     try {
       // Restoring can happen while a legacy chart/drawing drag gesture is still active. Cancel any
       // in-progress gestures first so the eventual pointerup cannot commit/cancel against a workbook
@@ -8626,8 +8626,8 @@ export class SpreadsheetApp {
       }
       hiddenCols.sort((a, b) => a - b);
       this.lastSyncedHiddenColsEngine = this.wasmEngine;
-      this.lastSyncedHiddenCols = hiddenCols;
-      this.lastSyncedHiddenColsKey = `${this.sheetId}:${hiddenCols.join(",")}`;
+      this.lastSyncedHiddenColsBySheetId.set(this.sheetId, hiddenCols);
+      this.lastSyncedHiddenColsKeyBySheetId.set(this.sheetId, hiddenCols.join(","));
     }
   }
 

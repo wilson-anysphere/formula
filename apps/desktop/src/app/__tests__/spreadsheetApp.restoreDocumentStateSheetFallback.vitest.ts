@@ -182,8 +182,8 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
     try {
       // Seed non-null cache values to ensure restore clears them even when sheet ids collide.
       (app as any).lastSyncedHiddenColsEngine = { terminate: () => {} };
-      (app as any).lastSyncedHiddenColsKey = "Sheet1:0";
-      (app as any).lastSyncedHiddenCols = [0];
+      (app as any).lastSyncedHiddenColsKeyBySheetId?.set?.("Sheet1", "0");
+      (app as any).lastSyncedHiddenColsBySheetId?.set?.("Sheet1", [0]);
 
       const snapshotDoc = new DocumentController();
       snapshotDoc.setCellValue("Sheet1", { row: 0, col: 0 }, "A");
@@ -192,8 +192,8 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
       await app.restoreDocumentState(snapshot);
 
       expect((app as any).lastSyncedHiddenColsEngine).toBeNull();
-      expect((app as any).lastSyncedHiddenColsKey).toBeNull();
-      expect((app as any).lastSyncedHiddenCols).toBeNull();
+      expect((app as any).lastSyncedHiddenColsKeyBySheetId?.size ?? 0).toBe(0);
+      expect((app as any).lastSyncedHiddenColsBySheetId?.size ?? 0).toBe(0);
     } finally {
       app.destroy();
     }
