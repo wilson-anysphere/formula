@@ -1,9 +1,10 @@
 import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
+import { valuesRangeToTsv } from "./tsv.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
-import { isCellEmpty, parseA1Range, rangeToA1 } from "./a1.js";
+import { parseA1Range, rangeToA1 } from "./a1.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
 import { extractWorkbookSchema } from "./workbookSchema.js";
 import { summarizeSheetSchema } from "./summarizeSheet.js";
@@ -936,7 +937,7 @@ export class ContextManager {
     }
 
     const attachmentDataRaw = buildRangeAttachmentSectionText(
-      { sheet: sheetForContext, attachments: params.attachments, signal },
+      { sheet: sheetForContext, attachments: params.attachments },
       { maxRows: 30, maxAttachments: 3, signal },
     );
 
@@ -2142,13 +2143,14 @@ function getSheetOrigin(sheet) {
 }
 
 /**
- * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[], signal?: AbortSignal }} params
+ * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[] }} params
  * @param {{ maxRows?: number, maxAttachments?: number, signal?: AbortSignal }} [options]
  */
 function buildRangeAttachmentSectionText(params, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   const attachments = Array.isArray(params.attachments) ? params.attachments : [];
   if (attachments.length === 0) return "";
-  const signal = options.signal ?? params.signal;
   const sheet = params.sheet;
   const sheetName = sheet?.name ?? "";
   const normalizedSheetName = normalizeSheetNameForComparison(sheetName);
@@ -2158,10 +2160,21 @@ function buildRangeAttachmentSectionText(params, options = {}) {
   const values = Array.isArray(sheet?.values) ? sheet.values : [];
   const matrixRowCount = values.length;
   let matrixColCount = 0;
-  for (const row of values) {
-    throwIfAborted(signal);
-    if (!Array.isArray(row)) continue;
-    if (row.length > matrixColCount) matrixColCount = row.length;
+  const LARGE_ROW_THRESHOLD = 10_000;
+  if (matrixRowCount > LARGE_ROW_THRESHOLD) {
+    // Avoid iterating over holes in sparse Excel-scale matrices.
+    for (const key in values) {
+      throwIfAborted(signal);
+      const row = values[key];
+      if (!Array.isArray(row)) continue;
+      if (row.length > matrixColCount) matrixColCount = row.length;
+    }
+  } else {
+    for (const row of values) {
+      throwIfAborted(signal);
+      if (!Array.isArray(row)) continue;
+      if (row.length > matrixColCount) matrixColCount = row.length;
+    }
   }
 
   const origin = getSheetOrigin(sheet);
@@ -2232,59 +2245,6 @@ function buildRangeAttachmentSectionText(params, options = {}) {
 
   if (entries.length === 0) return "";
   return `Attached range data:\n${entries.join("\n\n")}`;
-}
-
-/**
- * Convert a sub-range of a sheet's value matrix to TSV without allocating a full
- * intermediate matrix.
- *
- * Output matches the previous `matrixToTsv(slice2D(...))` behavior:
- *  - tab-separated values
- *  - empty cells -> ""
- *  - ragged rows do not emit trailing tabs beyond the source row length
- *  - ellipsis line when truncated
- *
- * @param {unknown[][]} values
- * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
- * @param {{ maxRows: number, signal?: AbortSignal }} options
- */
-function valuesRangeToTsv(values, range, options) {
-  const signal = options.signal;
-  const shouldCheckAbort = Boolean(signal);
-  const lines = [];
-  const totalRows = range.endRow - range.startRow + 1;
-  const limit = Math.min(totalRows, options.maxRows);
-  for (let rOffset = 0; rOffset < limit; rOffset++) {
-    if (shouldCheckAbort) throwIfAborted(signal);
-    const row = values[range.startRow + rOffset];
-    if (!Array.isArray(row)) {
-      lines.push("");
-      continue;
-    }
- 
-    const rowLen = row.length;
-    if (rowLen <= range.startCol) {
-      lines.push("");
-      continue;
-    }
- 
-    const sliceLen = Math.max(0, Math.min(rowLen, range.endCol + 1) - range.startCol);
-    if (sliceLen === 0) {
-      lines.push("");
-      continue;
-    }
- 
-    /** @type {string[]} */
-    const cells = new Array(sliceLen);
-    for (let cOffset = 0; cOffset < sliceLen; cOffset++) {
-      if (shouldCheckAbort && (cOffset & 0x7f) === 0) throwIfAborted(signal);
-      const v = row[range.startCol + cOffset];
-      cells[cOffset] = isCellEmpty(v) ? "" : String(v);
-    }
-    lines.push(cells.join("\t"));
-  }
-  if (totalRows > limit) lines.push(`… (${totalRows - limit} more rows)`);
-  return lines.join("\n");
 }
 
 function cellInNormalizedRange(cell, range) {
