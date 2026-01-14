@@ -624,12 +624,14 @@ pub fn decrypt_standard_only(
             header, verifier, ..
         } => {
             let info = StandardEncryptionInfo { header, verifier };
-            let key = standard_derive_key(&info, password)?;
-            standard_verify_key(&info, &key)?;
+            // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password
+            // attempts don't leave key material lingering in heap allocations.
+            let key = Zeroizing::new(standard_derive_key(&info, password)?);
+            standard_verify_key(&info, key.as_slice())?;
 
             decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
                 pt.copy_from_slice(ct);
-                aes_ecb_decrypt_in_place(&key, pt)
+                aes_ecb_decrypt_in_place(key.as_slice(), pt)
             })
         }
         EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryptionType {
