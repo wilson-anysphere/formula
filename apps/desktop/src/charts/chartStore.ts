@@ -231,6 +231,63 @@ export class ChartStore {
     this.options.onChange?.();
   }
 
+  /**
+   * Reorder a chart within its sheet's z-order stack (relative to other charts on the same sheet).
+   *
+   * Note: ChartStore does not currently persist an explicit `zOrder` field; the z-stack is derived
+   * from the chart list ordering (used by `chartRecordToDrawingObject`).
+   */
+  arrangeChart(chartId: string, direction: "forward" | "backward" | "front" | "back"): boolean {
+    const id = String(chartId ?? "").trim();
+    if (!id) return false;
+    const prev = this.charts;
+    const selectedIdx = prev.findIndex((chart) => chart.id === id);
+    if (selectedIdx === -1) return false;
+
+    const sheetId = prev[selectedIdx]!.sheetId;
+    const indices: number[] = [];
+    for (let i = 0; i < prev.length; i += 1) {
+      if (prev[i]!.sheetId === sheetId) indices.push(i);
+    }
+    if (indices.length < 2) return false;
+
+    const pos = indices.indexOf(selectedIdx);
+    if (pos < 0) return false;
+
+    const subset = indices.map((idx) => prev[idx]!);
+    const nextSubset = subset.slice();
+
+    if (direction === "forward") {
+      if (pos >= nextSubset.length - 1) return false;
+      const tmp = nextSubset[pos]!;
+      nextSubset[pos] = nextSubset[pos + 1]!;
+      nextSubset[pos + 1] = tmp;
+    } else if (direction === "backward") {
+      if (pos <= 0) return false;
+      const tmp = nextSubset[pos]!;
+      nextSubset[pos] = nextSubset[pos - 1]!;
+      nextSubset[pos - 1] = tmp;
+    } else if (direction === "front") {
+      if (pos >= nextSubset.length - 1) return false;
+      const [entry] = nextSubset.splice(pos, 1);
+      if (!entry) return false;
+      nextSubset.push(entry);
+    } else {
+      if (pos <= 0) return false;
+      const [entry] = nextSubset.splice(pos, 1);
+      if (!entry) return false;
+      nextSubset.unshift(entry);
+    }
+
+    const next = prev.slice();
+    for (let i = 0; i < indices.length; i += 1) {
+      next[indices[i]!] = nextSubset[i]!;
+    }
+    this.charts = next;
+    this.options.onChange?.();
+    return true;
+  }
+
   setDefaultSheet(sheetId: string): void {
     this.options.defaultSheet = sheetId;
   }

@@ -40,7 +40,21 @@ export function buildDrawingContextMenuItems(params: {
     }
     const idx = drawings.findIndex((d) => d?.id === selectedId);
     if (idx < 0) return { canBringForward: false, canSendBackward: false };
-    return { canBringForward: idx > 0, canSendBackward: idx < drawings.length - 1 };
+    const canvasChartCount = (() => {
+      let count = 0;
+      for (const obj of drawings) {
+        if (typeof obj?.id === "number" && obj.id < 0) count += 1;
+      }
+      return count;
+    })();
+    const isCanvasChart = typeof selectedId === "number" && selectedId < 0;
+    const groupStart = isCanvasChart ? 0 : canvasChartCount;
+    const groupSize = isCanvasChart ? canvasChartCount : Math.max(0, drawings.length - canvasChartCount);
+    const groupIndex = idx - groupStart;
+    return {
+      canBringForward: groupIndex > 0,
+      canSendBackward: groupIndex >= 0 && groupIndex < groupSize - 1,
+    };
   })();
 
   const cutLabelRaw = t("clipboard.cut");

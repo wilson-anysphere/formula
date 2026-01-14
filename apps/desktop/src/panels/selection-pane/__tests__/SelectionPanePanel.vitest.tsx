@@ -583,16 +583,19 @@ describe("Selection Pane panel", () => {
     const ribbonRoot = document.createElement("div");
     document.body.appendChild(ribbonRoot);
 
-    const unmountRibbon = mountRibbon(
-      ribbonRoot,
-      {
-        onCommand: (commandId: string) => {
-          if (commandId !== "pageLayout.arrange.selectionPane") return;
-          panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+    let unmountRibbon: (() => void) | null = null;
+    await act(async () => {
+      unmountRibbon = mountRibbon(
+        ribbonRoot,
+        {
+          onCommand: (commandId: string) => {
+            if (commandId !== "pageLayout.arrange.selectionPane") return;
+            panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+          },
         },
-      },
-      { initialTabId: "pageLayout" },
-    );
+        { initialTabId: "pageLayout" },
+      );
+    });
 
     const commandButton = ribbonRoot.querySelector<HTMLButtonElement>('button[data-command-id="pageLayout.arrange.selectionPane"]');
     expect(commandButton).toBeInstanceOf(HTMLButtonElement);
@@ -621,8 +624,45 @@ describe("Selection Pane panel", () => {
     expect(app.listCharts().some((c) => c.id === chartId)).toBe(false);
     expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)).toBeNull();
 
-    unmountRibbon();
-    panelBodyRenderer.cleanup([]);
+    await act(async () => {
+      unmountRibbon?.();
+      panelBodyRenderer.cleanup([]);
+    });
+    app.destroy();
+    sheetRoot.remove();
+  });
+
+  it("reorders ChartStore charts via bring forward / send backward in ?canvasCharts=1 mode", async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("canvasCharts", "1");
+    window.history.replaceState(null, "", url.toString());
+
+    const sheetRoot = createRoot();
+    const app = new SpreadsheetApp(sheetRoot, {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    });
+
+    const { chart_id: chartA } = app.addChart({ chart_type: "bar", data_range: "A1:B2", title: "A" });
+    const { chart_id: chartB } = app.addChart({ chart_type: "bar", data_range: "A1:B2", title: "B" });
+    const drawingA = chartIdToDrawingId(chartA);
+    const drawingB = chartIdToDrawingId(chartB);
+
+    // Newer charts render above older charts.
+    expect(app.listDrawingsForSheet().map((d) => d.id).slice(0, 2)).toEqual([drawingB, drawingA]);
+
+    app.selectDrawingById(drawingA);
+    expect(app.getSelectedChartId()).toBe(chartA);
+
+    app.bringSelectedDrawingForward();
+    expect(app.getSelectedChartId()).toBe(chartA);
+    expect(app.listDrawingsForSheet().map((d) => d.id).slice(0, 2)).toEqual([drawingA, drawingB]);
+
+    app.sendSelectedDrawingBackward();
+    expect(app.getSelectedChartId()).toBe(chartA);
+    expect(app.listDrawingsForSheet().map((d) => d.id).slice(0, 2)).toEqual([drawingB, drawingA]);
+
     app.destroy();
     sheetRoot.remove();
   });

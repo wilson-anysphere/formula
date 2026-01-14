@@ -214,6 +214,16 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     [app, items, scrollItemIntoView, selectedId],
   );
 
+  // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with a high z-order base.
+  // They therefore form a separate z-stack above workbook drawing objects.
+  const canvasChartCount = (() => {
+    let count = 0;
+    for (const { obj } of items) {
+      if (obj.id < 0) count += 1;
+    }
+    return count;
+  })();
+
   return (
     <div className="selection-pane" data-testid="selection-pane" tabIndex={0} ref={rootRef} onKeyDown={handleKeyDown}>
       {items.length === 0 ? (
@@ -224,12 +234,12 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         <ul className="selection-pane__list" role="listbox" aria-label="Selection Pane objects">
           {items.map(({ obj, label }, index) => {
             const selected = obj.id === selectedId;
-            // ChartStore (canvas) charts use negative ids derived from their string ids. These are not
-            // currently reorderable (z-order is managed by the workbook drawing layer), so disable
-            // arrange actions to avoid no-op buttons.
-            const canArrange = obj.id >= 0;
-            const canBringForward = canArrange && index > 0;
-            const canSendBackward = canArrange && index < items.length - 1;
+            const isCanvasChart = obj.id < 0;
+            const groupStart = isCanvasChart ? 0 : canvasChartCount;
+            const groupSize = isCanvasChart ? canvasChartCount : Math.max(0, items.length - canvasChartCount);
+            const groupIndex = index - groupStart;
+            const canBringForward = groupIndex > 0;
+            const canSendBackward = groupIndex >= 0 && groupIndex < groupSize - 1;
             return (
               <li
                 key={obj.id}

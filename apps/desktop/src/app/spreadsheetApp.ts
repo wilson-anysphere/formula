@@ -6594,7 +6594,7 @@ export class SpreadsheetApp {
 
   private arrangeSelectedDrawing(direction: "forward" | "backward" | "front" | "back"): void {
     const sheetId = this.sheetId;
-    const selectedId = this.selectedDrawingId;
+    const selectedId = this.getSelectedDrawingId();
     if (selectedId == null) return;
     if (this.isReadOnly()) {
       const cell = this.selection.active;
@@ -6604,6 +6604,20 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isEditing()) return;
+
+    const canvasChartId = this.getCanvasChartIdForDrawingId(selectedId, sheetId);
+    if (canvasChartId) {
+      // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with negative ids.
+      // They are not part of the DocumentController sheet drawings list, so z-order operations must
+      // be applied via ChartStore ordering instead.
+      const changed = this.chartStore.arrangeChart(canvasChartId, direction);
+      if (changed) {
+        // ChartStore reorder is a UI-only operation (no DocumentController mutation), so emit
+        // a drawings-changed notification explicitly so split view + Selection Pane update.
+        this.dispatchDrawingsChanged();
+      }
+      return;
+    }
 
     const docAny = this.document as any;
     if (typeof docAny.getSheetDrawings !== "function" || typeof docAny.setSheetDrawings !== "function") {
