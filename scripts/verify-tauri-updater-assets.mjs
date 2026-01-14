@@ -110,6 +110,23 @@ const EXPECTED_PLATFORMS = [
 ];
 const EXPECTED_PLATFORM_KEYS = REQUIRED_RUNTIME_PLATFORM_KEYS;
 
+// Ensure this verifier's per-platform expectations stay in sync with the canonical runtime target
+// identifiers used by CI (scripts/ci/validate-updater-manifest.mjs). If Tauri/tauri-action changes
+// the target key naming scheme, we want this script to fail loudly so we update the expected asset
+// type + arch-token rules together.
+{
+  const localKeys = EXPECTED_PLATFORMS.map((p) => p.key).slice().sort();
+  const ciKeys = EXPECTED_PLATFORM_KEYS.slice().sort();
+  if (localKeys.join(",") !== ciKeys.join(",")) {
+    throw new Error(
+      `Internal error: scripts/verify-tauri-updater-assets.mjs EXPECTED_PLATFORMS keys are out of sync with scripts/ci/validate-updater-manifest.mjs EXPECTED_PLATFORM_KEYS.\n` +
+        `Expected (CI): ${ciKeys.join(", ")}\n` +
+        `Found (local): ${localKeys.join(", ")}\n` +
+        `Update scripts/verify-tauri-updater-assets.mjs (EXPECTED_PLATFORMS) alongside docs/desktop-updater-target-mapping.md.`,
+    );
+  }
+}
+
 /**
  * @param {string} heading
  * @param {string[]} details
