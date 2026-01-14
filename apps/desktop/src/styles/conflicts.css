@@ -40,8 +40,8 @@
 .structural-conflict-ui-dialog-root {
   position: absolute;
   top: var(--conflict-ui-inset);
-  max-width: min(720px, 92vw);
-  max-height: min(560px, 92vh);
+  max-width: min(720px, calc(100vw - (var(--conflict-ui-inset) * 2)));
+  max-height: min(560px, calc(100vh - (var(--conflict-ui-inset) * 2)));
   overflow: auto;
   background: var(--dialog-bg);
   border: 1px solid var(--dialog-border);
