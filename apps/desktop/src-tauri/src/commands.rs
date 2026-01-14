@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
-#[cfg(any(feature = "desktop", test))]
 use url::Url;
 
 use crate::macro_trust::MacroTrustDecision;
@@ -6832,8 +6831,7 @@ pub async fn write_clipboard(
 // behavior consistent across WebViews), the WebView prefers routing outbound HTTP(S) through these
 // Tauri commands so the Rust backend performs the network request.
 
-#[cfg(any(feature = "desktop", test))]
-fn is_local_http_allowed(url: &Url) -> bool {
+pub(crate) fn is_local_http_allowed(url: &Url) -> bool {
     if url.scheme() != "http" {
         return false;
     }
@@ -6849,8 +6847,11 @@ fn is_local_http_allowed(url: &Url) -> bool {
     }
 }
 
-#[cfg(any(feature = "desktop", test))]
-fn ensure_ipc_network_url_allowed(url: &Url, context: &str, debug_assertions: bool) -> Result<(), String> {
+pub(crate) fn ensure_ipc_network_url_allowed(
+    url: &Url,
+    context: &str,
+    debug_assertions: bool,
+) -> Result<(), String> {
     match url.scheme() {
         "https" => Ok(()),
         "http" => {
@@ -6967,8 +6968,21 @@ pub async fn marketplace_search(
         }
     }
 
+    let debug_assertions = cfg!(debug_assertions);
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            match ensure_ipc_network_url_allowed(
+                attempt.url(),
+                "Marketplace redirect",
+                debug_assertions,
+            ) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
@@ -7013,8 +7027,21 @@ pub async fn marketplace_get_extension(
         segments.push(args.id.trim());
     }
 
+    let debug_assertions = cfg!(debug_assertions);
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            match ensure_ipc_network_url_allowed(
+                attempt.url(),
+                "Marketplace redirect",
+                debug_assertions,
+            ) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
@@ -7157,8 +7184,21 @@ pub async fn marketplace_download_package(
         segments.push(args.version.trim());
     }
 
+    let debug_assertions = cfg!(debug_assertions);
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            match ensure_ipc_network_url_allowed(
+                attempt.url(),
+                "Marketplace redirect",
+                debug_assertions,
+            ) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;

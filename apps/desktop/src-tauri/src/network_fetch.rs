@@ -70,14 +70,7 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
     use reqwest::Method;
 
     let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Invalid url: {e}"))?;
-    match parsed_url.scheme() {
-        "http" | "https" => {}
-        other => {
-            return Err(format!(
-                "Unsupported url scheme for network_fetch: {other} (only http/https allowed)"
-            ));
-        }
-    }
+    crate::commands::ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
 
     let method = init
         .get("method")
@@ -87,8 +80,25 @@ pub async fn network_fetch_impl(url: &str, init: &JsonValue) -> Result<NetworkFe
     let method = Method::from_bytes(method.as_bytes())
         .map_err(|_| format!("Unsupported method: {method}"))?;
 
+    let debug_assertions = cfg!(debug_assertions);
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            // Keep redirect behavior aligned with browser `fetch` (follow redirects), but enforce
+            // the same scheme/host allowlist for every hop to prevent `https -> http` downgrade
+            // redirects from bypassing the IPC URL policy in release builds.
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+
+            match crate::commands::ensure_ipc_network_url_allowed(
+                attempt.url(),
+                "network_fetch redirect",
+                debug_assertions,
+            ) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.stop(),
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
 
