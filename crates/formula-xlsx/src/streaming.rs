@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
+use formula_model::{CellRef, CellValue, ColProperties, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use thiserror::Error;
@@ -238,6 +238,7 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashMap::new(),
         recalc_policy,
     )?;
     Ok(())
@@ -361,6 +362,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
     }
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut col_properties_by_part: HashMap<String, BTreeMap<u32, ColProperties>> = HashMap::new();
     let mut saw_formula_patch = false;
     for (sheet_selector, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
@@ -368,6 +370,10 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+
+        if let Some(cols) = sheet_patches.col_properties() {
+            col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
+        }
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -407,6 +413,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
         &mut archive,
         output,
         &patches_by_part,
+        &col_properties_by_part,
         &pre_read_parts,
         &HashMap::new(),
         &HashMap::new(),
@@ -462,6 +469,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
             part_overrides,
             RecalcPolicy::PRESERVE,
         )?;
@@ -507,6 +515,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
     }
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut col_properties_by_part: HashMap<String, BTreeMap<u32, ColProperties>> = HashMap::new();
     let mut saw_formula_patch = false;
     for (sheet_selector, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
@@ -514,6 +523,10 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+
+        if let Some(cols) = sheet_patches.col_properties() {
+            col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
+        }
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -553,6 +566,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
         &mut archive,
         output,
         &patches_by_part,
+        &col_properties_by_part,
         &pre_read_parts,
         &HashMap::new(),
         part_overrides,
@@ -1773,6 +1787,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
     };
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut col_properties_by_part: HashMap<String, BTreeMap<u32, ColProperties>> = HashMap::new();
     let mut saw_formula_patch = false;
     for (sheet_selector, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
@@ -1780,6 +1795,10 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
         }
         let worksheet_part =
             resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+
+        if let Some(cols) = sheet_patches.col_properties() {
+            col_properties_by_part.insert(worksheet_part.clone(), cols.clone());
+        }
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -1836,6 +1855,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
         &mut archive,
         output,
         &patches_by_part,
+        &col_properties_by_part,
         &pre_read_parts,
         &updated_parts,
         &HashMap::new(),
@@ -2507,6 +2527,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     archive: &mut ZipArchive<R>,
     output: W,
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+    col_properties_by_part: &HashMap<String, BTreeMap<u32, ColProperties>>,
     pre_read_parts: &HashMap<String, Vec<u8>>,
     updated_parts: &HashMap<String, Vec<u8>>,
     part_overrides: &HashMap<String, PartOverride>,
@@ -2586,6 +2607,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
     let mut missing_parts: BTreeMap<String, ()> = effective_patches_by_part
         .keys()
+        .chain(col_properties_by_part.keys())
         .map(|k| (k.clone(), ()))
         .collect();
 
@@ -2625,7 +2647,12 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             }
         }
 
-        if let Some(patches) = effective_patches_by_part.get(canonical_name) {
+        let col_properties = col_properties_by_part.get(canonical_name);
+        if col_properties.is_some() || effective_patches_by_part.contains_key(canonical_name) {
+            let patches = effective_patches_by_part
+                .get(canonical_name)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
             zip.start_file(name.clone(), options)?;
             let indices = shared_string_indices.get(canonical_name);
             let worksheet_meta = worksheet_metadata_by_part
@@ -2638,6 +2665,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 canonical_name,
                 patches,
                 indices,
+                col_properties,
                 worksheet_meta,
                 drop_vm_on_value_change,
                 recalc_policy,
@@ -3017,15 +3045,20 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     worksheet_part: &str,
     patches: &[WorksheetCellPatch],
     shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
+    col_properties: Option<&BTreeMap<u32, ColProperties>>,
     worksheet_meta: WorksheetXmlMetadata,
     drop_vm_on_value_change: bool,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
+    let has_cell_patches = !patches.is_empty();
     let patch_bounds = bounds_for_patches(patches);
-    let dimension_ref_to_insert = if worksheet_meta.has_dimension {
-        None
-    } else {
+
+    // Only insert `<dimension>` when applying cell patches. Column-metadata-only edits should not
+    // introduce unrelated structural changes.
+    let dimension_ref_to_insert = if has_cell_patches && !worksheet_meta.has_dimension {
         union_bounds(worksheet_meta.existing_used_range, patch_bounds).map(bounds_to_dimension_ref)
+    } else {
+        None
     };
     let insert_dimension_after_sheet_pr =
         dimension_ref_to_insert.is_some() && worksheet_meta.has_sheet_pr;
@@ -3074,6 +3107,8 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     let mut sheet_prefix: Option<String> = None;
     let mut inserted_dimension = false;
     let mut pending_dimension_after_sheet_pr_end = false;
+    let mut cols_written = false;
+    let mut skip_cols_depth: usize = 0;
 
     let mut row_state: Option<RowState> = None;
     let mut in_cell = false;
@@ -3082,6 +3117,48 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
+            ev if skip_cols_depth > 0 => {
+                // Skip the original `<cols>` section when rewriting column metadata.
+                match ev {
+                    Event::Start(_) => skip_cols_depth += 1,
+                    Event::End(_) => skip_cols_depth = skip_cols_depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+
+            Event::Start(ref e)
+                if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
+            {
+                let name = e.name();
+                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                if !cols_written {
+                    let cols_xml = crate::patch::render_cols_xml(
+                        col_properties.expect("checked is_some above"),
+                        prefix,
+                    );
+                    if !cols_xml.is_empty() {
+                        writer.get_mut().write_all(cols_xml.as_bytes())?;
+                        cols_written = true;
+                    }
+                }
+                skip_cols_depth = 1;
+            }
+            Event::Empty(ref e)
+                if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
+            {
+                let name = e.name();
+                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                if !cols_written {
+                    let cols_xml = crate::patch::render_cols_xml(
+                        col_properties.expect("checked is_some above"),
+                        prefix,
+                    );
+                    if !cols_xml.is_empty() {
+                        writer.get_mut().write_all(cols_xml.as_bytes())?;
+                        cols_written = true;
+                    }
+                }
+            }
 
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"worksheet" => {
                 if worksheet_prefix.is_none() {
@@ -3139,8 +3216,20 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     pending_dimension_after_sheet_pr_end = false;
                 }
             }
-
+ 
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                if let Some(col_properties) = col_properties {
+                    if !cols_written {
+                        let name = e.name();
+                        let prefix =
+                            element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                        let cols_xml = crate::patch::render_cols_xml(col_properties, prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().write_all(cols_xml.as_bytes())?;
+                            cols_written = true;
+                        }
+                    }
+                }
                 saw_sheet_data = true;
                 in_sheet_data = true;
                 if sheet_prefix.is_none() {
@@ -3151,6 +3240,18 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                if let Some(col_properties) = col_properties {
+                    if !cols_written {
+                        let name = e.name();
+                        let prefix =
+                            element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                        let cols_xml = crate::patch::render_cols_xml(col_properties, prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().write_all(cols_xml.as_bytes())?;
+                            cols_written = true;
+                        }
+                    }
+                }
                 saw_sheet_data = true;
                 if patch_bounds.is_none() {
                     writer.write_event(Event::Empty(e.to_owned()))?;
@@ -3185,6 +3286,20 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 writer.write_event(Event::End(e.to_owned()))?;
             }
             Event::End(ref e) if local_name(e.name().as_ref()) == b"worksheet" => {
+                if let Some(col_properties) = col_properties {
+                    if !cols_written {
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let cols_xml = crate::patch::render_cols_xml(col_properties, prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().write_all(cols_xml.as_bytes())?;
+                            cols_written = true;
+                        }
+                    }
+                }
                 if !saw_sheet_data && !patches_by_row.is_empty() {
                     saw_sheet_data = true;
                     let sheet_prefix = if worksheet_has_default_ns {

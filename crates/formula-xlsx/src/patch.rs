@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use formula_model::rich_text::{RichText, RichTextRunStyle};
-use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
+use formula_model::{CellRef, CellValue, ColProperties, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
@@ -70,17 +70,43 @@ impl WorkbookCellPatches {
 pub struct WorksheetCellPatches {
     // Deterministic ordering (row-major) makes patch application deterministic.
     cells: BTreeMap<(u32, u32), CellPatch>,
+    /// Optional replacement for the worksheet `<cols>` section.
+    ///
+    /// This is treated as the full desired set of per-column overrides (sparse, 0-based indices),
+    /// matching [`formula_model::Worksheet::col_properties`].
+    ///
+    /// - `None`: preserve the existing `<cols>` section.
+    /// - `Some(map)`: rewrite `<cols>` to match `map` (and remove `<cols>` entirely if the
+    ///   rendered section would be empty).
+    col_properties: Option<BTreeMap<u32, ColProperties>>,
 }
 
 impl WorksheetCellPatches {
     /// Returns `true` if there are no pending edits.
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.cells.is_empty() && self.col_properties.is_none()
     }
 
     /// Insert/replace a patch for a single cell.
     pub fn set_cell(&mut self, cell: CellRef, patch: CellPatch) {
         self.cells.insert((cell.row, cell.col), patch);
+    }
+
+    /// Replace the worksheet `<cols>` section using the provided `col_properties` map.
+    ///
+    /// Column indices are 0-based (matching `formula_model`); `width` values are expressed in
+    /// Excel "character" units (OOXML `col/@width`).
+    pub fn set_col_properties(&mut self, col_properties: BTreeMap<u32, ColProperties>) {
+        self.col_properties = Some(col_properties);
+    }
+
+    /// Clear all existing worksheet column overrides by removing the `<cols>` section.
+    pub fn clear_col_properties(&mut self) {
+        self.col_properties = Some(BTreeMap::new());
+    }
+
+    pub(crate) fn col_properties(&self) -> Option<&BTreeMap<u32, ColProperties>> {
+        self.col_properties.as_ref()
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (CellRef, &CellPatch)> {
@@ -853,31 +879,42 @@ fn patch_worksheet_xml(
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     clear_cached_values_on_formula_change: bool,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
-    let mut non_material_targets: HashSet<(u32, u32)> = HashSet::new();
-    for (cell_ref, patch) in patches.iter() {
-        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
-            non_material_targets.insert((cell_ref.row, cell_ref.col));
+    // Column metadata patches do not require scanning sheetData (we only rewrite the `<cols>`
+    // section), so avoid the potentially-large worksheet scan when there are no cell patches.
+    let mut scan = WorksheetXmlScan::default();
+    let mut existing_non_material_cells: HashSet<(u32, u32)> = HashSet::new();
+    if !patches.cells.is_empty() {
+        let mut non_material_targets: HashSet<(u32, u32)> = HashSet::new();
+        for (cell_ref, patch) in patches.iter() {
+            if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                non_material_targets.insert((cell_ref.row, cell_ref.col));
+            }
         }
-    }
 
-    let (scan, existing_non_material_cells) = scan_worksheet_xml(
-        original,
-        (!non_material_targets.is_empty()).then_some(&non_material_targets),
-    )?;
+        let (scan0, existing0) = scan_worksheet_xml(
+            original,
+            (!non_material_targets.is_empty()).then_some(&non_material_targets),
+        )?;
+        scan = scan0;
+        existing_non_material_cells = existing0;
+    }
 
     // Drop patches that are guaranteed to be a no-op:
     // a non-material patch (clear with no value/formula/style) targeting a missing cell cannot
     // reference an existing `<c>` element, and since it would not insert a new cell, it cannot
     // change the worksheet XML.
     let mut effective_patches = WorksheetCellPatches::default();
-    for (cell_ref, patch) in patches.iter() {
-        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)?
-            || existing_non_material_cells.contains(&(cell_ref.row, cell_ref.col))
-        {
-            effective_patches
-                .cells
-                .insert((cell_ref.row, cell_ref.col), patch.clone());
-            continue;
+    effective_patches.col_properties = patches.col_properties.clone();
+    if !patches.cells.is_empty() {
+        for (cell_ref, patch) in patches.iter() {
+            if cell_patch_is_material_for_insertion(patch, style_id_to_xf)?
+                || existing_non_material_cells.contains(&(cell_ref.row, cell_ref.col))
+            {
+                effective_patches
+                    .cells
+                    .insert((cell_ref.row, cell_ref.col), patch.clone());
+                continue;
+            }
         }
     }
 
@@ -896,9 +933,17 @@ fn patch_worksheet_xml(
     // `<dimension ref="..."/>` if needed.
     //
     // We don't shrink dimensions (clears), mirroring Excel's typical behavior.
-    let patch_bounds = patch_bounds(patches, style_id_to_xf)?;
+    let has_cell_patches = !patches.cells.is_empty();
 
-    let dimension_ref_to_insert = (!scan.has_dimension).then(|| {
+    let patch_bounds = if has_cell_patches {
+        patch_bounds(patches, style_id_to_xf)?
+    } else {
+        None
+    };
+
+    // Only insert/patch `<dimension>` when cell patches are present; column metadata edits should
+    // not introduce unrelated structural changes.
+    let dimension_ref_to_insert = (has_cell_patches && !scan.has_dimension).then(|| {
         let merged = match (scan.existing_used_range, patch_bounds) {
             (Some((min_r, min_c, max_r, max_c)), Some((p_min_r, p_min_c, p_max_r, p_max_c))) => {
                 Some((
@@ -932,8 +977,24 @@ fn patch_worksheet_xml(
     let mut worksheet_has_default_ns = false;
     let mut saw_sheet_data = false;
     let mut inserted_dimension = false;
+    let col_properties = patches.col_properties.as_ref();
+    let mut cols_written = false;
+    let mut skip_cols_depth: usize = 0;
     loop {
         match reader.read_event_into(&mut buf)? {
+            ev if skip_cols_depth > 0 => {
+                // Skip the original `<cols>` section when rewriting column metadata.
+                match ev {
+                    Event::Start(_) => skip_cols_depth += 1,
+                    Event::End(_) => skip_cols_depth = skip_cols_depth.saturating_sub(1),
+                    Event::Eof => {
+                        return Err(XlsxError::Invalid(
+                            "unexpected EOF while skipping <cols> section".to_string(),
+                        ))
+                    }
+                    _ => {}
+                }
+            }
             Event::Start(e) if local_name(e.name().as_ref()) == b"worksheet" => {
                 if worksheet_prefix.is_none() {
                     worksheet_prefix = element_prefix(e.name().as_ref())
@@ -957,6 +1018,41 @@ fn patch_worksheet_xml(
                         inserted_dimension = true;
                     }
                 }
+            }
+            Event::Start(e)
+                if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
+            {
+                let name = e.name();
+                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                if !cols_written {
+                    let cols_xml = render_cols_xml(
+                        col_properties.expect("checked is_some above"),
+                        prefix,
+                    );
+                    if !cols_xml.is_empty() {
+                        writer.get_mut().extend_from_slice(cols_xml.as_bytes());
+                        cols_written = true;
+                    }
+                }
+                skip_cols_depth = 1;
+                drop(e);
+            }
+            Event::Empty(e)
+                if col_properties.is_some() && local_name(e.name().as_ref()) == b"cols" =>
+            {
+                let name = e.name();
+                let prefix = element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                if !cols_written {
+                    let cols_xml = render_cols_xml(
+                        col_properties.expect("checked is_some above"),
+                        prefix,
+                    );
+                    if !cols_xml.is_empty() {
+                        writer.get_mut().extend_from_slice(cols_xml.as_bytes());
+                        cols_written = true;
+                    }
+                }
+                drop(e);
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
                 writer.write_event(Event::Empty(e.into_owned()))?;
@@ -1007,6 +1103,18 @@ fn patch_worksheet_xml(
                 }
             }
             Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                if let Some(col_properties) = col_properties {
+                    if !cols_written {
+                        let name = e.name();
+                        let sheet_prefix =
+                            element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                        let cols_xml = render_cols_xml(col_properties, sheet_prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().extend_from_slice(cols_xml.as_bytes());
+                            cols_written = true;
+                        }
+                    }
+                }
                 saw_sheet_data = true;
                 let sheet_prefix = element_prefix(e.name().as_ref())
                     .and_then(|p| std::str::from_utf8(p).ok())
@@ -1027,6 +1135,18 @@ fn patch_worksheet_xml(
                 formula_changed |= changed;
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                if let Some(col_properties) = col_properties {
+                    if !cols_written {
+                        let name = e.name();
+                        let sheet_prefix =
+                            element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
+                        let cols_xml = render_cols_xml(col_properties, sheet_prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().extend_from_slice(cols_xml.as_bytes());
+                            cols_written = true;
+                        }
+                    }
+                }
                 saw_sheet_data = true;
                 if row_patches.is_empty() || patch_bounds.is_none() {
                     writer.write_event(Event::Empty(e.into_owned()))?;
@@ -1056,6 +1176,20 @@ fn patch_worksheet_xml(
                 }
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"worksheet" => {
+                if !cols_written {
+                    if let Some(col_properties) = col_properties {
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let cols_xml = render_cols_xml(col_properties, prefix);
+                        if !cols_xml.is_empty() {
+                            writer.get_mut().extend_from_slice(cols_xml.as_bytes());
+                            cols_written = true;
+                        }
+                    }
+                }
                 if !saw_sheet_data && !row_patches.is_empty() {
                     // Insert missing <sheetData> just before </worksheet>.
                     let sheet_prefix = if worksheet_has_default_ns {
@@ -1091,6 +1225,87 @@ fn patch_worksheet_xml(
     }
 
     Ok((writer.into_inner(), formula_changed))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ColXmlProps {
+    width: Option<f32>,
+    hidden: bool,
+}
+
+pub(crate) fn render_cols_xml(
+    col_properties: &BTreeMap<u32, ColProperties>,
+    prefix: Option<&str>,
+) -> String {
+    let cols_tag = prefixed_tag(prefix, "cols");
+    let col_tag = prefixed_tag(prefix, "col");
+
+    // `col_properties` keys are 0-based; OOXML uses 1-based column indices.
+    let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
+    for (&col0, props) in col_properties {
+        let col_1 = col0.saturating_add(1);
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        if props.width.is_none() && !props.hidden {
+            continue;
+        }
+        col_xml_props.insert(
+            col_1,
+            ColXmlProps {
+                width: props.width,
+                hidden: props.hidden,
+            },
+        );
+    }
+
+    if col_xml_props.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&cols_tag);
+    out.push('>');
+
+    let mut current: Option<(u32, u32, ColXmlProps)> = None;
+    for (&col_1, props) in col_xml_props.iter() {
+        let props = props.clone();
+        match current.take() {
+            None => current = Some((col_1, col_1, props)),
+            Some((start, end, cur)) if col_1 == end + 1 && props == cur => {
+                current = Some((start, col_1, cur));
+            }
+            Some((start, end, cur)) => {
+                out.push_str(&render_col_range(&col_tag, start, end, &cur));
+                current = Some((col_1, col_1, props));
+            }
+        }
+    }
+    if let Some((start, end, cur)) = current {
+        out.push_str(&render_col_range(&col_tag, start, end, &cur));
+    }
+
+    out.push_str("</");
+    out.push_str(&cols_tag);
+    out.push('>');
+    out
+}
+
+fn render_col_range(col_tag: &str, start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        r#"<{col_tag} min="{start_col_1}" max="{end_col_1}""#
+    ));
+    if let Some(width) = props.width {
+        s.push_str(&format!(r#" width="{width}""#));
+        s.push_str(r#" customWidth="1""#);
+    }
+    if props.hidden {
+        s.push_str(r#" hidden="1""#);
+    }
+    s.push_str("/>");
+    s
 }
 
 fn patch_sheet_data<R: std::io::BufRead>(
