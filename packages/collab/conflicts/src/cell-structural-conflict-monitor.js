@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { getMapRoot, getYMap } from "@formula/collab-yjs-utils";
+import { getMapRoot, getYMap, yjsValueToJson } from "@formula/collab-yjs-utils";
 import { cellRefFromKey, numberToCol } from "./cell-ref.js";
  
 /**
@@ -1384,12 +1384,14 @@ function normalizeCell(cellData) {
   const map = getYMap(cellData);
   if (map) {
     value = readYMapValue(map, "value") ?? null;
-    formula = readYMapValue(map, "formula") ?? null;
+    formula = yjsValueToJson(readYMapValue(map, "formula") ?? null);
+    if (formula != null) formula = String(formula);
     enc = readYMapValue(map, "enc") ?? null;
     format = (readYMapValue(map, "format") ?? readYMapValue(map, "style")) ?? null;
   } else if (typeof cellData === "object") {
     value = cellData.value ?? null;
-    formula = cellData.formula ?? null;
+    formula = yjsValueToJson(cellData.formula ?? null);
+    if (formula != null) formula = String(formula);
     enc = cellData.enc ?? null;
     format = cellData.format ?? cellData.style ?? null;
   } else {

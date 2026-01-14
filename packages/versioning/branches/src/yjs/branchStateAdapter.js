@@ -61,8 +61,9 @@ function coerceString(value) {
  * @returns {string | null}
  */
 function normalizeFormula(value) {
-  if (value == null) return null;
-  const trimmed = String(value).trim();
+  const json = yjsValueToJson(value);
+  if (json == null) return null;
+  const trimmed = String(json).trim();
   const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
   const stripped = strippedLeading.trim();
   if (stripped === "") return null;
