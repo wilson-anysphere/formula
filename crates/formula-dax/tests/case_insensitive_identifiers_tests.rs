@@ -1,6 +1,6 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, DaxError, FilterContext, Relationship, Table,
-    Value,
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
+    GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
 };
 
 fn build_model() -> DataModel {
@@ -112,4 +112,57 @@ fn add_table_rejects_duplicate_column_names_case_insensitively() {
         err,
         DaxError::DuplicateColumn { table, column } if table == "T" && column == "col"
     ));
+}
+
+#[test]
+fn pivot_resolves_identifiers_case_insensitively_and_uses_model_casing_for_headers() {
+    let mut model = build_model();
+    model.add_measure("Total", "SUM(Orders[Amount])").unwrap();
+
+    let group_by = vec![GroupByColumn::new("customers", "region")];
+    let measures = vec![PivotMeasure::new("Total", "[TOTAL]").unwrap()];
+
+    let result = pivot(
+        &model,
+        "orders",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    // The pivot output should preserve the model's original casing, even when callers pass
+    // mismatched identifier casing.
+    assert_eq!(result.columns, vec!["Customers[Region]", "Total"]);
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("East"), Value::from(38.0)],
+            vec![Value::from("West"), Value::from(5.0)],
+        ]
+    );
+}
+
+#[test]
+fn duplicate_measure_names_are_rejected_case_insensitively() {
+    let mut model = DataModel::new();
+    model.add_measure("Total", "1").unwrap();
+    let err = model.add_measure("total", "2").unwrap_err();
+    assert!(matches!(err, DaxError::DuplicateMeasure { .. }));
+}
+
+#[test]
+fn dax_engine_resolves_mixed_case_table_and_column_refs() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(orders[amount])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(43.0));
 }

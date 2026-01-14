@@ -193,6 +193,38 @@ pub struct PivotResultGrid {
     pub data: Vec<Vec<Value>>,
 }
 
+fn canonicalize_table_name(model: &DataModel, table: &str) -> DaxResult<String> {
+    model.table(table)
+        .map(|t| t.name().to_string())
+        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))
+}
+
+fn canonicalize_group_by_columns(
+    model: &DataModel,
+    columns: &[GroupByColumn],
+) -> DaxResult<Vec<GroupByColumn>> {
+    let mut out = Vec::with_capacity(columns.len());
+    for col in columns {
+        let table_ref = model
+            .table(&col.table)
+            .ok_or_else(|| DaxError::UnknownTable(col.table.clone()))?;
+        let table = table_ref.name().to_string();
+        let idx = table_ref
+            .column_idx(&col.column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.clone(),
+                column: col.column.clone(),
+            })?;
+        let column = table_ref
+            .columns()
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| col.column.clone());
+        out.push(GroupByColumn { table, column });
+    }
+    Ok(out)
+}
+
 impl PivotResultGrid {
     /// Convert this grid into the workbook model's pivot scalar values.
     ///
@@ -2308,6 +2340,18 @@ pub fn pivot(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
+    let base_table = canonicalize_table_name(model, base_table)?;
+    let group_by = canonicalize_group_by_columns(model, group_by)?;
+    pivot_impl(model, &base_table, &group_by, measures, filter)
+}
+
+fn pivot_impl(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<PivotResult> {
     if let Some(result) = pivot_columnar_group_by(model, base_table, group_by, measures, filter)? {
         maybe_trace_pivot_path(PivotPath::ColumnarGroupBy);
         return Ok(result);
@@ -2386,11 +2430,15 @@ pub fn pivot_crosstab_with_options(
         ));
     }
 
-    let mut group_by = Vec::with_capacity(row_fields.len() + column_fields.len());
-    group_by.extend_from_slice(row_fields);
-    group_by.extend_from_slice(column_fields);
+    let base_table = canonicalize_table_name(model, base_table)?;
+    let row_fields = canonicalize_group_by_columns(model, row_fields)?;
+    let column_fields = canonicalize_group_by_columns(model, column_fields)?;
 
-    let grouped = pivot(model, base_table, &group_by, measures, filter)?;
+    let mut group_by = Vec::with_capacity(row_fields.len() + column_fields.len());
+    group_by.extend_from_slice(&row_fields);
+    group_by.extend_from_slice(&column_fields);
+
+    let grouped = pivot_impl(model, &base_table, &group_by, measures, filter)?;
 
     let row_key_len = row_fields.len();
     let col_key_len = column_fields.len();
@@ -2428,7 +2476,7 @@ pub fn pivot_crosstab_with_options(
 
     // Header row.
     let mut header: Vec<Value> = Vec::new();
-    for col in row_fields {
+    for col in &row_fields {
         header.push(Value::from(format!("{}[{}]", col.table, col.column)));
     }
     if col_key_len == 0 {
