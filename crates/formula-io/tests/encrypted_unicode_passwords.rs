@@ -47,7 +47,11 @@ fn opens_encrypted_ooxml_with_unicode_passwords_including_emoji() {
     // - non-ASCII BMP codepoints
     // - a non-BMP emoji (surrogate pair in UTF-16)
     // - leading/trailing whitespace to ensure caller input is not trimmed
-    let passwords = ["pässwörd🔒", "密码🔒", "pässwörd🔒 ", " 密码🔒"];
+    //
+    // Note: encrypting via `ms-offcrypto-writer` uses a real-world Agile spinCount (100k), which is
+    // expensive. Keep this list minimal while still covering both the whitespace and non-whitespace
+    // cases (so we exercise both branches of the trimming checks below).
+    let passwords = ["pässwörd🔒", " 密码🔒 "];
 
     for password in passwords {
         let encrypted = encrypt_bytes_with_password(&plain_xlsx, password);
