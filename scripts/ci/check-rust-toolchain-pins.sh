@@ -57,6 +57,41 @@ if [ "${#workflow_files[@]}" -eq 0 ]; then
 fi
 
 for workflow in "${workflow_files[@]}"; do
+  # If a workflow uses Rust tooling (cargo/rustup/rustc, our cargo wrapper, or Tauri build actions),
+  # it must install the pinned toolchain explicitly. GitHub-hosted runners ship with a preinstalled
+  # Rust, but that version can drift over time (breaking reproducibility and causing "CI green,
+  # release red" when CI and release workflows disagree).
+  #
+  # We enforce the repo standard: install Rust via dtolnay/rust-toolchain pinned to a commit SHA,
+  # with `with: toolchain: <pinned>` set explicitly.
+  workflow_uses_rust=0
+  if grep -Eq '^[[:space:]]*(cargo|rustup|rustc)([[:space:]]|$)' "$workflow"; then
+    workflow_uses_rust=1
+  elif grep -Eq '^[[:space:]]*-?[[:space:]]*run:[[:space:]]*(cargo|rustup|rustc)([[:space:]]|$)' "$workflow"; then
+    workflow_uses_rust=1
+  elif grep -Eq '^[[:space:]]*[^#[:space:]].*cargo_agent\.sh' "$workflow"; then
+    workflow_uses_rust=1
+  elif grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*tauri-apps/tauri-action@' "$workflow"; then
+    workflow_uses_rust=1
+  elif grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*Swatinem/rust-cache@' "$workflow"; then
+    workflow_uses_rust=1
+  fi
+
+  workflow_has_dtolnay=0
+  if grep -Eq '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*dtolnay/rust-toolchain@' "$workflow"; then
+    workflow_has_dtolnay=1
+  fi
+
+  if [ "${workflow_uses_rust}" -eq 1 ] && [ "${workflow_has_dtolnay}" -eq 0 ]; then
+    echo "Rust toolchain pin check failed: ${workflow} appears to use Rust tooling but does not install the pinned toolchain." >&2
+    echo "Fix: add a dtolnay/rust-toolchain step pinned to a commit SHA with:" >&2
+    echo "  with:" >&2
+    echo "    toolchain: ${channel}" >&2
+    echo "" >&2
+    fail=1
+    continue
+  fi
+
   # Parse each workflow and validate every dtolnay/rust-toolchain step declares a matching toolchain.
   awk -v workflow="$workflow" -v expected="$channel" '
     function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
