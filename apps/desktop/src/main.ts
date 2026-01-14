@@ -10839,11 +10839,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     try {
       const wasmEngine = (app as any).wasmEngine as any;
       if (wasmEngine && typeof wasmEngine.setColHidden === "function") {
-        const activeSheetId = app.getCurrentSheetId();
-        const hiddenCols = importedHiddenColsBySheetId.get(activeSheetId) ?? [];
         (app as any).lastSyncedHiddenColsEngine = wasmEngine;
-        (app as any).lastSyncedHiddenCols = [...hiddenCols];
-        (app as any).lastSyncedHiddenColsKey = `${activeSheetId}:${hiddenCols.join(",")}`;
+        const keyBySheetId = (app as any).lastSyncedHiddenColsKeyBySheetId as Map<string, string> | undefined;
+        const colsBySheetId = (app as any).lastSyncedHiddenColsBySheetId as Map<string, number[]> | undefined;
+        if (keyBySheetId && colsBySheetId) {
+          for (const [sheetId, cols] of importedHiddenColsBySheetId) {
+            const sorted = [...cols].sort((a, b) => a - b);
+            colsBySheetId.set(sheetId, sorted);
+            keyBySheetId.set(sheetId, sorted.join(","));
+          }
+        }
       }
     } catch (err) {
       console.warn("[formula][desktop] Failed to seed hidden-column engine sync cache:", err);
