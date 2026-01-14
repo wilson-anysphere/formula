@@ -59,6 +59,14 @@ callers can decide whether to prompt for a password vs report “unsupported enc
 
 ## Supported schemes / parameter subsets
 
+MS-OFFCRYPTO defines additional OOXML encryption containers/schemes. In this repo we intentionally
+scope support to the Excel-common subset and treat everything else as **unsupported encryption**
+(callers should ask the user to remove encryption in Excel and re-save):
+- **Extensible Encryption** (`EncryptionInfo` `versionMinor == 3`, commonly `4.3`) is **not
+  implemented**.
+- Agile **certificate-based** key encryptors and IRM/DataSpaces transforms are **not implemented**
+  (password-only).
+
 ### OOXML: Agile encryption (4.4)
 We implement the password key encryptor subset of Agile (`keyEncryptor uri=".../password"`).
 
@@ -719,8 +727,30 @@ We aim to `zeroize()`:
 Be aware that Rust `Vec` reallocation, copies, and allocator behavior can still duplicate sensitive
 bytes. Zeroization is best-effort, not a formal guarantee.
 
-### Caching / streaming decrypt
-To support streaming readers (don’t materialize the entire decrypted ZIP in memory):
+### Full-buffer vs streaming decryption (memory/perf tradeoffs)
+There are two main decryption patterns in this repo:
+
+1. **Full-buffer decrypt** (materialize decrypted ZIP bytes into a `Vec<u8>`):
+   - Used by end-to-end helpers like `formula_office_crypto::decrypt_encrypted_package_ole(..)` and by
+     `formula-io` open APIs that return a `Workbook` (not a model).
+   - Pros: simpler control flow; enables Agile `dataIntegrity` verification (HMAC over the full
+     `EncryptedPackage` stream) before handing bytes to the ZIP parser.
+   - Cons: peak memory is roughly `ciphertext + plaintext` (and can include extra OLE-sector slack),
+     which can be expensive for large workbooks.
+
+2. **Streaming decrypt** (decrypt on demand behind a `Read + Seek` interface):
+   - Used when we want to feed a decrypted ZIP into `zip::ZipArchive` without allocating the full
+     plaintext in memory (notably `open_workbook_model_*` for Standard AES).
+   - Implemented by `crates/formula-io/src/encrypted_package_reader.rs` (`DecryptedPackageReader`),
+     which decrypts in 4096-byte segments and caches one segment at a time.
+     - Standard RC4 streaming uses `crates/formula-io/src/rc4_cryptoapi.rs`
+       (`Rc4CryptoApiDecryptReader`).
+   - Pros: peak memory is closer to “one segment + small caches”; avoids full plaintext duplication.
+   - Cons: Agile `dataIntegrity` is not currently validated in the streaming reader; wrong-password
+     detection relies on verifiers and/or ZIP validation.
+
+### Caching / secret lifetime
+To support streaming readers safely (don’t materialize the entire decrypted ZIP in memory):
 
 * Cache the **derived package key** (Agile) or **derived AES key** (Standard) after password
   verification.
@@ -735,6 +765,21 @@ The reader should enforce a reasonable maximum spin count (and surface a specifi
 Note: Standard encryption uses a fixed 50,000 iteration count; the DoS concern is primarily for
 Agile’s file-provided `spinCount`.
 
+### `EncryptedPackage` size / allocation limits
+The 8-byte plaintext size prefix (`orig_size`) in `EncryptedPackage` is **attacker-controlled**.
+Implementations must reject absurd sizes *before* allocating output buffers.
+
+In this repo:
+
+- `crates/formula-office-crypto` enforces `MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE = 512 MiB` and also
+  bounds trailing ciphertext slack when reading OLE streams.
+- `crates/formula-offcrypto` defaults `DecryptLimits.max_output_size` to
+  `MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE = 512 MiB`.
+- `crates/formula-io` performs additional plausibility checks (e.g. size-prefix parsing quirks,
+  ciphertext-length checks, and `usize` overflow avoidance) before allocating.
+- Legacy `.xls` `FILEPASS` payload parsing is bounded by
+  `crates/formula-xls/src/biff/encryption.rs::MAX_FILEPASS_PAYLOAD_BYTES` (4 KiB).
+
 ### `EncryptionInfo` size limits (XML + base64 fields)
 Agile `EncryptionInfo` embeds an XML descriptor with multiple base64-encoded fields
 (`saltValue`, `encryptedKeyValue`, `encryptedVerifierHash*`, `encryptedHmac*`, …).
@@ -746,6 +791,11 @@ In this repo:
   max XML length / base64 field length / decoded length), and returns structured errors:
   `OffCryptoError::EncryptionInfoTooLarge` / `OffCryptoError::FieldTooLarge`.
   - See: `crates/formula-xlsx/src/offcrypto/encryption_info.rs`
+- `crates/formula-io`’s XML extractor (`extract_agile_encryption_info_xml`) rejects Agile descriptors
+  larger than 1 MiB before parsing: `crates/formula-io/src/encryption_info.rs`.
+- `crates/formula-offcrypto` and `crates/formula-office-crypto` also enforce conservative size caps
+  when reading/parsing `EncryptionInfo` (XML size, Standard header size, CSPName length, verifier
+  digest size).
 
 ## Spec references (sections we implement)
 Primary:
@@ -775,6 +825,17 @@ Other useful keywords inside MS-OFFCRYPTO:
 * `spinCount` (Agile password hashing loop)
 * `encryptedHmacKey` / `encryptedHmacValue` (“Data Integrity”; HMAC computed over the full
   `EncryptedPackage` stream bytes, including the size prefix)
+
+### MS-XLS sections (legacy `.xls` encryption)
+The MS-XLS spec is also long; these are the sections we refer to most for BIFF `FILEPASS`:
+
+* **§2.2.10** — “Encryption (Password to Open)” (record-by-record encryption semantics and which
+  fields remain plaintext).
+* **§2.4.105** — “FILEPASS” (workbook-global record that signals encryption and encodes the scheme).
+
+Related:
+* **MS-OFFCRYPTO §2.3.7.4** — legacy password “method 2” byte mapping (used by some `.xls` XOR
+  variants).
 
 Additional repo-specific references:
 - `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` framing + AES-ECB decrypt + truncation)
