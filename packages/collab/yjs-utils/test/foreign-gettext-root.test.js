@@ -23,6 +23,23 @@ test("collab-yjs-utils: getTextRoot normalizes foreign roots created via CJS get
   assert.ok(doc.getText("title") instanceof Y.Text);
 });
 
+test("collab-yjs-utils: getTextRoot normalizes foreign AbstractType placeholder roots created via CJS Doc.get into an ESM Doc", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Simulate another Yjs module instance touching the root via Doc.get(name),
+  // leaving a foreign AbstractType placeholder under the same key.
+  Ycjs.Doc.prototype.get.call(doc, "title");
+
+  assert.ok(doc.share.get("title"));
+  assert.throws(() => doc.getText("title"), /different constructor/);
+
+  const title = getTextRoot(doc, "title");
+  assert.ok(title instanceof Y.Text);
+  assert.ok(doc.getText("title") instanceof Y.Text);
+});
+
 test("collab-yjs-utils: getTextRoot preserves foreign formatting/content when normalizing a text root", () => {
   const Ycjs = requireYjsCjs();
 

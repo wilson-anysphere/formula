@@ -22,3 +22,20 @@ test("collab-yjs-utils: getMapRoot normalizes foreign roots created via CJS getM
   assert.equal(cells.get("foo"), "bar");
   assert.ok(doc.getMap("cells") instanceof Y.Map);
 });
+
+test("collab-yjs-utils: getMapRoot normalizes foreign AbstractType placeholder roots created via CJS Doc.get into an ESM Doc", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Simulate another Yjs module instance touching the root via Doc.get(name),
+  // leaving a foreign AbstractType placeholder under the same key.
+  Ycjs.Doc.prototype.get.call(doc, "cells");
+
+  assert.ok(doc.share.get("cells"));
+  assert.throws(() => doc.getMap("cells"), /different constructor/);
+
+  const cells = getMapRoot(doc, "cells");
+  assert.ok(cells instanceof Y.Map);
+  assert.ok(doc.getMap("cells") instanceof Y.Map);
+});
