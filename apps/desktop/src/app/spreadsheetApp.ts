@@ -6661,6 +6661,7 @@ export class SpreadsheetApp {
         await this.enqueueWasmSync(async (engine) => {
           const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
             workbookFileMetadata: this.workbookFileMetadata,
+            localeId: getLocale(),
           });
           this.applyComputedChanges(changes);
         });
@@ -6744,6 +6745,7 @@ export class SpreadsheetApp {
               this.clearComputedValuesByCoord();
               const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(engine), this.document, {
                 workbookFileMetadata: this.workbookFileMetadata,
+                localeId: getLocale(),
               });
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
@@ -6761,11 +6763,12 @@ export class SpreadsheetApp {
              if (source === "applyState") {
                this.clearComputedValuesByCoord();
                void this.enqueueWasmSync(async (worker) => {
-                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                   workbookFileMetadata: this.workbookFileMetadata,
-                 });
-                 this.applyComputedChanges(changes);
-               });
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                  workbookFileMetadata: this.workbookFileMetadata,
+                  localeId: getLocale(),
+                });
+                this.applyComputedChanges(changes);
+              });
                return;
              }
 
@@ -6783,11 +6786,12 @@ export class SpreadsheetApp {
              if (sheetMetaRequiresHydrate) {
                this.clearComputedValuesByCoord();
                void this.enqueueWasmSync(async (worker) => {
-                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                   workbookFileMetadata: this.workbookFileMetadata,
-                 });
-                 this.applyComputedChanges(changes);
-               });
+                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                  workbookFileMetadata: this.workbookFileMetadata,
+                  localeId: getLocale(),
+                });
+                this.applyComputedChanges(changes);
+              });
                return;
              }
 
@@ -6850,12 +6854,13 @@ export class SpreadsheetApp {
            //
            // Note: do not `await` inside this init chain (it would deadlock by waiting on the
            // promise chain we're currently building).
-           postInitHydrate = this.enqueueWasmSync(async (worker) => {
-             const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-               workbookFileMetadata: this.workbookFileMetadata,
-             });
-             this.applyComputedChanges(changes);
-           });
+          postInitHydrate = this.enqueueWasmSync(async (worker) => {
+            const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+              workbookFileMetadata: this.workbookFileMetadata,
+              localeId: getLocale(),
+            });
+            this.applyComputedChanges(changes);
+          });
           } catch {
             // Ignore initialization failures (e.g. missing WASM bundle).
             engine?.terminate();
@@ -9297,6 +9302,7 @@ export class SpreadsheetApp {
         try {
           const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
             workbookFileMetadata: this.workbookFileMetadata,
+            localeId: getLocale(),
           });
           this.applyComputedChanges(changes);
         } catch (err) {

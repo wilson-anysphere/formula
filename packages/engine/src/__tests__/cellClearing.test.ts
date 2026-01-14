@@ -736,6 +736,43 @@ describeWasm("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("applies localeId when loading workbook JSON (localized formulas parse correctly)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.loadWorkbookFromJson(
+        JSON.stringify({
+          localeId: "de-DE",
+          sheets: {
+            Sheet1: {
+              cells: {
+                // de-DE: localized function name + semicolon arg separator + decimal comma.
+                A1: "=SUMME(1,5;2,5)"
+              }
+            }
+          }
+        })
+      );
+
+      await engine.recalculate();
+      expect((await engine.getCell("A1")).value).toBe(4);
+
+      const exported = JSON.parse(await engine.toJson());
+      expect(exported.localeId).toBe("de-DE");
+      // Engine persists canonical formulas internally.
+      expect(exported.sheets.Sheet1.cells.A1).toBe("=SUM(1.5,2.5)");
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("clears null entries passed to setRange and updates dependents", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

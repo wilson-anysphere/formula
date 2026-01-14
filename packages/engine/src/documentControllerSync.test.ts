@@ -53,6 +53,15 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     });
   });
 
+  it("includes localeId in exported workbook JSON when provided", () => {
+    const doc = new DocumentController();
+    doc.setCellFormula("Sheet1", "A1", "1+1");
+
+    const json = exportDocumentToEngineWorkbookJson(doc, { localeId: "de-DE" });
+    expect(json.localeId).toBe("de-DE");
+    expect(json.sheets.Sheet1.cells.A1).toBe("=1+1");
+  });
+
   it("hydrates an engine from exported JSON in a single load+recalc step", async () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", 1);
@@ -78,6 +87,23 @@ describe("DocumentController → engine workbook JSON exporter", () => {
 
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(["loadWorkbookFromJson", "recalculate"]);
+  });
+
+  it("embeds localeId in engine hydration JSON when provided", async () => {
+    const doc = new DocumentController();
+    doc.setCellFormula("Sheet1", "A1", "1+1");
+
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+    };
+
+    await engineHydrateFromDocument(engine, doc, { localeId: "de-DE" });
+
+    const serialized = engine.loadWorkbookFromJson.mock.calls[0]?.[0];
+    const parsed = JSON.parse(String(serialized));
+    expect(parsed.localeId).toBe("de-DE");
   });
 
   it("applies incremental deltas without emitting format-only updates when style sync hooks are absent", async () => {

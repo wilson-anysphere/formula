@@ -2885,6 +2885,8 @@ impl WasmWorkbook {
     pub fn from_json(json: &str) -> Result<WasmWorkbook, JsValue> {
         #[derive(Debug, Deserialize)]
         struct WorkbookJson {
+            #[serde(default, rename = "localeId")]
+            locale_id: Option<String>,
             sheets: BTreeMap<String, SheetJson>,
         }
 
@@ -2901,6 +2903,15 @@ impl WasmWorkbook {
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
 
         let mut wb = WorkbookState::new_empty();
+
+        // Best-effort: set workbook locale before importing cells so localized formulas and
+        // locale-aware parsing semantics (argument separators, decimal commas, boolean keywords)
+        // are handled correctly during JSON hydration.
+        //
+        // Unknown locale ids are ignored for backwards compatibility (treat as en-US).
+        if let Some(locale_id) = parsed.locale_id.as_deref() {
+            wb.set_locale_id(locale_id);
+        }
 
         // Create all sheets up-front so cross-sheet formula references resolve correctly.
         for sheet_name in parsed.sheets.keys() {
@@ -3216,7 +3227,9 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]
-        struct WorkbookJson {
+        struct WorkbookJson<'a> {
+            #[serde(default, skip_serializing_if = "Option::is_none", rename = "localeId")]
+            locale_id: Option<&'a str>,
             sheets: BTreeMap<String, SheetJson>,
         }
 
@@ -3257,7 +3270,15 @@ impl WasmWorkbook {
             );
         }
 
-        serde_json::to_string(&WorkbookJson { sheets })
+        // Preserve the workbook formula locale id so round-tripping through the JSON workbook
+        // schema does not lose locale-aware formula input semantics.
+        let locale_id = if self.inner.formula_locale.id == EN_US.id {
+            None
+        } else {
+            Some(self.inner.formula_locale.id)
+        };
+
+        serde_json::to_string(&WorkbookJson { locale_id, sheets })
             .map_err(|err| js_err(format!("invalid workbook json: {err}")))
     }
 

@@ -33,6 +33,13 @@ export type EngineSheetJson = {
 
 export type EngineWorkbookJson = {
   /**
+   * Optional workbook formula locale identifier (e.g. `"en-US"`, `"de-DE"`).
+   *
+   * When provided, `crates/formula-wasm` will configure the workbook locale prior to importing
+   * formulas from JSON so localized formula inputs can be canonicalized correctly.
+   */
+  localeId?: string;
+  /**
    * Worksheet map keyed by sheet identifier.
    *
    * In the desktop app, this should match the user-facing sheet display name
@@ -294,7 +301,17 @@ function isAxisValueEqual(a: number | null, b: number | null): boolean {
  *
  * Note: empty/cleared cells are omitted from the JSON entirely (sparse semantics).
  */
-export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson {
+export function exportDocumentToEngineWorkbookJson(
+  doc: any,
+  options: { localeId?: string | null } = {},
+): EngineWorkbookJson {
+  return exportDocumentToEngineWorkbookJsonWithOptions(doc, options);
+}
+
+function exportDocumentToEngineWorkbookJsonWithOptions(
+  doc: any,
+  options: { localeId?: string | null } = {},
+): EngineWorkbookJson {
   const sheets: Record<string, EngineSheetJson> = {};
 
   const ids = getDocumentSheetIds(doc);
@@ -342,10 +359,20 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
     };
   }
 
-  return { sheets };
+  const localeIdRaw = options.localeId;
+  const localeId = typeof localeIdRaw === "string" && localeIdRaw.trim() !== "" ? localeIdRaw.trim() : undefined;
+
+  return { ...(localeId ? { localeId } : {}), sheets };
 }
 
 export type EngineHydrateFromDocumentOptions = {
+  /**
+   * Optional formula locale id to embed in the exported workbook JSON (e.g. `"de-DE"`).
+   *
+   * When provided, the WASM workbook loader will apply locale-specific parsing rules while
+   * importing formulas (argument separators, decimal commas, localized function names, etc).
+   */
+  localeId?: string | null;
   /**
    * Workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`
    * and `INFO("directory")`.
@@ -362,7 +389,7 @@ export async function engineHydrateFromDocument(
   doc: any,
   options: EngineHydrateFromDocumentOptions = {},
 ): Promise<CellChange[]> {
-  const workbookJson = exportDocumentToEngineWorkbookJson(doc);
+  const workbookJson = exportDocumentToEngineWorkbookJsonWithOptions(doc, { localeId: options.localeId });
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
 
   // Sync sheet view column widths (DocumentController stores base px; engine uses Excel char units).
