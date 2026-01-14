@@ -305,10 +305,13 @@ fn spawn_post_window_visible_init(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
-    // The frontend calls this to:
-    //  1) tell the host "JS has started running" (called as early as possible to reduce skew), and
-    //  2) (when called again after listeners are installed) request that cached startup timing
-    //     events be (re-)emitted so they aren't dropped on cold start.
+    // The frontend calls this after it has installed its startup metrics listeners to request
+    // that cached startup timing events be (re-)emitted (Tauri does not guarantee events are
+    // queued before listeners are registered).
+    //
+    // This command is idempotent and safe to call multiple times. It will not overwrite the
+    // authoritative `webview_loaded_ms` recorded from Rust via `Builder::on_page_load` when the
+    // main webview finishes its initial navigation.
     //
     // The primary `webview_loaded_ms` measurement is recorded from Rust via `Builder::on_page_load`
     // when the main webview finishes its initial navigation; this command is idempotent and will
