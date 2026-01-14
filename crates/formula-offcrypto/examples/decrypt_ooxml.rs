@@ -45,6 +45,8 @@ use formula_offcrypto::{
 };
 use hmac::{Hmac, Mac as _};
 use sha1::Digest as _;
+use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 fn main() {
     let args = match Args::parse() {
@@ -442,13 +444,13 @@ fn verify_agile_password(
     verifier_hash_value: &[u8],
     hash_alg: HashAlgorithm,
 ) -> Result<(), OffcryptoError> {
-    let expected = hash_alg_digest(hash_alg, verifier_hash_input);
+    let expected = Zeroizing::new(hash_alg_digest(hash_alg, verifier_hash_input));
     if verifier_hash_value.len() < expected.len() {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "Agile verifierHashValue is too short",
         });
     }
-    if verifier_hash_value[..expected.len()] != expected[..] {
+    if !bool::from(verifier_hash_value[..expected.len()].ct_eq(&expected[..])) {
         return Err(OffcryptoError::InvalidPassword);
     }
     Ok(())
@@ -494,8 +496,9 @@ fn verify_agile_data_integrity(
     }
     let expected_hmac = &hmac_value_buf[..digest_len];
 
-    let computed = compute_hmac(info.key_data_hash_algorithm, hmac_key, decrypted_package)?;
-    if computed.as_slice() != expected_hmac {
+    let computed =
+        Zeroizing::new(compute_hmac(info.key_data_hash_algorithm, hmac_key, decrypted_package)?);
+    if !bool::from(computed.as_slice().ct_eq(expected_hmac)) {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "Agile dataIntegrity HMAC mismatch",
         });
