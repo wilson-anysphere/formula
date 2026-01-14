@@ -139,12 +139,15 @@ else
   node_major="$(node -p "process.versions.node.split('.')[0]")"
 
   # Prefer the repo-pinned Node major from `.nvmrc` when available.
-  # Fall back to 22 to preserve historical guidance if `.nvmrc` is missing/unparseable.
+  # Fall back to `mise.toml` if the repo uses mise for local tooling.
+  # Fall back to 22 to preserve historical guidance if neither file is present/unparseable.
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd "${script_dir}/.." && pwd)"
   expected_node_major=""
   if [ -f "${repo_root}/.nvmrc" ]; then
     expected_node_major="$(head -n 1 "${repo_root}/.nvmrc" | tr -d '[:space:]' | sed -E 's/^[vV]?([0-9]+).*/\\1/')"
+  elif [ -f "${repo_root}/mise.toml" ]; then
+    expected_node_major="$(grep -E '^[[:space:]]*node[[:space:]]*=' "${repo_root}/mise.toml" | head -n 1 | sed -E 's/.*=[[:space:]]*\"?([0-9]+).*/\\1/')"
   fi
   if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]]; then
     expected_node_major="22"
