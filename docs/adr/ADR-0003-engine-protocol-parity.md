@@ -135,7 +135,7 @@ The canonical protocol is **typed scalar values**; formatting into display strin
 
 ### 5) Non-goals (first iteration)
 
-- **Full XLSX OPC part preservation in the web target**. The WASM engine can load `.xlsx` bytes via `crates/formula-wasm::fromXlsxBytes`, but it only imports the workbook model (values/formulas/basic metadata) and does not preserve arbitrary OPC parts on round-trip.
+- **Full XLSX OPC part preservation in the web target**. The WASM engine can load `.xlsx`/`.xlsm` bytes via `crates/formula-wasm::fromXlsxBytes`, but it only imports the workbook model (values/formulas/basic metadata) and does not preserve arbitrary OPC parts on round-trip.
 - **VBA execution / macro enablement in web**.
 - **Chart/pivot fidelity parity** between web and desktop engines.
 - **Sheet rename parity without engine rebuild** (requires a sheet registry + formula rewrite plumbing).
