@@ -107,6 +107,27 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("• Top\n  ◦ Nested");
   });
 
+  it("inherits default run properties from <a:lstStyle> lvlNpPr", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle>
+            <a:lvl1pPr><a:defRPr sz="2000"/></a:lvl1pPr>
+            <a:lvl2pPr><a:defRPr sz="1000"/></a:lvl2pPr>
+          </a:lstStyle>
+          <a:p><a:pPr lvl="0"/><a:r><a:t>Top</a:t></a:r></a:p>
+          <a:p><a:pPr lvl="1"/><a:r><a:t>Nested</a:t></a:r></a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.find((r) => r.text === "Top")?.fontSizePt).toBe(20);
+    expect(parsed?.textRuns.find((r) => r.text === "Nested")?.fontSizePt).toBe(10);
+  });
+
   it("prepends <a:buAutoNum> numbering to paragraph text", () => {
     const rawXml = `
       <xdr:sp>

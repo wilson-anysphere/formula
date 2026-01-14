@@ -277,6 +277,20 @@ function parseListStyleBulletsFromDom(lstStyle: Element | null): Map<number, Bul
   return bullets;
 }
 
+function parseListStyleRunStylesFromDom(lstStyle: Element | null): Map<number, RunStyle> {
+  const styles = new Map<number, RunStyle>();
+  if (!lstStyle) return styles;
+  for (let level = 0; level < 9; level += 1) {
+    const lvlPPr = findFirstByLocalName(lstStyle, `lvl${level + 1}pPr`);
+    if (!lvlPPr) continue;
+    const defRPr = findFirstByLocalName(lvlPPr, "defRPr");
+    if (!defRPr) continue;
+    const style = parseRunStyleFromDom(defRPr);
+    if (Object.keys(style).length > 0) styles.set(level, style);
+  }
+  return styles;
+}
+
 function parseRunStyleFromDom(el: Element | null): RunStyle {
   if (!el) return {};
   const bold = parseBoolAttr(el.getAttribute("b"));
@@ -354,7 +368,9 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
     (n): n is Element => n.nodeType === 1 && (n as Element).localName === "p",
   );
 
-  const listBullets = parseListStyleBulletsFromDom(findFirstByLocalName(txBody, "lstStyle"));
+  const lstStyle = findFirstByLocalName(txBody, "lstStyle");
+  const listBullets = parseListStyleBulletsFromDom(lstStyle);
+  const listRunStyles = parseListStyleRunStylesFromDom(lstStyle);
 
   const textRuns: ShapeTextRun[] = [];
   let alignment: ShapeTextLayout["alignment"] | undefined;
@@ -374,7 +390,11 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
       }
     }
 
-    const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromDom(findFirstByLocalName(pPr ?? p, "defRPr")));
+    const levelStyle = listRunStyles.get(level) ?? {};
+    const paraDefaultStyle = mergeStyle(
+      mergeStyle(shapeDefaultStyle, levelStyle),
+      parseRunStyleFromDom(findFirstByLocalName(pPr ?? p, "defRPr")),
+    );
     // Best-effort bullet handling: prepend a bullet character or auto-numbering prefix when
     // the paragraph defines a bullet (either directly on `<a:pPr>` or inherited via `<a:lstStyle>`).
     if (level < prevLevel) {
@@ -549,6 +569,20 @@ function parseListStyleBulletsFromXml(lstStyleXml: string | null): Map<number, B
   return bullets;
 }
 
+function parseListStyleRunStylesFromXml(lstStyleXml: string | null): Map<number, RunStyle> {
+  const styles = new Map<number, RunStyle>();
+  if (!lstStyleXml) return styles;
+  for (let level = 0; level < 9; level += 1) {
+    const lvlXml = extractFirstElementXml(lstStyleXml, `lvl${level + 1}pPr`);
+    if (!lvlXml) continue;
+    const defRPrXml = extractFirstElementXml(lvlXml, "defRPr");
+    if (!defRPrXml) continue;
+    const style = parseRunStyleFromXmlSnippet(defRPrXml);
+    if (Object.keys(style).length > 0) styles.set(level, style);
+  }
+  return styles;
+}
+
 function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const txBodyMatch = /<(?:[A-Za-z_][\w.-]*:)?txBody\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?txBody\s*>/i.exec(rawXml);
   if (!txBodyMatch) return { textRuns: [] };
@@ -561,7 +595,9 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
   const wrap = parseWrap(getAttrFromTag(bodyPrOpen, "wrap"));
 
   const shapeDefaultStyle = parseRunStyleFromXmlSnippet(extractFirstElementXml(txBodyXml, "defRPr"));
-  const listBullets = parseListStyleBulletsFromXml(extractFirstElementXml(txBodyXml, "lstStyle"));
+  const lstStyleXml = extractFirstElementXml(txBodyXml, "lstStyle");
+  const listBullets = parseListStyleBulletsFromXml(lstStyleXml);
+  const listRunStyles = parseListStyleRunStylesFromXml(lstStyleXml);
 
   const paragraphsInner = extractAllElementInner(txBodyInner, "p");
   const textRuns: ShapeTextRun[] = [];
@@ -584,7 +620,11 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
       }
     }
 
-    const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
+    const levelStyle = listRunStyles.get(level) ?? {};
+    const paraDefaultStyle = mergeStyle(
+      mergeStyle(shapeDefaultStyle, levelStyle),
+      parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")),
+    );
     // Best-effort bullet handling (see DOMParser path above).
     if (level < prevLevel) {
       for (const key of Array.from(autoNumbers.keys())) {
