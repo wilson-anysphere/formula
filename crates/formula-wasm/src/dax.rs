@@ -399,12 +399,61 @@ impl DaxModel {
         self.get_distinct_column_values_inner(table, column, &filter)
     }
 
+    /// Return a paged slice of distinct values for `table[column]`.
+    ///
+    /// This is useful for high-cardinality fields where returning every unique value would be too
+    /// expensive to transport to JS at once.
+    #[wasm_bindgen(js_name = "getDistinctColumnValuesPaged")]
+    pub fn get_distinct_column_values_paged(
+        &self,
+        table: &str,
+        column: &str,
+        offset: u32,
+        limit: u32,
+        filter_context: Option<DaxFilterContext>,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context
+            .map(|ctx| ctx.ctx)
+            .unwrap_or_else(FilterContext::empty);
+        self.get_distinct_column_values_paged_inner(table, column, offset, limit, &filter)
+    }
+
+    /// Like [`get_distinct_column_values_paged`](Self::get_distinct_column_values_paged), but borrows
+    /// the provided filter context instead of consuming it.
+    #[wasm_bindgen(js_name = "getDistinctColumnValuesPagedWithFilter")]
+    pub fn get_distinct_column_values_paged_with_filter(
+        &self,
+        table: &str,
+        column: &str,
+        offset: u32,
+        limit: u32,
+        filter_context: &DaxFilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context.ctx.clone();
+        self.get_distinct_column_values_paged_inner(table, column, offset, limit, &filter)
+    }
+
     fn get_distinct_column_values_inner(
         &self,
         table: &str,
         column: &str,
         filter: &FilterContext,
     ) -> Result<JsValue, JsValue> {
+        self.get_distinct_column_values_paged_inner(
+            table,
+            column,
+            0,
+            u32::MAX,
+            filter,
+        )
+    }
+
+    fn distinct_column_values_sorted(
+        &self,
+        table: &str,
+        column: &str,
+        filter: &FilterContext,
+    ) -> Result<Vec<Value>, JsValue> {
         let expr = Expr::ColumnRef {
             table: table.to_string(),
             column: column.to_string(),
@@ -421,10 +470,28 @@ impl DaxModel {
             })
             .collect();
         values.sort_by(|(a, _), (b, _)| a.cmp(b));
+        Ok(values.into_iter().map(|(_, v)| v).collect())
+    }
 
+    fn get_distinct_column_values_paged_inner(
+        &self,
+        table: &str,
+        column: &str,
+        offset: u32,
+        limit: u32,
+        filter: &FilterContext,
+    ) -> Result<JsValue, JsValue> {
+        let values = self.distinct_column_values_sorted(table, column, filter)?;
+        let start = offset as usize;
+        let end = start.saturating_add(limit as usize).min(values.len());
+        let slice: &[Value] = if start >= values.len() {
+            &[]
+        } else {
+            &values[start..end]
+        };
         let out = Array::new();
-        for (_, value) in values {
-            out.push(&dax_value_to_js(value));
+        for value in slice {
+            out.push(&dax_value_to_js(value.clone()));
         }
         Ok(out.into())
     }

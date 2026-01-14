@@ -247,6 +247,43 @@ fn dax_model_pivot_crosstab_with_filter_borrows_filter_context() {
 }
 
 #[wasm_bindgen_test]
+fn dax_model_get_distinct_column_values_paged_supports_offset_and_borrowed_filters() {
+    let model = build_basic_model(true);
+
+    let page1_js = model
+        .get_distinct_column_values_paged("Customers", "Region", 0, 1, None)
+        .unwrap();
+    let page1: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(page1_js).unwrap();
+    assert_eq!(page1, vec![json!("East")]);
+
+    let page2_js = model
+        .get_distinct_column_values_paged("Customers", "Region", 1, 10, None)
+        .unwrap();
+    let page2: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(page2_js).unwrap();
+    assert_eq!(page2, vec![json!("West")]);
+
+    let empty_js = model
+        .get_distinct_column_values_paged("Customers", "Region", 999, 10, None)
+        .unwrap();
+    let empty: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(empty_js).unwrap();
+    assert_eq!(empty, Vec::<serde_json::Value>::new());
+
+    // Borrowed filter variant should not consume the filter context.
+    let mut filter = DaxFilterContext::new();
+    filter
+        .set_column_equals("Customers", "Region", JsValue::from_str("East"))
+        .unwrap();
+    let filtered_js = model
+        .get_distinct_column_values_paged_with_filter("Customers", "Region", 0, 10, &filter)
+        .unwrap();
+    let filtered: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(filtered_js).unwrap();
+    assert_eq!(filtered, vec![json!("East")]);
+
+    let total_east = model.evaluate_with_filter("Total", &filter).unwrap();
+    assert_eq!(total_east.as_f64().unwrap(), 38.0);
+}
+
+#[wasm_bindgen_test]
 fn dax_filter_context_set_column_in_supports_multi_value_filters() {
     let model = build_basic_model(true);
 
