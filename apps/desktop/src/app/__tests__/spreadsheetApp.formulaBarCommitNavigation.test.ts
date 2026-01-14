@@ -234,4 +234,48 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("restores the original sheet before navigating on Tab commits (range selection mode)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const doc = (app as any).document as { setCellValue: (sheetId: string, cell: { row: number; col: number }, value: unknown) => void };
+
+    // Ensure Sheet2 exists so sheet switching is valid.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 7);
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    // Begin editing Sheet1!A1.
+    expect((app as any).sheetId).toBe("Sheet1");
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    input!.focus();
+    input!.value = "1";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Switch to Sheet2 while still editing (simulates cross-sheet range picking / navigation).
+    app.activateCell({ sheetId: "Sheet2", row: 0, col: 0 }, { scrollIntoView: false, focus: false });
+    expect((app as any).sheetId).toBe("Sheet2");
+
+    // Commit via Tab while the grid is focused. Should apply + navigate relative to Sheet1!A1,
+    // restoring the sheet first.
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect((app as any).sheetId).toBe("Sheet1");
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 1 });
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
