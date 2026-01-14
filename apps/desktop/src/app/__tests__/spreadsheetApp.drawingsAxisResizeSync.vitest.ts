@@ -127,7 +127,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     };
   });
 
-  it("re-renders drawings when shared-grid column widths change", async () => {
+  it("re-renders drawings when shared-grid column widths change", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -176,21 +176,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const renderSpy = vi.spyOn(app as any, "renderDrawings");
 
-      const waitForStrokeRect = async (): Promise<CtxCall | undefined> => {
-        // Drawing overlay rendering is synchronous, but missing images may trigger async hydration + a
-        // subsequent repaint. In shared-grid mode, additional viewport callbacks can also trigger
-        // redraws that abort in-flight renders. Poll across a few microtasks for a completed pass.
-        for (let i = 0; i < 8; i += 1) {
-          const stroke = calls!.find((call) => call.method === "strokeRect");
-          if (stroke) return stroke;
-          await Promise.resolve();
-        }
-        return undefined;
-      };
-
       // Initial render.
       (app as any).renderDrawings();
-      const firstStroke = await waitForStrokeRect();
+      const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
       expect(Number.isFinite(x1)).toBe(true);
@@ -218,7 +206,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       });
 
       expect(renderSpy).toHaveBeenCalled();
-      const secondStroke = await waitForStrokeRect();
+      const secondStroke = calls!.find((call) => call.method === "strokeRect");
       expect(secondStroke).toBeTruthy();
       const x2 = Number(secondStroke!.args[0]);
       expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);
@@ -231,7 +219,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
-  it("updates drawings during interactive shared-grid column resize (viewport changes)", async () => {
+  it("updates drawings during interactive shared-grid column resize (viewport changes)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -244,6 +232,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
+
+      // Disable async IndexedDB hydration so draw calls land synchronously for this unit test.
+      (app as any).drawingImages.getAsync = undefined;
 
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
       expect(drawingCanvas).toBeTruthy();
@@ -270,7 +261,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       // Baseline render (establish initial x position).
       calls!.splice(0, calls!.length);
       (app as any).renderDrawings();
-      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
@@ -285,7 +275,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       calls!.splice(0, calls!.length);
       renderer.setColWidth(index, nextSize);
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
       expect(secondStroke).toBeTruthy();
@@ -300,7 +289,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
-  it("updates drawings during interactive shared-grid row resize (viewport changes)", async () => {
+  it("updates drawings during interactive shared-grid row resize (viewport changes)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -313,6 +302,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
+
+      // Disable async IndexedDB hydration so draw calls land synchronously for this unit test.
+      (app as any).drawingImages.getAsync = undefined;
 
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
       expect(drawingCanvas).toBeTruthy();
@@ -340,7 +332,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       // Baseline render (establish initial y position).
       calls!.splice(0, calls!.length);
       (app as any).renderDrawings();
-      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const y1 = Number(firstStroke!.args[1]);
@@ -355,7 +346,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       calls!.splice(0, calls!.length);
       renderer.setRowHeight(index, nextSize);
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
       expect(secondStroke).toBeTruthy();
@@ -370,7 +360,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
-  it("updates drawing hit-testing geometry when shared-grid column widths change", async () => {
+  it("updates drawing hit-testing geometry when shared-grid column widths change", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -383,6 +373,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
+
+      // Disable async IndexedDB hydration so draw calls land synchronously for this unit test.
+      (app as any).drawingImages.getAsync = undefined;
 
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
       expect(drawingCanvas).toBeTruthy();
@@ -409,7 +402,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       // Baseline render.
       (app as any).renderDrawings();
-      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const x1 = Number(firstStroke!.args[0]);
@@ -445,7 +437,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
         zoom: renderer.getZoom(),
         source: "resize",
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
       expect(secondStroke).toBeTruthy();
@@ -472,7 +463,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
-  it("re-renders drawings when shared-grid row heights change", async () => {
+  it("re-renders drawings when shared-grid row heights change", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -516,7 +507,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       // Initial render.
       (app as any).renderDrawings();
-      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const y1 = Number(firstStroke!.args[1]);
@@ -543,7 +533,6 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
         zoom: renderer.getZoom(),
         source: "resize",
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(renderSpy).toHaveBeenCalled();
       const secondStroke = calls!.find((call) => call.method === "strokeRect");
