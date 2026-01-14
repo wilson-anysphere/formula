@@ -30,4 +30,6 @@ getrandom = { version = "0.2", features = ["js"] }
 ms-offcrypto-writer = "1.0.7"
 rand09 = { package = "rand", version = "0.9" }
 proptest = "1"
+# Tests inspect decrypted OOXML packages via `zip::ZipArchive`; enable deflate so we can read
+# typical XLSX parts (Excel uses DEFLATE compression for most entries).
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
