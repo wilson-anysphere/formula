@@ -1,4 +1,4 @@
-use std::cmp::{max, min, Ordering};
+use std::cmp::{max, min};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellAddr,
@@ -484,10 +484,6 @@ fn range_has_external_workbook(expr: &Expr) -> bool {
         Expr::ColRef(r) => r.workbook.is_some(),
         _ => false,
     }
-}
-
-fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
-    crate::value::cmp_case_insensitive(a, b) == Ordering::Equal
 }
 
 fn sheet_index_in_order(sheet_order: &[String], name: &str) -> Option<usize> {

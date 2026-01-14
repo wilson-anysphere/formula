@@ -11389,16 +11389,8 @@ fn rewrite_defined_name_structural(
                 origin,
                 edit,
                 |name| {
-                    engine
-                        .workbook
-                        .sheet_ids_in_order()
-                        .iter()
-                        .position(|&sheet_id| {
-                            engine
-                                .workbook
-                                .sheet_name(sheet_id)
-                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                        })
+                    let sheet_id = engine.workbook.sheet_id(name)?;
+                    engine.workbook.sheet_order_index(sheet_id)
                 },
             );
             (NameDefinition::Reference(new_formula), changed)
@@ -11410,16 +11402,8 @@ fn rewrite_defined_name_structural(
                 origin,
                 edit,
                 |name| {
-                    engine
-                        .workbook
-                        .sheet_ids_in_order()
-                        .iter()
-                        .position(|&sheet_id| {
-                            engine
-                                .workbook
-                                .sheet_name(sheet_id)
-                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                        })
+                    let sheet_id = engine.workbook.sheet_id(name)?;
+                    engine.workbook.sheet_order_index(sheet_id)
                 },
             );
             (NameDefinition::Formula(new_formula), changed)
@@ -11463,16 +11447,8 @@ fn rewrite_defined_name_range_map(
                 origin,
                 edit,
                 |name| {
-                    engine
-                        .workbook
-                        .sheet_ids_in_order()
-                        .iter()
-                        .position(|&sheet_id| {
-                            engine
-                                .workbook
-                                .sheet_name(sheet_id)
-                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                        })
+                    let sheet_id = engine.workbook.sheet_id(name)?;
+                    engine.workbook.sheet_order_index(sheet_id)
                 },
             );
             (NameDefinition::Reference(new_formula), changed)
@@ -11484,16 +11460,8 @@ fn rewrite_defined_name_range_map(
                 origin,
                 edit,
                 |name| {
-                    engine
-                        .workbook
-                        .sheet_ids_in_order()
-                        .iter()
-                        .position(|&sheet_id| {
-                            engine
-                                .workbook
-                                .sheet_name(sheet_id)
-                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                        })
+                    let sheet_id = engine.workbook.sheet_id(name)?;
+                    engine.workbook.sheet_order_index(sheet_id)
                 },
             );
             (NameDefinition::Formula(new_formula), changed)
