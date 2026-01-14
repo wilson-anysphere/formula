@@ -309,15 +309,6 @@ impl RowContext {
             .nth(level_from_inner)
     }
 
-    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
-        self.physical_row_for_level(table, level_from_inner)
-            .map(|(row, _)| row)
-    }
-
-    fn row_for(&self, table: &str) -> Option<usize> {
-        self.row_for_level(table, 0)
-    }
-
     fn physical_row_for_outermost(&self, table: &str) -> Option<(usize, Option<&[usize]>)> {
         self.stack.iter().find_map(|frame| match frame {
             RowContextFrame::Physical {
