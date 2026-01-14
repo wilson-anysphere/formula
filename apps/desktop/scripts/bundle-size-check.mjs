@@ -172,7 +172,7 @@ function parseBudgetKiB(envVarName) {
   if (!Number.isFinite(n) || n < 0) {
     throw new Error(`Invalid ${envVarName}="${raw}" (expected a non-negative number of KiB).`);
   }
-  return Math.round(n);
+  return n;
 }
 
 function budgetStatus(actualBytes, budgetKiB) {
