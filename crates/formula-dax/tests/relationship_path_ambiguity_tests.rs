@@ -77,17 +77,16 @@ fn related_errors_on_ambiguous_relationship_paths() {
 
     match err {
         DaxError::Eval(message) => {
-            let message_lc = message.to_ascii_lowercase();
             assert!(
-                message_lc.contains("ambiguous active relationship path between sales and categories"),
+                message.contains("ambiguous active relationship path between Sales and Categories"),
                 "unexpected error message: {message}"
             );
             assert!(
-                message_lc.contains("sales -> products -> categories"),
+                message.contains("Sales -> Products -> Categories"),
                 "expected error to include snowflake path, got: {message}"
             );
             assert!(
-                message_lc.contains("sales -> categories"),
+                message.contains("Sales -> Categories"),
                 "expected error to include direct path, got: {message}"
             );
         }
@@ -114,9 +113,8 @@ fn relatedtable_errors_on_ambiguous_relationship_paths() {
 
     match err {
         DaxError::Eval(message) => {
-            let message_lc = message.to_ascii_lowercase();
             assert!(
-                message_lc.contains("ambiguous active relationship path between categories and sales"),
+                message.contains("ambiguous active relationship path between Categories and Sales"),
                 "unexpected error message: {message}"
             );
         }
