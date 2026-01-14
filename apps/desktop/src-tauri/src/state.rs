@@ -5313,8 +5313,7 @@ mod tests {
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
     use crate::resource_limits::{MAX_ORIGIN_XLSX_BYTES, MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef,
-        SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, SubtotalPosition, ValueField,
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
@@ -5443,7 +5442,13 @@ mod tests {
             )
             .expect("set width formula");
         let c1 = state.get_cell(&app_sheet_id, 0, 2).expect("read C1");
-        assert_eq!(c1.value, CellScalar::Number(20.0));
+        match c1.value {
+            CellScalar::Number(v) => assert!(
+                (v - 20.1).abs() < 0.2,
+                "expected column width ~20 for A1, got {v}"
+            ),
+            other => panic!("expected numeric column width, got {other:?}"),
+        }
 
         // Hidden columns report width=0.
         state

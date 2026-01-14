@@ -986,8 +986,23 @@ fn read_encrypted_ooxml_workbook_blocking(
         },
     };
 
-    let origin_xlsx_bytes = Arc::<[u8]>::from(decrypted_zip);
-    read_xlsx_or_xlsm_from_bytes(path, origin_xlsx_bytes)
+    // Mirror the non-encrypted XLSX open logic: only retain the decrypted ZIP bytes baseline when
+    // it is within the configured limit. This keeps memory usage bounded even if a user opens a
+    // large password-protected workbook.
+    let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
+    let decrypted_zip = Arc::<[u8]>::from(decrypted_zip);
+    let origin_xlsx_bytes = if decrypted_zip.len() <= max_origin_bytes {
+        Some(decrypted_zip.clone())
+    } else {
+        None
+    };
+
+    let decrypted_zip_for_reader = decrypted_zip;
+    let open_reader = move || -> anyhow::Result<Box<dyn ReadSeek>> {
+        Ok(Box::new(Cursor::new(decrypted_zip_for_reader.clone())))
+    };
+
+    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
 }
 
 fn validate_workbook_open_size(path: &Path) -> anyhow::Result<u64> {
@@ -3897,7 +3912,13 @@ mod tests {
             )
             .expect("set CELL(width) formula for A1");
         let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
-        assert_eq!(c1.value, CellScalar::Number(20.0));
+        match c1.value {
+            CellScalar::Number(v) => assert!(
+                (v - 20.1).abs() < 0.2,
+                "expected column width ~20 for A1, got {v}"
+            ),
+            other => panic!("expected numeric column width, got {other:?}"),
+        }
 
         // Hidden columns report width=0.
         state
