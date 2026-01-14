@@ -7,7 +7,7 @@ use zip::ZipArchive;
 use crate::patch::WorkbookCellPatches;
 use crate::streaming::PartOverride;
 use crate::zip_util::read_zip_file_bytes_with_limit;
-use crate::{MacroPresence, RecalcPolicy, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
+use crate::{MacroPresence, RecalcPolicy, WorkbookKind, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
@@ -209,6 +209,36 @@ impl StreamingXlsxPackage {
         }
         let buf = read_zip_file_bytes_with_limit(&mut file, &canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
         Ok(Some(buf))
+    }
+
+    /// Ensure `[Content_Types].xml` advertises the correct workbook content type for the requested
+    /// workbook kind.
+    ///
+    /// This matches [`crate::XlsxPackage::enforce_workbook_kind`] but avoids materializing the full
+    /// OPC package: only `[Content_Types].xml` is read and rewritten when needed.
+    pub fn enforce_workbook_kind(&mut self, kind: WorkbookKind) -> Result<(), XlsxError> {
+        let Some(content_types_xml) = self.read_part("[Content_Types].xml")? else {
+            // Match `XlsxPackage` semantics: don't synthesize content types when missing.
+            return Ok(());
+        };
+
+        let Some(updated) = crate::rewrite_content_types_workbook_kind(&content_types_xml, kind)?
+        else {
+            return Ok(());
+        };
+
+        // Always store as `Replace` so that existing parts are rewritten in-place (and missing
+        // parts are appended), matching the streaming patcher semantics.
+        let canonical = canonical_part_name("[Content_Types].xml");
+        let override_key = self
+            .source_part_name_to_zip_key
+            .get(&canonical)
+            .cloned()
+            .unwrap_or(canonical);
+        self.part_overrides
+            .insert(override_key, PartOverride::Replace(updated));
+
+        Ok(())
     }
 
     /// Write the effective package to a new ZIP stream, raw-copying unchanged entries.
