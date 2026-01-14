@@ -476,3 +476,83 @@ fn sheet_range_3d_refs_create_per_sheet_range_nodes_for_full_sheet_refs() {
         }]
     );
 }
+
+#[test]
+fn auditing_sorts_cross_sheet_precedents_and_dependents_by_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+
+    let id1 = engine.sheet_id("Sheet1").unwrap();
+    let id2 = engine.sheet_id("Sheet2").unwrap();
+    let id3 = engine.sheet_id("Sheet3").unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 30.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1+Sheet3!A1")
+        .unwrap();
+    engine.set_cell_formula("Sheet3", "B1", "=Sheet1!A1").unwrap();
+
+    engine.recalculate_single_threaded();
+
+    // Initial tab order: Sheet1, Sheet2, Sheet3.
+    assert_eq!(
+        engine.precedents("Sheet2", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: id1,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::Cell {
+                sheet: id3,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+        ]
+    );
+    assert_eq!(
+        engine.dependents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: id2,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::Cell {
+                sheet: id3,
+                addr: CellAddr { row: 0, col: 1 },
+            },
+        ]
+    );
+
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    engine.recalculate_single_threaded();
+
+    // New tab order: Sheet3, Sheet1, Sheet2.
+    assert_eq!(
+        engine.precedents("Sheet2", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: id3,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::Cell {
+                sheet: id1,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+        ]
+    );
+    assert_eq!(
+        engine.dependents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: id3,
+                addr: CellAddr { row: 0, col: 1 },
+            },
+            PrecedentNode::Cell {
+                sheet: id2,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+        ]
+    );
+}
