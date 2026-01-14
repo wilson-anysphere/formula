@@ -225,5 +225,83 @@ describe("SpreadsheetApp drawings pointercancel (shared grid)", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("commits a drawing resize gesture on pointercancel when drawing interactions are enabled", () => {
+    const root = createRoot({ width: 800, height: 600 });
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+
+    const sheetId = app.getCurrentSheetId();
+    const doc: any = app.getDocument() as any;
+
+    const startCx = pxToEmu(100);
+    const startCy = pxToEmu(100);
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "shape", label: "box" },
+      zOrder: 0,
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: startCx, cy: startCy },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [drawing], { label: "Insert Picture" });
+    // Ensure hit testing sees the latest document state immediately.
+    (app as any).drawingObjectsCache = null;
+    (app as any).drawingHitTestIndex = null;
+    (app as any).drawingHitTestIndexObjects = null;
+
+    const historyBefore = doc.history.length;
+
+    const viewport = app.getDrawingInteractionViewport();
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect;
+
+    // Hit the bottom-right resize handle (se). Handles are centered on the corners, so landing
+    // exactly on the corner should begin a resize gesture.
+    const downX = headerOffsetX + 100;
+    const downY = headerOffsetY + 100;
+
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { clientX: downX, clientY: downY, pointerId: 1, button: 0, buttons: 1 });
+    dispatchPointerEvent(selectionCanvas, "pointermove", {
+      clientX: downX + 20,
+      clientY: downY + 30,
+      pointerId: 1,
+      buttons: 1,
+    });
+
+    const preview = app.getDrawingObjects(sheetId)[0]!;
+    expect(preview.anchor.type).toBe("absolute");
+    expect((preview.anchor as any).size.cx).not.toBe(startCx);
+    expect((preview.anchor as any).size.cy).not.toBe(startCy);
+
+    dispatchPointerEvent(selectionCanvas, "pointercancel", { clientX: downX + 20, clientY: downY + 30, pointerId: 1 });
+
+    expect(doc.history.length).toBe(historyBefore + 1);
+
+    const committed = doc.getSheetDrawings(sheetId)[0];
+    expect(committed.anchor).toEqual(preview.anchor);
+
+    if (typeof doc.undo === "function") {
+      expect(doc.undo()).toBe(true);
+      const reverted = doc.getSheetDrawings(sheetId)[0];
+      expect(reverted.anchor.type).toBe("absolute");
+      expect(reverted.anchor.size.cx).toBe(startCx);
+      expect(reverted.anchor.size.cy).toBe(startCy);
+    }
+
+    app.destroy();
+    root.remove();
+  });
+});
