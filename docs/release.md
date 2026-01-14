@@ -228,16 +228,15 @@ node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.js
 node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
 ```
 
-CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for the primary
-installer/bundle artifacts).
+CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for all uploaded GitHub
+Release assets, including `.sig` signature files).
 To reproduce locally:
 
 ```bash
 # Fast path: verify `latest.json` + `latest.json.sig` + referenced assets without hashing installers/bundles.
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --dry-run --tag vX.Y.Z --repo owner/repo
 
-# Verify the GitHub Release asset set and generate SHA256SUMS.txt for the primary installers/bundles
-# (this matches CI; excludes `.sig` files by default).
+# Generate SHA256SUMS.txt for primary installers/bundles (faster; excludes `.sig` files by default).
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
 
 # Optional (recommended for multi-arch releases): enforce that each expected OS/arch target has at
@@ -246,11 +245,11 @@ GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo 
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --dry-run \
   --expectations scripts/release-asset-expectations.json
 
-# To hash *all* release assets (including `.sig` files):
+# Match CI: hash *all* release assets (including `.sig` files and updater metadata).
 GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt --all-assets --include-sigs
 
 # Or, if you already downloaded the release assets into ./release-assets:
-# (Note: this hashes *all* files in the directory.)
+# (Note: this hashes *all* files in the directory, including `.sig` files.)
 bash scripts/ci/generate-release-checksums.sh release-assets SHA256SUMS.txt
 ```
 
