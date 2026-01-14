@@ -1986,10 +1986,25 @@ fn main() {
 
   const raf = () =>
     new Promise((resolve) => {
+      // Some headless environments can throttle or pause rAF; keep a short timeout fallback so
+      // `--startup-bench` doesn't hang waiting for a frame that never arrives.
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve(null);
+      };
+      const timeout = setTimeout(finish, 100);
       if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => resolve(null));
+        requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          finish();
+        });
       } else {
-        setTimeout(() => resolve(null), 0);
+        setTimeout(() => {
+          clearTimeout(timeout);
+          finish();
+        }, 0);
       }
     });
 
