@@ -194,6 +194,33 @@ describe("createDefaultAIAuditStore", () => {
     expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "indexeddb" wraps IndexedDbAIAuditStore in BoundedAIAuditStore by default when available', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(IndexedDbAIAuditStore);
+  });
+
+  it('prefer: "indexeddb" wraps LocalStorageAIAuditStore fallback in BoundedAIAuditStore by default when open fails', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        throw new Error("indexedDB.open failed");
+      }
+    };
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open errors (onerror)', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
