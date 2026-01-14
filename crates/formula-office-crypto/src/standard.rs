@@ -655,6 +655,23 @@ fn verify_password_standard_with_key_and_mode(
     }
 }
 
+/// Verify the Standard/CryptoAPI password using the *spec* AES-ECB verifier mode only.
+///
+/// Some producers encrypt verifier fields with AES-CBC; callers that need that compatibility should
+/// use `verify_password_standard_with_key_and_mode` or their own scheme-specific verification.
+fn verify_password_standard_with_key(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<(), OfficeCryptoError> {
+    match verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0) {
+        Ok(StandardAesCipherMode::Ecb) => Ok(()),
+        Ok(StandardAesCipherMode::Cbc { .. }) => Err(OfficeCryptoError::InvalidPassword),
+        Err(e) => Err(e),
+    }
+}
+
 pub(crate) fn decrypt_standard_encrypted_package(
     info: &StandardEncryptionInfo,
     encrypted_package: &[u8],

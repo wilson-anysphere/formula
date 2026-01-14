@@ -528,8 +528,16 @@ fn resolve_table_reference(
 ) -> Result<Option<(String, Range)>, XlsxError> {
     let mut matched: Option<(String, Range)> = None;
     for (part_name, bytes) in package.parts() {
-        let canonical = part_name.strip_prefix('/').unwrap_or(part_name);
-        if !canonical.starts_with("xl/tables/table") || !canonical.ends_with(".xml") {
+        // ZIP entry names in valid OOXML packages should use `/`, but some producers emit `\` or
+        // vary casing; normalize to make table discovery best-effort.
+        let canonical = part_name.trim_start_matches(|c| c == '/' || c == '\\');
+        let canonical = if canonical.contains('\\') {
+            canonical.replace('\\', "/")
+        } else {
+            canonical.to_string()
+        };
+        let canonical_lower = canonical.to_ascii_lowercase();
+        if !canonical_lower.starts_with("xl/tables/table") || !canonical_lower.ends_with(".xml") {
             continue;
         }
         let Ok(xml) = std::str::from_utf8(bytes) else {
@@ -546,7 +554,7 @@ fn resolve_table_reference(
         let worksheet_part = if let Some(sheet_name) = sheet_hint {
             resolve_worksheet_part(package, sheet_name)?
         } else {
-            resolve_worksheet_part_for_table(package, canonical)?.ok_or_else(|| {
+            resolve_worksheet_part_for_table(package, &canonical)?.ok_or_else(|| {
                 XlsxError::Invalid(format!(
                     "table {name:?} found in {part:?} but worksheetSource did not specify a sheet and no worksheet relationship targets the table part",
                     name = table.name,
@@ -567,11 +575,17 @@ fn resolve_worksheet_part_for_table(
 ) -> Result<Option<String>, XlsxError> {
     let mut candidates = Vec::new();
     for part_name in package.part_names() {
-        let worksheet_part = part_name.strip_prefix('/').unwrap_or(part_name);
-        if !worksheet_part.starts_with("xl/worksheets/") || !worksheet_part.ends_with(".xml") {
+        let worksheet_part = part_name.trim_start_matches(|c| c == '/' || c == '\\');
+        let worksheet_part = if worksheet_part.contains('\\') {
+            worksheet_part.replace('\\', "/")
+        } else {
+            worksheet_part.to_string()
+        };
+        let worksheet_lower = worksheet_part.to_ascii_lowercase();
+        if !worksheet_lower.starts_with("xl/worksheets/") || !worksheet_lower.ends_with(".xml") {
             continue;
         }
-        let rels_part = rels_part_name(worksheet_part);
+        let rels_part = rels_part_name(&worksheet_part);
         let Some(rels_bytes) = package.part(&rels_part) else {
             continue;
         };
@@ -590,10 +604,10 @@ fn resolve_worksheet_part_for_table(
             {
                 continue;
             }
-            let target = resolve_target(worksheet_part, &rel.target);
+            let target = resolve_target(&worksheet_part, &rel.target);
             let target = target.strip_prefix('/').unwrap_or(target.as_str());
             if crate::zip_util::zip_part_names_equivalent(target, table_part) {
-                candidates.push(worksheet_part.to_string());
+                candidates.push(worksheet_part);
                 break;
             }
         }
@@ -1789,6 +1803,52 @@ mod tests {
         let worksheet_part =
             resolve_worksheet_part_for_table(&pkg, "xl/tables/table1.xml").expect("resolve");
         assert_eq!(worksheet_part.as_deref(), Some("xl/worksheets/sheet1.xml"));
+    }
+
+    #[test]
+    fn resolve_table_reference_discovers_tables_with_backslash_and_case_entry_names() {
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+        let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="..\\tables\\table1.xml"/>
+</Relationships>"#;
+
+        let table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:B3" headerRowCount="1" totalsRowCount="0">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Header1"/>
+    <tableColumn id="2" name="Header2"/>
+  </tableColumns>
+</table>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(worksheet_rels.as_bytes()).unwrap();
+
+        // Backslash separators and case differences are invalid in canonical XLSX ZIP entry names,
+        // but are tolerated by `XlsxPackage::part`. Ensure table discovery normalizes them too.
+        zip.start_file("XL\\Tables\\Table1.xml", options).unwrap();
+        zip.write_all(table_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let resolved = resolve_table_reference(&pkg, "Table1", None).expect("resolve");
+        let (sheet_part, range) = resolved.expect("expected match");
+        assert_eq!(sheet_part, "xl/worksheets/sheet1.xml");
+        assert_eq!(range, Range::from_a1("A1:B3").unwrap());
     }
 
     #[test]
