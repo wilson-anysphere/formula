@@ -221,6 +221,12 @@ For the password key-encryptor fields (`encryptedVerifierHashInput`, `encryptedV
 
 Do **not** reuse the per-segment IV logic from `EncryptedPackage` here.
 
+Compatibility note: some non-Excel producers appear to derive the IV as
+`IV = Truncate(Hash(saltValue || blockKey), blockSize)` (similar to other Agile IV derivations).
+To maximize real-world compatibility, `crates/formula-xlsx::offcrypto` will try both strategies
+(treating a verifier mismatch as a signal to retry with the alternative IV derivation). In
+contrast, `crates/formula-office-crypto` uses `saltValue` directly as the IV.
+
 ## Decrypting `EncryptedPackage`
 
 The `EncryptedPackage` stream layout (on disk / as stored) is:
@@ -286,6 +292,12 @@ Notably:
 
 This detail has been the source of prior incorrect implementations.
 
+Compatibility note: some non-Excel producers have been observed to compute `dataIntegrity` over the
+**decrypted package bytes** (plaintext ZIP) instead of the `EncryptedPackage` stream bytes. For
+Excel parity, new implementations should follow the spec (authenticate the stream bytes). However,
+`crates/formula-xlsx::offcrypto` is permissive and will accept either target, while
+`crates/formula-office-crypto` requires the spec/Excel behavior (stream bytes).
+
 ### High-level integrity algorithm (Agile)
 
 1. Obtain the **package key** (by password verification + decrypting `encryptedKeyValue`)
@@ -319,6 +331,12 @@ The Agile decryption errors are designed to be actionable. The most important di
 | `formula_xlsx::offcrypto::OffCryptoError::UnsupportedKeyEncryptor { .. }` | File is encrypted, but only a non-password key-encryptor (e.g. certificate) is present | Re-save using password encryption; or add key-encryptor support |
 | `formula_xlsx::offcrypto::OffCryptoError::{UnsupportedCipherAlgorithm, UnsupportedCipherChaining, UnsupportedHashAlgorithm}` | Cipher/chaining/hash params are not in our supported subset | Re-save with default Excel encryption settings; or add support |
 | XML/structure errors (`InvalidEncryptionInfo`, base64 decode, ciphertext alignment) | Malformed/corrupt encrypted wrapper | Treat as corrupted file |
+
+Note: at the `formula-io` API boundary we currently expose only `PasswordRequired` / `InvalidPassword`
+for password-to-open OOXML. Integrity failures from deeper layers (HMAC mismatch) may be mapped to
+`formula_io::Error::InvalidPassword`. If you need to distinguish “wrong password” vs “integrity
+failure”, use `crates/formula-xlsx::offcrypto` or `crates/formula-office-crypto` directly (or plumb a
+dedicated error variant through `formula-io`).
 
 For the exact user-facing strings, see:
 
