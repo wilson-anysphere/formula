@@ -12063,26 +12063,15 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn format_run_style_id(&self, sheet_id: usize, addr: CellAddr) -> u32 {
-        self.format_runs_by_col
-            .get(sheet_id)
-            .and_then(|cols| cols.get(&addr.col))
-            .map(|runs| {
-                // Runs are expected to be sorted and non-overlapping, but we use a conservative
-                // linear scan (last-match wins) to preserve deterministic behavior even if hosts
-                // provide unexpected overlaps.
-                let mut style_id = 0;
-                for run in runs {
-                    if addr.row < run.start_row {
-                        break;
-                    }
-                    if addr.row >= run.end_row_exclusive {
-                        continue;
-                    }
-                    style_id = run.style_id;
-                }
-                style_id
-            })
-            .unwrap_or(0)
+        // Runs are expected to be sorted and non-overlapping (DocumentController semantics). Use
+        // binary search so lookups remain fast even for large formatted rectangles.
+        style_id_for_row_in_runs(
+            self.format_runs_by_col
+                .get(sheet_id)
+                .and_then(|cols| cols.get(&addr.col))
+                .map(|runs| runs.as_slice()),
+            addr.row,
+        )
     }
 
     fn row_style_id(&self, sheet_id: usize, row: u32) -> Option<u32> {
