@@ -37,7 +37,9 @@ Options:
                         - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm
                         - apps/desktop/target/**/release/bundle/rpm/*.rpm
                         - target/**/release/bundle/rpm/*.rpm
-  --no-container      Skip the Fedora container installability check (static checks only).
+  --no-container      Skip the Fedora container installability check.
+                      Note: we still extract the RPM payload to validate desktop integration
+                      metadata (MimeType= in *.desktop). This requires rpm2cpio + cpio on the host.
   --image <image>     Fedora image to use for the container step (default: fedora:40).
   -h, --help          Show this help text.
 EOF
