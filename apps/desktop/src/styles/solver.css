@@ -49,8 +49,8 @@
 }
 
 .solver-panel__configure-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .solver-panel__configure-button:disabled {

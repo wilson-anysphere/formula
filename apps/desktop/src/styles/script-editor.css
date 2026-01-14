@@ -47,8 +47,8 @@
 }
 
 .script-editor__run-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .script-editor__editor-host {
@@ -73,8 +73,8 @@
 }
 
 .script-editor__fallback-editor:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: -2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: calc(var(--space-1) * -1);
 }
 
 .script-editor__console {
