@@ -4,6 +4,16 @@ export interface CollabPersistenceBinding {
   destroy(): Promise<void>;
 }
 
+export type CollabPersistenceFlushOptions = {
+  /**
+   * When true (default for IndexedDB persistence), `flush()` may also perform compaction
+   * to keep persisted logs bounded.
+   *
+   * Implementations that do not support compaction may ignore this flag.
+   */
+  compact?: boolean;
+};
+
 /**
  * Local persistence for a Yjs document.
  *
@@ -28,7 +38,7 @@ export interface CollabPersistence {
   /**
    * Wait until any pending persistence work for `docId` is durably written.
    */
-  flush?(docId: string): Promise<void>;
+  flush?(docId: string, opts?: CollabPersistenceFlushOptions): Promise<void>;
   /**
    * Best-effort compaction for `docId`.
    *

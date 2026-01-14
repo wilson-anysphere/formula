@@ -6,7 +6,7 @@ import * as Y from "yjs";
 
 import type { KeyRing } from "../../../security/crypto/keyring.js";
 
-import type { CollabPersistence, CollabPersistenceBinding } from "./index.js";
+import type { CollabPersistence, CollabPersistenceBinding, CollabPersistenceFlushOptions } from "./index.js";
 import {
   FILE_FLAG_ENCRYPTED,
   FILE_HEADER_BYTES,
@@ -391,7 +391,7 @@ export class FileCollabPersistence implements CollabPersistence {
     return { destroy };
   }
 
-  async flush(docId: string): Promise<void> {
+  async flush(docId: string, _opts?: CollabPersistenceFlushOptions): Promise<void> {
     await (this.queues.get(docId) ?? Promise.resolve());
   }
 

@@ -1,18 +1,11 @@
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
 
-import type { CollabPersistence, CollabPersistenceBinding } from "./index.js";
-
-type FlushOptions = {
-  /**
-   * When true (default), `flush()` will compact the `updates` object store by clearing it
-   * and writing a single snapshot update.
-   *
-   * This prevents `flush()` from growing IndexedDB without bound by appending snapshot
-   * records.
-   */
-  compact?: boolean;
-};
+import type {
+  CollabPersistence,
+  CollabPersistenceBinding,
+  CollabPersistenceFlushOptions,
+} from "./index.js";
 
 type Entry = {
   doc: Y.Doc;
@@ -270,7 +263,7 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
    * By default, `flush()` also compacts the update log so IndexedDB does not grow
    * without bound.
    */
-  async flush(docId: string, opts: FlushOptions = {}): Promise<void> {
+  async flush(docId: string, opts: CollabPersistenceFlushOptions = {}): Promise<void> {
     const entry = this.entries.get(docId);
     if (!entry) return;
 
