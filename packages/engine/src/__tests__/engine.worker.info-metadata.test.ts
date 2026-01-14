@@ -186,6 +186,107 @@ describe("engine.worker INFO() metadata integration", () => {
       dispose();
     }
   });
+
+  it("normalizes empty strings as unset and validates memavail/totmem finiteness", async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookEvalInfo.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCells",
+        params: {
+          updates: [
+            { address: "A1", value: '=INFO("system")', sheet: "Sheet1" },
+            { address: "A2", value: '=INFO("osversion")', sheet: "Sheet1" },
+            { address: "A3", value: '=INFO("origin")', sheet: "Sheet1" },
+            { address: "A4", value: '=INFO("memavail")', sheet: "Sheet1" },
+          ],
+        },
+      });
+
+      await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setEngineInfo",
+        params: { info: { system: "mac", osversion: "14.0", memavail: 100 } },
+      });
+      await sendRequest(port, { type: "request", id: 3, method: "setInfoOrigin", params: { origin: "workbook-origin" } });
+      await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "setInfoOriginForSheet",
+        params: { sheet: "Sheet1", origin: "sheet-origin" },
+      });
+      await sendRequest(port, { type: "request", id: 5, method: "recalculate", params: {} });
+
+      const read = async (id: number, address: string) => {
+        const resp = await sendRequest(port, { type: "request", id, method: "getCell", params: { address, sheet: "Sheet1" } });
+        expect(resp.ok).toBe(true);
+        return resp.result.value as unknown;
+      };
+
+      expect(await read(6, "A1")).toBe("mac");
+      expect(await read(7, "A2")).toBe("14.0");
+      expect(await read(8, "A3")).toBe("sheet-origin");
+      expect(await read(9, "A4")).toBe(100);
+
+      // Clearing the per-sheet origin should fall back to the workbook-level origin.
+      await sendRequest(port, {
+        type: "request",
+        id: 10,
+        method: "setInfoOriginForSheet",
+        params: { sheet: "Sheet1", origin: "" },
+      });
+      await sendRequest(port, { type: "request", id: 11, method: "recalculate", params: {} });
+      expect(await read(12, "A3")).toBe("workbook-origin");
+
+      // Clearing the workbook origin should return #N/A.
+      await sendRequest(port, { type: "request", id: 13, method: "setInfoOrigin", params: { origin: "" } });
+      await sendRequest(port, { type: "request", id: 14, method: "recalculate", params: {} });
+      expect(await read(15, "A3")).toBe("#N/A");
+
+      // Clearing string metadata should revert to Excel defaults / #N/A.
+      await sendRequest(port, {
+        type: "request",
+        id: 16,
+        method: "setEngineInfo",
+        params: { info: { system: "", osversion: "" } },
+      });
+      await sendRequest(port, { type: "request", id: 17, method: "recalculate", params: {} });
+      expect(await read(18, "A1")).toBe("pcdos");
+      expect(await read(19, "A2")).toBe("#N/A");
+
+      // memavail must be finite numbers.
+      const bad = await sendRequest(port, {
+        type: "request",
+        id: 20,
+        method: "setEngineInfo",
+        params: { info: { memavail: Infinity } },
+      });
+      expect(bad.ok).toBe(false);
+      expect(String((bad as any).error)).toContain("memavail");
+
+      // Failed update should not clobber existing metadata.
+      await sendRequest(port, { type: "request", id: 21, method: "recalculate", params: {} });
+      expect(await read(22, "A4")).toBe(100);
+
+      // Clearing memavail should restore #N/A.
+      await sendRequest(port, {
+        type: "request",
+        id: 23,
+        method: "setEngineInfo",
+        params: { info: { memavail: null } },
+      });
+      await sendRequest(port, { type: "request", id: 24, method: "recalculate", params: {} });
+      expect(await read(25, "A4")).toBe("#N/A");
+    } finally {
+      dispose();
+    }
+  });
 });
 
 const previousSelf = (globalThis as any).self;
@@ -200,4 +301,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-
