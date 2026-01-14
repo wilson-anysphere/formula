@@ -688,6 +688,12 @@ fn merge_chart_models(
             part: Some(chart_space_part.to_string()),
             xpath: None,
         });
+        diagnostics.push(ChartDiagnostic {
+            severity: ChartDiagnosticSeverity::Info,
+            message: "model.plot_area: using chartSpace".to_string(),
+            part: Some(chart_space_part.to_string()),
+            xpath: None,
+        });
     }
 
     // Title / legend: prefer ChartEx when present (future-proofing, as ChartEx parsing is still incomplete).
