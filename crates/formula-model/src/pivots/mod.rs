@@ -534,13 +534,15 @@ pub struct FilterField {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed: Option<HashSet<PivotKeyPart>>,
 }
-
 /// Canonical pivot table configuration (field layout + display options).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotConfig {
+    #[serde(default)]
     pub row_fields: Vec<PivotField>,
+    #[serde(default)]
     pub column_fields: Vec<PivotField>,
+    #[serde(default)]
     pub value_fields: Vec<ValueField>,
     #[serde(default)]
     pub filter_fields: Vec<FilterField>,
