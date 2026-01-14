@@ -63,6 +63,32 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(consumerRefs).toEqual(sharedRefs);
   });
 
+  it("matches between packages for external workbook refs with quoted sheet names after an unquoted workbook prefix", () => {
+    const input = "=SUM([Book.xlsx]'My Sheet'!A1, 1)";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["[Book.xlsx]'My Sheet'!A1"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
+  it("matches between packages for external workbook 3D refs with quoted sheet tokens after an unquoted workbook prefix", () => {
+    const input = "=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1, 1)";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const consumerRefs = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["[Book.xlsx]'Sheet 1':'Sheet 3'!A1"]);
+    expect(consumerRefs).toEqual(sharedRefs);
+  });
+
   it("matches between packages for workbook-scoped external defined names (quoted name refs)", () => {
     const input = "='[Book.xlsx]MyName'+1";
     const sharedIdents = sharedTokenizeFormula(input)

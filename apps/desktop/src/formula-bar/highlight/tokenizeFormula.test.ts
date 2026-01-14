@@ -163,6 +163,21 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["[A1[Name.xlsx]Sheet1!A1"]);
   });
 
+  it("tokenizes external workbook references with quoted sheet names after an unquoted workbook prefix", () => {
+    // Excel permits quoting the sheet token even when the workbook prefix itself is unquoted.
+    // The engine serializer will typically quote the whole sheet spec instead, but we still
+    // tokenize this form for best-effort highlighting parity.
+    const tokens = tokenizeFormula("=SUM([Book.xlsx]'My Sheet'!A1, 1)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[Book.xlsx]'My Sheet'!A1"]);
+  });
+
+  it("tokenizes external workbook 3D sheet spans with quoted sheet tokens after an unquoted workbook prefix", () => {
+    const tokens = tokenizeFormula("=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1, 1)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[Book.xlsx]'Sheet 1':'Sheet 3'!A1"]);
+  });
+
   it("tokenizes workbook-scoped external defined names (quoted external name refs)", () => {
     // The engine serializer emits workbook-scoped external defined names as a single quoted token:
     //   `'[Book.xlsx]MyName'`
