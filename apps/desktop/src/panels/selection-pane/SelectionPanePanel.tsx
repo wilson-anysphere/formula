@@ -19,6 +19,9 @@ type SelectionPaneApp = {
   bringSelectedDrawingForward?(): void;
   sendSelectedDrawingBackward?(): void;
   getCurrentSheetId?(): string;
+  isReadOnly?(): boolean;
+  isEditing?(): boolean;
+  onEditStateChange?(listener: (isEditing: boolean) => void): () => void;
   focus?(): void;
 };
 
@@ -47,6 +50,50 @@ type SheetLabelState = {
 export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const labelsBySheetRef = useRef<Map<string, SheetLabelState>>(new Map());
+
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(() => {
+    if (typeof app.isReadOnly !== "function") return false;
+    try {
+      return Boolean(app.isReadOnly());
+    } catch {
+      return false;
+    }
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    if (typeof app.isEditing !== "function") return false;
+    try {
+      return Boolean(app.isEditing());
+    } catch {
+      return false;
+    }
+  });
+
+  const actionsDisabled = isReadOnly || isEditing;
+
+  useEffect(() => {
+    if (typeof app.onEditStateChange !== "function") return;
+    return app.onEditStateChange((next) => setIsEditing(Boolean(next)));
+  }, [app]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onReadOnlyChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.readOnly === "boolean") {
+        setIsReadOnly(detail.readOnly);
+        return;
+      }
+      if (typeof app.isReadOnly !== "function") return;
+      try {
+        setIsReadOnly(Boolean(app.isReadOnly()));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+    return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, [app]);
 
   const computeItems = useCallback(
     (drawings: DrawingObject[]): SelectionPaneItem[] => {
@@ -194,6 +241,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         case "Backspace": {
           if (selectedId == null) return;
           if (typeof app.deleteDrawingById !== "function") return;
+          if (actionsDisabled) return;
           e.preventDefault();
           e.stopPropagation();
           app.deleteDrawingById(selectedId);
@@ -211,7 +259,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
           return;
       }
     },
-    [app, items, scrollItemIntoView, selectedId],
+    [actionsDisabled, app, items, scrollItemIntoView, selectedId],
   );
 
   // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with a high z-order base.
@@ -271,7 +319,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                     className="selection-pane__action"
                     aria-label={`Bring forward ${label}`}
                     data-testid={`selection-pane-bring-forward-${obj.id}`}
-                    disabled={!canBringForward}
+                    disabled={actionsDisabled || !canBringForward}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -288,7 +336,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                     className="selection-pane__action"
                     aria-label={`Send backward ${label}`}
                     data-testid={`selection-pane-send-backward-${obj.id}`}
-                    disabled={!canSendBackward}
+                    disabled={actionsDisabled || !canSendBackward}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -304,6 +352,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                   className="selection-pane__action"
                   aria-label={`Delete ${label}`}
                   data-testid={`selection-pane-delete-${obj.id}`}
+                  disabled={actionsDisabled}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

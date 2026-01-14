@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { createRoot as createReactRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../../../app/spreadsheetApp";
 import { chartIdToDrawingId } from "../../../charts/chartDrawingAdapter";
 import type { DrawingObject } from "../../../drawings/types";
+import { SelectionPanePanel } from "../SelectionPanePanel";
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -693,5 +695,56 @@ describe("Selection Pane panel", () => {
 
     app.destroy();
     sheetRoot.remove();
+  });
+
+  it("disables arrange/delete action buttons in read-only mode", async () => {
+    const drawings: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "img_1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 10 } },
+        zOrder: 0,
+      },
+    ];
+
+    const deleteDrawingById = vi.fn();
+
+    const app = {
+      listDrawingsForSheet: () => drawings,
+      subscribeDrawings: (listener: () => void) => {
+        listener();
+        return () => {};
+      },
+      getSelectedDrawingId: () => null,
+      subscribeDrawingSelection: (listener: (id: number | null) => void) => {
+        listener(null);
+        return () => {};
+      },
+      selectDrawingById: vi.fn(),
+      deleteDrawingById,
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      isReadOnly: () => true,
+      isEditing: () => false,
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createReactRoot(container);
+
+    await act(async () => {
+      root.render(<SelectionPanePanel app={app as any} />);
+    });
+
+    const deleteBtn = container.querySelector<HTMLButtonElement>('[data-testid="selection-pane-delete-1"]');
+    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(deleteBtn!.disabled).toBe(true);
+
+    await act(async () => {
+      deleteBtn!.click();
+    });
+    expect(deleteDrawingById).toHaveBeenCalledTimes(0);
+
+    act(() => root.unmount());
   });
 });
