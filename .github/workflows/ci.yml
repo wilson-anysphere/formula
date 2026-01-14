@@ -39,6 +39,8 @@ jobs:
         run: bash scripts/ci/check-wasm-pack-version-pins.sh
       - name: "Guard: Tauri CLI pins match release workflow"
         run: bash scripts/ci/check-tauri-cli-version-pins.sh
+      - name: "Guard: Pyodide assets are cached for desktop builds"
+        run: python3 scripts/ci/check-pyodide-cache.py
       - name: "Guard: desktop installer artifact size reporter JSON output"
         run: python3 -m unittest scripts/test_desktop_bundle_size_report_json.py
       - name: "Guard: lightweight desktop size reporter JSON output"
