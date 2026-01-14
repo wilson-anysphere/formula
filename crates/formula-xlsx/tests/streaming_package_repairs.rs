@@ -267,6 +267,86 @@ fn streaming_write_repairs_macro_with_backslash_rels_entry_without_appending_dup
 }
 
 #[test]
+fn streaming_macro_repair_does_not_append_equivalent_user_override_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Regression test: if a caller supplies a PartOverride keyed by a non-canonical name (e.g.
+    // backslashes), and the streaming repair layer also produces a canonical repair override for
+    // the same effective part, ensure we don't append the caller override as a duplicate ZIP entry.
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let bytes = build_zip(&[
+        ("[Content_Types].xml", content_types),
+        ("xl/workbook.xml", workbook_xml),
+        // Non-canonical ZIP entry name:
+        ("xl\\_rels\\workbook.xml.rels", workbook_rels),
+        ("xl/vbaProject.bin", b"fake-vba-project"),
+    ]);
+
+    // Caller override uses the *non-canonical* key. The repair layer will produce a canonical key.
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "xl\\_rels\\workbook.xml.rels".to_string(),
+        PartOverride::Replace(workbook_rels.to_vec()),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut out,
+        &WorkbookCellPatches::default(),
+        &overrides,
+    )?;
+    let out_bytes = out.into_inner();
+
+    // Count occurrences of the backslash entry name to ensure it wasn't appended twice.
+    let mut zip = ZipArchive::new(Cursor::new(&out_bytes))?;
+    let mut rel_count = 0usize;
+    let mut rel_bytes = Vec::new();
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        if file.name() == "xl\\_rels\\workbook.xml.rels" {
+            rel_count += 1;
+            // Read the (single) rels payload for later assertions.
+            file.read_to_end(&mut rel_bytes)?;
+        }
+    }
+    assert_eq!(
+        rel_count, 1,
+        "expected exactly one workbook rels entry, got {rel_count}"
+    );
+
+    let rels = parse_relationships(&rel_bytes)?;
+    assert!(
+        rels.iter().any(|rel| {
+            rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
+                && rel.target == "vbaProject.bin"
+        }),
+        "expected repaired workbook rels to contain vbaProject relationship, got: {rels:?}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn streaming_part_override_matches_backslash_entry_name_without_appending_duplicate(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let original_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

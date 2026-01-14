@@ -2989,6 +2989,18 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             if applied_part_overrides.contains(name) {
                 continue;
             }
+            // Avoid appending equivalent overrides when the part was already written under a
+            // different-but-equivalent key (e.g. canonical vs backslash/percent-encoded names).
+            //
+            // This matters because repair overrides are always keyed by canonical names, but the
+            // caller's `part_overrides` may use non-canonical keys. We apply repairs before caller
+            // overrides; if we only check exact strings here, we can accidentally append the
+            // caller's override after already writing the repaired payload in-place.
+            if applied_part_overrides.iter().any(|applied| {
+                crate::zip_util::zip_part_names_equivalent(applied.as_str(), name)
+            }) {
+                continue;
+            }
             let override_op = repair_overrides
                 .get(name)
                 .or_else(|| part_overrides.get(name));
