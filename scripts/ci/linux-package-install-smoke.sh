@@ -44,8 +44,27 @@ require_docker() {
   fi
   echo "::group::Docker version"
   docker version
+  if [[ -n "${DOCKER_PLATFORM:-}" ]]; then
+    echo "Docker platform override: ${DOCKER_PLATFORM}"
+  fi
   echo "::endgroup::"
 }
+
+detect_docker_platform() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64) echo "linux/amd64" ;;
+    aarch64 | arm64) echo "linux/arm64" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Force docker to use the host architecture image variant so we don't accidentally
+# run an ARM container on an x86_64 runner (or vice versa). This avoids confusing
+# failures like `exec format error` or `ldd: not a dynamic executable` when the
+# installed binary can't run on the container architecture.
+DOCKER_PLATFORM="$(detect_docker_platform)"
 
 find_pkg_dirs() {
   local pkg_type="$1" # deb|rpm
@@ -169,6 +188,7 @@ deb_smoke_test_dir() {
   echo "::group::.deb smoke test (${image}) - ${deb_dir}"
   echo "Mounting: ${deb_dir_abs} -> /mounted"
   docker run --rm \
+    ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
@@ -211,6 +231,7 @@ rpm_smoke_test_dir() {
   echo "::group::.rpm smoke test (${image}) - ${rpm_dir}"
   echo "Mounting: ${rpm_dir_abs} -> /mounted"
   docker run --rm \
+    ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
@@ -261,7 +282,7 @@ require_docker
 if [[ "${kind}" == "deb" || "${kind}" == "all" ]]; then
   deb_image="${FORMULA_DEB_SMOKE_IMAGE:-ubuntu:24.04}"
   echo "::group::Pull .deb smoke test image (${deb_image})"
-  docker pull "${deb_image}"
+  docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${deb_image}"
   echo "::endgroup::"
 
   deb_dirs=()
@@ -274,7 +295,7 @@ fi
 if [[ "${kind}" == "rpm" || "${kind}" == "all" ]]; then
   rpm_image="${FORMULA_RPM_SMOKE_IMAGE:-fedora:40}"
   echo "::group::Pull .rpm smoke test image (${rpm_image})"
-  docker pull "${rpm_image}"
+  docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${rpm_image}"
   echo "::endgroup::"
 
   rpm_dirs=()
