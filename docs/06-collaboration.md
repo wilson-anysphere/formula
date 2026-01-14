@@ -1149,6 +1149,7 @@ Desktop note: desktop collaboration uses a *binder-origin* undo scope (DocumentC
 so comment edits must run inside the binder-origin transact wrapper (not `session.transactLocal`).
 Use `createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact })` (see
 `apps/desktop/src/collab/documentControllerCollabUndo.ts` / `apps/desktop/src/app/spreadsheetApp.ts`).
+If you also want permission enforcement at the comment API layer, pass `canComment: () => session.canComment()` so viewer roles throw on comment mutations (fail-closed).
 
 If you need to normalize legacy Array-backed docs to the canonical Map schema:
 
