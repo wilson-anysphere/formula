@@ -847,12 +847,18 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setColWidthChars":
-              if (typeof (wb as any).setColWidthChars !== "function") {
-                throw new Error("setColWidthChars: not available in this WASM build");
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setColWidthChars(sheet, params.col, params.widthChars);
+                const widthChars = params.widthChars ?? null;
+                if (typeof (wb as any).setColWidthChars === "function") {
+                  (wb as any).setColWidthChars(sheet, params.col, widthChars);
+                } else if (typeof (wb as any).setColWidth === "function") {
+                  // Backward compatibility: older WASM builds used `setColWidth` as the column
+                  // width override setter (same Excel "character" unit semantics).
+                  (wb as any).setColWidth(sheet, params.col, widthChars);
+                } else {
+                  throw new Error("setColWidthChars: not available in this WASM build");
+                }
               }
               result = null;
               break;
@@ -1025,14 +1031,20 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setFormatRunsByCol":
-              if (typeof (wb as any).setFormatRunsByCol !== "function") {
-                throw new Error(
-                  "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
-                );
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setFormatRunsByCol(sheet, params.col, params.runs ?? []);
+                const runs = params.runs ?? [];
+                if (typeof (wb as any).setFormatRunsByCol === "function") {
+                  (wb as any).setFormatRunsByCol(sheet, params.col, runs);
+                } else if (typeof (wb as any).setColFormatRuns === "function") {
+                  // Backward compatibility: older WASM builds exposed `setColFormatRuns` as the
+                  // formatting-run setter (same payload shape).
+                  (wb as any).setColFormatRuns(sheet, params.col, runs);
+                } else {
+                  throw new Error(
+                    "setFormatRunsByCol: WasmWorkbook.setFormatRunsByCol is not available in this WASM build"
+                  );
+                }
               }
               result = null;
               break;
@@ -1050,12 +1062,18 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setColWidth":
-              if (typeof (wb as any).setColWidth !== "function") {
-                throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setColWidth(sheet, params.col, params.width ?? null);
+                const width = params.width ?? null;
+                if (typeof (wb as any).setColWidth === "function") {
+                  (wb as any).setColWidth(sheet, params.col, width);
+                } else if (typeof (wb as any).setColWidthChars === "function") {
+                  // Backward compatibility: some WASM builds only expose `setColWidthChars`, which
+                  // uses the same Excel character-unit semantics as `setColWidth`.
+                  (wb as any).setColWidthChars(sheet, params.col, width);
+                } else {
+                  throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
+                }
               }
               result = null;
               break;
@@ -1082,12 +1100,20 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setColFormatRuns":
-              if (typeof (wb as any).setColFormatRuns !== "function") {
-                throw new Error("setColFormatRuns: WasmWorkbook.setColFormatRuns is not available in this WASM build");
-              }
               {
                 const sheet = sheetNameOrDefault(params.sheet);
-                (wb as any).setColFormatRuns(sheet, params.col, params.runs);
+                const runs = params.runs ?? [];
+                if (typeof (wb as any).setColFormatRuns === "function") {
+                  (wb as any).setColFormatRuns(sheet, params.col, runs);
+                } else if (typeof (wb as any).setFormatRunsByCol === "function") {
+                  // Backward compatibility: some WASM builds used `setFormatRunsByCol` as the
+                  // formatting-run setter.
+                  (wb as any).setFormatRunsByCol(sheet, params.col, runs);
+                } else {
+                  throw new Error(
+                    "setColFormatRuns: WasmWorkbook.setColFormatRuns is not available in this WASM build"
+                  );
+                }
               }
               result = null;
               break;

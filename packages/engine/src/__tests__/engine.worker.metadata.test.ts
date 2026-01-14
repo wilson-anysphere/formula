@@ -656,6 +656,102 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("falls back to setColWidth when setColWidthChars is missing", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookLegacyColWidthFormatRuns.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setColWidthChars",
+        params: { sheet: "Sheet2", col: 3, widthChars: 8.5 }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["setColWidth", "Sheet2", 3, 8.5]]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
+  it("falls back to setColWidthChars when setColWidth is missing", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookModernColWidthFormatRuns.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setColWidth",
+        params: { sheet: "Sheet2", col: 3, width: 8.5 }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([["setColWidthChars", "Sheet2", 3, 8.5]]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
+  it("falls back to legacy setColFormatRuns when setFormatRunsByCol is missing", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookLegacyColWidthFormatRuns.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setFormatRunsByCol",
+        params: { sheet: "Sheet2", col: 3, runs: [{ startRow: 0, endRowExclusive: 1, styleId: 7 }] }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setColFormatRuns", "Sheet2", 3, [{ startRow: 0, endRowExclusive: 1, styleId: 7 }]]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
+  it("falls back to setFormatRunsByCol when setColFormatRuns is missing", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookModernColWidthFormatRuns.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setColFormatRuns",
+        params: { sheet: "Sheet2", col: 3, runs: [{ startRow: 0, endRowExclusive: 1, styleId: 7 }] }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setFormatRunsByCol", "Sheet2", 3, [{ startRow: 0, endRowExclusive: 1, styleId: 7 }]]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("trims sheet names for setColFormatRuns", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
