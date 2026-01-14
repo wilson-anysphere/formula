@@ -1889,15 +1889,27 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             (false, true) => true,
                             (false, false) => return Err(Error::UnexpectedEof),
                             (true, true) => {
-                                let simple_score = score_utf16_le_bytes(
-                                    &rr.data[simple_utf16_start..simple_utf16_end],
-                                );
-                                let flagged_score = score_utf16_le_bytes(
-                                    &rr.data[flagged_utf16_start..flagged_utf16_end],
-                                );
-                                // Tie-break in favor of the flagged layout (more common in the
-                                // wild and required for rich/phonetic preservation).
-                                flagged_score >= simple_score
+                                // Heuristic: if the would-be flags byte contains bits outside the
+                                // observed BrtCellSt wide-string flag set (rich/phonetic +
+                                // reserved 0x80), treat the record as using the simple layout.
+                                //
+                                // This avoids misinterpreting the first UTF-16 code unit byte as
+                                // a flags byte for simple-layout strings that include trailing
+                                // bytes (seen in the wild), which can shift the decode by 1 byte
+                                // and corrupt the decoded text (especially for non-ASCII strings).
+                                if rr.data[simple_utf16_start] & !0x83 != 0 {
+                                    false
+                                } else {
+                                    let simple_score = score_utf16_le_bytes(
+                                        &rr.data[simple_utf16_start..simple_utf16_end],
+                                    );
+                                    let flagged_score = score_utf16_le_bytes(
+                                        &rr.data[flagged_utf16_start..flagged_utf16_end],
+                                    );
+                                    // Tie-break in favor of the flagged layout (more common in the
+                                    // wild and required for rich/phonetic preservation).
+                                    flagged_score >= simple_score
+                                }
                             }
                         };
 
