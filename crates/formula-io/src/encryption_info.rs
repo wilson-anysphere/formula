@@ -36,6 +36,18 @@ pub fn extract_agile_encryption_info_xml(
     }
 
     let payload = &encryption_info_stream[8..];
+    // Defensive: bound the amount of work we do scanning/parsing attacker-controlled
+    // `EncryptionInfo` streams.
+    //
+    // Real-world Agile `EncryptionInfo` XML descriptors are tiny (typically a few KB). Allow up to
+    // 1 MiB to be generous while preventing pathological memory/CPU usage on corrupt inputs.
+    const MAX_XML_LEN: usize = 1024 * 1024;
+    if payload.len() > MAX_XML_LEN {
+        return Err(EncryptionInfoXmlError::InvalidXml(format!(
+            "payload too large: {} bytes (max {MAX_XML_LEN})",
+            payload.len()
+        )));
+    }
     let mut errors: Vec<String> = Vec::new();
 
     // --- Primary: UTF-8 payload (trim UTF-8 BOM, trim trailing NULs). ---
@@ -323,5 +335,22 @@ mod tests {
     fn rejects_truncated_streams() {
         let err = extract_agile_encryption_info_xml(&[0u8; 7]).expect_err("should error");
         assert!(matches!(err, EncryptionInfoXmlError::Truncated(7)));
+    }
+
+    #[test]
+    fn rejects_overly_large_payloads() {
+        // This should fail the size guardrail before any XML parsing is attempted.
+        let payload = vec![b'a'; 1024 * 1024 + 1];
+        let stream = make_stream(&payload);
+        let err = extract_agile_encryption_info_xml(&stream).expect_err("should error");
+        match err {
+            EncryptionInfoXmlError::InvalidXml(msg) => {
+                assert!(
+                    msg.contains("payload too large"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

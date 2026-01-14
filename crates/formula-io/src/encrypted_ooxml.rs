@@ -9,7 +9,7 @@
 use std::io;
 use std::io::{Read, Seek};
 
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
 use base64::Engine as _;
 use roxmltree::Document;
 use zeroize::Zeroizing;
@@ -920,6 +920,36 @@ mod tests {
     }
 
     #[test]
+    fn rejects_spin_count_before_decoding_password_salt() {
+        // Ensure we short-circuit on an oversized `spinCount` even if the password salt is
+        // malformed base64 (avoid spending effort decoding attacker-controlled blobs).
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AA==" hashAlgorithm="SHA1" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="!!!!" spinCount="4294967295" hashAlgorithm="SHA1" hashSize="20"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let err = parse_agile_encryption_info(xml).expect_err("expected error");
+        assert!(
+            matches!(err, DecryptError::InvalidInfo(ref msg) if msg.contains("spinCount") && msg.contains("maximum")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn derive_standard_aes_key_truncate_uses_hblock0_prefix_for_known_vector() {
         // Some producers in the wild appear to derive the Standard AES-128 key by truncating the
         // per-block hash value, instead of running the CryptoAPI `CryptDeriveKey` ipad/opad
@@ -1311,9 +1341,50 @@ fn parse_u32_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<u32, Decr
 
 fn parse_base64_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8>, DecryptError> {
     let val = required_attr(node, attr)?;
-    BASE64
-        .decode(val.trim())
-        .map_err(|err| DecryptError::InvalidInfo(format!("base64 decode `{attr}`: {err}")))
+    // Defensive: avoid allocating/decoding attacker-controlled base64 blobs of unbounded size.
+    //
+    // Agile encryption attributes are small in real-world files (salts, encrypted keys, verifier
+    // hashes, ...). Keep a generous upper bound to avoid compatibility issues while still preventing
+    // pathological memory usage on corrupt inputs.
+    const MAX_BASE64_FIELD_LEN: usize = 1024 * 1024; // 1 MiB (after whitespace stripping)
+    const MAX_BASE64_DECODED_LEN: usize = 1024 * 1024; // 1 MiB
+
+    let bytes = val.as_bytes();
+    let mut stripped_len: usize = 0;
+    let mut has_ws = false;
+    for &b in bytes {
+        if b.is_ascii_whitespace() {
+            has_ws = true;
+            continue;
+        }
+        stripped_len = stripped_len.saturating_add(1);
+        if stripped_len > MAX_BASE64_FIELD_LEN {
+            return Err(DecryptError::InvalidInfo(format!(
+                "base64 field `{attr}` too large ({stripped_len} bytes, max {MAX_BASE64_FIELD_LEN})"
+            )));
+        }
+    }
+
+    // Avoid allocating a stripped copy when no whitespace is present.
+    let decoded = if !has_ws {
+        BASE64.decode(bytes).or_else(|_| BASE64_NO_PAD.decode(bytes))
+    } else {
+        let mut stripped = Vec::with_capacity(stripped_len);
+        stripped.extend(bytes.iter().copied().filter(|b| !b.is_ascii_whitespace()));
+        BASE64
+            .decode(&stripped)
+            .or_else(|_| BASE64_NO_PAD.decode(&stripped))
+    }
+    .map_err(|err| DecryptError::InvalidInfo(format!("base64 decode `{attr}`: {err}")))?;
+
+    if decoded.len() > MAX_BASE64_DECODED_LEN {
+        return Err(DecryptError::InvalidInfo(format!(
+            "base64 field `{attr}` too large (decoded {} bytes, max {MAX_BASE64_DECODED_LEN})",
+            decoded.len()
+        )));
+    }
+
+    Ok(decoded)
 }
 
 fn parse_hash_algorithm(
