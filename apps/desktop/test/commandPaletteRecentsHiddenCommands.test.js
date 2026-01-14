@@ -41,6 +41,29 @@ test('command palette recents ignore commands hidden via when: "false"', async (
   );
 });
 
+test('command palette recents ignore commands hidden via when: "FALSE" (case-insensitive boolean literal)', async () => {
+  const commandRegistry = new CommandRegistry();
+  const storage = new MemoryStorage();
+
+  commandRegistry.registerBuiltinCommand("cmd.visible", "Visible", () => "ok");
+  commandRegistry.registerBuiltinCommand("cmd.hidden", "Hidden", () => "ok", { when: "FALSE" });
+
+  const dispose = installCommandPaletteRecentsTracking(commandRegistry, storage, { now: () => 1234 });
+
+  try {
+    await commandRegistry.executeCommand("cmd.hidden");
+    await commandRegistry.executeCommand("cmd.visible");
+  } finally {
+    dispose();
+  }
+
+  assert.deepEqual(
+    readCommandRecents(storage).map((entry) => entry.commandId),
+    ["cmd.visible"],
+    "Expected cmd.hidden (when:FALSE) to be ignored so it does not crowd out visible command recents",
+  );
+});
+
 test("command palette recents record canonical command ids when a hidden alias delegates via CommandRegistry", async () => {
   const commandRegistry = new CommandRegistry();
   const storage = new MemoryStorage();
@@ -62,4 +85,3 @@ test("command palette recents record canonical command ids when a hidden alias d
     "Expected cmd.alias (when:false) to be ignored while cmd.canonical is recorded via delegation",
   );
 });
-

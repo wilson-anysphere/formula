@@ -176,7 +176,9 @@ export function installCommandRecentsTracker(
   const isAlwaysHiddenFromPalette = (commandId: string): boolean => {
     if (!maybeGetCommand) return false;
     const when = maybeGetCommand(commandId)?.when;
-    return typeof when === "string" && when.trim() === "false";
+    // `evaluateWhenClause` treats boolean literals case-insensitively, so match that here
+    // to ensure we ignore hidden commands even if authors accidentally register `when: "False"`.
+    return typeof when === "string" && when.trim().toLowerCase() === "false";
   };
 
   // Best-effort, one-time migration from the legacy recents key.
