@@ -1,4 +1,5 @@
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_io::offcrypto::decrypt_standard_encrypted_package_stream;
 use proptest::prelude::*;
@@ -8,15 +9,6 @@ const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const AES_BLOCK_LEN: usize = 16;
 
 const KEY: [u8; 16] = [0x42; 16];
-
-fn padded_aes_len(len: usize) -> usize {
-    let rem = len % AES_BLOCK_LEN;
-    if rem == 0 {
-        len
-    } else {
-        len + (AES_BLOCK_LEN - rem)
-    }
-}
 
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     assert!(
@@ -52,18 +44,15 @@ fn encrypt_standard_encrypted_package_stream(plaintext: &[u8], key: &[u8]) -> Ve
         return out;
     }
 
-    // Standard (CryptoAPI) EncryptedPackage AES uses AES-ECB (no IV).
-    //
-    // The plaintext is segmented into 0x1000-byte chunks; each chunk is padded to a 16-byte
-    // boundary and encrypted block-by-block. Consumers must truncate the decrypted output to
-    // `orig_size`.
-    for chunk in plaintext.chunks(ENCRYPTED_PACKAGE_SEGMENT_LEN) {
-        let cipher_len = padded_aes_len(chunk.len());
-        let mut buf = vec![0u8; cipher_len];
-        buf[..chunk.len()].copy_from_slice(chunk);
-        aes_ecb_encrypt_in_place(key, &mut buf);
-        out.extend_from_slice(&buf);
+    // Standard/CryptoAPI AES `EncryptedPackage` uses AES-ECB (no IV). Ciphertext is padded to a
+    // whole number of AES blocks, and consumers truncate the decrypted plaintext to `orig_size`.
+    let mut buf = plaintext.to_vec();
+    let rem = buf.len() % AES_BLOCK_LEN;
+    if rem != 0 {
+        buf.resize(buf.len() + (AES_BLOCK_LEN - rem), 0);
     }
+    aes_ecb_encrypt_in_place(key, &mut buf);
+    out.extend_from_slice(&buf);
 
     out
 }
