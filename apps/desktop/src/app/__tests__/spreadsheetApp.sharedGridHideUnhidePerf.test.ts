@@ -94,7 +94,7 @@ function createRoot(): HTMLElement {
 
 function createNumericKeyCountingProxy<T extends Record<string, number>>(
   obj: T,
-  counters: { gets: number; has: number },
+  counters: { gets: number; has: number; descriptors: number },
 ): T {
   const numericKey = /^\d+$/;
   return new Proxy(obj, {
@@ -105,6 +105,10 @@ function createNumericKeyCountingProxy<T extends Record<string, number>>(
     has(target, prop) {
       if (typeof prop === "string" && numericKey.test(prop)) counters.has += 1;
       return Reflect.has(target, prop);
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (typeof prop === "string" && numericKey.test(prop)) counters.descriptors += 1;
+      return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
 }
@@ -313,12 +317,13 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument() as any;
-      const originalGetSheetView = doc.getSheetView?.bind(doc);
-      const view = { ...(originalGetSheetView?.(sheetId) ?? {}) } as any;
-      const rowViewAccess = { gets: 0, has: 0 };
-      const colViewAccess = { gets: 0, has: 0 };
+      const hadOwnGetSheetView = Object.prototype.hasOwnProperty.call(doc, "getSheetView");
+      const originalGetSheetView = doc.getSheetView;
+      const view = { ...(typeof originalGetSheetView === "function" ? originalGetSheetView.call(doc, sheetId) : {}) } as any;
+      const rowViewAccess = { gets: 0, has: 0, descriptors: 0 };
+      const colViewAccess = { gets: 0, has: 0, descriptors: 0 };
       if (typeof originalGetSheetView === "function") {
-        doc.getSheetView = (id: string) => (id === sheetId ? view : originalGetSheetView(id));
+        doc.getSheetView = (id: string) => (id === sheetId ? view : originalGetSheetView.call(doc, id));
       }
 
       const rowStart = limits.maxRows - OVERRIDE_COUNT - 1;
@@ -336,13 +341,15 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
       rowViewAccess.gets = 0;
       rowViewAccess.has = 0;
+      rowViewAccess.descriptors = 0;
       colViewAccess.gets = 0;
       colViewAccess.has = 0;
+      colViewAccess.descriptors = 0;
       const hideRun = withAllocationGuards(() => {
         (app as any).syncSharedGridAxisSizesFromDocument();
       });
-      expect(rowViewAccess.gets + rowViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
-      expect(colViewAccess.gets + colViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+      expect(rowViewAccess.gets + rowViewAccess.has + rowViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+      expect(colViewAccess.gets + colViewAccess.has + colViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
 
       const headerRows = (app as any).sharedHeaderRows?.() ?? 1;
       const headerCols = (app as any).sharedHeaderCols?.() ?? 1;
@@ -367,13 +374,15 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
       rowViewAccess.gets = 0;
       rowViewAccess.has = 0;
+      rowViewAccess.descriptors = 0;
       colViewAccess.gets = 0;
       colViewAccess.has = 0;
+      colViewAccess.descriptors = 0;
       const unhideRun = withAllocationGuards(() => {
         (app as any).syncSharedGridAxisSizesFromDocument();
       });
-      expect(rowViewAccess.gets + rowViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
-      expect(colViewAccess.gets + colViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+      expect(rowViewAccess.gets + rowViewAccess.has + rowViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+      expect(colViewAccess.gets + colViewAccess.has + colViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
 
       expect((renderer as any).rowHeightOverridesBase.size).toBe(baselineRowOverrides);
       expect((renderer as any).colWidthOverridesBase.size).toBe(baselineColOverrides);
@@ -402,7 +411,8 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       }
 
       if (typeof originalGetSheetView === "function") {
-        doc.getSheetView = originalGetSheetView;
+        if (hadOwnGetSheetView) doc.getSheetView = originalGetSheetView;
+        else delete doc.getSheetView;
       }
 
       app.destroy();
@@ -454,24 +464,25 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       try {
         expect(app.getGridMode()).toBe("shared");
 
-        const sharedGrid = (app as any).sharedGrid;
-        expect(sharedGrid).toBeTruthy();
-        const renderer = sharedGrid.renderer;
-        const provider = (app as any).sharedProvider;
-        const limits = app.getGridLimits();
+         const sharedGrid = (app as any).sharedGrid;
+         expect(sharedGrid).toBeTruthy();
+         const renderer = sharedGrid.renderer;
+         const provider = (app as any).sharedProvider;
+         const limits = app.getGridLimits();
         const doc = app.getDocument() as any;
         const sheetId = app.getCurrentSheetId();
-        const originalGetSheetView = doc.getSheetView?.bind(doc);
-        const view = { ...(originalGetSheetView?.(sheetId) ?? {}) } as any;
-        const rowViewAccess = { gets: 0, has: 0 };
-        const colViewAccess = { gets: 0, has: 0 };
+        const hadOwnGetSheetView = Object.prototype.hasOwnProperty.call(doc, "getSheetView");
+        const originalGetSheetView = doc.getSheetView;
+        const view = { ...(typeof originalGetSheetView === "function" ? originalGetSheetView.call(doc, sheetId) : {}) } as any;
+        const rowViewAccess = { gets: 0, has: 0, descriptors: 0 };
+        const colViewAccess = { gets: 0, has: 0, descriptors: 0 };
         if (typeof originalGetSheetView === "function") {
           // Even in the outline-driven hide/unhide path, `syncSharedGridAxisSizesFromDocument` reads
           // `view.rowHeights/colWidths`. Wrap them in proxies so any accidental `for (i=0..maxRows)`
           // scanning loops will trip deterministic counters instead of slipping past allocation-only checks.
           view.rowHeights = createNumericKeyCountingProxy({}, rowViewAccess);
           view.colWidths = createNumericKeyCountingProxy({}, colViewAccess);
-          doc.getSheetView = (id: string) => (id === sheetId ? view : originalGetSheetView(id));
+          doc.getSheetView = (id: string) => (id === sheetId ? view : originalGetSheetView.call(doc, id));
         }
 
         const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
@@ -503,14 +514,16 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
          rowViewAccess.gets = 0;
          rowViewAccess.has = 0;
+         rowViewAccess.descriptors = 0;
          colViewAccess.gets = 0;
          colViewAccess.has = 0;
+         colViewAccess.descriptors = 0;
          const hideRun = withAllocationGuards(() => {
            app.hideRows(rows);
            app.hideCols(cols);
          });
-         expect(rowViewAccess.gets + rowViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
-         expect(colViewAccess.gets + colViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+         expect(rowViewAccess.gets + rowViewAccess.has + rowViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+         expect(colViewAccess.gets + colViewAccess.has + colViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
 
          expect(rebuildSpy).not.toHaveBeenCalled();
          expect(outline.rows.entries.size).toBeLessThanOrEqual(baselineOutlineRows + OVERRIDE_COUNT);
@@ -542,14 +555,16 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
          rowViewAccess.gets = 0;
          rowViewAccess.has = 0;
+         rowViewAccess.descriptors = 0;
          colViewAccess.gets = 0;
          colViewAccess.has = 0;
+         colViewAccess.descriptors = 0;
          const unhideRun = withAllocationGuards(() => {
            app.unhideRows(rows);
            app.unhideCols(cols);
          });
-         expect(rowViewAccess.gets + rowViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
-         expect(colViewAccess.gets + colViewAccess.has).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+         expect(rowViewAccess.gets + rowViewAccess.has + rowViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
+         expect(colViewAccess.gets + colViewAccess.has + colViewAccess.descriptors).toBeLessThan(MAX_SHEET_VIEW_KEY_ACCESSES);
 
          expect(rebuildSpy).not.toHaveBeenCalled();
          // Unhide should not create additional outline entries; it may keep or delete entries depending on implementation.
@@ -583,7 +598,8 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
          }
        } finally {
          if (typeof originalGetSheetView === "function") {
-           doc.getSheetView = originalGetSheetView;
+           if (hadOwnGetSheetView) doc.getSheetView = originalGetSheetView;
+           else delete doc.getSheetView;
          }
          restoreOutlineGetOverrides();
          app.destroy();
