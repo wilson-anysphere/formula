@@ -12,7 +12,10 @@ describe("desktop updater listener consolidation", () => {
     // `main.ts` wraps listen() calls in `listenBestEffort(...)` so they can't throw during
     // startup. Count either form to ensure we don't regress and add extra updater listeners.
     const listenCallRe = (eventName: string) =>
-      new RegExp(String.raw`\b(?:listen|listenBestEffort)\(\s*['"]${escapeRegExp(eventName)}['"]`, "g");
+      new RegExp(
+        String.raw`\b(?:listen|listenBestEffort)\(\s*['"]${escapeRegExp(eventName)}['"]`,
+        "g",
+      );
     const listenCallCount = (eventName: string) => (source.match(listenCallRe(eventName)) ?? []).length;
 
     // These updater UX events should be handled by `tauri/updaterUi.ts` so that manual checks
