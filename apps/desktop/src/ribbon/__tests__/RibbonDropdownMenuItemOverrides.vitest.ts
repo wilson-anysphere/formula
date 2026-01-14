@@ -68,7 +68,7 @@ describe("Ribbon UI state overrides (dropdown menu items)", () => {
     act(() => root.unmount());
   });
 
-  it("does not allow disabledById to re-enable schema-disabled menu items", async () => {
+  it("allows disabledById overrides to re-enable schema-disabled menu items", async () => {
     const { container, root } = renderRibbon();
 
     const insertTab = container.querySelector<HTMLButtonElement>('[data-testid="ribbon-tab-insert"]');
@@ -107,8 +107,11 @@ describe("Ribbon UI state overrides (dropdown menu items)", () => {
 
     const updated = menu.querySelector<HTMLButtonElement>(`[data-command-id="${schemaDisabledId}"]`);
     expect(updated).toBeInstanceOf(HTMLButtonElement);
-    expect(updated?.disabled).toBe(true);
-    expect(menu.querySelector(`.ribbon-dropdown__menuitem:not(:disabled)[data-command-id="${schemaDisabledId}"]`)).toBeNull();
+    expect(updated?.disabled).toBe(false);
+    expect(updated?.hasAttribute("disabled")).toBe(false);
+    expect(menu.querySelector(`.ribbon-dropdown__menuitem:not(:disabled)[data-command-id="${schemaDisabledId}"]`)).toBeInstanceOf(
+      HTMLButtonElement,
+    );
 
     act(() => root.unmount());
   });

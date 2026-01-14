@@ -35,12 +35,12 @@ export function RibbonGroup({
             pressed={pressedById[button.id]}
             labelOverride={labelById?.[button.id]}
             disabledOverride={disabledById?.[button.id]}
+            labelById={labelById}
+            disabledById={disabledById}
             shortcutOverride={shortcutById?.[button.id]}
             shortcutById={shortcutById}
             ariaKeyShortcutsOverride={ariaKeyShortcutsById?.[button.id]}
             ariaKeyShortcutsById={ariaKeyShortcutsById}
-            menuItemDisabledOverrides={button.menuItems?.map((item) => disabledById?.[item.id])}
-            menuItemLabelOverrides={button.menuItems?.map((item) => labelById?.[item.id])}
             onActivate={onActivateButton}
           />
         ))}

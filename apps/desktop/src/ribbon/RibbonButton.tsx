@@ -9,6 +9,13 @@ export interface RibbonButtonProps {
   labelOverride?: string;
   disabledOverride?: boolean;
   /**
+   * Full UI state override maps (keyed by command id).
+   *
+   * These are used by dropdown menu items, which need to consult overrides by id.
+   */
+  labelById?: Record<string, string>;
+  disabledById?: Record<string, boolean>;
+  /**
    * Optional shortcut display override for the top-level ribbon control.
    *
    * This is plumbed through `RibbonGroup` from `RibbonUiState.shortcutById`.
@@ -28,20 +35,6 @@ export interface RibbonButtonProps {
    * Optional lookup table for dropdown menu items (keyed by menu item `id`).
    */
   ariaKeyShortcutsById?: Record<string, string>;
-  /**
-   * Per-menu-item disabled overrides, aligned with `button.menuItems`.
-   *
-   * This is passed as an array (instead of the full `disabledById` record) to avoid
-   * invalidating `React.memo(...)` on every ribbon UI state update.
-   */
-  menuItemDisabledOverrides?: ReadonlyArray<boolean | undefined>;
-  /**
-   * Per-menu-item label overrides, aligned with `button.menuItems`.
-   *
-   * This is passed as an array (instead of the full `labelById` record) to avoid
-   * invalidating `React.memo(...)` on every ribbon UI state update.
-   */
-  menuItemLabelOverrides?: ReadonlyArray<string | undefined>;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -97,12 +90,12 @@ export const RibbonButton = React.memo(function RibbonButton({
   pressed,
   labelOverride,
   disabledOverride,
+  labelById,
+  disabledById,
   shortcutOverride,
   shortcutById,
   ariaKeyShortcutsOverride,
   ariaKeyShortcutsById,
-  menuItemDisabledOverrides,
-  menuItemLabelOverrides,
   onActivate,
 }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
@@ -119,8 +112,14 @@ export const RibbonButton = React.memo(function RibbonButton({
     () => `ribbon-menu-${domInstanceId}-${button.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
     [button.id, domInstanceId],
   );
-  const label = labelOverride ?? button.label;
-  const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
+  const label = labelOverride ?? labelById?.[button.id] ?? button.label;
+  const disabledByIdOverride = disabledById?.[button.id];
+  const disabled =
+    typeof disabledOverride === "boolean"
+      ? disabledOverride
+      : typeof disabledByIdOverride === "boolean"
+        ? disabledByIdOverride
+        : Boolean(button.disabled);
   const shortcut = shortcutOverride ?? shortcutById?.[button.id];
   const title = formatTooltipTitle(button.ariaLabel, shortcut);
   const ariaKeyShortcuts = ariaKeyShortcutsOverride ?? ariaKeyShortcutsById?.[button.id];
@@ -310,10 +309,11 @@ export const RibbonButton = React.memo(function RibbonButton({
             }
           }}
         >
-          {button.menuItems?.map((item, idx) => {
-            const menuItemLabelOverride = menuItemLabelOverrides?.[idx];
-            const menuItemLabel = menuItemLabelOverride ?? item.label;
-            const menuItemDisabled = Boolean(item.disabled) || menuItemDisabledOverrides?.[idx] === true;
+          {button.menuItems?.map((item) => {
+            const menuItemLabel = labelById?.[item.id] ?? item.label;
+            const menuItemDisabledOverride = disabledById?.[item.id];
+            const menuItemDisabled =
+              typeof menuItemDisabledOverride === "boolean" ? menuItemDisabledOverride : Boolean(item.disabled);
             const itemShortcut = shortcutById?.[item.id];
             const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
             const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
@@ -375,18 +375,13 @@ function areRibbonButtonPropsEqual(prev, next) {
   if (prev.ariaKeyShortcutsById !== next.ariaKeyShortcutsById) return false;
   if (prev.onActivate !== next.onActivate) return false;
 
-  const arraysShallowEqual = <T,>(a?: ReadonlyArray<T>, b?: ReadonlyArray<T>): boolean => {
-    if (a === b) return true;
-    if (!a || !b) return false;
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i += 1) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  };
+  const menuItems = prev.button.menuItems;
+  if (!menuItems?.length) return true;
 
-  if (!arraysShallowEqual(prev.menuItemDisabledOverrides, next.menuItemDisabledOverrides)) return false;
-  if (!arraysShallowEqual(prev.menuItemLabelOverrides, next.menuItemLabelOverrides)) return false;
+  for (const item of menuItems) {
+    if (prev.labelById?.[item.id] !== next.labelById?.[item.id]) return false;
+    if (prev.disabledById?.[item.id] !== next.disabledById?.[item.id]) return false;
+  }
 
   return true;
 });
