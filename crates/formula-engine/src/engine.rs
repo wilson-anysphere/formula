@@ -976,7 +976,9 @@ impl Engine {
         let directory = directory.filter(|s| !s.is_empty()).map(|s| s.to_string());
         let filename = filename.filter(|s| !s.is_empty()).map(|s| s.to_string());
 
-        if self.workbook.workbook_directory == directory && self.workbook.workbook_filename == filename {
+        if self.workbook.workbook_directory == directory
+            && self.workbook.workbook_filename == filename
+        {
             return;
         }
 
@@ -1513,11 +1515,15 @@ impl Engine {
 
         let mut out = Vec::new();
         for (_, sheet_id, addr, reason) in entries.into_iter().take(limit) {
-            let sheet = self.workbook.sheet_name(sheet_id).unwrap_or_default().to_string();
-        out.push(BytecodeCompileReportEntry {
-            sheet,
-            addr,
-            reason,
+            let sheet = self
+                .workbook
+                .sheet_name(sheet_id)
+                .unwrap_or_default()
+                .to_string();
+            out.push(BytecodeCompileReportEntry {
+                sheet,
+                addr,
+                reason,
             });
         }
         out
@@ -8152,7 +8158,8 @@ impl crate::eval::ValueResolver for Snapshot {
         if start_idx <= end_idx {
             Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
         } else {
-            let mut out: Vec<usize> = self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
+            let mut out: Vec<usize> =
+                self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
             out.reverse();
             Some(out)
         }
@@ -9698,11 +9705,8 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                     .map(engine_value_to_bytecode)
                     .or_else(|| {
                         let provider = self.snapshot.external_value_provider.as_ref()?;
-                        let sheet_name = self
-                            .snapshot
-                            .sheet_names_by_id
-                            .get(sheet_id)?
-                            .as_deref()?;
+                        let sheet_name =
+                            self.snapshot.sheet_names_by_id.get(sheet_id)?.as_deref()?;
                         provider
                             .get(sheet_name, addr)
                             .as_ref()
@@ -9738,12 +9742,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         }
     }
 
-    fn record_reference(
-        &self,
-        sheet: usize,
-        start: bytecode::CellCoord,
-        end: bytecode::CellCoord,
-    ) {
+    fn record_reference(&self, sheet: usize, start: bytecode::CellCoord, end: bytecode::CellCoord) {
         // Dependency tracing is only used for the engine's internal dependency graph, which does
         // not represent external workbooks yet. Ignore references into synthetic external sheets.
         if !self.snapshot.sheets.contains(&sheet) {
@@ -9951,22 +9950,22 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         // Excel resolves sheet names case-insensitively across Unicode using compatibility
         // normalization (NFKC). Ensure bytecode runtime sheet-name lookups (e.g. INDIRECT, SHEET)
         // match the engine's canonical sheet-key semantics.
-        let local = self
-            .snapshot
-            .sheet_names_by_id
-            .iter()
-            .enumerate()
-            .find_map(|(sheet_id, candidate)| {
-                if !self.snapshot.sheets.contains(&sheet_id) {
-                    return None;
-                }
-                let candidate = candidate.as_deref()?;
-                if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
-                    Some(sheet_id)
-                } else {
-                    None
-                }
-            });
+        let local =
+            self.snapshot
+                .sheet_names_by_id
+                .iter()
+                .enumerate()
+                .find_map(|(sheet_id, candidate)| {
+                    if !self.snapshot.sheets.contains(&sheet_id) {
+                        return None;
+                    }
+                    let candidate = candidate.as_deref()?;
+                    if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
+                        Some(sheet_id)
+                    } else {
+                        None
+                    }
+                });
         if local.is_some() {
             return local;
         }
@@ -11081,12 +11080,18 @@ fn bytecode_expr_is_eligible_inner(
                             let lowered = crate::eval::lower_ast(&ast, origin);
                             match lowered {
                                 crate::eval::Expr::CellRef(r)
-                                    if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+                                    if matches!(
+                                        r.sheet,
+                                        crate::eval::SheetReference::External(_)
+                                    ) =>
                                 {
                                     return false;
                                 }
                                 crate::eval::Expr::RangeRef(r)
-                                    if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
+                                    if matches!(
+                                        r.sheet,
+                                        crate::eval::SheetReference::External(_)
+                                    ) =>
                                 {
                                     return false;
                                 }
@@ -15060,7 +15065,10 @@ mod tests {
 
         let sheet4 = engine.workbook.ensure_sheet("Sheet4");
         assert_eq!(sheet4, 3, "deleted sheet ids should not be reused");
-        assert_eq!(engine.workbook.sheet_ids_in_order(), &[sheet1, sheet3, sheet4]);
+        assert_eq!(
+            engine.workbook.sheet_ids_in_order(),
+            &[sheet1, sheet3, sheet4]
+        );
 
         // 3D spans are driven by the current tab order and ignore deleted sheets.
         assert_eq!(
@@ -16434,7 +16442,9 @@ mod tests {
             cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
             trace: None,
-            external_sheets: Mutex::new(ExternalSheetResolver::new(snapshot.sheet_names_by_id.len())),
+            external_sheets: Mutex::new(ExternalSheetResolver::new(
+                snapshot.sheet_names_by_id.len(),
+            )),
         };
 
         assert!(
