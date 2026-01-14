@@ -520,5 +520,6 @@ test("fails when Parquet shared-mime-info definition file lacks expected content
     { mimeXmlContent: "<mime-info />\n" },
   );
   assert.notEqual(proc.status, 0);
-  assert.match(proc.stderr, /shared-mime-info definition file is missing expected content/i);
+  assert.match(proc.stderr, /shared-mime-info definition file is missing required glob mappings/i);
+  assert.match(proc.stderr, /\.parquet/i);
 });

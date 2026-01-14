@@ -43,6 +43,47 @@ function asObject(value) {
   return value;
 }
 
+function normalizeExt(value) {
+  return String(value).trim().toLowerCase().replace(/^\./, "");
+}
+
+/**
+ * Parse shared-mime-info XML content into a mapping of:
+ *   mimeType -> Set(glob patterns)
+ *
+ * This is intentionally lightweight (regex-based) to keep the guard dependency-free.
+ *
+ * @param {string} xml
+ * @returns {Map<string, Set<string>>}
+ */
+function parseSharedMimeInfoXml(xml) {
+  /** @type {Map<string, Set<string>>} */
+  const out = new Map();
+  if (typeof xml !== "string" || !xml.trim()) return out;
+
+  const mimeTypeRe = /<mime-type\b[^>]*\btype\s*=\s*(['"])(.*?)\1[^>]*>([\s\S]*?)<\/mime-type>/gi;
+  while (true) {
+    const match = mimeTypeRe.exec(xml);
+    if (!match) break;
+    const type = String(match[2] ?? "").trim().toLowerCase();
+    if (!type) continue;
+    const inner = String(match[3] ?? "");
+    const patterns = out.get(type) ?? new Set();
+
+    const globRe = /<glob\b[^>]*\bpattern\s*=\s*(['"])(.*?)\1[^>]*\/?>/gi;
+    while (true) {
+      const g = globRe.exec(inner);
+      if (!g) break;
+      const pattern = String(g[2] ?? "").trim().toLowerCase();
+      if (pattern) patterns.add(pattern);
+    }
+
+    out.set(type, patterns);
+  }
+
+  return out;
+}
+
 /**
  * @param {unknown} resources
  * @param {string} filename
@@ -170,9 +211,10 @@ function validateLinuxDepends(depends, kind) {
 
 /**
  * @param {unknown} files
+ * @param {unknown} fileAssociations
  * @param {string} kind
  */
-function validateLinuxMimeFiles(files, kind, identifier) {
+function validateLinuxMimeFiles(files, fileAssociations, kind, identifier) {
   const obj = asObject(files);
   if (!obj) {
     die(`bundle.linux.${kind}.files must be an object mapping destination -> source`);
@@ -211,10 +253,56 @@ function validateLinuxMimeFiles(files, kind, identifier) {
   } catch (err) {
     die(`failed to read Parquet shared-mime-info definition file: ${resolved} (${err instanceof Error ? err.message : err})`);
   }
-  if (!xml.includes("application/vnd.apache.parquet") || !xml.includes("*.parquet")) {
+
+  if (!Array.isArray(fileAssociations) || fileAssociations.length === 0) {
+    die("bundle.fileAssociations must be an array when Parquet file association is configured");
+  }
+
+  /** @type {Map<string, string>} */
+  const mimeByExt = new Map();
+  for (const assoc of fileAssociations) {
+    if (!assoc || typeof assoc !== "object" || Array.isArray(assoc)) continue;
+    // @ts-ignore
+    const mimeTypeRaw = assoc.mimeType;
+    const mimeType = typeof mimeTypeRaw === "string" ? mimeTypeRaw.trim().toLowerCase() : "";
+    if (!mimeType) continue;
+    // @ts-ignore
+    const extRaw = assoc.ext;
+    const exts = Array.isArray(extRaw) ? extRaw : typeof extRaw === "string" ? [extRaw] : [];
+    for (const extValue of exts) {
+      const ext = normalizeExt(extValue);
+      if (!ext) continue;
+      const existing = mimeByExt.get(ext);
+      if (existing && existing !== mimeType) {
+        die(
+          `bundle.fileAssociations contains conflicting mimeType entries for .${ext}: ` +
+            `${existing} vs ${mimeType}. Fix: ensure each extension maps to a single MIME type.`,
+        );
+      }
+      mimeByExt.set(ext, mimeType);
+    }
+  }
+
+  const parsed = parseSharedMimeInfoXml(xml);
+  /** @type {Array<{ ext: string, mimeType: string, expectedGlob: string }>} */
+  const missing = [];
+  for (const [ext, mimeType] of mimeByExt.entries()) {
+    const expectedGlob = `*.${ext}`;
+    const patterns = parsed.get(mimeType) ?? new Set();
+    if (!patterns.has(expectedGlob)) {
+      missing.push({ ext, mimeType, expectedGlob });
+    }
+  }
+
+  if (missing.length > 0) {
+    const formatted = missing
+      .sort((a, b) => a.ext.localeCompare(b.ext))
+      .map(({ ext, mimeType, expectedGlob }) => `- .${ext} → ${mimeType} (expected glob ${expectedGlob})`)
+      .join("\n");
     die(
-      `Parquet shared-mime-info definition file is missing expected content: ${resolved}\n` +
-        `Expected to find both "application/vnd.apache.parquet" and "*.parquet"`,
+      `shared-mime-info definition file is missing required glob mappings: ${resolved}\n` +
+        `Missing:\n${formatted}\n` +
+        "Fix: add <glob pattern=\"*.ext\" /> entries to mime/<identifier>.xml for all configured file associations so Linux file managers can resolve extensions to the advertised MIME types.",
     );
   }
 }
@@ -260,9 +348,9 @@ validateLinuxFiles(asObject(linux.appimage)?.files, mainBinaryName, "appimage");
 // so the MIME database can map `*.parquet` correctly even on distros whose shared-mime-info
 // package does not include a Parquet glob by default.
 if (hasParquetAssociation(bundle.fileAssociations)) {
-  validateLinuxMimeFiles(asObject(linux.deb)?.files, "deb", identifier);
-  validateLinuxMimeFiles(asObject(linux.rpm)?.files, "rpm", identifier);
-  validateLinuxMimeFiles(asObject(linux.appimage)?.files, "appimage", identifier);
+  validateLinuxMimeFiles(asObject(linux.deb)?.files, bundle.fileAssociations, "deb", identifier);
+  validateLinuxMimeFiles(asObject(linux.rpm)?.files, bundle.fileAssociations, "rpm", identifier);
+  validateLinuxMimeFiles(asObject(linux.appimage)?.files, bundle.fileAssociations, "appimage", identifier);
 
   // Ensure the distro-native packages pull in `update-mime-database` on install.
   validateLinuxDepends(asObject(linux.deb)?.depends, "deb");
