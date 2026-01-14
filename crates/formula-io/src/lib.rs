@@ -1988,14 +1988,6 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
 }
 
 #[cfg(feature = "encrypted-workbooks")]
-fn zip_contains_workbook_bin(package_bytes: &[u8]) -> bool {
-    matches!(
-        sniff_ooxml_zip_workbook_kind(package_bytes),
-        Some(WorkbookFormat::Xlsb)
-    )
-}
-
-#[cfg(feature = "encrypted-workbooks")]
 fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
     path: &Path,
     password: Option<&str>,
