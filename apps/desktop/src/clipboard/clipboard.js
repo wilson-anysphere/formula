@@ -303,8 +303,12 @@ export function clipboardFormatToDocStyle(format) {
   const numberFormat = format.numberFormat;
   if (typeof numberFormat === "string") {
     const trimmed = numberFormat.trim();
-    // Treat "General" (Excel default) the same as clearing number formatting.
-    if (trimmed !== "" && trimmed.toLowerCase() !== "general") {
+    // Treat "General" (Excel default) and empty string as clearing number formatting.
+    // Use `null` (explicit override) instead of omitting the key so pastes can clear
+    // inherited row/column formatting (Excel semantics).
+    if (trimmed === "" || trimmed.toLowerCase() === "general") {
+      out.numberFormat = null;
+    } else {
       out.numberFormat = numberFormat;
     }
   }

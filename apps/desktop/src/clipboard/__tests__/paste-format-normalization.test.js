@@ -95,7 +95,7 @@ test("pasteClipboardContent converts common CSS named colors to ARGB (non-DOM fa
   assert.equal(style.fill?.fgColor, "#FFFFFF00");
 });
 
-test("pasteClipboardContent treats mso-number-format:General as clearing (does not intern a style)", () => {
+test("pasteClipboardContent treats mso-number-format:General as clearing (explicit numberFormat: null override)", () => {
   const doc = new DocumentController();
 
   const html = `<!DOCTYPE html><html><body><table>
@@ -109,5 +109,10 @@ test("pasteClipboardContent treats mso-number-format:General as clearing (does n
 
   const cell = doc.getCell("Sheet1", "A1");
   assert.equal(cell.value, 1);
-  assert.equal(cell.styleId, 0);
+
+  // "General" should map to an explicit `numberFormat: null` override so pasted cells
+  // clear any inherited number formats (row/col/sheet defaults).
+  assert.notEqual(cell.styleId, 0);
+  const style = doc.styleTable.get(cell.styleId);
+  assert.equal(style.numberFormat, null);
 });
