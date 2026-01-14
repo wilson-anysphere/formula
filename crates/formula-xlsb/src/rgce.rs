@@ -1169,7 +1169,20 @@ fn decode_rgce_impl(
                     text.push('@');
                     prec = 70;
                 }
-                if is_single_cell {
+                const MAX_ROW: u32 = 1_048_575;
+                let col_first_idx = col_first & COL_INDEX_MASK;
+                let col_last_idx = col_last & COL_INDEX_MASK;
+                if row_first0 == 0 && row_last0 == MAX_ROW {
+                    // Column range: `A:C` / `A:A`.
+                    text.push_str(&format_col_ref_from_field(col_first));
+                    text.push(':');
+                    text.push_str(&format_col_ref_from_field(col_last));
+                } else if col_first_idx == 0 && col_last_idx == COL_INDEX_MASK {
+                    // Row range: `1:3` / `1:1`.
+                    text.push_str(&format_row_ref_from_field(row_first0, col_first));
+                    text.push(':');
+                    text.push_str(&format_row_ref_from_field(row_last0, col_last));
+                } else if is_single_cell {
                     text.push_str(&a);
                 } else {
                     text.push_str(&a);
@@ -1437,7 +1450,18 @@ fn decode_rgce_impl(
                     prec = 70;
                 }
                 text.push_str(&prefix);
-                if is_single_cell {
+                const MAX_ROW: u32 = 1_048_575;
+                let col_first_idx = col_first & COL_INDEX_MASK;
+                let col_last_idx = col_last & COL_INDEX_MASK;
+                if row_first0 == 0 && row_last0 == MAX_ROW {
+                    text.push_str(&format_col_ref_from_field(col_first));
+                    text.push(':');
+                    text.push_str(&format_col_ref_from_field(col_last));
+                } else if col_first_idx == 0 && col_last_idx == COL_INDEX_MASK {
+                    text.push_str(&format_row_ref_from_field(row_first0, col_first));
+                    text.push(':');
+                    text.push_str(&format_row_ref_from_field(row_last0, col_last));
+                } else if is_single_cell {
                     text.push_str(&a);
                 } else {
                     text.push_str(&a);
@@ -2319,6 +2343,30 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
         out.push('$');
     }
     push_column_label(col, &mut out);
+    if !row_relative {
+        out.push('$');
+    }
+    out.push_str(&row1.to_string());
+    out
+}
+
+fn format_col_ref_from_field(col_field: u16) -> String {
+    let col = (col_field & COL_INDEX_MASK) as u32;
+    let col_relative = (col_field & COL_RELATIVE_MASK) == COL_RELATIVE_MASK;
+
+    let mut out = String::new();
+    if !col_relative {
+        out.push('$');
+    }
+    push_column_label(col, &mut out);
+    out
+}
+
+fn format_row_ref_from_field(row0: u32, col_field: u16) -> String {
+    let row1 = (row0 as u64).saturating_add(1);
+    let row_relative = (col_field & ROW_RELATIVE_MASK) == ROW_RELATIVE_MASK;
+
+    let mut out = String::new();
     if !row_relative {
         out.push('$');
     }
@@ -4863,7 +4911,17 @@ impl<'a> FormulaParser<'a> {
             }
             Some('"') => Expr::String(self.parse_string_literal()?),
             Some('#') => Expr::Error(self.parse_error_literal()?),
-            Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number()?,
+            Some(ch) if ch.is_ascii_digit() => {
+                // Row-range references like `1:3` start with digits, which would otherwise be
+                // interpreted as a numeric literal. Try parsing a row range first so we can emit
+                // Excel-compatible `PtgArea` tokens for `1:3` / `1:1`.
+                if let Some(r) = self.try_parse_ref(None)? {
+                    Expr::Ref(r)
+                } else {
+                    self.parse_number()?
+                }
+            }
+            Some('.') => self.parse_number()?,
             Some('$') => self.parse_ident_or_ref()?,
             Some('[') => self.parse_ident_or_ref()?,
             Some('\'') => self.parse_ident_or_ref()?,
@@ -5121,39 +5179,104 @@ impl<'a> FormulaParser<'a> {
 
     fn try_parse_ref(&mut self, sheet: Option<SheetSpec>) -> Result<Option<Ref>, String> {
         let start = self.pos;
-        let Some(a) = self.parse_cell_ref()? else {
-            self.pos = start;
-            return Ok(None);
-        };
-        let after_a = self.pos;
+        if let Some(a) = self.parse_cell_ref()? {
+            let after_a = self.pos;
 
-        // Area references like `A1:B2` allow optional whitespace around the `:` operator. But
-        // whitespace is also significant for the intersection operator, so only consume it if the
-        // next non-whitespace character is actually `:`.
-        let colon_pos = self.peek_non_ws_pos();
-        if colon_pos < self.input.len() && self.input[colon_pos..].starts_with(':') {
-            // Commit whitespace and consume ':'.
-            self.pos = colon_pos;
-            self.next_char();
-            // Allow whitespace after ':'.
-            self.skip_ws();
+            // Area references like `A1:B2` allow optional whitespace around the `:` operator. But
+            // whitespace is also significant for the intersection operator, so only consume it if
+            // the next non-whitespace character is actually `:`.
+            let colon_pos = self.peek_non_ws_pos();
+            if colon_pos < self.input.len() && self.input[colon_pos..].starts_with(':') {
+                // Commit whitespace and consume ':'.
+                self.pos = colon_pos;
+                self.next_char();
+                // Allow whitespace after ':'.
+                self.skip_ws();
 
-            if let Some(b) = self.parse_cell_ref()? {
-                return Ok(Some(Ref {
-                    sheet,
-                    kind: RefKind::Area(a, b),
-                }));
+                if let Some(b) = self.parse_cell_ref()? {
+                    return Ok(Some(Ref {
+                        sheet,
+                        kind: RefKind::Area(a, b),
+                    }));
+                }
+
+                // Not a simple area ref (`A1:B2`). Leave the `:` operator to be handled as a
+                // general range expression (`PtgRange`) by higher-precedence parsing.
+                self.pos = after_a;
             }
 
-            // Not a simple area ref (`A1:B2`). Leave the `:` operator to be handled as a general
-            // range expression (`PtgRange`) by higher-precedence parsing.
-            self.pos = after_a;
+            return Ok(Some(Ref {
+                sheet,
+                kind: RefKind::Cell(a),
+            }));
+        }
+        self.pos = start;
+
+        // Column ranges like `A:C` / `A:A`.
+        if let Some((col_a, abs_col_a)) = self.parse_col_ref()? {
+            let colon_pos = self.peek_non_ws_pos();
+            if colon_pos < self.input.len() && self.input[colon_pos..].starts_with(':') {
+                self.pos = colon_pos;
+                self.next_char();
+                self.skip_ws();
+                if let Some((col_b, abs_col_b)) = self.parse_col_ref()? {
+                    const MAX_ROW: u32 = 1_048_575;
+                    return Ok(Some(Ref {
+                        sheet,
+                        kind: RefKind::Area(
+                            CellRef {
+                                row: 0,
+                                col: col_a,
+                                abs_row: true,
+                                abs_col: abs_col_a,
+                            },
+                            CellRef {
+                                row: MAX_ROW,
+                                col: col_b,
+                                abs_row: true,
+                                abs_col: abs_col_b,
+                            },
+                        ),
+                    }));
+                }
+            }
+            // Only treat this as a column reference if both sides are valid column refs. Otherwise
+            // roll back so the caller can interpret it as a defined name, number, etc.
+            self.pos = start;
         }
 
-        Ok(Some(Ref {
-            sheet,
-            kind: RefKind::Cell(a),
-        }))
+        // Row ranges like `1:3` / `1:1`.
+        if let Some((row_a, abs_row_a)) = self.parse_row_ref()? {
+            let colon_pos = self.peek_non_ws_pos();
+            if colon_pos < self.input.len() && self.input[colon_pos..].starts_with(':') {
+                self.pos = colon_pos;
+                self.next_char();
+                self.skip_ws();
+                if let Some((row_b, abs_row_b)) = self.parse_row_ref()? {
+                    const MAX_COL: u32 = COL_INDEX_MASK as u32;
+                    return Ok(Some(Ref {
+                        sheet,
+                        kind: RefKind::Area(
+                            CellRef {
+                                row: row_a,
+                                col: 0,
+                                abs_row: abs_row_a,
+                                abs_col: true,
+                            },
+                            CellRef {
+                                row: row_b,
+                                col: MAX_COL,
+                                abs_row: abs_row_b,
+                                abs_col: true,
+                            },
+                        ),
+                    }));
+                }
+            }
+            self.pos = start;
+        }
+
+        Ok(None)
     }
 
     fn parse_number(&mut self) -> Result<Expr, String> {
@@ -5192,6 +5315,68 @@ impl<'a> FormulaParser<'a> {
             .parse()
             .map_err(|_| format!("invalid number literal: {s}"))?;
         Ok(Expr::Number(n))
+    }
+
+    fn parse_col_ref(&mut self) -> Result<Option<(u32, bool)>, String> {
+        let start = self.pos;
+        let abs_col = self.consume_if('$');
+        let col_start = self.pos;
+        while let Some(ch) = self.peek_char() {
+            if ch.is_ascii_alphabetic() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        let col_label = &self.input[col_start..self.pos];
+        if col_label.is_empty() {
+            self.pos = start;
+            return Ok(None);
+        }
+        if col_label.len() > 3 {
+            self.pos = start;
+            return Ok(None);
+        }
+
+        let col =
+            col_label_to_index(col_label).ok_or_else(|| "invalid column label".to_string())?;
+        if col > COL_INDEX_MASK as u32 {
+            self.pos = start;
+            return Ok(None);
+        }
+
+        Ok(Some((col, abs_col)))
+    }
+
+    fn parse_row_ref(&mut self) -> Result<Option<(u32, bool)>, String> {
+        let start = self.pos;
+        let abs_row = self.consume_if('$');
+        let row_start = self.pos;
+        while let Some(ch) = self.peek_char() {
+            if ch.is_ascii_digit() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        let row_str = &self.input[row_start..self.pos];
+        if row_str.is_empty() {
+            self.pos = start;
+            return Ok(None);
+        }
+
+        let row1: u32 = row_str.parse().map_err(|_| "invalid row".to_string())?;
+        if row1 == 0 {
+            self.pos = start;
+            return Ok(None);
+        }
+        let row = row1 - 1;
+        if row > 1_048_575 {
+            self.pos = start;
+            return Ok(None);
+        }
+
+        Ok(Some((row, abs_row)))
     }
 
     fn parse_cell_ref(&mut self) -> Result<Option<CellRef>, String> {
@@ -5362,9 +5547,34 @@ impl<'a> FormulaParser<'a> {
         i
     }
 
+    fn looks_like_row_range_start(&self) -> bool {
+        let mut i = self.pos;
+        while i < self.input.len() {
+            let ch = self.input[i..].chars().next().expect("i < len");
+            if ch.is_ascii_digit() {
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if i == self.pos {
+            return false;
+        }
+        while i < self.input.len() {
+            let ch = self.input[i..].chars().next().expect("i < len");
+            if ch.is_whitespace() {
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        i < self.input.len() && self.input[i..].starts_with(':')
+    }
+
     fn is_intersection_rhs_start(&self) -> bool {
         match self.peek_char() {
             Some('$' | '[' | '\'' | '(') => true,
+            Some(ch) if ch.is_ascii_digit() => self.looks_like_row_range_start(),
             Some(ch) if is_ident_start(ch) => true,
             _ => false,
         }
