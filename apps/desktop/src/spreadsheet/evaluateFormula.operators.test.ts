@@ -36,6 +36,11 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null)).toBe(true);
   });
 
+  it("treats whitespace between function names and '(' as a function call", () => {
+    expect(evaluateFormula("=SUM (1, 2)", () => null)).toBe(3);
+    expect(evaluateFormula("=IF \n (1>0, TRUE, FALSE)", () => null)).toBe(true);
+  });
+
   it("canonicalizes localized function names when a localeId is provided", () => {
     expect(evaluateFormula("=SUMME(1;2)", () => null, { localeId: "de-DE" })).toBe(3);
     expect(evaluateFormula("=MITTELWERT(1;2;3)", () => null, { localeId: "de-DE" })).toBe(2);

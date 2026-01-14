@@ -431,6 +431,15 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
           out.push({ type: "reference", value: resolved });
           break;
         }
+
+        // `tokenizeFormula` only labels a token as a "function" when the opening paren is adjacent
+        // (e.g. `SUM(A1)`). Excel permits whitespace between a function name and `(`, so treat an
+        // unresolved identifier followed by `(` as a function call too (e.g. `SUM (A1)`).
+        if (tokens[i + 1]?.type === "punctuation" && tokens[i + 1]?.text === "(") {
+          out.push({ type: "function", value: canonicalizeFunctionNameForLocale(token.text, options.localeId) });
+          break;
+        }
+
         out.push({ type: "error", value: "#NAME?" });
         break;
       }
