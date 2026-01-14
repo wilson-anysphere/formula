@@ -358,6 +358,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    repo_root = Path(__file__).resolve().parents[2]
+    # Safety guard: prevent accidentally overwriting the canonical, committed corpus with a volatile
+    # debug corpus.
+    if args.include_volatile:
+        out_path = Path(args.out)
+        out_abs = out_path.resolve() if out_path.is_absolute() else (Path.cwd() / out_path).resolve()
+        canonical_abs = (repo_root / "tests" / "compatibility" / "excel-oracle" / "cases.json").resolve()
+        if out_abs == canonical_abs:
+            raise SystemExit(
+                "Refusing to write a volatile debug corpus to tests/compatibility/excel-oracle/cases.json. "
+                "Re-run with a different --out path (e.g. /tmp/cases.json) and do not commit/pin the result."
+            )
+
     payload = generate_cases(include_volatile=args.include_volatile)
     _validate_against_function_catalog(payload, allow_volatile=args.include_volatile)
 
