@@ -589,7 +589,62 @@ type DrawingGestureState =
       startSheetX: number;
       startSheetY: number;
       startAnchor: DrawingAnchor;
+      startWidthPx: number;
+      startHeightPx: number;
+      /** Only set for image objects; used when Shift is held during resize. */
+      aspectRatio: number | null;
     };
+
+function lockAspectRatioResize(args: {
+  handle: ResizeHandle;
+  dx: number;
+  dy: number;
+  startWidthPx: number;
+  startHeightPx: number;
+  aspectRatio: number;
+  minSizePx: number;
+}): { dx: number; dy: number } {
+  const { handle, startWidthPx, startHeightPx } = args;
+  let { dx, dy, aspectRatio } = args;
+
+  // Only lock corner-handle resizes (edge handles remain unconstrained).
+  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return { dx, dy };
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return { dx, dy };
+  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return { dx, dy };
+  if (startWidthPx <= 0 || startHeightPx <= 0) return { dx, dy };
+
+  const sx = handle === "ne" || handle === "se" ? 1 : -1;
+  const sy = handle === "sw" || handle === "se" ? 1 : -1;
+
+  const proposedWidth = startWidthPx + sx * dx;
+  const proposedHeight = startHeightPx + sy * dy;
+  const scaleW = proposedWidth / startWidthPx;
+  const scaleH = proposedHeight / startHeightPx;
+
+  const widthDriven = Math.abs(scaleW - 1) >= Math.abs(scaleH - 1);
+
+  const minScale = Math.max(
+    startWidthPx > args.minSizePx ? args.minSizePx / startWidthPx : 0,
+    startHeightPx > args.minSizePx ? args.minSizePx / startHeightPx : 0,
+  );
+
+  const clampScale = (s: number): number => {
+    if (!Number.isFinite(s)) return 1;
+    return Math.max(s, minScale, 0);
+  };
+
+  if (widthDriven) {
+    const scale = clampScale(scaleW);
+    const nextWidth = startWidthPx * scale;
+    const nextHeight = nextWidth / aspectRatio;
+    return { dx: (nextWidth - startWidthPx) * sx, dy: (nextHeight - startHeightPx) * sy };
+  }
+
+  const scale = clampScale(scaleH);
+  const nextHeight = startHeightPx * scale;
+  const nextWidth = nextHeight * aspectRatio;
+  return { dx: (nextWidth - startWidthPx) * sx, dy: (nextHeight - startHeightPx) * sy };
+}
 
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
@@ -11512,6 +11567,12 @@ export class SpreadsheetApp {
               startSheetX,
               startSheetY,
               startAnchor: hit.object.anchor,
+              startWidthPx: hit.bounds.width,
+              startHeightPx: hit.bounds.height,
+              aspectRatio:
+                hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
+                  ? hit.bounds.width / hit.bounds.height
+                  : null,
             }
           : {
               pointerId: e.pointerId,
@@ -11724,8 +11785,22 @@ export class SpreadsheetApp {
       const sheetX = x - headerOffsetX + scroll.scrollX;
       const sheetY = y - headerOffsetY + scroll.scrollY;
 
-      const dxPx = sheetX - this.drawingGesture.startSheetX;
-      const dyPx = sheetY - this.drawingGesture.startSheetY;
+      let dxPx = sheetX - this.drawingGesture.startSheetX;
+      let dyPx = sheetY - this.drawingGesture.startSheetY;
+
+      if (this.drawingGesture.mode === "resize" && e.shiftKey && this.drawingGesture.aspectRatio != null) {
+        const locked = lockAspectRatioResize({
+          handle: this.drawingGesture.handle,
+          dx: dxPx,
+          dy: dyPx,
+          startWidthPx: this.drawingGesture.startWidthPx,
+          startHeightPx: this.drawingGesture.startHeightPx,
+          aspectRatio: this.drawingGesture.aspectRatio,
+          minSizePx: 8,
+        });
+        dxPx = locked.dx;
+        dyPx = locked.dy;
+      }
 
       const nextAnchor =
         this.drawingGesture.mode === "resize"
