@@ -449,6 +449,8 @@ export type RpcMethod =
   | "lexFormulaPartial"
   | "parseFormulaPartial"
   | "rewriteFormulasForCopyDelta"
+  | "canonicalizeFormula"
+  | "localizeFormula"
   // Workbook lifecycle
   | "newWorkbook"
   | "loadFromJson"
@@ -464,6 +466,9 @@ export type RpcMethod =
   | "setLocale"
   | "recalculate"
   | "applyOperation"
+  | "goalSeek"
+  | "getPivotSchema"
+  | "calculatePivot"
   | "setSheetDimensions"
   | "getSheetDimensions"
   // Workbook metadata
