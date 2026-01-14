@@ -2281,6 +2281,7 @@ dependencies = [
  "rand 0.9.2",
  "serde",
  "serde_json",
+ "tempfile",
  "zip 2.4.2",
 ]
 

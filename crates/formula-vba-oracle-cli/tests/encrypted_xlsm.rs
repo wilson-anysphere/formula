@@ -40,6 +40,35 @@ fn extract_supports_encrypted_xlsm_with_password() {
 }
 
 #[test]
+fn extract_supports_encrypted_xlsm_with_password_file() {
+    let fixture_path =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/basic-encrypted.xlsm");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let pw_path = tmp.path().join("password.txt");
+    // Preserve compatibility with Windows-style line endings.
+    std::fs::write(&pw_path, "password\r\n").expect("write password file");
+
+    let assert = Command::new(assert_cmd::cargo::cargo_bin!("formula-vba-oracle-cli"))
+        .args([
+            "extract",
+            "--input",
+            fixture_path,
+            "--format",
+            "auto",
+            "--password-file",
+            pw_path.to_str().expect("utf8 password path"),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("parse output json");
+
+    assert_eq!(json["ok"], true, "stdout:\n{stdout}");
+}
+
+#[test]
 fn extract_reports_wrong_password_for_encrypted_xlsm() {
     let fixture_path =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/basic-encrypted.xlsm");

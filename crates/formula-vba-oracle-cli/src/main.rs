@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -722,15 +722,27 @@ fn resolve_password(
     let Some(path) = password_file else {
         return Ok(None);
     };
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read password file {}: {e}", path.display()))?;
-    let pw = contents.lines().next().unwrap_or("").trim().to_string();
-    if pw.is_empty() {
-        return Err(format!(
-            "Password file {} is empty (expected password on first line)",
-            path.display()
-        ));
-    }
+
+    let contents = if path.as_os_str() == std::ffi::OsStr::new("-") {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("Failed to read password from stdin: {e}"))?;
+        buf
+    } else {
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read password file {}: {e}", path.display()))?
+    };
+
+    // Treat the first line as the password, trimming only `\r`/`\n` (but preserving leading/trailing
+    // whitespace in the password itself).
+    let pw = contents
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('\r')
+        .to_string();
+
     Ok(Some(pw))
 }
 
@@ -1075,6 +1087,38 @@ fn diff_execution_workbooks(
     out
 }
 
+fn emit_json_report<T: Serialize>(report: &T) -> bool {
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+
+    if let Err(err) = serde_json::to_writer(&mut out, report) {
+        if err.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe) {
+            // Allow piping output to tools like `head` without panicking.
+            return true;
+        }
+        eprintln!("error: failed to write JSON report: {err}");
+        std::process::exit(1);
+    }
+
+    if let Err(err) = out.write_all(b"\n") {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            return true;
+        }
+        eprintln!("error: failed to write JSON report: {err}");
+        std::process::exit(1);
+    }
+
+    if let Err(err) = out.flush() {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            return true;
+        }
+        eprintln!("error: failed to flush JSON report: {err}");
+        std::process::exit(1);
+    }
+
+    false
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -1091,14 +1135,16 @@ fn main() {
                         error: Some(e),
                         exit_status: 1,
                         cell_diffs: BTreeMap::new(),
-                        workbook_after: OracleWorkbook {
-                            schema_version: 1,
-                            active_sheet: None,
-                            sheets: Vec::new(),
-                            vba_modules: Vec::new(),
-                        },
-                    };
-                    println!("{}", serde_json::to_string(&report).unwrap());
+                         workbook_after: OracleWorkbook {
+                             schema_version: 1,
+                             active_sheet: None,
+                             sheets: Vec::new(),
+                             vba_modules: Vec::new(),
+                         },
+                     };
+                    if emit_json_report(&report) {
+                        return;
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1114,14 +1160,16 @@ fn main() {
                         error: Some(e),
                         exit_status: 1,
                         cell_diffs: BTreeMap::new(),
-                        workbook_after: OracleWorkbook {
-                            schema_version: 1,
-                            active_sheet: None,
-                            sheets: Vec::new(),
-                            vba_modules: Vec::new(),
-                        },
-                    };
-                    println!("{}", serde_json::to_string(&report).unwrap());
+                         workbook_after: OracleWorkbook {
+                             schema_version: 1,
+                             active_sheet: None,
+                             sheets: Vec::new(),
+                             vba_modules: Vec::new(),
+                         },
+                     };
+                    if emit_json_report(&report) {
+                        return;
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1141,14 +1189,16 @@ fn main() {
                             error: Some(e),
                             exit_status: 1,
                             cell_diffs: BTreeMap::new(),
-                            workbook_after: OracleWorkbook {
-                                schema_version: 1,
-                                active_sheet: None,
-                                sheets: Vec::new(),
-                                vba_modules: Vec::new(),
-                            },
-                        };
-                        println!("{}", serde_json::to_string(&report).unwrap());
+                         workbook_after: OracleWorkbook {
+                             schema_version: 1,
+                             active_sheet: None,
+                             sheets: Vec::new(),
+                             vba_modules: Vec::new(),
+                         },
+                     };
+                        if emit_json_report(&report) {
+                            return;
+                        }
                         std::process::exit(1);
                     }
                 },
@@ -1167,11 +1217,13 @@ fn main() {
                                 workbook_after: OracleWorkbook {
                                     schema_version: 1,
                                     active_sheet: None,
-                                    sheets: Vec::new(),
-                                    vba_modules: Vec::new(),
-                                },
-                            };
-                            println!("{}", serde_json::to_string(&report).unwrap());
+                                     sheets: Vec::new(),
+                                     vba_modules: Vec::new(),
+                                 },
+                             };
+                            if emit_json_report(&report) {
+                                return;
+                            }
                             std::process::exit(1);
                         }
                     };
@@ -1190,11 +1242,13 @@ fn main() {
                                 workbook_after: OracleWorkbook {
                                     schema_version: 1,
                                     active_sheet: None,
-                                    sheets: Vec::new(),
-                                    vba_modules: Vec::new(),
-                                },
-                            };
-                            println!("{}", serde_json::to_string(&report).unwrap());
+                                     sheets: Vec::new(),
+                                     vba_modules: Vec::new(),
+                                 },
+                             };
+                            if emit_json_report(&report) {
+                                return;
+                            }
                             std::process::exit(1);
                         }
                     };
@@ -1213,11 +1267,13 @@ fn main() {
                                 workbook_after: OracleWorkbook {
                                     schema_version: 1,
                                     active_sheet: None,
-                                    sheets: Vec::new(),
-                                    vba_modules: Vec::new(),
-                                },
-                            };
-                            println!("{}", serde_json::to_string(&report).unwrap());
+                                     sheets: Vec::new(),
+                                     vba_modules: Vec::new(),
+                                 },
+                             };
+                            if emit_json_report(&report) {
+                                return;
+                            }
                             std::process::exit(1);
                         }
                     }
@@ -1237,7 +1293,9 @@ fn main() {
                         cell_diffs: BTreeMap::new(),
                         workbook_after: workbook,
                     };
-                    println!("{}", serde_json::to_string(&report).unwrap());
+                    if emit_json_report(&report) {
+                        return;
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1252,7 +1310,9 @@ fn main() {
             }
 
             let report = run_macro(&workbook, &args.macro_name, &args_values);
-            println!("{}", serde_json::to_string(&report).unwrap());
+            if emit_json_report(&report) {
+                return;
+            }
             if !report.ok {
                 std::process::exit(report.exit_status);
             }
@@ -1272,7 +1332,9 @@ fn main() {
                         },
                         procedures: Vec::new(),
                     };
-                    println!("{}", serde_json::to_string(&report).unwrap());
+                    if emit_json_report(&report) {
+                        return;
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1291,7 +1353,9 @@ fn main() {
                         },
                         procedures: Vec::new(),
                     };
-                    println!("{}", serde_json::to_string(&report).unwrap());
+                    if emit_json_report(&report) {
+                        return;
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1375,7 +1439,9 @@ fn main() {
                 }
             };
 
-            println!("{}", serde_json::to_string(&report).unwrap());
+            if emit_json_report(&report) {
+                return;
+            }
             if !report.ok {
                 std::process::exit(1);
             }

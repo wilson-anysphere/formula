@@ -698,9 +698,6 @@ fn run(args: &Args) -> TriageOutput {
 
 fn resolve_password(args: &Args) -> Result<Option<String>> {
     if let Some(pw) = args.password.as_ref() {
-        if pw.is_empty() {
-            anyhow::bail!("password was empty");
-        }
         return Ok(Some(pw.clone()));
     }
     let Some(path) = args.password_file.as_ref() else {
@@ -709,9 +706,6 @@ fn resolve_password(args: &Args) -> Result<Option<String>> {
 
     let pw = fs::read_to_string(path).with_context(|| format!("read password file {}", path.display()))?;
     let pw = pw.lines().next().unwrap_or("").trim_end_matches(&['\r', '\n'][..]).to_string();
-    if pw.is_empty() {
-        anyhow::bail!("password file was empty");
-    }
     Ok(Some(pw))
 }
 
