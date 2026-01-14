@@ -352,6 +352,13 @@ impl PivotCache {
             }
         }
 
+        // Final fallback: try the canonical `Display` rendering. This handles Data Model columns
+        // whose table names require DAX quoting (e.g. `'Sales Table'[Region]`).
+        let display = field.to_string();
+        if let Some(idx) = self.field_index(&display) {
+            return Some(idx);
+        }
+
         None
     }
 
@@ -3553,6 +3560,21 @@ mod tests {
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
         values.to_vec()
+    }
+
+    #[test]
+    fn pivot_cache_field_index_ref_resolves_quoted_data_model_column_headers() {
+        let data = vec![
+            pv_row(&["'Sales Table'[Region]".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let field = PivotFieldRef::DataModelColumn {
+            table: "Sales Table".to_string(),
+            column: "Region".to_string(),
+        };
+        assert_eq!(cache.field_index_ref(&field), Some(0));
     }
 
     #[test]
