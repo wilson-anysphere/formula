@@ -36,11 +36,11 @@ use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::theme::convert::to_model_theme_palette;
 use crate::theme::parse_theme_palette;
 use crate::WorkbookKind;
+use crate::WorksheetCommentPartNames;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
 };
-use crate::WorksheetCommentPartNames;
 
 mod rich_values;
 
@@ -252,11 +252,10 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     } else {
         read_zip_part_optional(archive, "xl/sharedStrings.xml")?
     };
-    let (shared_strings, shared_string_phonetics) =
-        match shared_strings_bytes {
-            Some(bytes) => parse_shared_strings(&bytes)?,
-            None => (Vec::new(), Vec::new()),
-        };
+    let (shared_strings, shared_string_phonetics) = match shared_strings_bytes {
+        Some(bytes) => parse_shared_strings(&bytes)?,
+        None => (Vec::new(), Vec::new()),
+    };
 
     let metadata_part_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
         let mut found = None;
@@ -366,7 +365,8 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
-        let merged_cells = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).ok();
+        let merged_cells =
+            crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).ok();
 
         // Worksheet relationships are needed to resolve drawings, external hyperlink targets, and
         // table parts.
@@ -427,7 +427,13 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
 
         ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).ok().flatten();
 
-        attach_tables_from_parts(ws, &worksheet_part, &sheet_xml, rels_xml_bytes.as_deref(), archive);
+        attach_tables_from_parts(
+            ws,
+            &worksheet_part,
+            &sheet_xml,
+            rels_xml_bytes.as_deref(),
+            archive,
+        );
 
         parse_worksheet_into_model(
             ws,
@@ -488,7 +494,8 @@ fn populate_workbook_print_settings_from_xlsx_defined_names(workbook: &mut Workb
         .iter()
         .filter(|n| {
             n.name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
-                || n.name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES)
+                || n.name
+                    .eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES)
         })
         .filter_map(|n| {
             n.xlsx_local_sheet_id
@@ -532,8 +539,7 @@ fn populate_workbook_print_settings_from_xlsx_defined_names(workbook: &mut Workb
             {
                 continue;
             }
-            let Ok(titles) =
-                crate::print::parse_print_titles_defined_name(&sheet_name, &refers_to)
+            let Ok(titles) = crate::print::parse_print_titles_defined_name(&sheet_name, &refers_to)
             else {
                 continue;
             };
@@ -797,11 +803,11 @@ fn load_sheet_drawings_from_parts(
             continue;
         }
 
-        let parsed = match DrawingPart::parse_from_parts(sheet_index, &drawing_part, parts, workbook)
-        {
-            Ok(part) => part,
-            Err(_) => continue,
-        };
+        let parsed =
+            match DrawingPart::parse_from_parts(sheet_index, &drawing_part, parts, workbook) {
+                Ok(part) => part,
+                Err(_) => continue,
+            };
         objects.extend(parsed.objects);
     }
 
@@ -932,7 +938,8 @@ pub fn load_from_reader<R: Read + Seek>(mut reader: R) -> Result<XlsxDocument, R
 fn load_from_zip_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
 ) -> Result<XlsxDocument, ReadError> {
-    let mut budget = crate::zip_util::ZipInflateBudget::new(crate::zip_util::DEFAULT_MAX_ZIP_TOTAL_BYTES);
+    let mut budget =
+        crate::zip_util::ZipInflateBudget::new(crate::zip_util::DEFAULT_MAX_ZIP_TOTAL_BYTES);
     let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -1008,12 +1015,11 @@ fn load_from_zip_archive<R: Read + Seek>(
     } else {
         part_bytes_tolerant(&parts, "xl/sharedStrings.xml")
     };
-    let (shared_strings, shared_string_phonetics) =
-        if let Some(bytes) = shared_strings_bytes {
-            parse_shared_strings(bytes)?
-        } else {
-            (Vec::new(), Vec::new())
-        };
+    let (shared_strings, shared_string_phonetics) = if let Some(bytes) = shared_strings_bytes {
+        parse_shared_strings(bytes)?
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     let metadata_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
         resolve_target_candidates(WORKBOOK_PART, target)
@@ -1084,8 +1090,8 @@ fn load_from_zip_archive<R: Read + Seek>(
             .get(&worksheet_part)
             .map(|bytes| bytes.as_slice())
             .ok_or(ReadError::MissingPart(
-            "worksheet part referenced from workbook.xml.rels",
-        ))?;
+                "worksheet part referenced from workbook.xml.rels",
+            ))?;
 
         // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet
         // XML. Parse them via a streaming extractor to avoid DOM parsing.
@@ -1193,18 +1199,25 @@ fn load_from_zip_archive<R: Read + Seek>(
                 |target| part_bytes_tolerant(&parts, target).map(Cow::Borrowed),
             );
 
-            ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
-                AutoFilterParseError::Xml(e) => ReadError::Xml(e),
-                AutoFilterParseError::Attr(e) => ReadError::XmlAttr(e),
-                AutoFilterParseError::MissingRef => ReadError::InvalidRangeRef(
-                    "missing worksheet autoFilter ref attribute".to_string(),
-                ),
-                AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
-            })?;
+            ws.auto_filter =
+                parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
+                    AutoFilterParseError::Xml(e) => ReadError::Xml(e),
+                    AutoFilterParseError::Attr(e) => ReadError::XmlAttr(e),
+                    AutoFilterParseError::MissingRef => ReadError::InvalidRangeRef(
+                        "missing worksheet autoFilter ref attribute".to_string(),
+                    ),
+                    AutoFilterParseError::InvalidRef(e) => {
+                        ReadError::InvalidRangeRef(e.to_string())
+                    }
+                })?;
 
-            attach_tables_from_part_getter(ws, &worksheet_part, sheet_xml, rels_xml_bytes, |target| {
-                part_bytes_tolerant(&parts, target).map(Cow::Borrowed)
-            });
+            attach_tables_from_part_getter(
+                ws,
+                &worksheet_part,
+                sheet_xml,
+                rels_xml_bytes,
+                |target| part_bytes_tolerant(&parts, target).map(Cow::Borrowed),
+            );
 
             parse_worksheet_into_model(
                 ws,
@@ -1414,12 +1427,18 @@ fn normalize_worksheet_comments(worksheet: &formula_model::Worksheet) -> Vec<Com
         .map(|(_, comment)| comment.clone())
         .collect();
     out.sort_by(|a, b| {
-        (a.cell_ref.row, a.cell_ref.col, comment_kind_rank(a.kind), &a.id).cmp(&(
-            b.cell_ref.row,
-            b.cell_ref.col,
-            comment_kind_rank(b.kind),
-            &b.id,
-        ))
+        (
+            a.cell_ref.row,
+            a.cell_ref.col,
+            comment_kind_rank(a.kind),
+            &a.id,
+        )
+            .cmp(&(
+                b.cell_ref.row,
+                b.cell_ref.col,
+                comment_kind_rank(b.kind),
+                &b.id,
+            ))
     });
     out
 }
@@ -2900,7 +2919,9 @@ fn parse_worksheet_into_model(
                 };
 
                 let selection = match sqref.as_deref() {
-                    Some(sqref) => formula_model::SheetSelection::from_sqref(active_cell, sqref).ok(),
+                    Some(sqref) => {
+                        formula_model::SheetSelection::from_sqref(active_cell, sqref).ok()
+                    }
                     None => Some(formula_model::SheetSelection::new(active_cell, Vec::new())),
                 };
                 if selection.is_some() {
@@ -3174,9 +3195,7 @@ fn parse_worksheet_into_model(
                                     .unwrap_or("0")
                                     .parse::<usize>()
                                     .unwrap_or(0);
-                                shared_string_phonetics
-                                    .get(idx)
-                                    .and_then(|p| p.clone())
+                                shared_string_phonetics.get(idx).and_then(|p| p.clone())
                             }
                             Some("inlineStr") => current_inline_phonetic.take(),
                             _ => None,
@@ -3427,7 +3446,9 @@ fn parse_data_validation_operator(val: &str) -> Option<DataValidationOperator> {
             Some(DataValidationOperator::GreaterThanOrEqual)
         }
         v if v.eq_ignore_ascii_case("lessThan") => Some(DataValidationOperator::LessThan),
-        v if v.eq_ignore_ascii_case("lessThanOrEqual") => Some(DataValidationOperator::LessThanOrEqual),
+        v if v.eq_ignore_ascii_case("lessThanOrEqual") => {
+            Some(DataValidationOperator::LessThanOrEqual)
+        }
         _ => None,
     }
 }
@@ -3448,15 +3469,17 @@ fn parse_sqref_ranges(val: &str) -> Vec<Range> {
 }
 
 fn normalize_data_validation_formula(raw: &str) -> String {
-    // Data validation formulas are stored without a leading `=` in the model, matching
-    // SpreadsheetML (and `formula_model::normalize_formula_text`).
+    // Data validation formulas are stored without a leading `=` in the model.
     //
-    // Also strip any `_xlfn.` prefixes at function-call boundaries (mirrors cell formula
-    // normalization).
+    // Preserve the original text but:
+    // - strip a single leading `=` if present (model invariant)
+    // - strip `_xlfn.` prefixes at function-call boundaries (matches cell formula normalization)
     crate::formula_text::strip_xlfn_prefixes(raw.strip_prefix('=').unwrap_or(raw))
 }
 
-fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<(Vec<Range>, DataValidation)> {
+fn parse_data_validation_empty(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Option<(Vec<Range>, DataValidation)> {
     let mut kind: Option<DataValidationKind> = None;
     let mut operator: Option<DataValidationOperator> = None;
     let mut allow_blank = false;
@@ -3490,6 +3513,9 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
                 //
                 // The in-memory model stores the UI-facing behavior: `show_drop_down=true` means
                 // "show the in-cell dropdown arrow". Therefore we invert the OOXML attribute.
+                //
+                // See: ECMA-376 SpreadsheetML `CT_DataValidation` / `showDropDown` and
+                // https://learn.microsoft.com/en-us/openspecs/office_standards/ms-xlsx/
                 show_drop_down = Some(!parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
@@ -3507,9 +3533,13 @@ fn parse_data_validation_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<
         return None;
     }
 
-    // OOXML `showDropDown` defaults to false (arrow shown) when omitted. Our model stores the UI
-    // semantics (`true` = arrow shown), and the setting is only meaningful for list validations.
-    let show_drop_down = show_drop_down.unwrap_or(kind == DataValidationKind::List);
+    // Only list validations have an in-cell dropdown affordance. When the OOXML attribute is
+    // omitted, Excel shows the arrow by default.
+    let show_drop_down = if kind == DataValidationKind::List {
+        show_drop_down.unwrap_or(true)
+    } else {
+        false
+    };
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {
@@ -3584,6 +3614,9 @@ fn parse_data_validation_start<R: std::io::BufRead>(
                 //
                 // The in-memory model stores the UI-facing behavior: `show_drop_down=true` means
                 // "show the in-cell dropdown arrow". Therefore we invert the OOXML attribute.
+                //
+                // See: ECMA-376 SpreadsheetML `CT_DataValidation` / `showDropDown` and
+                // https://learn.microsoft.com/en-us/openspecs/office_standards/ms-xlsx/
                 show_drop_down = Some(!parse_xml_bool(&val));
             }
             b"promptTitle" => prompt_title = Some(val),
@@ -3611,7 +3644,8 @@ fn parse_data_validation_start<R: std::io::BufRead>(
                 formula1.clear();
             }
             Event::Start(e) if e.local_name().as_ref() == b"formula2" => {
-                let normalized = normalize_data_validation_formula(&read_text(reader, b"formula2")?);
+                let normalized =
+                    normalize_data_validation_formula(&read_text(reader, b"formula2")?);
                 if normalized.is_empty() {
                     formula2 = None;
                 } else {
@@ -3642,9 +3676,13 @@ fn parse_data_validation_start<R: std::io::BufRead>(
 
     let kind = kind.expect("checked in should_store");
 
-    // OOXML `showDropDown` defaults to false (arrow shown) when omitted. Our model stores the UI
-    // semantics (`true` = arrow shown), and the setting is only meaningful for list validations.
-    let show_drop_down = show_drop_down.unwrap_or(kind == DataValidationKind::List);
+    // Only list validations have an in-cell dropdown affordance. When the OOXML attribute is
+    // omitted, Excel shows the arrow by default.
+    let show_drop_down = if kind == DataValidationKind::List {
+        show_drop_down.unwrap_or(true)
+    } else {
+        false
+    };
 
     let input_message = if prompt_title.is_some() || prompt_body.is_some() {
         Some(DataValidationInputMessage {
@@ -3993,10 +4031,7 @@ fn parse_inline_rpr<R: std::io::BufRead>(
     Ok(style)
 }
 
-fn parse_inline_rpr_tag(
-    e: &BytesStart<'_>,
-    style: &mut RichTextRunStyle,
-) -> Result<(), ReadError> {
+fn parse_inline_rpr_tag(e: &BytesStart<'_>, style: &mut RichTextRunStyle) -> Result<(), ReadError> {
     match e.local_name().as_ref() {
         b"b" => style.bold = Some(parse_inline_rpr_bool_val(e)?),
         b"i" => style.italic = Some(parse_inline_rpr_bool_val(e)?),
@@ -4345,7 +4380,8 @@ mod tests {
         zip.write_all(workbook_rels.as_bytes()).unwrap();
 
         // The part name uses a literal space.
-        zip.start_file("xl/worksheets/sheet 1.xml", options).unwrap();
+        zip.start_file("xl/worksheets/sheet 1.xml", options)
+            .unwrap();
         zip.write_all(sheet_xml.as_bytes()).unwrap();
 
         let bytes = zip.finish().unwrap().into_inner();
@@ -4355,7 +4391,8 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet 1.xml");
 
-        let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+        let workbook =
+            read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
         assert_eq!(workbook.sheets.len(), 1);
         assert_eq!(workbook.sheets[0].name, "Sheet1");
         assert_eq!(
