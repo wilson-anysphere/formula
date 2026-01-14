@@ -204,6 +204,72 @@ fn unicode_identifiers_work_in_filter_context() {
 }
 
 #[test]
+fn unicode_relationships_are_case_insensitive_for_filters_and_pivots() {
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    // Add relationship using mixed casing and ASCII-only identifiers that casefold to the Unicode
+    // model names (`Straße` -> `STRASSE`, `StraßenId` -> `STRASSENID`).
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(orders[amount])").unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("strasse", "region", "East".into());
+    let east_total = model.evaluate_measure("[TOTAL]", &east_filter).unwrap();
+    assert_eq!(east_total, Value::from(30.0));
+
+    // Pivot should also traverse relationships with Unicode identifiers and preserve the model's
+    // original casing in the output headers.
+    let group_by = vec![GroupByColumn::new("STRASSE", "region")];
+    let measures = vec![PivotMeasure::new("Total", "[TOTAL]").unwrap()];
+    let result = pivot(
+        &model,
+        "orders",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    assert_eq!(result.columns, vec!["Straße[Region]", "Total"]);
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("East"), Value::from(30.0)],
+            vec![Value::from("West"), Value::from(5.0)],
+        ]
+    );
+}
+
+#[test]
 fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
     // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
     let mut model = DataModel::new();
