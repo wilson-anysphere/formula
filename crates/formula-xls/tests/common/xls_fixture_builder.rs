@@ -816,7 +816,26 @@ pub fn build_page_setup_fit_to_scaling_fixture_xls() -> Vec<u8> {
 pub fn build_custom_paper_size_fixture_xls() -> Vec<u8> {
     // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
     // style XFs).
-    let sheet_stream = build_custom_paper_size_sheet_stream(16);
+    let sheet_stream = build_custom_paper_size_sheet_stream(16, 0);
+    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a worksheet `SETUP` record with a custom paper size
+/// (`iPaperSize>=256`, `fNoPls=0`).
+pub fn build_custom_paper_size_ge_256_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_custom_paper_size_sheet_stream(16, 256);
     let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
@@ -1029,7 +1048,7 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     sheet
 }
 
-fn build_custom_paper_size_sheet_stream(xf_cell: u16) -> Vec<u8> {
+fn build_custom_paper_size_sheet_stream(xf_cell: u16, paper_size: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
@@ -1053,11 +1072,11 @@ fn build_custom_paper_size_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_SETUP,
         &setup_record(
-            0,    // iPaperSize (custom)
+            paper_size, // iPaperSize (custom/unmappable)
             100,  // iScale
             0,    // iFitWidth
             0,    // iFitHeight
-            true, // set fPortrait bit (see importer semantics)
+            false, // portrait (keep model default)
             0.3,  // header margin (default)
             0.3,  // footer margin (default)
         ),
