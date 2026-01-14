@@ -50,6 +50,7 @@ function writeFakeAppImage(
   {
     withDesktopFile = true,
     withXlsxMime = true,
+    withParquetMime = true,
     withMimeTypeEntry = true,
     withSchemeMime = true,
     withParquetMimeDefinition = true,
@@ -62,11 +63,13 @@ function writeFakeAppImage(
     desktopEntryVersion = "",
   } = {},
 ) {
-  const mimeTypes = withXlsxMime
-    ? expectedFileAssociationMimeTypes
-    : expectedFileAssociationMimeTypes.filter(
-        (mt) => mt !== "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      );
+  let mimeTypes = expectedFileAssociationMimeTypes;
+  if (!withXlsxMime) {
+    mimeTypes = mimeTypes.filter((mt) => mt !== "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  }
+  if (!withParquetMime) {
+    mimeTypes = mimeTypes.filter((mt) => mt !== "application/vnd.apache.parquet");
+  }
   const desktopMimeBase = `${mimeTypes.join(";")};`;
   const desktopMime = withSchemeMime
     ? `${desktopMimeBase}x-scheme-handler/formula;`
@@ -320,6 +323,21 @@ test("validate-linux-appimage fails when .desktop lacks xlsx integration", { ski
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /MimeType=.*xlsx|spreadsheet/i);
+});
+
+test("validate-linux-appimage fails when .desktop lacks Parquet MIME type", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, {
+    withDesktopFile: true,
+    withXlsxMime: true,
+    withParquetMime: false,
+    appImageVersion: expectedVersion,
+  });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet support/i);
 });
 
 test("validate-linux-appimage fails when .desktop lacks URL scheme handler (x-scheme-handler/formula)", { skip: !hasBash }, () => {
