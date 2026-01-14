@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { pickLocalImageFiles } from "../pickLocalImageFiles.js";
+import { MAX_INSERT_IMAGE_BYTES } from "../insertImageLimits.js";
 
 describe("pickLocalImageFiles (Tauri)", () => {
   afterEach(() => {
@@ -44,12 +45,23 @@ describe("pickLocalImageFiles (Tauri)", () => {
     const open = vi.fn(async () => ["/tmp/big.jpg"]);
     const fileSize = 4 * 1024 * 1024 + 10; // > smallFileThreshold (4MiB)
 
+    const base64Cache = new Map<number, string>();
+    const base64Zeros = (length: number): string => {
+      const len = Math.max(0, Math.trunc(length));
+      const cached = base64Cache.get(len);
+      if (cached) return cached;
+      // eslint-disable-next-line no-undef
+      const encoded = Buffer.from(new Uint8Array(len)).toString("base64");
+      base64Cache.set(len, encoded);
+      return encoded;
+    };
+
     const invoke = vi.fn(async (cmd: string, args?: any) => {
       calls.push({ cmd, args });
       if (cmd === "stat_file") return { size_bytes: fileSize };
       if (cmd === "read_binary_file_range") {
         const length = Number(args?.length ?? 0);
-        return new Uint8Array(length);
+        return base64Zeros(length);
       }
       if (cmd === "read_binary_file") {
         throw new Error("read_binary_file should not be used for large payloads");
@@ -100,5 +112,21 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(files[0]!.name).toBe("c.webp");
     expect(files[0]!.type).toBe("image/webp");
     expect(files[0]!.size).toBe(2);
+  });
+
+  it("rejects when stat_file reports an oversized image", async () => {
+    const open = vi.fn(async () => ["/tmp/huge.png"]);
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "stat_file") return { size_bytes: MAX_INSERT_IMAGE_BYTES + 1 };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { dialog: { open }, core: { invoke } };
+
+    await expect(pickLocalImageFiles({ multiple: true })).rejects.toThrow(/too large/i);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("stat_file", { path: "/tmp/huge.png" });
   });
 });
