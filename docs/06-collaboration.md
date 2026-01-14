@@ -213,6 +213,19 @@ const session = createCollabSession({
 });
 ```
 
+Encrypted range metadata (key ids, ranges):
+
+- The canonical source of truth for *which* cells should be encrypted lives in workbook metadata under `metadata.encryptedRanges`.
+  - This is managed by `@formula/collab-encrypted-ranges` (`EncryptedRangeManager`, `createEncryptionPolicyFromDoc`).
+- Canonical schema: a `Y.Array<Y.Map>` where each entry contains:
+  - `id` (stable identifier)
+  - `sheetId` (stable workbook sheet id, not the display name)
+  - `startRow`, `startCol`, `endRow`, `endCol` (0-based, inclusive)
+  - `keyId` (identifier only; secret key material is not stored in Yjs)
+- Legacy docs may store `encryptedRanges` in older shapes (e.g. map schema, plain objects, missing `id`, `sheetName` instead of `sheetId`).
+  - Policy helpers include best-effort compatibility for these older formats.
+- Overlap precedence: when multiple encrypted ranges overlap, the **most recently added** range (last in the array order) wins.
+
 Desktop dev/testing toggle:
 
 - The desktop app supports a **dev-only** URL param toggle to exercise encrypted cell payloads end-to-end:
