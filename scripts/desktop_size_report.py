@@ -256,6 +256,13 @@ def _candidate_default_binary_paths(repo_root: Path) -> list[Path]:
         for ent in entries:
             if not ent.is_dir():
                 continue
+            # Avoid noise from common non-target-triple directories in `target/`.
+            name = ent.name
+            if name in {"debug", "release", "cargo-home", "perf-home", "build", "deps", "incremental", ".fingerprint"}:
+                continue
+            # Target triples generally contain hyphens (e.g. `x86_64-unknown-linux-gnu`).
+            if "-" not in name:
+                continue
             candidates.append(ent / "release" / exe)
 
     # De-dupe while preserving order.
@@ -373,7 +380,8 @@ def main() -> int:
         _append_error_summary(
             msg,
             hints=[
-                "Build the desktop binary: `cargo build -p formula-desktop-tauri --features desktop --release --locked`",
+                "Build the desktop binary: `cargo build -p formula-desktop-tauri --bin formula-desktop --features desktop --release --locked`",
+                "If your checkout uses the historical package name: `cargo build -p desktop --bin formula-desktop --features desktop --release --locked`",
                 "Or pass `--binary <path>` (default: `target/release/formula-desktop[.exe]`)",
                 f"Searched: {searched}" if searched else "Searched: _(none)_",
             ],

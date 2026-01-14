@@ -174,6 +174,36 @@ function parseDesktopStartupBenchKind({ env, forwardedArgs }) {
   return kind;
 }
 
+function detectDesktopPackageName() {
+  // The desktop shell package has historically been named both `desktop` and
+  // `formula-desktop-tauri`. Prefer reading the current name from the crate's
+  // Cargo.toml so local perf tooling stays stable across renames.
+  const cargoToml = path.join(repoRoot, "apps", "desktop", "src-tauri", "Cargo.toml");
+  try {
+    if (!existsSync(cargoToml)) return "formula-desktop-tauri";
+    const lines = readFileSync(cargoToml, "utf8").split(/\r?\n/);
+    let inPackage = false;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      if (line.startsWith("[") && line.endsWith("]")) {
+        inPackage = line === "[package]";
+        continue;
+      }
+      if (!inPackage) continue;
+      if (!line.startsWith("name")) continue;
+      const parts = line.split("=", 2);
+      if (parts.length !== 2) continue;
+      const rhs = parts[1].trim();
+      const m = rhs.match(/^"([^"]+)"/);
+      if (m?.[1]) return m[1];
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return "formula-desktop-tauri";
+}
+
 function buildDesktop({ env, buildFrontend = true } = {}) {
   if (buildFrontend) {
     // eslint-disable-next-line no-console
@@ -188,13 +218,14 @@ function buildDesktop({ env, buildFrontend = true } = {}) {
 
   // eslint-disable-next-line no-console
   console.log("[perf-desktop] Building desktop binary (target/release/formula-desktop)...");
+  const pkg = detectDesktopPackageName();
   run(
     "bash",
     [
       "scripts/cargo_agent.sh",
       "build",
       "-p",
-      "formula-desktop-tauri",
+      pkg,
       "--bin",
       "formula-desktop",
       "--release",
