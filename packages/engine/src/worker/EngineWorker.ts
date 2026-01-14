@@ -351,6 +351,42 @@ export class EngineWorker {
   }
 
   /**
+   * Canonicalize a locale-specific formula string into the engine's persisted form.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  async canonicalizeFormula(
+    formula: string,
+    localeId: string,
+    referenceStyle?: "A1" | "R1C1",
+    rpcOptions?: RpcOptions
+  ): Promise<string> {
+    return (await this.invoke(
+      "canonicalizeFormula",
+      { formula, localeId, referenceStyle },
+      rpcOptions
+    )) as string;
+  }
+
+  /**
+   * Localize a canonical (English) formula string for display in `localeId`.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  async localizeFormula(
+    formula: string,
+    localeId: string,
+    referenceStyle?: "A1" | "R1C1",
+    rpcOptions?: RpcOptions
+  ): Promise<string> {
+    return (await this.invoke(
+      "localizeFormula",
+      { formula, localeId, referenceStyle },
+      rpcOptions
+    )) as string;
+  }
+
+  /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
    *
    * Note: this RPC is independent of workbook state and intentionally does NOT

@@ -144,6 +144,30 @@ export interface EngineClient {
   rewriteFormulasForCopyDelta(requests: RewriteFormulaForCopyDeltaRequest[], options?: RpcOptions): Promise<string[]>;
 
   /**
+   * Canonicalize a locale-specific formula string into the engine's persisted form.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  canonicalizeFormula?(
+    formula: string,
+    localeId: string,
+    referenceStyle?: "A1" | "R1C1",
+    options?: RpcOptions
+  ): Promise<string>;
+
+  /**
+   * Localize a canonical (English) formula string for display in `localeId`.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  localizeFormula?(
+    formula: string,
+    localeId: string,
+    referenceStyle?: "A1" | "R1C1",
+    options?: RpcOptions
+  ): Promise<string>;
+
+  /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
    *
    * This call is independent of any loaded workbook.
@@ -304,6 +328,10 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     rewriteFormulasForCopyDelta: async (requests, rpcOptions) =>
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),
+    canonicalizeFormula: async (formula, localeId, referenceStyle, rpcOptions) =>
+      await withEngine((connected) => connected.canonicalizeFormula(formula, localeId, referenceStyle, rpcOptions)),
+    localizeFormula: async (formula, localeId, referenceStyle, rpcOptions) =>
+      await withEngine((connected) => connected.localizeFormula(formula, localeId, referenceStyle, rpcOptions)),
     lexFormula: async (formula: string, optionsOrRpcOptions?: FormulaParseOptions | RpcOptions, rpcOptions?: RpcOptions) =>
       await withEngine((connected) => (connected.lexFormula as any)(formula, optionsOrRpcOptions, rpcOptions)),
     lexFormulaPartial: async (

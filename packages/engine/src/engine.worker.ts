@@ -287,6 +287,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
           result = cloneToPlainData(lexFormula(params.formula, params.options));
         }
         break;
+      case "canonicalizeFormula":
+        {
+          const canonicalizeFormula = mod.canonicalizeFormula;
+          if (typeof canonicalizeFormula !== "function") {
+            throw new Error("canonicalizeFormula: wasm module does not export canonicalizeFormula()");
+          }
+          result = canonicalizeFormula(params.formula, params.localeId, params.referenceStyle);
+        }
+        break;
+      case "localizeFormula":
+        {
+          const localizeFormula = mod.localizeFormula;
+          if (typeof localizeFormula !== "function") {
+            throw new Error("localizeFormula: wasm module does not export localizeFormula()");
+          }
+          result = localizeFormula(params.formula, params.localeId, params.referenceStyle);
+        }
+        break;
       case "lexFormulaPartial":
         {
           const lexFormulaPartial = mod.lexFormulaPartial;
