@@ -18,5 +18,11 @@ describe("drawings EMU ↔ px conversions", () => {
     expect(emuToPx(emu, Number.NaN)).toBeCloseTo(10, 6);
     expect(pxToEmu(10, 0)).toBeCloseTo(pxToEmu(10), 6);
   });
-});
 
+  it("rounds half values away from zero so pxToEmu is odd", () => {
+    // `Math.round` is asymmetric for negative half values; pxToEmu normalizes so
+    // opposite pixel deltas cancel exactly (important for reversible zoom nudges).
+    expect(pxToEmu(-0.5)).toBe(-pxToEmu(0.5));
+    expect(pxToEmu(-1, 2)).toBe(-pxToEmu(1, 2));
+  });
+});
