@@ -6,7 +6,11 @@ use formula_xlsx::{decrypt_ooxml_from_cfb, XlsxPackage};
 const PASSWORD: &str = "password";
 
 fn fixture_path_buf(rel: &str) -> PathBuf {
-    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/encrypted/ooxml/")).join(rel)
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/"
+    ))
+    .join(rel)
 }
 
 fn decrypt_fixture(encrypted_name: &str) -> Vec<u8> {
@@ -70,7 +74,8 @@ fn decrypts_agile_and_standard_small_fixtures() {
         // Additional sanity: the decrypted bytes should be a valid OPC/ZIP workbook package.
         let pkg = XlsxPackage::from_bytes(&decrypted).expect("open decrypted package as XLSX");
         assert!(
-            pkg.part_names().any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+            pkg.part_names()
+                .any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
             "decrypted package missing xl/workbook.xml"
         );
     }
@@ -97,8 +102,8 @@ fn decrypts_standard_4_2_fixture() {
 
 #[test]
 fn decrypts_standard_small_fixtures_match_plaintext_bytes() {
-    let plaintext_xlsx =
-        std::fs::read(fixture_path_buf("plaintext.xlsx")).expect("read plaintext.xlsx fixture bytes");
+    let plaintext_xlsx = std::fs::read(fixture_path_buf("plaintext.xlsx"))
+        .expect("read plaintext.xlsx fixture bytes");
     let plaintext_xlsm = std::fs::read(fixture_path_buf("plaintext-basic.xlsm"))
         .expect("read plaintext-basic.xlsm fixture bytes");
 
@@ -108,6 +113,13 @@ fn decrypts_standard_small_fixtures_match_plaintext_bytes() {
         "decrypted bytes must match plaintext.xlsx for standard.xlsx"
     );
     assert!(decrypted_xlsx.starts_with(b"PK"));
+
+    let decrypted_rc4 = decrypt_fixture("standard-rc4.xlsx");
+    assert_eq!(
+        decrypted_rc4, plaintext_xlsx,
+        "decrypted bytes must match plaintext.xlsx for standard-rc4.xlsx"
+    );
+    assert!(decrypted_rc4.starts_with(b"PK"));
 
     let decrypted_xlsm = decrypt_fixture("standard-basic.xlsm");
     assert_eq!(
@@ -131,9 +143,15 @@ fn decrypts_agile_basic_xlsm_fixture_matches_plaintext_bytes() {
 
 #[test]
 fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
-    for encrypted in ["agile.xlsx", "standard.xlsx", "agile-large.xlsx", "standard-large.xlsx"] {
+    for encrypted in [
+        "agile.xlsx",
+        "standard.xlsx",
+        "agile-large.xlsx",
+        "standard-large.xlsx",
+    ] {
         let path = fixture_path_buf(encrypted);
-        let bytes = std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
 
         let pkg = XlsxPackage::from_bytes_with_password(&bytes, PASSWORD)
             .unwrap_or_else(|err| panic!("from_bytes_with_password {encrypted}: {err}"));
