@@ -311,7 +311,7 @@ fn agile_encryption_accepts_header_plus_plaintext_hmac_target() {
     let password = "Password";
     let plaintext = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/xlsx/basic/basic.xlsx"
+        "/../../fixtures/encrypted/ooxml/plaintext-large.xlsx"
     ));
     let ole_bytes = encrypt_agile_ooxml_ole_header_plus_plaintext_hmac(plaintext, password);
     assert!(is_encrypted_ooxml_ole(&ole_bytes));
