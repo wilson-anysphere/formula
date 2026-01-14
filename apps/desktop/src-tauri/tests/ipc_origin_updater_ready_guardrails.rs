@@ -17,8 +17,7 @@ fn updater_ui_ready_listener_requires_trusted_origin() {
 
     let listener_block = &rest[..spawn];
     assert!(
-        listener_block.contains("is_trusted_app_origin"),
-        "`updater-ui-ready` listener must gate to trusted app origins via `ipc_origin::is_trusted_app_origin`"
+        listener_block.contains("ensure_stable_origin"),
+        "`updater-ui-ready` listener must gate to trusted app origins via `ipc_origin::ensure_stable_origin`"
     );
 }
-

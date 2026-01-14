@@ -52,7 +52,7 @@ fn sensitive_ipc_events_require_trusted_origin() {
     let emit_open_file_event = extract_brace_block(main_rs, "fn emit_open_file_event");
     assert_contains_in_order(
         emit_open_file_event,
-        "is_trusted_app_origin",
+        "ensure_stable_origin",
         "window.emit(OPEN_FILE_EVENT",
         "emit_open_file_event must verify the main window origin is trusted before emitting",
     );
@@ -60,7 +60,7 @@ fn sensitive_ipc_events_require_trusted_origin() {
     let emit_oauth_redirect_event = extract_brace_block(main_rs, "fn emit_oauth_redirect_event");
     assert_contains_in_order(
         emit_oauth_redirect_event,
-        "is_trusted_app_origin",
+        "ensure_stable_origin",
         "window.emit(OAUTH_REDIRECT_EVENT",
         "emit_oauth_redirect_event must verify the main window origin is trusted before emitting",
     );
@@ -68,7 +68,7 @@ fn sensitive_ipc_events_require_trusted_origin() {
     let open_file_ready_listener = extract_brace_block(main_rs, "listen(OPEN_FILE_READY_EVENT");
     assert_contains_in_order(
         open_file_ready_listener,
-        "is_trusted_app_origin",
+        "ensure_stable_origin",
         "mark_ready_and_drain",
         "OPEN_FILE_READY_EVENT handler must verify the main window origin is trusted before draining",
     );
@@ -77,7 +77,7 @@ fn sensitive_ipc_events_require_trusted_origin() {
         extract_brace_block(main_rs, "listen(OAUTH_REDIRECT_READY_EVENT");
     assert_contains_in_order(
         oauth_redirect_ready_listener,
-        "is_trusted_app_origin",
+        "ensure_stable_origin",
         "mark_ready_and_drain",
         "OAUTH_REDIRECT_READY_EVENT handler must verify the main window origin is trusted before draining",
     );

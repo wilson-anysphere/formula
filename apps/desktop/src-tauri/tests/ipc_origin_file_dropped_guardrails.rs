@@ -22,8 +22,8 @@ fn file_dropped_event_is_gated_by_trusted_origin_and_payload_limits() {
         .expect("DragDrop handler missing `file-dropped` emission");
 
     let origin_check_idx = body
-        .find("is_trusted_app_origin")
-        .expect("`file-dropped` emission must be gated by ipc_origin::is_trusted_app_origin");
+        .find("ensure_stable_origin")
+        .expect("`file-dropped` emission must be gated by ipc_origin::ensure_stable_origin");
     assert!(
         origin_check_idx < emit_idx,
         "expected trusted-origin check to occur before `file-dropped` emission"

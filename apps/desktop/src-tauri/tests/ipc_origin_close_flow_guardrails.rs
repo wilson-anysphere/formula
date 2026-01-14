@@ -26,10 +26,8 @@ fn close_requested_flow_checks_trusted_origin_before_emitting_events() {
     });
     let block = &rest[..end];
 
-    let trust_check_pos = block.find("is_trusted_app_origin").unwrap_or_else(|| {
-        panic!(
-            "expected CloseRequested handler to call `desktop::ipc_origin::is_trusted_app_origin`"
-        )
+    let trust_check_pos = block.find("ensure_stable_origin").unwrap_or_else(|| {
+        panic!("expected CloseRequested handler to call `desktop::ipc_origin::ensure_stable_origin`")
     });
 
     let close_prep_emit_pos = block.find("emit(\"close-prep\"").unwrap_or_else(|| {
@@ -37,7 +35,7 @@ fn close_requested_flow_checks_trusted_origin_before_emitting_events() {
     });
     assert!(
         trust_check_pos < close_prep_emit_pos,
-        "CloseRequested handler must check `is_trusted_app_origin` before emitting `close-prep`"
+        "CloseRequested handler must check `ensure_stable_origin` before emitting `close-prep`"
     );
 
     let close_requested_emit_pos = block.find("emit(\"close-requested\"").unwrap_or_else(|| {
@@ -45,7 +43,6 @@ fn close_requested_flow_checks_trusted_origin_before_emitting_events() {
     });
     assert!(
         trust_check_pos < close_requested_emit_pos,
-        "CloseRequested handler must check `is_trusted_app_origin` before emitting `close-requested`"
+        "CloseRequested handler must check `ensure_stable_origin` before emitting `close-requested`"
     );
 }
-
