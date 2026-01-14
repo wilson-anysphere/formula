@@ -215,6 +215,15 @@ fn dax_model_apply_calculate_filters_supports_boolean_filter_args() {
 
     model.add_measure("Total", "SUM(Orders[Amount])").unwrap();
 
+    // Multi-value filters should support selecting BLANK (null) so pivot field items can include
+    // the relationship-generated "(blank)" member.
+    let mut blank_filter = DaxFilterContext::new();
+    blank_filter
+        .set_column_in("Customers", "Region", vec![JsValue::NULL])
+        .unwrap();
+    let total_blank = model.evaluate_with_filter("Total", &blank_filter).unwrap();
+    assert_eq!(total_blank.as_f64().unwrap(), 7.0);
+
     let group_by = serde_wasm_bindgen::to_value(&vec![GroupByDto {
         table: "Customers".into(),
         column: "Region".into(),
