@@ -8486,7 +8486,7 @@ fn update_sheet_prefix_flags(
         let key = match sheet {
             Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
             Some(crate::SheetRef::SheetRange { start, end }) => {
-                if start.eq_ignore_ascii_case(end) {
+                if formula_model::sheet_name_eq_case_insensitive(start, end) {
                     format!("[{book}]{start}")
                 } else {
                     format!("[{book}]{start}:{end}")

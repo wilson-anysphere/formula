@@ -407,6 +407,34 @@ fn degenerate_external_3d_sheet_range_ref_resolves_via_provider() {
 }
 
 #[test]
+fn degenerate_external_3d_sheet_range_ref_matches_endpoints_nfkc_case_insensitively_for_bytecode() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Kelvin",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]'Kelvin':'Kelvin'!A1")
+        .unwrap();
+
+    // Degenerate external 3D spans (`Sheet1:Sheet1`) are representable in the bytecode backend.
+    // Ensure we treat NFKC-equivalent endpoints (`Kelvin` / `Kelvin`) as degenerate too so the
+    // reference can be lowered as a single external sheet key (not rejected as an external span).
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
 fn external_3d_sheet_span_with_quoted_sheet_names_expands_via_provider_sheet_order() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(

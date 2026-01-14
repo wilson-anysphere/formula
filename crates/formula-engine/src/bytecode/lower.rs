@@ -186,7 +186,7 @@ fn external_sheet_id(prefix: &RefPrefix) -> Result<SheetId, LowerError> {
     let key = match prefix.sheet.as_ref() {
         Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
         Some(crate::SheetRef::SheetRange { start, end }) => {
-            if start.eq_ignore_ascii_case(end) {
+            if formula_model::sheet_name_eq_case_insensitive(start, end) {
                 format!("[{book}]{start}")
             } else {
                 format!("[{book}]{start}:{end}")
