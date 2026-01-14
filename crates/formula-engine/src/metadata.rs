@@ -1,11 +1,14 @@
 use std::fmt;
 
-/// A compressed formatting segment for a column in a sheet.
+/// A compressed formatting segment applied to a single column.
 ///
-/// The segment covers the half-open row interval `[start_row, end_row_exclusive)`.
+/// This mirrors the document model's `formatRunsByCol` representation:
+/// - Each run covers rows `[start_row, end_row_exclusive)`.
+/// - `style_id` references the workbook [`formula_model::StyleTable`] (`0` is the default/empty
+///   style).
 ///
-/// `style_id` references an entry in the engine's style table and represents a patch that
-/// participates in effective style merge semantics.
+/// When computing effective formatting, these runs have precedence:
+/// `sheet < col < row < range-run < cell`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormatRun {
     pub start_row: u32,
