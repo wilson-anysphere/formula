@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DrawingOverlay, pxToEmu } from "../../drawings/overlay";
-import { buildHitTestIndex, hitTestDrawings } from "../../drawings/hitTest";
+import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings } from "../../drawings/hitTest";
+import { getResizeHandleCenters } from "../../drawings/selectionHandles";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
@@ -509,6 +510,63 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       (app as any).renderSelection();
 
       expect(selectionCtx.rotate).toHaveBeenCalledWith(Math.PI / 2);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("starts a resize gesture when clicking a rotated resize handle", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      const rotated: DrawingObject = {
+        id: 1,
+        kind: { type: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(50), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+        transform: { rotationDeg: 90, flipH: false, flipV: false },
+      };
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => [rotated];
+
+      const viewport = (app as any).getDrawingInteractionViewport();
+      const geom = (app as any).drawingGeom;
+      const bounds = drawingObjectToViewportRect(rotated, viewport, geom);
+      const handleCenter = getResizeHandleCenters(bounds, rotated.transform).find((c) => c.handle === "nw");
+      expect(handleCenter).toBeTruthy();
+
+      (app as any).onPointerDown({
+        clientX: handleCenter!.x,
+        clientY: handleCenter!.y,
+        pointerType: "mouse",
+        button: 0,
+        pointerId: 1,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        preventDefault: () => {},
+      } as any);
+
+      expect((app as any).drawingGesture).toEqual(expect.objectContaining({ mode: "resize", handle: "nw" }));
 
       app.destroy();
       root.remove();

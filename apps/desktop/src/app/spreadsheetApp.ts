@@ -145,6 +145,7 @@ import { reservedRootGuardUiMessage, subscribeToReservedRootGuardDisconnect } fr
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { ImageBitmapCache } from "../drawings/imageBitmapCache";
+import { applyTransformVector, inverseTransformVector } from "../drawings/transform";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
@@ -630,6 +631,7 @@ type DrawingGestureState =
       startAnchor: DrawingAnchor;
       startWidthPx: number;
       startHeightPx: number;
+      transform?: DrawingObject["transform"];
       /** Only set for image objects; used when Shift is held during resize. */
       aspectRatio: number | null;
     };
@@ -12549,6 +12551,52 @@ export class SpreadsheetApp {
     // overlaid objects (charts/images/shapes) behave like Excel.
     const drawingViewport = this.getDrawingInteractionViewport();
     const drawings = this.listDrawingObjectsForSheet();
+
+    // Allow grabbing a resize handle for the current drawing selection even when the
+    // pointer is slightly outside the object's bounds (handles extend beyond the
+    // selection outline).
+    if (primaryButton && this.selectedDrawingId != null) {
+      const selected = drawings.find((obj) => obj.id === this.selectedDrawingId) ?? null;
+      if (selected) {
+        const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX) ? Math.max(0, drawingViewport.headerOffsetX!) : 0;
+        const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY) ? Math.max(0, drawingViewport.headerOffsetY!) : 0;
+        if (x >= headerOffsetX && y >= headerOffsetY) {
+          const selectedBounds = drawingObjectToViewportRect(selected, drawingViewport, this.drawingGeom);
+          const handle = hitTestResizeHandle(selectedBounds, x, y, selected.transform);
+          if (handle) {
+            e.preventDefault();
+            this.renderSelection();
+            this.focus();
+
+            const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
+            const startSheetX = x - headerOffsetX + scroll.scrollX;
+            const startSheetY = y - headerOffsetY + scroll.scrollY;
+            this.drawingGesture = {
+              pointerId: e.pointerId,
+              mode: "resize",
+              objectId: selected.id,
+              handle,
+              startSheetX,
+              startSheetY,
+              startAnchor: selected.anchor,
+              startWidthPx: selectedBounds.width,
+              startHeightPx: selectedBounds.height,
+              transform: selected.transform,
+              aspectRatio:
+                selected.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
+                  ? selectedBounds.width / selectedBounds.height
+                  : null,
+            };
+            try {
+              this.root.setPointerCapture(e.pointerId);
+            } catch {
+              // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+            }
+            return;
+          }
+        }
+      }
+    }
     const hitIndex = this.getDrawingHitTestIndex(drawings);
     const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
     if (hit) {
@@ -12559,7 +12607,7 @@ export class SpreadsheetApp {
       // Begin drag/resize gesture for primary-button interactions.
       if (primaryButton) {
         e.preventDefault();
-        const handle = hitTestResizeHandle(hit.bounds, x, y);
+        const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
         const scroll = effectiveScrollForAnchor(hit.object.anchor, drawingViewport);
         const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
           ? Math.max(0, drawingViewport.headerOffsetX!)
@@ -12580,6 +12628,7 @@ export class SpreadsheetApp {
               startAnchor: hit.object.anchor,
               startWidthPx: hit.bounds.width,
               startHeightPx: hit.bounds.height,
+              transform: hit.object.transform,
               aspectRatio:
                 hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
                   ? hit.bounds.width / hit.bounds.height
@@ -12791,36 +12840,62 @@ export class SpreadsheetApp {
 
       const viewport = this.getDrawingInteractionViewport();
       const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
-      const scroll = effectiveScrollForAnchor(this.drawingGesture.startAnchor, viewport);
+      const gesture = this.drawingGesture;
+      const scroll = effectiveScrollForAnchor(gesture.startAnchor, viewport);
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
       const sheetX = x - headerOffsetX + scroll.scrollX;
       const sheetY = y - headerOffsetY + scroll.scrollY;
 
-      let dxPx = sheetX - this.drawingGesture.startSheetX;
-      let dyPx = sheetY - this.drawingGesture.startSheetY;
+      let dxPx = sheetX - gesture.startSheetX;
+      let dyPx = sheetY - gesture.startSheetY;
 
-      if (this.drawingGesture.mode === "resize" && e.shiftKey && this.drawingGesture.aspectRatio != null) {
-        const locked = lockAspectRatioResize({
-          handle: this.drawingGesture.handle,
-          dx: dxPx,
-          dy: dyPx,
-          startWidthPx: this.drawingGesture.startWidthPx,
-          startHeightPx: this.drawingGesture.startHeightPx,
-          aspectRatio: this.drawingGesture.aspectRatio,
-          minSizePx: 8,
-        });
-        dxPx = locked.dx;
-        dyPx = locked.dy;
-      }
+      const nextAnchor = (() => {
+        if (gesture.mode !== "resize") {
+          return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+        }
 
-      const nextAnchor =
-        this.drawingGesture.mode === "resize"
-          ? resizeAnchor(this.drawingGesture.startAnchor, this.drawingGesture.handle, dxPx, dyPx, this.drawingGeom, undefined, zoom)
-          : shiftAnchor(this.drawingGesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+        const transform = gesture.transform;
+        const hasNonIdentityTransform = !!(
+          transform &&
+          (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
+        );
+
+        if (e.shiftKey && gesture.aspectRatio != null) {
+          if (hasNonIdentityTransform) {
+            const local = inverseTransformVector(dxPx, dyPx, transform!);
+            const lockedLocal = lockAspectRatioResize({
+              handle: gesture.handle,
+              dx: local.x,
+              dy: local.y,
+              startWidthPx: gesture.startWidthPx,
+              startHeightPx: gesture.startHeightPx,
+              aspectRatio: gesture.aspectRatio,
+              minSizePx: 8,
+            });
+            const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+            dxPx = world.x;
+            dyPx = world.y;
+          } else {
+            const locked = lockAspectRatioResize({
+              handle: gesture.handle,
+              dx: dxPx,
+              dy: dyPx,
+              startWidthPx: gesture.startWidthPx,
+              startHeightPx: gesture.startHeightPx,
+              aspectRatio: gesture.aspectRatio,
+              minSizePx: 8,
+            });
+            dxPx = locked.dx;
+            dyPx = locked.dy;
+          }
+        }
+
+        return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
+      })();
 
       const objects = this.listDrawingObjectsForSheet();
-      const nextObjects = objects.map((obj) => (obj.id === this.drawingGesture!.objectId ? { ...obj, anchor: nextAnchor } : obj));
+      const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
       const doc = this.document as any;
       const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
       this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
@@ -13017,13 +13092,52 @@ export class SpreadsheetApp {
       const sheetX = x - headerOffsetX + scroll.scrollX;
       const sheetY = y - headerOffsetY + scroll.scrollY;
 
-      const dxPx = sheetX - gesture.startSheetX;
-      const dyPx = sheetY - gesture.startSheetY;
+      let dxPx = sheetX - gesture.startSheetX;
+      let dyPx = sheetY - gesture.startSheetY;
 
-      const nextAnchor =
-        gesture.mode === "resize"
-          ? resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, undefined, zoom)
-          : shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+      const nextAnchor = (() => {
+        if (gesture.mode !== "resize") {
+          return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+        }
+
+        const transform = gesture.transform;
+        const hasNonIdentityTransform = !!(
+          transform &&
+          (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
+        );
+
+        if (e.shiftKey && gesture.aspectRatio != null) {
+          if (hasNonIdentityTransform) {
+            const local = inverseTransformVector(dxPx, dyPx, transform!);
+            const lockedLocal = lockAspectRatioResize({
+              handle: gesture.handle,
+              dx: local.x,
+              dy: local.y,
+              startWidthPx: gesture.startWidthPx,
+              startHeightPx: gesture.startHeightPx,
+              aspectRatio: gesture.aspectRatio,
+              minSizePx: 8,
+            });
+            const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+            dxPx = world.x;
+            dyPx = world.y;
+          } else {
+            const locked = lockAspectRatioResize({
+              handle: gesture.handle,
+              dx: dxPx,
+              dy: dyPx,
+              startWidthPx: gesture.startWidthPx,
+              startHeightPx: gesture.startHeightPx,
+              aspectRatio: gesture.aspectRatio,
+              minSizePx: 8,
+            });
+            dxPx = locked.dx;
+            dyPx = locked.dy;
+          }
+        }
+
+        return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
+      })();
 
       const objects = this.listDrawingObjectsForSheet();
       const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
