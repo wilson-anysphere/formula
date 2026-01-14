@@ -83,6 +83,10 @@ function createRoot(): HTMLElement {
 
 describe("Selection Pane panel", () => {
   beforeEach(() => {
+    // Some test suites use fake timers and can leak them across files when a test aborts early.
+    // SelectionPanePanel relies on real timers for React scheduling, so force real timers here.
+    vi.useRealTimers();
+
     priorCanvasChartsEnv = process.env.CANVAS_CHARTS;
     priorUseCanvasChartsEnv = process.env.USE_CANVAS_CHARTS;
     // Most Selection Pane behavior is authored/expected in legacy chart mode. In canvas charts mode,
@@ -90,7 +94,6 @@ describe("Selection Pane panel", () => {
     // drawings; only tests that explicitly set `?canvasCharts=1` should run in that mode.
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;
-
     document.body.innerHTML = "";
 
     // Avoid leaking URL params (e.g. `?canvasCharts=0`) between tests.
