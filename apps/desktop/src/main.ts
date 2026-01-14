@@ -9704,7 +9704,6 @@ const ribbonActions = createRibbonActions({
   showToast,
   showQuickPick,
   showInputBox,
-  notify,
   openOrganizeSheets,
   handleAddSheet,
   handleDeleteActiveSheet,
@@ -9722,8 +9721,6 @@ const ribbonActions = createRibbonActions({
   // Excel-style: "Clear" clears filter criteria (show all rows) but keeps AutoFilter enabled.
   clearAutoFilter: clearRibbonAutoFilterCriteriaForActiveSheet,
   reapplyAutoFilter: reapplyRibbonAutoFiltersForActiveSheet,
-  applyAutoFilterFromSelection: applyRibbonAutoFilterFromSelection,
-  scheduleRibbonSelectionFormatStateUpdate,
   applyFormattingToSelection,
   getActiveCellNumberFormat: activeCellNumberFormat,
   getEnsureExtensionsLoadedRef: () => ensureExtensionsLoadedRef,

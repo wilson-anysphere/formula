@@ -39,7 +39,6 @@ export interface RibbonCommandRouterDeps {
   showToast: (message: string, type?: RibbonToastType, options?: { timeoutMs?: number }) => void;
   showQuickPick: <T>(items: RibbonQuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   showInputBox: (options: { prompt?: string; value?: string; placeHolder?: string }) => Promise<string | null>;
-  notify: (args: { title: string; body: string }) => Promise<void> | void;
 
   // Sheet/dialog helpers.
   openOrganizeSheets: () => void;
@@ -51,10 +50,6 @@ export interface RibbonCommandRouterDeps {
   toggleAutoFilter: () => void;
   clearAutoFilter: () => void;
   reapplyAutoFilter: () => void;
-  applyAutoFilterFromSelection: () => Promise<boolean>;
-
-  // Ribbon state sync.
-  scheduleRibbonSelectionFormatStateUpdate: () => void;
 
   // Formatting helpers used by ribbon-only handlers.
   applyFormattingToSelection: (
