@@ -122,4 +122,60 @@ describe("registerDesktopCommands", () => {
     await commandRegistry.executeCommand("format.toggleFormatPainter");
     expect(formatPainterArm).toHaveBeenCalledTimes(1);
   });
+
+  it("registers Data → Queries & Connections commands when dataQueriesHandlers are provided", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const focus = vi.fn();
+    const showToast = vi.fn();
+    const notify = vi.fn(async () => {});
+
+    const refreshAll = vi.fn(() => ({ promise: Promise.resolve() }));
+    const service = {
+      ready: Promise.resolve(),
+      getQueries: () => [{ id: "q1" }],
+      refreshAll,
+    };
+
+    registerDesktopCommands({
+      commandRegistry,
+      app: { focus } as any,
+      layoutController: null,
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
+      openFormatCells: () => {},
+      showQuickPick: async () => null,
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      workbenchFileHandlers: {
+        newWorkbook: () => {},
+        openWorkbook: () => {},
+        saveWorkbook: () => {},
+        saveWorkbookAs: () => {},
+        setAutoSaveEnabled: () => {},
+        print: () => {},
+        printPreview: () => {},
+        closeWorkbook: () => {},
+        quit: () => {},
+      },
+      dataQueriesHandlers: {
+        getPowerQueryService: () => service as any,
+        showToast,
+        notify,
+        now: () => 0,
+        focusAfterExecute: focus,
+      },
+    });
+
+    expect(commandRegistry.getCommand("data.queriesConnections.refreshAll")).toBeTruthy();
+
+    await commandRegistry.executeCommand("data.queriesConnections.refreshAll");
+    expect(focus).toHaveBeenCalledTimes(1);
+    // Refresh is kicked off in an async continuation; flush microtasks.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(refreshAll).toHaveBeenCalledTimes(1);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
 });
