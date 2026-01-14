@@ -207,11 +207,31 @@ function findActiveReferenceIndex(references: readonly FormulaReference[], curso
   const start = Math.min(cursorStart, cursorEnd);
   const end = Math.max(cursorStart, cursorEnd);
 
+  const findContainingReference = (needleStart: number, needleEnd: number): number | null => {
+    if (references.length === 0) return null;
+    let lo = 0;
+    let hi = references.length - 1;
+    let candidate = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const ref = references[mid]!;
+      if (ref.start <= needleStart) {
+        candidate = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (candidate < 0) return null;
+    const ref = references[candidate]!;
+    if (ref.start <= needleStart && needleEnd <= ref.end) return ref.index;
+    return null;
+  };
+
   // If text is selected, treat a reference as active only when the selection is
   // contained within that reference token.
   if (start !== end) {
-    const active = references.find((ref) => start >= ref.start && end <= ref.end);
-    return active ? active.index : null;
+    return findContainingReference(start, end);
   }
 
   // Caret: treat the reference containing either the character at the caret or
@@ -219,8 +239,8 @@ function findActiveReferenceIndex(references: readonly FormulaReference[], curso
   // being at the end of a token still counts as "in" the token.
   const positions = start === 0 ? [0] : [start, start - 1];
   for (const pos of positions) {
-    const active = references.find((ref) => ref.start <= pos && pos < ref.end);
-    if (active) return active.index;
+    const active = findContainingReference(pos, pos + 1);
+    if (active != null) return active;
   }
   return null;
 }
