@@ -240,6 +240,12 @@ export default defineConfig({
       // (see `exclude` below).
       "src/**/*.test.ts",
       "src/**/*.test.tsx",
+      // Drawings `.test.ts` suites are invoked in CI via repo-rooted paths like `apps/desktop/src/...`
+      // (from within the `apps/desktop/` cwd). Keep wrapper entrypoints under `apps/desktop/src/...`
+      // so those commands work even when running `vitest` directly.
+      "apps/desktop/src/drawings/__tests__/selectionHandles.test.ts",
+      "apps/desktop/src/drawings/__tests__/drawingmlPatch.test.ts",
+      "apps/desktop/src/drawings/__tests__/modelAdapters.test.ts",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
@@ -255,6 +261,11 @@ export default defineConfig({
       // suffix.
       "src/app/**/!(*sharedGrid*).test.ts",
       "src/app/**/!(*sharedGrid*).test.tsx",
+      // Avoid running these drawings suites twice: they are imported by wrapper entrypoints under
+      // `apps/desktop/src/...` so repo-rooted invocations work.
+      "src/drawings/__tests__/selectionHandles.test.ts",
+      "src/drawings/__tests__/drawingmlPatch.test.ts",
+      "src/drawings/__tests__/modelAdapters.test.ts",
     ],
   },
 });

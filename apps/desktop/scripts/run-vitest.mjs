@@ -17,10 +17,33 @@ let args = normalizeVitestArgs(process.argv.slice(2));
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
-  if (arg.startsWith(PREFIX_POSIX_DOT)) return arg.slice(PREFIX_POSIX_DOT.length);
-  if (arg.startsWith(PREFIX_WIN_DOT)) return arg.slice(PREFIX_WIN_DOT.length);
-  if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
-  if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
+  const isDrawingTestPath = (value) =>
+    value.startsWith("src/drawings/__tests__/") || value.startsWith(`src\\drawings\\__tests__\\`);
+
+  // Drawings `.test.ts` suites have wrapper entrypoints under `apps/desktop/src/...` so repo-rooted
+  // invocations (e.g. `apps/desktop/src/...`) still work when run from within the `apps/desktop/`
+  // package directory.
+  if (arg.startsWith(PREFIX_POSIX_DOT)) {
+    const stripped = arg.slice(PREFIX_POSIX_DOT.length);
+    if (isDrawingTestPath(stripped)) return PREFIX_POSIX + stripped;
+    return stripped;
+  }
+  if (arg.startsWith(PREFIX_WIN_DOT)) {
+    const stripped = arg.slice(PREFIX_WIN_DOT.length);
+    if (isDrawingTestPath(stripped)) return PREFIX_WIN + stripped;
+    return stripped;
+  }
+  if (arg.startsWith(PREFIX_POSIX)) {
+    const stripped = arg.slice(PREFIX_POSIX.length);
+    if (isDrawingTestPath(stripped)) return arg;
+    return stripped;
+  }
+  if (arg.startsWith(PREFIX_WIN)) {
+    const stripped = arg.slice(PREFIX_WIN.length);
+    if (isDrawingTestPath(stripped)) return arg;
+    return stripped;
+  }
+  if (isDrawingTestPath(arg)) return PREFIX_POSIX + arg;
   return arg;
 });
 
