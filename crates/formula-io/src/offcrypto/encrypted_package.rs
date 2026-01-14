@@ -423,7 +423,7 @@ mod tests {
     use super::*;
     use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
     use aes::{Aes128, Aes192, Aes256};
-    use std::io::{Cursor, Read as _};
+    use std::io::Cursor;
 
     fn fixed_key(len: usize) -> Vec<u8> {
         (0..len).map(|i| i as u8).collect()
