@@ -267,6 +267,15 @@ fn errors_on_unsupported_encryption_for_encrypted_xls() {
         matches!(err, Error::UnsupportedEncryption { .. }),
         "expected Error::UnsupportedEncryption, got {err:?}"
     );
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("unsupported"),
+        "expected unsupported-encryption error message to mention unsupported encryption, got: {msg}"
+    );
+    assert!(
+        !msg.contains("wrong password") && !msg.contains("invalid password"),
+        "unsupported-encryption error message should not imply the password is wrong, got: {msg}"
+    );
 
     let err = open_workbook_with_options(
         &path,
@@ -278,5 +287,14 @@ fn errors_on_unsupported_encryption_for_encrypted_xls() {
     assert!(
         matches!(err, Error::UnsupportedEncryption { .. }),
         "expected Error::UnsupportedEncryption, got {err:?}"
+    );
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("unsupported"),
+        "expected unsupported-encryption error message to mention unsupported encryption, got: {msg}"
+    );
+    assert!(
+        !msg.contains("wrong password") && !msg.contains("invalid password"),
+        "unsupported-encryption error message should not imply the password is wrong, got: {msg}"
     );
 }

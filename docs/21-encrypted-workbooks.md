@@ -42,10 +42,14 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
       `_with_password` APIs still treat Standard as `PasswordRequired`/`InvalidPassword` until they
       are updated to use the streaming decryptor.
     - Standard-encrypted `.xlsb` payloads are not yet opened end-to-end.
-- Legacy **`.xls`** with BIFF `FILEPASS` yields `formula_io::Error::EncryptedWorkbook` when no password
-  is provided. When a password *is* provided via `open_workbook_with_password` /
-  `open_workbook_model_with_password`, Formula will attempt BIFF8 RC4 CryptoAPI decryption via the `.xls`
-  importer (see below).
+- Legacy **`.xls`** with BIFF `FILEPASS` yields:
+  - `formula_io::Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (prompt
+    callers to retry via the password-capable APIs).
+  - `formula_io::Error::PasswordRequired` / `formula_io::Error::InvalidPassword` via
+    `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` when the password is
+    missing/incorrect.
+  - When a password is provided, Formula will attempt BIFF8 RC4 CryptoAPI decryption via the `.xls`
+    importer (see below).
 - The desktop app surfaces a **password required** style error (so the UI can prompt for a password).
 
 **Intended behavior (when decryption + password plumbing is implemented):**
@@ -334,9 +338,12 @@ Today, the `formula-io` crate:
         `open_workbook_with_options` (streaming decrypt; returns a `Workbook::Model`).
       - Standard-encrypted `.xlsb` payloads are not yet opened end-to-end.
 - For legacy `.xls` with BIFF `FILEPASS`:
-  - without a password, `open_workbook(...)` / `open_workbook_model(...)` return `Error::EncryptedWorkbook`
-  - with a password, `open_workbook_with_password(...)` / `open_workbook_model_with_password(...)`
-    route to `formula_xls::import_xls_path_with_password(...)` (BIFF8 RC4 CryptoAPI only)
+  - without a password, `open_workbook(...)` / `open_workbook_model(...)` return
+    `Error::EncryptedWorkbook`
+  - `open_workbook_with_password(...)` / `open_workbook_model_with_password(...)` return:
+    - `Error::PasswordRequired` when `password` is `None`
+    - `Error::InvalidPassword` when a password is provided but decryption fails
+    - and otherwise route to `formula_xls::import_xls_path_with_password(...)` (BIFF8 RC4 CryptoAPI only)
 
 If you specifically need to open an **encrypted legacy `.xls`** workbook *today*, you can either:
 
@@ -501,10 +508,12 @@ Current behavior in `formula-io`:
       (Agile 4.4). For Standard/CryptoAPI, `InvalidPassword` is still a placeholder until Standard is
       wired into the open path.
   - `Error::UnsupportedOoxmlEncryption` (unrecognized `EncryptionInfo` version)
-- Legacy `.xls` encryption (`FILEPASS`) is surfaced as `Error::EncryptedWorkbook` when no password is
-  provided. When a password is provided via `open_workbook_with_password` /
-  `open_workbook_model_with_password`, `formula-io` routes to the decrypting `.xls` importer (BIFF8
-  RC4 CryptoAPI only).
+- Legacy `.xls` encryption (`FILEPASS`) is surfaced as:
+  - `Error::EncryptedWorkbook` via `open_workbook(..)` / `open_workbook_model(..)` (no password support),
+    and
+  - `Error::PasswordRequired` / `Error::InvalidPassword` via `open_workbook_with_password(..)` /
+    `open_workbook_model_with_password(..)` (attempts the decrypting `.xls` importer; BIFF8 RC4 CryptoAPI
+    only).
 
 ### Mapping to existing Rust error types
 
