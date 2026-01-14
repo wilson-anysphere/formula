@@ -1063,6 +1063,24 @@ mod tests {
     }
 
     #[test]
+    fn resolves_record_value_non_index_passthrough() {
+        let def = PivotCacheDefinition::default();
+        assert_eq!(
+            def.resolve_record_value(0, PivotCacheValue::Number(3.14)),
+            PivotCacheValue::Number(3.14)
+        );
+    }
+
+    #[test]
+    fn resolves_record_value_when_cache_field_is_missing() {
+        let def = PivotCacheDefinition::default();
+        assert_eq!(
+            def.resolve_record_value(0, PivotCacheValue::Index(0)),
+            PivotCacheValue::Missing
+        );
+    }
+
+    #[test]
     fn resolves_record_value_out_of_range_shared_item_index() {
         let def = PivotCacheDefinition {
             cache_fields: vec![PivotCacheField {
