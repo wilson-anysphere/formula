@@ -3366,7 +3366,7 @@ impl DaxEngine {
         };
 
         let Some(rel_idx) =
-            model.find_relationship_index(left_table, left_column, right_table, right_column)
+            model.find_relationship_index(left_table, left_column, right_table, right_column)?
         else {
             return Err(DaxError::Eval(format!(
                 "no relationship found between {left_table}[{left_column}] and {right_table}[{right_column}]"
@@ -3419,7 +3419,7 @@ impl DaxEngine {
         let direction = direction.trim().to_ascii_uppercase();
 
         let Some(rel_idx) =
-            model.find_relationship_index(left_table, left_column, right_table, right_column)
+            model.find_relationship_index(left_table, left_column, right_table, right_column)?
         else {
             return Err(DaxError::Eval(format!(
                 "no relationship found between {left_table}[{left_column}] and {right_table}[{right_column}]"

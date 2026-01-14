@@ -2186,25 +2186,48 @@ impl DataModel {
         column_a: &str,
         table_b: &str,
         column_b: &str,
-    ) -> Option<usize> {
-        let table_a = normalize_ident(table_a);
-        let column_a = normalize_ident(column_a);
-        let table_b = normalize_ident(table_b);
-        let column_b = normalize_ident(column_b);
-        self.relationships
-            .iter()
-            .enumerate()
-            .find_map(|(idx, info)| {
-                let forward = info.from_table_key == table_a
-                    && info.from_column_key == column_a
-                    && info.to_table_key == table_b
-                    && info.to_column_key == column_b;
-                let reverse = info.from_table_key == table_b
-                    && info.from_column_key == column_b
-                    && info.to_table_key == table_a
-                    && info.to_column_key == column_a;
-                (forward || reverse).then_some(idx)
-            })
+    ) -> DaxResult<Option<usize>> {
+        let table_a_display = table_a.trim();
+        let column_a_display = column_a.trim();
+        let table_b_display = table_b.trim();
+        let column_b_display = column_b.trim();
+
+        let table_a = normalize_ident(table_a_display);
+        let column_a = normalize_ident(column_a_display);
+        let table_b = normalize_ident(table_b_display);
+        let column_b = normalize_ident(column_b_display);
+
+        let mut matches = Vec::new();
+        for (idx, info) in self.relationships.iter().enumerate() {
+            let forward = info.from_table_key == table_a
+                && info.from_column_key == column_a
+                && info.to_table_key == table_b
+                && info.to_column_key == column_b;
+            let reverse = info.from_table_key == table_b
+                && info.from_column_key == column_b
+                && info.to_table_key == table_a
+                && info.to_column_key == column_a;
+            if forward || reverse {
+                matches.push(idx);
+            }
+        }
+
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches[0])),
+            _ => {
+                let mut relationship_names: Vec<String> = matches
+                    .iter()
+                    .filter_map(|&idx| self.relationships.get(idx).map(|rel| rel.rel.name.clone()))
+                    .collect();
+                relationship_names.sort();
+                relationship_names.dedup();
+                Err(DaxError::Eval(format!(
+                    "multiple relationships found between {table_a_display}[{column_a_display}] and {table_b_display}[{column_b_display}]: {}",
+                    relationship_names.join(", ")
+                )))
+            }
+        }
     }
 
     pub(crate) fn normalize_measure_name(name: &str) -> &str {
