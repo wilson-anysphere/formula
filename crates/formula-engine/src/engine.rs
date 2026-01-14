@@ -14873,6 +14873,39 @@ fn walk_calc_expr(
                             }
                         }
                     }
+                    "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "SHEET" | "SHEETS" => {
+                        // These functions accept a reference argument but only consult its
+                        // address/shape metadata, not the referenced cells' values. Avoid creating
+                        // calc precedents for a bare reference/range:
+                        // - `=ROW(A1)` should not become a self-cycle when entered into `A1`
+                        // - `=SUM(ROW(1:5))` should not become a cycle when entered into a cell
+                        //   inside rows 1:5 (range nodes participate in calc ordering)
+                        //
+                        // When the argument is more complex (e.g. `ROW(OFFSET(...))`), fall back to
+                        // the generic walker so we still pick up dependencies used to compute the
+                        // reference.
+                        let Some(arg0) = args.first() else {
+                            return;
+                        };
+                        match arg0 {
+                            Expr::CellRef(_)
+                            | Expr::RangeRef(_)
+                            | Expr::StructuredRef(_)
+                            | Expr::SpillRange(_) => return,
+                            Expr::ImplicitIntersection(inner)
+                                if matches!(
+                                    inner.as_ref(),
+                                    Expr::CellRef(_)
+                                        | Expr::RangeRef(_)
+                                        | Expr::StructuredRef(_)
+                                        | Expr::SpillRange(_)
+                                ) =>
+                            {
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
             } else {
@@ -15677,6 +15710,43 @@ mod tests {
             engine.get_cell_value("Sheet1", "A1"),
             Value::Text("v".to_string())
         );
+    }
+
+    #[test]
+    fn reference_info_functions_do_not_create_spurious_cycles() {
+        let mut engine = Engine::new();
+
+        // Self-referential single-cell references should not become calc-graph cycles.
+        engine.set_cell_formula("Sheet1", "D1", "=ROW(D1)").unwrap();
+        engine.set_cell_formula("Sheet1", "D2", "=COLUMN(D2)").unwrap();
+        engine.set_cell_formula("Sheet1", "D3", "=ROWS(D1:D3)").unwrap();
+        engine.set_cell_formula("Sheet1", "D4", "=COLUMNS(B:D)").unwrap();
+        engine.set_cell_formula("Sheet1", "D5", "=SHEET(D5)").unwrap();
+        engine.set_cell_formula("Sheet1", "D6", "=SHEETS(D6)").unwrap();
+        engine.set_cell_formula("Sheet1", "D7", "=AREAS(D7)").unwrap();
+
+        // Range arguments that include the formula cell should not create range-node cycles.
+        engine
+            .set_cell_formula("Sheet1", "A1", "=SUM(ROW(1:5))")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A2", "=SUM(COLUMN(A:C))")
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.circular_reference_count(), 0);
+
+        assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(4.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(3.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D4"), Value::Number(3.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D5"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D6"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D7"), Value::Number(1.0));
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(6.0));
     }
 
     #[test]
