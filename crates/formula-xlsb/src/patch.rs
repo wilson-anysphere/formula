@@ -1675,7 +1675,24 @@ fn value_record_expected_payload_len(record_id: u32, payload: &[u8]) -> Result<u
             let cch = read_u32(payload, 8)? as usize;
             let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
             let expected_simple = 12usize.checked_add(utf16_len).ok_or(Error::UnexpectedEof)?;
-            if payload.len() == expected_simple {
+            // Some writers omit the wide-string `flags` byte when there are no rich/phonetic
+            // blocks. When this "simple" layout also contains unexpected trailing bytes, we still
+            // want to treat only the defined `[cch][utf16...]` range as the known payload so the
+            // conversion-to-formula guard can detect and reject the extra bytes.
+            //
+            // Heuristic: if the first byte after `cch` (offset 12) does *not* look like a flags
+            // byte (i.e. it has bits outside of the commonly-observed flag set), treat the record
+            // as using the simple layout even when the record length is larger than
+            // `expected_simple`.
+            //
+            // This is intentionally conservative: misclassifying an exotic reserved-flags record
+            // only makes conversion to formulas require an explicit `CellEdit.new_rgcb`, which is
+            // safer than silently dropping bytes.
+            if payload.len() == expected_simple
+                || payload
+                    .get(12)
+                    .map_or(false, |&flags| flags & !0x83 != 0)
+            {
                 return Ok(expected_simple);
             }
 

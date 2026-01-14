@@ -18,6 +18,7 @@ const NUM: u32 = 0x0002;
 const BOOLERR: u32 = 0x0003;
 const BOOL: u32 = 0x0004;
 const FLOAT: u32 = 0x0005;
+const CELL_ST: u32 = 0x0006;
 const STRING: u32 = 0x0007;
 
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
@@ -249,6 +250,51 @@ fn converting_shared_string_cell_with_trailing_bytes_to_formula_requires_explici
     let mut out = Vec::new();
     let err = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut out, &edits_missing_rgcb)
         .expect_err("expected InvalidInput when streaming convert STRING record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+
+    let edits_with_rgcb = [CellEdit {
+        new_rgcb: Some(Vec::new()),
+        ..edits_missing_rgcb[0].clone()
+    }];
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits_with_rgcb).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed =
+        patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits_with_rgcb)
+            .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+}
+
+#[test]
+fn converting_inline_string_cell_with_trailing_bytes_to_formula_requires_explicit_new_rgcb() {
+    // Same invariant as `converting_value_cell_with_trailing_bytes_to_formula_requires_explicit_new_rgcb`,
+    // but for BrtCellSt (`CELL_ST`) inline-string value records.
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "Hello");
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, CELL_ST, &[0xAB]);
+
+    let rgce = encode_rgce("=1+1").expect("encode formula");
+    let edits_missing_rgcb = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(rgce.clone()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let err = patch_sheet_bin(&tweaked, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when converting CELL_ST record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut out, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when streaming convert CELL_ST record with trailing bytes");
     assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
 
     let edits_with_rgcb = [CellEdit {
