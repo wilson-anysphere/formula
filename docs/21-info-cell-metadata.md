@@ -21,12 +21,14 @@ As of today:
   (layered style resolution), matching Excel semantics:
   - `protect`: `1` if the effective style is locked (default), `0` if unlocked.
   - `prefix`: single-character alignment prefix (`'`, `"`, `^`, `\`) or `""` for general/unspecified.
-- `CELL("width")` is **partially implemented**:
-  - consults per-column metadata when available (`ColProperties.width` / `ColProperties.hidden`)
-  - returns the column width in **Excel character units** (OOXML `col/@width`), defaulting to `8.43` when unset
+- `CELL("width")` is implemented with Excel-compatible encoding:
+  - consults per-column metadata (`ColProperties.width` / `ColProperties.hidden`) and the sheet default width
+  - returns an encoded number:
+    - integer part: `floor(widthChars)`
+    - fractional marker: `+ 0.0` when the column uses the sheet default width, `+ 0.1` when it has an explicit per-column width override
   - returns `0` when the column is hidden
 
-  This is not yet fully Excel-compatible (Excel uses a more idiosyncratic width/hidden encoding).
+  `widthChars` is the Excel column-width unit (OOXML `col/@width`). When unset, the engine falls back to Excel’s standard `8.43` width, which encodes as `8.0`.
 
 Tracking implementation: `crates/formula-engine/src/functions/information/worksheet.rs`.
 
@@ -93,7 +95,7 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
 | `protect` | number | **effective style** (`protection.locked`) | implemented |
 | `prefix` | text | **effective style** (`alignment.horizontal`) | implemented |
-| `width` | number | column width + column hidden state | **partially implemented** (consults `ColProperties.width` / `hidden`; defaults to `8.43`, returns `0` when hidden) |
+| `width` | number | column width + column hidden state | implemented (encodes `floor(widthChars) + 0.0/0.1`; returns `0` when hidden) |
 
 Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
 
@@ -159,21 +161,21 @@ Planned mapping (must match Excel exactly when implemented):
 
 This uses the cell’s **effective alignment** (layered style merge), not just a per-cell format.
 
-#### `CELL("width")` (planned full semantics)
+#### `CELL("width")`
 
 `CELL("width")` must reflect:
 
 - the effective **column width** for the referenced cell’s column
 - whether the column is **hidden**
 
-Current behavior:
+Current behavior (Excel encoding):
 
-- Returns the per-column `ColProperties.width` value when available (in **Excel character units**), defaulting to `8.43`.
-- Returns `0` when the referenced column is marked hidden (`ColProperties.hidden = true`).
+- If the referenced column is hidden (`ColProperties.hidden = true`): returns `0`.
+- Otherwise returns:
+  - `floor(widthChars) + 0.0` when the column uses the sheet default width
+  - `floor(widthChars) + 0.1` when the column has an explicit per-column width override
 
-Planned behavior:
-
-Excel uses a somewhat idiosyncratic numeric encoding for column width/hidden; we will document the exact encoding here once implemented.
+`widthChars` is stored in Excel column-width units (OOXML `<col width="…">` semantics). When unset, the engine falls back to the Excel standard `8.43`.
 
 ---
 
@@ -347,5 +349,5 @@ These are the concrete code areas that will need changes to fully support the pl
 3. **Expose setters in WASM + worker protocol**:
    - add `WasmWorkbook` methods in `crates/formula-wasm/src/lib.rs`
    - add worker RPC methods/types in `packages/engine/src/*`
-4. **Decide + test `CELL("width")` encoding**:
-   - lock the exact Excel encoding (width + hidden) in compatibility tests before shipping
+4. **Maintain `CELL("width")` encoding tests**:
+   - keep the integer+flag encoding stable (default/custom/hidden)
