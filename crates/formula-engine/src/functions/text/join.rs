@@ -1,7 +1,8 @@
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
+use crate::value::format_number_general_with_options;
 use crate::{ErrorKind, Value};
-use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
+use formula_format::Locale;
 
 /// TEXTJOIN(delimiter, ignore_empty, text1, [text2], ...)
 pub fn textjoin(
@@ -11,21 +12,13 @@ pub fn textjoin(
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
 ) -> Result<String, ErrorKind> {
-    let options = FormatOptions {
-        locale: value_locale.separators,
-        date_system: match date_system {
-            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
-            // for the 1900 date system (Excel compatibility).
-            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
-            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
-        },
-    };
+    let locale = value_locale.separators;
 
     let mut out = String::new();
     let mut first = true;
 
     for value in values {
-        let piece = match value_to_text(value, &options) {
+        let piece = match value_to_text(value, locale, date_system) {
             Ok(piece) => piece,
             Err(e) => return Err(e),
         };
@@ -44,17 +37,25 @@ pub fn textjoin(
     Ok(out)
 }
 
-fn value_to_text(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
+fn value_to_text(
+    value: &Value,
+    locale: Locale,
+    date_system: ExcelDateSystem,
+) -> Result<String, ErrorKind> {
     match value {
         Value::Blank => Ok(String::new()),
-        Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
+        Value::Number(n) => Ok(format_number_general_with_options(*n, locale, date_system)),
         Value::Text(s) => Ok(s.clone()),
-        Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
+        Value::Bool(b) => Ok(if *b {
+            "TRUE".to_string()
+        } else {
+            "FALSE".to_string()
+        }),
         Value::Entity(entity) => Ok(entity.display.clone()),
         Value::Record(record) => {
             if let Some(display_field) = record.display_field.as_deref() {
                 if let Some(value) = record.get_field_case_insensitive(display_field) {
-                    return value_to_text(&value, options);
+                    return value_to_text(&value, locale, date_system);
                 }
             }
             Ok(record.display.clone())
@@ -64,11 +65,14 @@ fn value_to_text(value: &Value, options: &FormatOptions) -> Result<String, Error
             if matches!(other, Value::Spill { .. }) {
                 return Err(ErrorKind::Spill);
             }
-            if matches!(other, Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_)) {
+            if matches!(
+                other,
+                Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_)
+            ) {
                 return Err(ErrorKind::Value);
             }
             if let Value::Array(arr) = other {
-                return value_to_text(&arr.top_left(), options);
+                return value_to_text(&arr.top_left(), locale, date_system);
             }
 
             // Other rich scalar values: treat as their display string.

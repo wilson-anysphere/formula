@@ -5,9 +5,9 @@ use crate::coercion::ValueLocaleConfig;
 use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
+use crate::value::format_number_general_with_options;
 use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, LocaleConfig, Value};
-use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CriteriaOp {
@@ -145,7 +145,9 @@ impl Criteria {
                 value_locale,
                 number_locale,
             }),
-            Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale),
+            Value::Text(s) => {
+                parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale)
+            }
             Value::Entity(entity) => parse_criteria_string(
                 entity.display.as_str(),
                 system,
@@ -496,13 +498,13 @@ fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<Stri
             value.coerce_to_string().ok()
         }
         Value::Number(n) => {
-            let options = FormatOptions {
-                locale: value_locale.separators,
-                // Criteria text matching always treats numbers as numbers under the "General"
-                // format; the date system is irrelevant.
-                date_system: DateSystem::Excel1900,
-            };
-            Some(formula_format::format_value(FmtValue::Number(*n), None, &options).text)
+            // Criteria text matching always treats numbers as numbers under the "General" format;
+            // the date system is irrelevant.
+            Some(format_number_general_with_options(
+                *n,
+                value_locale.separators,
+                ExcelDateSystem::EXCEL_1900,
+            ))
         }
         Value::Error(_)
         | Value::Reference(_)

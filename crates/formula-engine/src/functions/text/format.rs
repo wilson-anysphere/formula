@@ -1,11 +1,16 @@
 use crate::date::ExcelDateSystem;
-use crate::locale::ValueLocaleConfig;
 use crate::error::{ExcelError, ExcelResult};
+use crate::locale::ValueLocaleConfig;
+use crate::value::format_number_general_with_options;
 use crate::{ErrorKind, Value};
 use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 /// DOLLAR(number, [decimals])
-pub fn dollar(number: f64, decimals: Option<i32>, value_locale: ValueLocaleConfig) -> ExcelResult<String> {
+pub fn dollar(
+    number: f64,
+    decimals: Option<i32>,
+    value_locale: ValueLocaleConfig,
+) -> ExcelResult<String> {
     if !number.is_finite() {
         return Err(ExcelError::Num);
     }
@@ -66,25 +71,39 @@ pub fn text(
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
 ) -> Result<String, ErrorKind> {
-    fn value_to_display_string(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
+    fn value_to_display_string(
+        value: &Value,
+        options: &FormatOptions,
+        date_system: ExcelDateSystem,
+    ) -> Result<String, ErrorKind> {
         match value {
             Value::Blank => Ok(String::new()),
-            Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
+            Value::Number(n) => Ok(format_number_general_with_options(
+                *n,
+                options.locale,
+                date_system,
+            )),
             Value::Text(s) => Ok(s.clone()),
             Value::Entity(v) => Ok(v.display.clone()),
             Value::Record(v) => {
                 if let Some(display_field) = v.display_field.as_deref() {
                     if let Some(value) = v.get_field_case_insensitive(display_field) {
-                        return value_to_display_string(&value, options);
+                        return value_to_display_string(&value, options, date_system);
                     }
                 }
                 Ok(v.display.clone())
             }
-            Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
+            Value::Bool(b) => Ok(if *b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }),
             Value::Error(e) => Err(*e),
             Value::Spill { .. } => Err(ErrorKind::Spill),
-            Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) => Err(ErrorKind::Value),
-            Value::Array(arr) => value_to_display_string(&arr.top_left(), options),
+            Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) => {
+                Err(ErrorKind::Value)
+            }
+            Value::Array(arr) => value_to_display_string(&arr.top_left(), options, date_system),
         }
     }
 
@@ -103,9 +122,9 @@ pub fn text(
     let fmt_value = match value {
         Value::Error(e) => return Err(*e),
         Value::Spill { .. } => return Err(ErrorKind::Spill),
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Lambda(_) => return Err(ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) => {
+            return Err(ErrorKind::Value)
+        }
         Value::Array(arr) => return text(&arr.top_left(), format_text, date_system, value_locale),
         Value::Number(n) => {
             if !n.is_finite() {
@@ -118,7 +137,7 @@ pub fn text(
         Value::Record(v) => {
             let display = if let Some(display_field) = v.display_field.as_deref() {
                 if let Some(value) = v.get_field_case_insensitive(display_field) {
-                    value_to_display_string(&value, &options)?
+                    value_to_display_string(&value, &options, date_system)?
                 } else {
                     v.display.clone()
                 }
@@ -126,14 +145,12 @@ pub fn text(
                 v.display.clone()
             };
 
-            return Ok(
-                formula_format::format_value(
-                    FmtValue::Text(display.as_str()),
-                    Some(format_text),
-                    &options,
-                )
-                .text,
-            );
+            return Ok(formula_format::format_value(
+                FmtValue::Text(display.as_str()),
+                Some(format_text),
+                &options,
+            )
+            .text);
         }
         Value::Bool(b) => FmtValue::Bool(*b),
         Value::Blank => FmtValue::Blank,

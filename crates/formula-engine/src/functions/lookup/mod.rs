@@ -2,9 +2,10 @@ use crate::coercion::datetime::parse_value_text;
 use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
+use crate::value::format_number_general_with_options;
 use crate::{ErrorKind, Value};
 use chrono::{DateTime, Utc};
-use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
+use formula_format::Locale;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -13,42 +14,40 @@ struct LookupContext {
     value_locale: ValueLocaleConfig,
     date_system: ExcelDateSystem,
     now_utc: DateTime<Utc>,
-    format_options: FormatOptions,
 }
 
 impl LookupContext {
-    fn new(value_locale: ValueLocaleConfig, date_system: ExcelDateSystem, now_utc: DateTime<Utc>) -> Self {
+    fn new(
+        value_locale: ValueLocaleConfig,
+        date_system: ExcelDateSystem,
+        now_utc: DateTime<Utc>,
+    ) -> Self {
         Self {
             value_locale,
             date_system,
             now_utc,
-            format_options: format_options_for_value_locale(value_locale, date_system),
         }
     }
 
     fn default() -> Self {
-        Self::new(ValueLocaleConfig::en_us(), ExcelDateSystem::EXCEL_1900, Utc::now())
+        Self::new(
+            ValueLocaleConfig::en_us(),
+            ExcelDateSystem::EXCEL_1900,
+            Utc::now(),
+        )
     }
 }
 
-fn format_options_for_value_locale(value_locale: ValueLocaleConfig, system: ExcelDateSystem) -> FormatOptions {
-    FormatOptions {
-        locale: value_locale.separators,
-        date_system: match system {
-            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior for the 1900
-            // date system (Excel compatibility).
-            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
-            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
-        },
-    }
-}
-
-fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
+fn coerce_to_string_with_general_options(
+    value: &Value,
+    locale: Locale,
+    date_system: ExcelDateSystem,
+) -> Result<String, ErrorKind> {
     match value {
         Value::Text(s) => Ok(s.clone()),
         Value::Entity(entity) => Ok(entity.display.clone()),
         Value::Record(record) => Ok(record.display.clone()),
-        Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
+        Value::Number(n) => Ok(format_number_general_with_options(*n, locale, date_system)),
         Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Blank => Ok(String::new()),
         Value::Error(e) => Err(*e),
@@ -89,13 +88,8 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
             if trimmed.is_empty() {
                 false
             } else {
-                parse_value_text(
-                    trimmed,
-                    ctx.value_locale,
-                    ctx.now_utc,
-                    ctx.date_system,
-                )
-                .is_ok_and(|parsed| parsed == *a)
+                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
+                    .is_ok_and(|parsed| parsed == *a)
             }
         }
         (Value::Number(a), Value::Entity(b)) | (Value::Entity(b), Value::Number(a)) => {
@@ -103,13 +97,8 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
             if trimmed.is_empty() {
                 false
             } else {
-                parse_value_text(
-                    trimmed,
-                    ctx.value_locale,
-                    ctx.now_utc,
-                    ctx.date_system,
-                )
-                .is_ok_and(|parsed| parsed == *a)
+                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
+                    .is_ok_and(|parsed| parsed == *a)
             }
         }
         (Value::Number(a), Value::Record(b)) | (Value::Record(b), Value::Number(a)) => {
@@ -117,13 +106,8 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
             if trimmed.is_empty() {
                 false
             } else {
-                parse_value_text(
-                    trimmed,
-                    ctx.value_locale,
-                    ctx.now_utc,
-                    ctx.date_system,
-                )
-                .is_ok_and(|parsed| parsed == *a)
+                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
+                    .is_ok_and(|parsed| parsed == *a)
             }
         }
         (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
@@ -368,10 +352,18 @@ fn xmatch_with_modes_impl(
         return Err(ErrorKind::Value);
     }
     let pos = match search_mode {
-        SearchMode::FirstToLast => xmatch_linear(ctx, lookup_value, lookup_array, match_mode, false)?,
-        SearchMode::LastToFirst => xmatch_linear(ctx, lookup_value, lookup_array, match_mode, true)?,
-        SearchMode::BinaryAscending => xmatch_binary(ctx, lookup_value, lookup_array, match_mode, false)?,
-        SearchMode::BinaryDescending => xmatch_binary(ctx, lookup_value, lookup_array, match_mode, true)?,
+        SearchMode::FirstToLast => {
+            xmatch_linear(ctx, lookup_value, lookup_array, match_mode, false)?
+        }
+        SearchMode::LastToFirst => {
+            xmatch_linear(ctx, lookup_value, lookup_array, match_mode, true)?
+        }
+        SearchMode::BinaryAscending => {
+            xmatch_binary(ctx, lookup_value, lookup_array, match_mode, false)?
+        }
+        SearchMode::BinaryDescending => {
+            xmatch_binary(ctx, lookup_value, lookup_array, match_mode, true)?
+        }
     };
 
     let pos = pos.checked_add(1).unwrap_or(usize::MAX);
@@ -390,7 +382,14 @@ pub fn xmatch_with_modes_accessor(
     search_mode: SearchMode,
 ) -> Result<i32, ErrorKind> {
     let ctx = LookupContext::default();
-    xmatch_with_modes_accessor_impl(&ctx, lookup_value, len, &mut value_at, match_mode, search_mode)
+    xmatch_with_modes_accessor_impl(
+        &ctx,
+        lookup_value,
+        len,
+        &mut value_at,
+        match_mode,
+        search_mode,
+    )
 }
 
 pub(crate) fn xmatch_with_modes_accessor_with_locale(
@@ -404,7 +403,14 @@ pub(crate) fn xmatch_with_modes_accessor_with_locale(
     now_utc: DateTime<Utc>,
 ) -> Result<i32, ErrorKind> {
     let ctx = LookupContext::new(value_locale, date_system, now_utc);
-    xmatch_with_modes_accessor_impl(&ctx, lookup_value, len, &mut value_at, match_mode, search_mode)
+    xmatch_with_modes_accessor_impl(
+        &ctx,
+        lookup_value,
+        len,
+        &mut value_at,
+        match_mode,
+        search_mode,
+    )
 }
 
 fn xmatch_with_modes_accessor_impl(
@@ -419,10 +425,18 @@ fn xmatch_with_modes_accessor_impl(
         return Err(ErrorKind::Value);
     }
     let pos = match search_mode {
-        SearchMode::FirstToLast => xmatch_linear_accessor(ctx, lookup_value, len, value_at, match_mode, false)?,
-        SearchMode::LastToFirst => xmatch_linear_accessor(ctx, lookup_value, len, value_at, match_mode, true)?,
-        SearchMode::BinaryAscending => xmatch_binary_accessor(ctx, lookup_value, len, value_at, match_mode, false)?,
-        SearchMode::BinaryDescending => xmatch_binary_accessor(ctx, lookup_value, len, value_at, match_mode, true)?,
+        SearchMode::FirstToLast => {
+            xmatch_linear_accessor(ctx, lookup_value, len, value_at, match_mode, false)?
+        }
+        SearchMode::LastToFirst => {
+            xmatch_linear_accessor(ctx, lookup_value, len, value_at, match_mode, true)?
+        }
+        SearchMode::BinaryAscending => {
+            xmatch_binary_accessor(ctx, lookup_value, len, value_at, match_mode, false)?
+        }
+        SearchMode::BinaryDescending => {
+            xmatch_binary_accessor(ctx, lookup_value, len, value_at, match_mode, true)?
+        }
     };
 
     let pos = pos.checked_add(1).unwrap_or(usize::MAX);
@@ -453,7 +467,11 @@ fn xmatch_linear(
         }
         MatchMode::Wildcard => {
             // Excel applies wildcard matching to text patterns.
-            let pattern = match coerce_to_string_with_format_options(lookup_value, &ctx.format_options) {
+            let pattern = match coerce_to_string_with_general_options(
+                lookup_value,
+                ctx.value_locale.separators,
+                ctx.date_system,
+            ) {
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
@@ -462,7 +480,11 @@ fn xmatch_linear(
                 let text = match candidate {
                     Value::Error(_) => continue,
                     Value::Text(s) => Cow::Borrowed(s.as_str()),
-                    other => match coerce_to_string_with_format_options(other, &ctx.format_options) {
+                    other => match coerce_to_string_with_general_options(
+                        other,
+                        ctx.value_locale.separators,
+                        ctx.date_system,
+                    ) {
                         Ok(s) => Cow::Owned(s),
                         Err(_) => continue,
                     },
@@ -557,7 +579,11 @@ fn xmatch_linear_accessor(
             Err(ErrorKind::NA)
         }
         MatchMode::Wildcard => {
-            let pattern = match coerce_to_string_with_format_options(lookup_value, &ctx.format_options) {
+            let pattern = match coerce_to_string_with_general_options(
+                lookup_value,
+                ctx.value_locale.separators,
+                ctx.date_system,
+            ) {
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
@@ -567,7 +593,11 @@ fn xmatch_linear_accessor(
                 let text = match &candidate {
                     Value::Error(_) => continue,
                     Value::Text(s) => Cow::Borrowed(s.as_str()),
-                    other => match coerce_to_string_with_format_options(other, &ctx.format_options) {
+                    other => match coerce_to_string_with_general_options(
+                        other,
+                        ctx.value_locale.separators,
+                        ctx.date_system,
+                    ) {
                         Ok(s) => Cow::Owned(s),
                         Err(_) => continue,
                     },
@@ -586,17 +616,19 @@ fn xmatch_linear_accessor(
                 if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
-                        Some((best_idx, best_val)) => match lookup_cmp_with_equality(ctx, &candidate, &best_val) {
-                            Ordering::Greater => Some((idx, candidate)),
-                            Ordering::Equal => {
-                                if idx > best_idx {
-                                    Some((idx, candidate))
-                                } else {
-                                    Some((best_idx, best_val))
+                        Some((best_idx, best_val)) => {
+                            match lookup_cmp_with_equality(ctx, &candidate, &best_val) {
+                                Ordering::Greater => Some((idx, candidate)),
+                                Ordering::Equal => {
+                                    if idx > best_idx {
+                                        Some((idx, candidate))
+                                    } else {
+                                        Some((best_idx, best_val))
+                                    }
                                 }
+                                Ordering::Less => Some((best_idx, best_val)),
                             }
-                            Ordering::Less => Some((best_idx, best_val)),
-                        },
+                        }
                     };
                 }
             }
@@ -610,17 +642,19 @@ fn xmatch_linear_accessor(
                 if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
-                        Some((best_idx, best_val)) => match lookup_cmp_with_equality(ctx, &candidate, &best_val) {
-                            Ordering::Less => Some((idx, candidate)),
-                            Ordering::Equal => {
-                                if idx < best_idx {
-                                    Some((idx, candidate))
-                                } else {
-                                    Some((best_idx, best_val))
+                        Some((best_idx, best_val)) => {
+                            match lookup_cmp_with_equality(ctx, &candidate, &best_val) {
+                                Ordering::Less => Some((idx, candidate)),
+                                Ordering::Equal => {
+                                    if idx < best_idx {
+                                        Some((idx, candidate))
+                                    } else {
+                                        Some((best_idx, best_val))
+                                    }
                                 }
+                                Ordering::Greater => Some((best_idx, best_val)),
                             }
-                            Ordering::Greater => Some((best_idx, best_val)),
-                        },
+                        }
                     };
                 }
             }
@@ -665,13 +699,17 @@ fn xmatch_binary(
 
     match effective_mode {
         MatchMode::Exact => {
-            if lb < lookup_array.len() && values_equal_for_lookup(ctx, lookup_value, &lookup_array[lb]) {
+            if lb < lookup_array.len()
+                && values_equal_for_lookup(ctx, lookup_value, &lookup_array[lb])
+            {
                 return Ok(lb);
             }
             Err(ErrorKind::NA)
         }
         MatchMode::ExactOrNextLarger => {
-            if lb < lookup_array.len() && values_equal_for_lookup(ctx, lookup_value, &lookup_array[lb]) {
+            if lb < lookup_array.len()
+                && values_equal_for_lookup(ctx, lookup_value, &lookup_array[lb])
+            {
                 return Ok(lb);
             }
             if lb < lookup_array.len() {
@@ -895,7 +933,11 @@ pub fn lookup_array(lookup_value: &Value, array: &crate::value::Array) -> Result
     }
 
     let search_first_col = array.rows >= array.cols;
-    let len = if search_first_col { array.rows } else { array.cols };
+    let len = if search_first_col {
+        array.rows
+    } else {
+        array.cols
+    };
     let last_row = array.rows.saturating_sub(1);
     let last_col = array.cols.saturating_sub(1);
 
