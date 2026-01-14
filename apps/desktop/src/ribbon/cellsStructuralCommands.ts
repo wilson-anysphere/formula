@@ -84,7 +84,11 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
           .catch(() => {})
           .finally(() => app.focus());
       } else {
-        doc.insertRows(sheetId, row0, count, { label: "Insert Rows", source: "ribbon" });
+        try {
+          doc.insertRows(sheetId, row0, count, { label: "Insert Rows", source: "ribbon" });
+        } catch (err) {
+          console.warn("Failed to insert rows:", err);
+        }
         app.focus();
       }
       return true;
@@ -97,7 +101,11 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
           .catch(() => {})
           .finally(() => app.focus());
       } else {
-        doc.insertCols(sheetId, col0, count, { label: "Insert Columns", source: "ribbon" });
+        try {
+          doc.insertCols(sheetId, col0, count, { label: "Insert Columns", source: "ribbon" });
+        } catch (err) {
+          console.warn("Failed to insert columns:", err);
+        }
         app.focus();
       }
       return true;
@@ -110,7 +118,11 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
           .catch(() => {})
           .finally(() => app.focus());
       } else {
-        doc.deleteRows(sheetId, row0, count, { label: "Delete Rows", source: "ribbon" });
+        try {
+          doc.deleteRows(sheetId, row0, count, { label: "Delete Rows", source: "ribbon" });
+        } catch (err) {
+          console.warn("Failed to delete rows:", err);
+        }
         app.focus();
       }
       return true;
@@ -123,7 +135,11 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
           .catch(() => {})
           .finally(() => app.focus());
       } else {
-        doc.deleteCols(sheetId, col0, count, { label: "Delete Columns", source: "ribbon" });
+        try {
+          doc.deleteCols(sheetId, col0, count, { label: "Delete Columns", source: "ribbon" });
+        } catch (err) {
+          console.warn("Failed to delete columns:", err);
+        }
         app.focus();
       }
       return true;

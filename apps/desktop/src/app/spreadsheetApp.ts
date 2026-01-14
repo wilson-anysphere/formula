@@ -9852,7 +9852,13 @@ export class SpreadsheetApp {
 
     // Best-effort fallback when the engine is unavailable (e.g. restricted environments).
     if (!this.wasmEngine) {
-      this.document.insertRows(sheetId, row0, count0, { label: "Insert Rows", source: "ribbon" });
+      try {
+        this.document.insertRows(sheetId, row0, count0, { label: "Insert Rows", source: "ribbon" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to insert rows: ${message}`, "error");
+        return;
+      }
       this.refresh();
       this.focus();
       return;
@@ -9888,7 +9894,13 @@ export class SpreadsheetApp {
     if (!Number.isInteger(count0) || count0 <= 0) return;
 
     if (!this.wasmEngine) {
-      this.document.deleteRows(sheetId, row0, count0, { label: "Delete Rows", source: "ribbon" });
+      try {
+        this.document.deleteRows(sheetId, row0, count0, { label: "Delete Rows", source: "ribbon" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to delete rows: ${message}`, "error");
+        return;
+      }
       this.refresh();
       this.focus();
       return;
@@ -9924,7 +9936,13 @@ export class SpreadsheetApp {
     if (!Number.isInteger(count0) || count0 <= 0) return;
 
     if (!this.wasmEngine) {
-      this.document.insertCols(sheetId, col0, count0, { label: "Insert Columns", source: "ribbon" });
+      try {
+        this.document.insertCols(sheetId, col0, count0, { label: "Insert Columns", source: "ribbon" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to insert columns: ${message}`, "error");
+        return;
+      }
       this.refresh();
       this.focus();
       return;
@@ -9960,7 +9978,13 @@ export class SpreadsheetApp {
     if (!Number.isInteger(count0) || count0 <= 0) return;
 
     if (!this.wasmEngine) {
-      this.document.deleteCols(sheetId, col0, count0, { label: "Delete Columns", source: "ribbon" });
+      try {
+        this.document.deleteCols(sheetId, col0, count0, { label: "Delete Columns", source: "ribbon" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to delete columns: ${message}`, "error");
+        return;
+      }
       this.refresh();
       this.focus();
       return;

@@ -102,7 +102,12 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
           }
           const doc = app.getDocument();
           const sheetId = app.getCurrentSheetId();
-          doc.insertRows(sheetId, range.startRow, rowCount, { label: "Insert Rows", source: "ribbon" });
+          try {
+            doc.insertRows(sheetId, range.startRow, rowCount, { label: "Insert Rows", source: "ribbon" });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            showToast(`Failed to insert rows: ${message}`, "error");
+          }
           return true;
         }
         case "entireColumn": {
@@ -112,7 +117,12 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
           }
           const doc = app.getDocument();
           const sheetId = app.getCurrentSheetId();
-          doc.insertCols(sheetId, range.startCol, colCount, { label: "Insert Columns", source: "ribbon" });
+          try {
+            doc.insertCols(sheetId, range.startCol, colCount, { label: "Insert Columns", source: "ribbon" });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            showToast(`Failed to insert columns: ${message}`, "error");
+          }
           return true;
         }
         default:
@@ -159,7 +169,12 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
         }
         const doc = app.getDocument();
         const sheetId = app.getCurrentSheetId();
-        doc.deleteRows(sheetId, range.startRow, rowCount, { label: "Delete Rows", source: "ribbon" });
+        try {
+          doc.deleteRows(sheetId, range.startRow, rowCount, { label: "Delete Rows", source: "ribbon" });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          showToast(`Failed to delete rows: ${message}`, "error");
+        }
         return true;
       }
       case "entireColumn": {
@@ -169,7 +184,12 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
         }
         const doc = app.getDocument();
         const sheetId = app.getCurrentSheetId();
-        doc.deleteCols(sheetId, range.startCol, colCount, { label: "Delete Columns", source: "ribbon" });
+        try {
+          doc.deleteCols(sheetId, range.startCol, colCount, { label: "Delete Columns", source: "ribbon" });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          showToast(`Failed to delete columns: ${message}`, "error");
+        }
         return true;
       }
       default:
