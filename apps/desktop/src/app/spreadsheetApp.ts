@@ -10166,7 +10166,9 @@ export class SpreadsheetApp {
         return;
       }
       this.refresh();
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
       return;
     }
 
@@ -10180,7 +10182,9 @@ export class SpreadsheetApp {
     }, { label: "Insert Rows" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   async deleteRows(row: number, count: number): Promise<void> {
@@ -10208,7 +10212,9 @@ export class SpreadsheetApp {
         return;
       }
       this.refresh();
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
       return;
     }
 
@@ -10222,7 +10228,9 @@ export class SpreadsheetApp {
     }, { label: "Delete Rows" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   async insertCols(col: number, count: number): Promise<void> {
@@ -10250,7 +10258,9 @@ export class SpreadsheetApp {
         return;
       }
       this.refresh();
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
       return;
     }
 
@@ -10264,7 +10274,9 @@ export class SpreadsheetApp {
     }, { label: "Insert Columns" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   async deleteCols(col: number, count: number): Promise<void> {
@@ -10292,7 +10304,9 @@ export class SpreadsheetApp {
         return;
       }
       this.refresh();
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
       return;
     }
 
@@ -10306,7 +10320,9 @@ export class SpreadsheetApp {
     }, { label: "Delete Columns" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
@@ -10343,7 +10359,9 @@ export class SpreadsheetApp {
     }, { label: "Insert Cells" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   async deleteCells(range: Range, direction: "left" | "up"): Promise<void> {
@@ -10380,7 +10398,9 @@ export class SpreadsheetApp {
     }, { label: "Delete Cells" });
 
     this.refresh();
-    this.focus();
+    if (this.sheetId === sheetId) {
+      this.focus();
+    }
   }
 
   private async applyStructuralEdit(
