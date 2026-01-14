@@ -216,7 +216,14 @@ function parseSeriesModel(value: unknown): ChartSeriesModel | null {
   const obj: any = value;
 
   const name = parseTextModelToPlainString(obj.name);
-  const categories = parseSeriesTextData(obj.categories);
+  // `formula_model::charts::SeriesModel` can represent categories as either
+  // `categories` (text) or `categoriesNum` (numeric, e.g. date serials).
+  // Prefer text categories when available, otherwise fall back to numeric.
+  const categories =
+    parseSeriesTextData(obj.categories) ??
+    // `parseSeriesNumberData` returns the same cache/ref shape, but with numeric
+    // coercion. Cast is safe because UI categories accept `string | number`.
+    (parseSeriesNumberData(obj.categoriesNum ?? obj.categories_num) as ChartDataCache<string | number> | null);
   const values = parseSeriesNumberData(obj.values);
   const xValues = parseSeriesData(obj.xValues ?? obj.x_values);
   const yValues = parseSeriesData(obj.yValues ?? obj.y_values);
@@ -296,4 +303,3 @@ function toFiniteNumberOrNull(value: unknown): number | null {
   if (typeof value !== "number") return null;
   return Number.isFinite(value) ? value : null;
 }
-

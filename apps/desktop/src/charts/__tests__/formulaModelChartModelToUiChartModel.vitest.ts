@@ -94,6 +94,34 @@ describe("formulaModelChartModelToUiChartModel", () => {
     });
   });
 
+  it("uses numeric categories when provided as categoriesNum", () => {
+    const input = {
+      chartKind: { kind: "line" },
+      title: { richText: { text: "My Line Chart", runs: [] }, formula: null, style: null },
+      legend: { position: "right", overlay: false },
+      plotArea: { kind: "line", grouping: null, axIds: [1, 2] },
+      axes: [],
+      series: [
+        {
+          name: { richText: { text: "Revenue", runs: [] }, formula: null, style: null },
+          categories: null,
+          categoriesNum: { formula: null, cache: [45123, 45124], formatCode: null },
+          values: { formula: null, cache: [10, 20], formatCode: null },
+          xValues: null,
+          yValues: null,
+        },
+      ],
+      diagnostics: [],
+    };
+
+    const out = formulaModelChartModelToUiChartModel(input);
+    expect(out.series[0]).toMatchObject({
+      name: "Revenue",
+      categories: { cache: [45123, 45124] },
+      values: { cache: [10, 20] },
+    });
+  });
+
   it("converts a pie chart model (categories + values)", () => {
     const input = {
       chartKind: { kind: "pie" },
@@ -154,4 +182,3 @@ describe("formulaModelChartModelToUiChartModel", () => {
     ]);
   });
 });
-
