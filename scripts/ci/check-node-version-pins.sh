@@ -17,13 +17,6 @@ cd "$repo_root"
 
 ci_workflow=".github/workflows/ci.yml"
 release_workflow=".github/workflows/release.yml"
-dry_run_workflow=".github/workflows/desktop-bundle-dry-run.yml"
-bundle_size_workflow=".github/workflows/desktop-bundle-size.yml"
-desktop_perf_platform_matrix_workflow=".github/workflows/desktop-perf-platform-matrix.yml"
-collab_perf_workflow=".github/workflows/collab-perf.yml"
-perf_workflow=".github/workflows/perf.yml"
-security_workflow=".github/workflows/security.yml"
-windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
 
 extract_node_major() {
   local file="$1"
@@ -105,6 +98,38 @@ extract_mise_node_major() {
   extract_first_numeric_major "$value"
 }
 
+require_node_env_pins_match() {
+  local file="$1"
+  local expected_major="$2"
+
+  local pins=""
+  pins="$(grep -E '^[[:space:]]*NODE_VERSION[[:space:]]*:' "$file" || true)"
+  if [ -z "$pins" ]; then
+    echo "Node workflow pin check failed: Failed to find NODE_VERSION in ${file}" >&2
+    exit 1
+  fi
+
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    local value="${line#*:}"
+    value="${value%%#*}"
+    value="$(extract_first_numeric_major "$value")"
+    if [ -z "$value" ]; then
+      echo "Node workflow pin check failed: Could not parse NODE_VERSION major from ${file}:" >&2
+      echo "  ${line}" >&2
+      exit 1
+    fi
+    if [ "$value" != "$expected_major" ]; then
+      echo "Node major pin mismatch between CI and ${file}:" >&2
+      echo "  ${ci_workflow}: NODE_VERSION=${expected_major}" >&2
+      echo "  ${file}: NODE_VERSION=${value}" >&2
+      echo "" >&2
+      echo "Fix: update ${file} so NODE_VERSION matches CI/release." >&2
+      exit 1
+    fi
+  done <<<"$pins"
+}
+
 require_env_pin_usage() {
   local file="$1"
   local fail=0
@@ -181,49 +206,8 @@ require_env_pin_usage() {
 }
 
 ci_node_major="$(extract_node_major "$ci_workflow")"
-release_node_major="$(extract_node_major "$release_workflow")"
-dry_run_node_major="$(extract_node_major "$dry_run_workflow")"
-bundle_node_major="$(extract_node_major "$bundle_size_workflow")"
-desktop_perf_platform_matrix_node_major="$(extract_node_major "$desktop_perf_platform_matrix_workflow")"
-collab_perf_node_major="$(extract_node_major "$collab_perf_workflow")"
-perf_node_major="$(extract_node_major "$perf_workflow")"
-security_node_major="$(extract_node_major "$security_workflow")"
-smoke_node_major="$(extract_node_major "$windows_arm64_smoke_workflow")"
-
 if [ -z "$ci_node_major" ]; then
   echo "Failed to find NODE_VERSION in ${ci_workflow}" >&2
-  exit 1
-fi
-if [ -z "$release_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${release_workflow}" >&2
-  exit 1
-fi
-if [ -z "$bundle_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${bundle_size_workflow}" >&2
-  exit 1
-fi
-if [ -z "$desktop_perf_platform_matrix_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${desktop_perf_platform_matrix_workflow}" >&2
-  exit 1
-fi
-if [ -z "$collab_perf_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${collab_perf_workflow}" >&2
-  exit 1
-fi
-if [ -z "$perf_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${perf_workflow}" >&2
-  exit 1
-fi
-if [ -z "$security_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${security_workflow}" >&2
-  exit 1
-fi
-if [ -z "$smoke_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${windows_arm64_smoke_workflow}" >&2
-  exit 1
-fi
-if [ -z "$dry_run_node_major" ]; then
-  echo "Failed to find NODE_VERSION in ${dry_run_workflow}" >&2
   exit 1
 fi
 
@@ -231,114 +215,23 @@ if ! [[ "$ci_node_major" =~ ^[0-9]+$ ]]; then
   echo "Expected NODE_VERSION in ${ci_workflow} to be a Node major (e.g. 22); got ${ci_node_major}" >&2
   exit 1
 fi
-if ! [[ "$release_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${release_workflow} to be a Node major (e.g. 22); got ${release_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$bundle_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${bundle_size_workflow} to be a Node major (e.g. 22); got ${bundle_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$desktop_perf_platform_matrix_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${desktop_perf_platform_matrix_workflow} to be a Node major (e.g. 22); got ${desktop_perf_platform_matrix_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$collab_perf_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${collab_perf_workflow} to be a Node major (e.g. 22); got ${collab_perf_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$perf_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${perf_workflow} to be a Node major (e.g. 22); got ${perf_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$security_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${security_workflow} to be a Node major (e.g. 22); got ${security_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$smoke_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${windows_arm64_smoke_workflow} to be a Node major (e.g. 22); got ${smoke_node_major}" >&2
-  exit 1
-fi
-if ! [[ "$dry_run_node_major" =~ ^[0-9]+$ ]]; then
-  echo "Expected NODE_VERSION in ${dry_run_workflow} to be a Node major (e.g. 22); got ${dry_run_node_major}" >&2
+# Discover all workflows that configure Node via actions/setup-node and ensure they
+# follow the same pinning rules as CI/release.
+mapfile -t node_workflows < <(
+  {
+    git grep -l "actions/setup-node@" -- .github/workflows/*.yml
+    printf '%s\n' "$ci_workflow" "$release_workflow"
+  } | sort -u
+)
+if [ "${#node_workflows[@]}" -eq 0 ]; then
+  echo "Node workflow pin check failed: no workflows use actions/setup-node." >&2
   exit 1
 fi
 
-if [ "$ci_node_major" != "$release_node_major" ]; then
-  echo "Node major pin mismatch between CI and release workflows:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${release_workflow}: NODE_VERSION=${release_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$bundle_node_major" ]; then
-  echo "Node major pin mismatch between CI and desktop bundle-size workflows:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${bundle_size_workflow}: NODE_VERSION=${bundle_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$desktop_perf_platform_matrix_node_major" ]; then
-  echo "Node major pin mismatch between CI and desktop perf platform matrix workflow:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${desktop_perf_platform_matrix_workflow}: NODE_VERSION=${desktop_perf_platform_matrix_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$collab_perf_node_major" ]; then
-  echo "Node major pin mismatch between CI and collab perf workflow:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${collab_perf_workflow}: NODE_VERSION=${collab_perf_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$perf_node_major" ]; then
-  echo "Node major pin mismatch between CI and perf workflow:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${perf_workflow}: NODE_VERSION=${perf_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$security_node_major" ]; then
-  echo "Node major pin mismatch between CI and security workflow:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${security_workflow}: NODE_VERSION=${security_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$smoke_node_major" ]; then
-  echo "Node major pin mismatch between CI and Windows ARM64 smoke workflows:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${windows_arm64_smoke_workflow}: NODE_VERSION=${smoke_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-if [ "$ci_node_major" != "$dry_run_node_major" ]; then
-  echo "Node major pin mismatch between CI and desktop dry-run workflow:" >&2
-  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
-  echo "  ${dry_run_workflow}: NODE_VERSION=${dry_run_node_major}" >&2
-  echo "" >&2
-  echo "Fix: update one of the workflows so both use the same Node major." >&2
-  exit 1
-fi
-
-# Also ensure the workflows actually use the env pin consistently.
-require_env_pin_usage "$ci_workflow"
-require_env_pin_usage "$release_workflow"
-require_env_pin_usage "$dry_run_workflow"
-require_env_pin_usage "$bundle_size_workflow"
-require_env_pin_usage "$desktop_perf_platform_matrix_workflow"
-require_env_pin_usage "$collab_perf_workflow"
-require_env_pin_usage "$perf_workflow"
-require_env_pin_usage "$security_workflow"
-require_env_pin_usage "$windows_arm64_smoke_workflow"
+for workflow in "${node_workflows[@]}"; do
+  require_node_env_pins_match "$workflow" "$ci_node_major"
+  require_env_pin_usage "$workflow"
+done
 
 # Optional local tooling pins (keep local release builds aligned with CI).
 nvmrc_major="$(extract_nvmrc_node_major ".nvmrc")"
