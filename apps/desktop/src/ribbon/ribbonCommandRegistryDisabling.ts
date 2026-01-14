@@ -146,30 +146,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "insert.illustrations.onlinePictures",
 
   // --- View -------------------------------------------------------------------
-  "view.macros.viewMacros",
-  "view.macros.viewMacros.run",
-  "view.macros.viewMacros.edit",
-  "view.macros.viewMacros.delete",
-  "view.macros.recordMacro",
-  "view.macros.recordMacro.stop",
-  "view.macros.useRelativeReferences",
   "view.appearance.theme.system",
   "view.appearance.theme.light",
   "view.appearance.theme.dark",
   "view.appearance.theme.highContrast",
-
-  // --- Macro recorder toggles -------------------------------------------------
-  "developer.code.useRelativeReferences",
-  "developer.code.visualBasic",
-
-  // --- Developer tab macro controls ------------------------------------------
-  "developer.code.macros",
-  "developer.code.macros.run",
-  "developer.code.macros.edit",
-  "developer.code.macroSecurity",
-  "developer.code.macroSecurity.trustCenter",
-  "developer.code.recordMacro",
-  "developer.code.recordMacro.stop",
 ]);
 
 function defaultIsExemptFromCommandRegistry(commandId: string): boolean {
