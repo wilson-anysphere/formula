@@ -71,6 +71,7 @@ fn parse_chart_includes_series_from_all_chart_types_in_combo_plot_area() {
             .and_then(|v| v.formula.as_deref()),
         Some("Sheet1!$B$2:$B$3")
     );
+    assert_eq!(model.series[0].plot_index, Some(0));
 
     assert_eq!(
         model.series[1]
@@ -93,4 +94,5 @@ fn parse_chart_includes_series_from_all_chart_types_in_combo_plot_area() {
             .and_then(|v| v.formula.as_deref()),
         Some("Sheet1!$C$2:$C$3")
     );
+    assert_eq!(model.series[1].plot_index, Some(1));
 }
