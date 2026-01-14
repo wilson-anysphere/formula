@@ -308,7 +308,16 @@ Default selection behavior:
 
 - **Browser-like runtimes** (`window` exists): `IndexedDbAIAuditStore` → `LocalStorageAIAuditStore` → `MemoryAIAuditStore`.
 - **Node runtimes** (no `window`): defaults to `MemoryAIAuditStore` (to avoid pulling in `sql.js` unless explicitly requested).
-  - Use the Node entrypoint (`@formula/ai-audit/node`) with `prefer: "sqlite"` to opt into persistence.
+  - Use the Node entrypoint (`@formula/ai-audit/node`) with `prefer: "sqlite"` to opt into persistence:
+    ```ts
+    import { createDefaultAIAuditStore, NodeFileBinaryStorage } from "@formula/ai-audit/node";
+    const store = await createDefaultAIAuditStore({
+      prefer: "sqlite",
+      sqlite_storage: new NodeFileBinaryStorage("ai_audit.sqlite"),
+      // bounded is enabled by default
+      // bounded: false,
+    });
+    ```
   - Note: `prefer: "sqlite"` is not supported in the default/browser entrypoint.
 
 Tip: in Node test environments that provide browser globals (e.g. jsdom), importing `@formula/ai-audit` will resolve the Node entrypoint via package exports. To force browser-like defaults, import from `@formula/ai-audit/browser` instead.
