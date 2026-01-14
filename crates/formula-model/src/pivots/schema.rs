@@ -208,7 +208,7 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
 }
 
 impl fmt::Display for PivotFieldRef {
-fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
@@ -241,95 +241,10 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let is_simple = (first.is_ascii_alphabetic() || first == '_')
         && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     if is_simple {
-        return Cow::Borrowed(raw);
+        Cow::Borrowed(raw)
+    } else {
+        Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
     }
-    Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
-}
-
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX table identifiers can be unquoted when they are "simple" identifiers.
-    // For our purposes (display formatting), be conservative: quote anything that isn't
-    // ASCII `[A-Za-z_][A-Za-z0-9_]*`.
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return true;
-    }
-    for ch in chars {
-        if !(ch.is_ascii_alphanumeric() || ch == '_') {
-            return true;
-        }
-    }
-    false
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX quotes identifiers using single quotes, escaping embedded `'` as `''`.
-    let mut out = String::with_capacity(raw.len().saturating_add(2));
-    out.push('\'');
-    for ch in raw.chars() {
-        if ch == '\'' {
-            out.push('\'');
-        }
-        out.push(ch);
-    }
-    out.push('\'');
-    out
-}
-
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX identifiers can be unquoted (e.g. `Sales`) or single-quoted (e.g. `'Dim Product'`).
-    // Use a conservative heuristic: quote when any character is not an ASCII letter/digit/underscore,
-    // or when the identifier is empty.
-    raw.is_empty()
-        || raw
-            .chars()
-            .any(|c| !(c.is_ascii_alphanumeric() || c == '_'))
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // Within quoted identifiers, `'` is escaped as `''`.
-    format!("'{}'", raw.replace('\'', "''"))
-}
-
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-
-    // DAX table identifiers can be unquoted when they look like regular identifiers:
-    // - start with a letter or underscore
-    // - contain only letters/digits/underscore
-    //
-    // Quote everything else (spaces, punctuation, leading digits, etc).
-    if first != '_' && !first.is_alphabetic() {
-        return true;
-    }
-    for ch in chars {
-        if ch == '_' || ch.is_alphanumeric() {
-            continue;
-        }
-        return true;
-    }
-    false
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX uses single quotes for table identifiers; embedded quotes are escaped by doubling.
-    let mut out = String::with_capacity(raw.len() + 2);
-    out.push('\'');
-    for ch in raw.chars() {
-        if ch == '\'' {
-            out.push_str("''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
