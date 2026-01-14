@@ -81,6 +81,118 @@ function PixelsToPoints {
   return [double]$Pixels * 72.0 / $PixelsPerInch
 }
 
+function Read-UInt32BE {
+  param(
+    [Parameter(Mandatory = $true)]
+    [byte[]]$Bytes,
+    [Parameter(Mandatory = $true)]
+    [int]$Offset
+  )
+
+  if ($Offset -lt 0 -or ($Offset + 4) -gt $Bytes.Length) {
+    throw "Read-UInt32BE: out of bounds (offset=$Offset, len=$($Bytes.Length))"
+  }
+
+  return (
+    ([uint32]$Bytes[$Offset]   -shl 24) -bor
+    ([uint32]$Bytes[$Offset+1] -shl 16) -bor
+    ([uint32]$Bytes[$Offset+2] -shl 8)  -bor
+    ([uint32]$Bytes[$Offset+3])
+  )
+}
+
+function Get-PngDimensions {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $bytes = [System.IO.File]::ReadAllBytes($Path)
+  if ($bytes.Length -lt 24) {
+    throw "invalid PNG (too small): $Path"
+  }
+
+  # PNG signature.
+  $sig = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+  for ($i = 0; $i -lt $sig.Length; $i++) {
+    if ($bytes[$i] -ne $sig[$i]) {
+      throw "invalid PNG signature: $Path"
+    }
+  }
+
+  $ihdrLen = Read-UInt32BE -Bytes $bytes -Offset 8
+  if ($ihdrLen -lt 8) {
+    throw "invalid PNG IHDR length ($ihdrLen): $Path"
+  }
+  $chunkType = [System.Text.Encoding]::ASCII.GetString($bytes[12..15])
+  if ($chunkType -ne "IHDR") {
+    throw "invalid PNG (first chunk is not IHDR): $Path"
+  }
+
+  $w = Read-UInt32BE -Bytes $bytes -Offset 16
+  $h = Read-UInt32BE -Bytes $bytes -Offset 20
+  return @($w, $h)
+}
+
+function Get-PngSampleUniqueColorCount {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [int]$Step = 40,
+    [int]$MaxUnique = 20
+  )
+
+  try {
+    Add-Type -AssemblyName System.Drawing | Out-Null
+    $bmp = [System.Drawing.Bitmap]::new($Path)
+    try {
+      $set = New-Object System.Collections.Generic.HashSet[string]
+      for ($y = 0; $y -lt $bmp.Height; $y += $Step) {
+        for ($x = 0; $x -lt $bmp.Width; $x += $Step) {
+          $c = $bmp.GetPixel($x, $y)
+          [void]$set.Add("$($c.R),$($c.G),$($c.B)")
+          if ($set.Count -ge $MaxUnique) {
+            return $set.Count
+          }
+        }
+      }
+      return $set.Count
+    } finally {
+      $bmp.Dispose()
+    }
+  } catch {
+    # Best-effort: if bitmap loading isn't available (e.g. missing GDI+), skip.
+    return $null
+  }
+}
+
+function Validate-GoldenPng {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [int]$WidthPx,
+    [Parameter(Mandatory = $true)]
+    [int]$HeightPx
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    throw "Excel export did not create output PNG: $Path"
+  }
+
+  $dims = Get-PngDimensions -Path $Path
+  $w = $dims[0]
+  $h = $dims[1]
+  if ($w -ne $WidthPx -or $h -ne $HeightPx) {
+    throw "exported PNG has wrong size ($w x $h); expected ${WidthPx}x${HeightPx}: $Path"
+  }
+
+  $uniq = Get-PngSampleUniqueColorCount -Path $Path
+  if ($null -ne $uniq -and $uniq -le 2) {
+    Write-Warning "Exported PNG appears to be a placeholder/blank image (sample unique colors=$uniq): $Path"
+  }
+}
+
 if (-not (Test-Path -LiteralPath $FixturesDir)) {
   throw "FixturesDir not found: $FixturesDir"
 }
@@ -157,6 +269,7 @@ try {
 
       # Export to PNG.
       $chartObject.Chart.Export($outPath, "PNG") | Out-Null
+      Validate-GoldenPng -Path $outPath -WidthPx $WidthPx -HeightPx $HeightPx
     } finally {
       Release-ComObject $chartObject
       if ($null -ne $workbook) {
@@ -176,4 +289,3 @@ try {
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
 }
-

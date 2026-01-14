@@ -150,3 +150,6 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/export-chart-goldens
 
 The script exports the first embedded chart in each workbook under
 `fixtures/charts/xlsx/` to `fixtures/charts/golden/excel/` at 800×600 px.
+
+The exporter also validates that the PNG dimensions match the expected size, and will warn if the
+result appears to be a placeholder/blank image (for example, a near solid-fill output).
