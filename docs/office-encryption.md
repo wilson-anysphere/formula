@@ -31,7 +31,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` `minor=2` (major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; stricter alg gating), `docs/offcrypto-standard-encryptedpackage.md` |
-| Legacy `.xls` (BIFF5/BIFF8) | **BIFF `FILEPASS`** (XOR / RC4 / RC4 CryptoAPI) | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
+| Legacy `.xls` (BIFF5/BIFF8) | **FILEPASS** (XOR / RC4 Standard / RC4 CryptoAPI) | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors so
 callers can decide whether to prompt for a password vs report “unsupported encryption”.
@@ -111,7 +111,7 @@ Currently supported in `formula-xls`:
 - **BIFF8 RC4 “standard”** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
   - Note: this scheme uses only the first 15 UTF-16 code units of the password (Excel truncation).
 - **BIFF8 RC4 CryptoAPI** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
-  - RC4 with SHA-1 and 50,000 password-hash iterations.
+  - RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi)).
   - RC4 `KeySizeBits` values: `40`, `56`, `128`
     - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
       (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
