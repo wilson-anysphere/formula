@@ -49,6 +49,25 @@ afterEach(() => {
 });
 
 describe("OrganizeSheetsDialog", () => {
+  it("does not open while the spreadsheet is editing", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => "s1",
+        activateSheet: () => {},
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => true,
+        focusGrid: () => {},
+      });
+    });
+
+    expect(document.querySelector('dialog[data-testid="organize-sheets-dialog"]')).toBeNull();
+  });
+
   it("renders a tab color indicator when present", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([
