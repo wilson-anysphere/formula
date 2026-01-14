@@ -43,7 +43,12 @@ const FUNCTION_NAMES: string[] = (() => {
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 })();
 
-const FUNCTION_NAMES_UPPER = new Set(FUNCTION_NAMES.map((name) => name.toUpperCase()));
+const FUNCTION_ENTRIES: Array<{ name: string; upper: string }> = FUNCTION_NAMES.map((name) => ({
+  name,
+  upper: name.toUpperCase(),
+}));
+
+const FUNCTION_NAMES_UPPER = new Set(FUNCTION_ENTRIES.map((e) => e.upper));
 
 const DEFAULT_ARG_SEPARATOR = (() => {
   const locale = (() => {
@@ -215,9 +220,9 @@ function buildSuggestions(prefixUpper: string, limit: number): FunctionSuggestio
   const out: FunctionSuggestion[] = [];
   if (!prefixUpper) return out;
 
-  for (const name of FUNCTION_NAMES) {
-    if (!name.toUpperCase().startsWith(prefixUpper)) continue;
-    out.push({ name, signature: signaturePreview(name) });
+  for (const fn of FUNCTION_ENTRIES) {
+    if (!fn.upper.startsWith(prefixUpper)) continue;
+    out.push({ name: fn.name, signature: signaturePreview(fn.name) });
     if (out.length >= limit) break;
   }
   return out;
