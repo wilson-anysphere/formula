@@ -636,6 +636,10 @@ mod tests {
         assert_eq!(cache.as_cache_field_name(), Some("Region"));
         assert_eq!(cache.display_string(), "Region");
         assert_eq!(cache.to_string(), "Region");
+        assert_eq!(PivotFieldRef::from("Region"), cache);
+        assert_eq!(PivotFieldRef::from("Region".to_string()), cache);
+        assert!(cache == "Region");
+        assert!(cache != "Other");
 
         let col = PivotFieldRef::DataModelColumn {
             table: "Dim Product".to_string(),
@@ -646,6 +650,7 @@ mod tests {
         assert_eq!(col.display_string(), "Dim Product[Category]");
         // `Display` always quotes the table name to match `formula_dax` / Excel semantics.
         assert_eq!(col.to_string(), "'Dim Product'[Category]");
+        assert!(col != "Dim Product");
 
         let col_with_quote = PivotFieldRef::DataModelColumn {
             table: "O'Reilly".to_string(),
