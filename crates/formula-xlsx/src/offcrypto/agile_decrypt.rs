@@ -1542,6 +1542,164 @@ mod tests {
     }
 
     #[test]
+    fn decrypts_when_data_integrity_hmac_targets_plaintext() {
+        // Some non-Excel producers compute the `dataIntegrity` HMAC over the decrypted package bytes
+        // (plaintext ZIP) rather than the EncryptedPackage stream bytes. Ensure we accept that
+        // variant for compatibility.
+        let password = "password";
+
+        // keyData (package encryption parameters).
+        let key_data_salt = (0u8..=15).collect::<Vec<_>>();
+        let key_data_salt_size = key_data_salt.len();
+        let key_data_key_bits = 128usize;
+        let key_data_block_size = 16usize;
+        let key_data_hash_alg = HashAlgorithm::Sha1;
+        let key_data_hash_size = 20usize;
+
+        // password key encryptor parameters.
+        let ke_salt = (16u8..=31).collect::<Vec<_>>();
+        let ke_salt_size = ke_salt.len();
+        let ke_spin = 10u32;
+        let ke_key_bits = 128usize;
+        let ke_block_size = 16usize;
+        let ke_hash_alg = HashAlgorithm::Sha1;
+        let ke_hash_size = 20usize;
+
+        // Deterministic package key + plaintext.
+        let package_key = b"0123456789ABCDEF".to_vec(); // 16 bytes
+        let plaintext = (0..5000u32).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+
+        // --- Encrypt EncryptedPackage stream (segment-wise) -----------------------------------
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        let padded_plaintext = zero_pad(plaintext.clone());
+        for (i, chunk) in padded_plaintext.chunks(SEGMENT_SIZE).enumerate() {
+            let block_key = segment_block_key(i as u32);
+            let iv =
+                derive_iv(&key_data_salt, &block_key, key_data_block_size, key_data_hash_alg).unwrap();
+            let ct = encrypt_aes128_cbc_no_padding(&package_key, &iv, chunk);
+            encrypted_package.extend_from_slice(&ct);
+        }
+
+        // --- Encrypt password key-encryptor blobs ---------------------------------------------
+        let pw_hash = hash_password(password, &ke_salt, ke_spin, ke_hash_alg).unwrap();
+
+        let verifier_hash_input = b"abcdefghijklmnop".to_vec(); // 16 bytes
+        let verifier_hash_value = hash_bytes(ke_hash_alg, &verifier_hash_input); // 20 bytes for SHA1
+
+        fn encrypt_ke_blob(
+            pw_hash: &[u8],
+            ke_salt: &[u8],
+            ke_key_bits: usize,
+            ke_block_size: usize,
+            ke_hash_alg: HashAlgorithm,
+            block_key: &[u8],
+            plaintext: &[u8],
+        ) -> Vec<u8> {
+            let key_len = ke_key_bits / 8;
+            let key = derive_key(pw_hash, block_key, key_len, ke_hash_alg).unwrap();
+            let iv = &ke_salt[..ke_block_size];
+            let padded = zero_pad(plaintext.to_vec());
+            encrypt_aes128_cbc_no_padding(&key, iv, &padded)
+        }
+
+        let encrypted_verifier_hash_input = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_INPUT_BLOCK,
+            &verifier_hash_input,
+        );
+        let encrypted_verifier_hash_value = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &VERIFIER_HASH_VALUE_BLOCK,
+            &verifier_hash_value,
+        );
+        let encrypted_key_value = encrypt_ke_blob(
+            &pw_hash,
+            &ke_salt,
+            ke_key_bits,
+            ke_block_size,
+            ke_hash_alg,
+            &KEY_VALUE_BLOCK,
+            &package_key,
+        );
+
+        // --- dataIntegrity (HMAC over plaintext, not ciphertext stream) ------------------------
+        let hmac_key_plain = vec![0x22u8; key_data_hash_size];
+        let hmac_value_plain = compute_hmac(key_data_hash_alg, &hmac_key_plain, &plaintext).unwrap();
+
+        // Sanity: ensure the non-standard plaintext target differs from the spec target so this
+        // test actually exercises the fallback.
+        let hmac_value_stream =
+            compute_hmac(key_data_hash_alg, &hmac_key_plain, &encrypted_package).unwrap();
+        assert_ne!(
+            hmac_value_stream.get(..key_data_hash_size),
+            Some(hmac_value_plain.as_slice()),
+            "expected plaintext-target HMAC to differ from stream-target HMAC"
+        );
+
+        let iv_hmac_key =
+            derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, key_data_block_size, key_data_hash_alg).unwrap();
+        let encrypted_hmac_key =
+            encrypt_aes128_cbc_no_padding(&package_key, &iv_hmac_key, &zero_pad(hmac_key_plain));
+
+        let iv_hmac_val = derive_iv(
+            &key_data_salt,
+            &HMAC_VALUE_BLOCK,
+            key_data_block_size,
+            key_data_hash_alg,
+        )
+        .unwrap();
+        let encrypted_hmac_value = encrypt_aes128_cbc_no_padding(
+            &package_key,
+            &iv_hmac_val,
+            &zero_pad(hmac_value_plain),
+        );
+
+        // Build the EncryptionInfo XML (with `<dataIntegrity>` present).
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="{key_data_salt_b64}" saltSize="{key_data_salt_size}"
+                       hashAlgorithm="SHA1" hashSize="{key_data_hash_size}"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="{key_data_key_bits}" blockSize="{key_data_block_size}" />
+              <dataIntegrity encryptedHmacKey="{hmac_key_b64}" encryptedHmacValue="{hmac_value_b64}" />
+              <keyEncryptors>
+                <keyEncryptor uri="{KEY_ENCRYPTOR_URI_PASSWORD}">
+                  <p:encryptedKey saltValue="{ke_salt_b64}" saltSize="{ke_salt_size}"
+                                  spinCount="{ke_spin}" hashAlgorithm="SHA1" hashSize="{ke_hash_size}"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="{ke_key_bits}" blockSize="{ke_block_size}"
+                                  encryptedVerifierHashInput="{evhi_b64}"
+                                  encryptedVerifierHashValue="{evhv_b64}"
+                                  encryptedKeyValue="{ekv_b64}"/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#,
+            key_data_salt_b64 = BASE64.encode(&key_data_salt),
+            ke_salt_b64 = BASE64.encode(&ke_salt),
+            evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+            evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+            ekv_b64 = BASE64.encode(&encrypted_key_value),
+            hmac_key_b64 = BASE64.encode(&encrypted_hmac_key),
+            hmac_value_b64 = BASE64.encode(&encrypted_hmac_value),
+        );
+
+        let encryption_info = wrap_encryption_info(&xml);
+        let decrypted = decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password)
+            .expect("decrypt should succeed with plaintext-target HMAC");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
     fn decrypts_when_password_key_encryptor_blobs_use_derived_ivs() {
         // Some producers appear to derive per-blob IVs for the password-key-encryptor blobs
         // (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`, `encryptedKeyValue`) instead
