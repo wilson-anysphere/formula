@@ -202,15 +202,14 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
         opad[i] = buf[i] ^ 0x5C;
     }
 
-    let mut key = vec![0u8; hash_len * 2];
+    let mut key = [0u8; MAX_DIGEST_LEN * 2];
     let mut hasher = Hasher::new(hash_alg);
     hasher.update(&ipad);
     hasher.finalize_reset_into(&mut key[..hash_len]);
     hasher.update(&opad);
     hasher.finalize_reset_into(&mut key[hash_len..hash_len * 2]);
 
-    key.truncate(key_len_bytes);
-    key
+    key[..key_len_bytes].to_vec()
 }
 
 #[cfg(test)]
