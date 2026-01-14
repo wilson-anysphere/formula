@@ -2684,6 +2684,22 @@ fn related_requires_join_key_column_to_be_visible_in_row_context() {
 }
 
 #[test]
+fn related_works_when_join_key_column_is_visible_in_row_context() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(FILTER(VALUES(Orders[CustomerId]), RELATED(Customers[Region]) = \"East\"))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // There are 3 distinct customer ids in Orders, but only 2 of them are in the East region.
+    assert_eq!(value, 2.into());
+}
+
+#[test]
 fn filter_values_restricts_row_context_columns() {
     let model = build_model();
     let value = DaxEngine::new()
