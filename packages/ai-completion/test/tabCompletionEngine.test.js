@@ -4516,6 +4516,41 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   );
 });
 
+test("Sheet-qualified ranges are suggested at top level (=Sheet2!A → =Sheet2!A1:A10)", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=Sheet2!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Sheet2!A1:A10"),
+    `Expected a top-level sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified VLOOKUP table_array prefers a 2D table range when adjacent columns form a table", async () => {
   const values = {};
   // Header row.

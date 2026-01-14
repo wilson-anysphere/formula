@@ -244,6 +244,9 @@ export class TabCompletionEngine {
 
       const topLevelQuotedSheetPrefixes = await this.suggestTopLevelQuotedSheetPrefixes(context);
       if (topLevelQuotedSheetPrefixes.length > 0) return topLevelQuotedSheetPrefixes;
+
+      const topLevelSheetRanges = await this.suggestTopLevelSheetQualifiedRanges(context);
+      if (topLevelSheetRanges.length > 0) return topLevelSheetRanges;
     }
 
     // 1) Function name completion
@@ -826,6 +829,75 @@ export class TabCompletionEngine {
         displayText: insertedSuffix,
         type: "range",
         confidence: clamp01(0.55 + ratioBoost(typedPrefix, formatted) * 0.35),
+      });
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
+  }
+
+  /**
+   * Suggest sheet-qualified A1 range completions when the user is typing a reference
+   * outside of a function call (e.g. `=Sheet2!A` → `=Sheet2!A1:A10`).
+   *
+   * This reuses the same contiguous-range heuristics as in-function range completion,
+   * but only triggers when the sheet name portion is already fully specified (exact match).
+   *
+   * @param {CompletionContext} context
+   * @returns {Promise<Suggestion[]>}
+   */
+  async suggestTopLevelSheetQualifiedRanges(context) {
+    const provider = this.schemaProvider;
+    if (!provider) return [];
+
+    const input = safeToString(context?.currentInput);
+    const cursor = clampCursor(input, context?.cursorPosition);
+    const prefix = input.slice(0, cursor);
+    if (!prefix.includes("!")) return [];
+
+    const bangIdx = findLastSheetBangIndex(prefix);
+    if (bangIdx < 0) return [];
+
+    const tokenStart = findSheetQualifiedTokenStart(prefix, bangIdx);
+    if (tokenStart === null) return [];
+
+    const tokenText = prefix.slice(tokenStart);
+    const sheetArg = splitSheetQualifiedArg(tokenText);
+    if (!sheetArg) return [];
+    if (sheetArg.rangePrefix && /\s/.test(sheetArg.rangePrefix)) return [];
+
+    const sheetNames = await safeProviderCall(provider.getSheetNames);
+    const sheetName = sheetNames
+      .filter((s) => typeof s === "string" && s.length > 0)
+      .find((s) => s.toLowerCase() === sheetArg.sheetPrefix.toLowerCase());
+    if (!sheetName) return [];
+
+    const typedQuoted = tokenText.startsWith("'");
+    if (typedQuoted && !needsSheetQuotes(sheetName)) return [];
+    if (!typedQuoted && needsSheetQuotes(sheetName)) return [];
+
+    const cellRef = safeNormalizeCellRef(context?.cellRef);
+
+    const rangeCandidates = safeSuggestRanges({
+      currentArgText: sheetArg.rangePrefix,
+      cellRef,
+      surroundingCells: context?.surroundingCells,
+      sheetName,
+    });
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+    for (const candidate of rangeCandidates) {
+      if (typeof candidate?.range !== "string") continue;
+      if (!candidate.range.startsWith(sheetArg.rangePrefix)) continue;
+      const suffix = candidate.range.slice(sheetArg.rangePrefix.length);
+      if (suffix.length === 0) continue;
+      const replacement = `${tokenText}${suffix}`;
+      const newText = replaceSpan(input, tokenStart, cursor, replacement);
+      suggestions.push({
+        text: newText,
+        displayText: newText,
+        type: "range",
+        confidence: Math.min(0.85, (candidate.confidence ?? 0) + 0.05),
       });
     }
 
@@ -2344,6 +2416,123 @@ function findUnclosedSheetQuoteStart(textPrefix) {
   }
 
   return inSheetQuote ? start : null;
+}
+
+/**
+ * Find the last `!` that could plausibly indicate a sheet-qualified reference
+ * in an Excel formula prefix. This ignores:
+ * - `!` inside double-quoted string literals
+ * - `!` inside quoted sheet names (`'...'`)
+ * - `!` inside structured references (`[...]`)
+ *
+ * @param {string} textPrefix
+ * @returns {number}
+ */
+function findLastSheetBangIndex(textPrefix) {
+  const text = typeof textPrefix === "string" ? textPrefix : "";
+  if (!text.includes("!")) return -1;
+
+  let inString = false;
+  let inSheetQuote = false;
+  let bracketDepth = 0;
+  let lastBang = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+
+    if (inSheetQuote) {
+      if (ch === "'") {
+        if (text[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+
+    if (ch === "'" && bracketDepth === 0) {
+      inSheetQuote = true;
+      continue;
+    }
+
+    if (ch === "!" && bracketDepth === 0) {
+      lastBang = i;
+    }
+  }
+
+  return lastBang;
+}
+
+/**
+ * Find the start index of the sheet-qualified token containing the given `!`.
+ *
+ * Examples:
+ * - "=Sheet2!A"         (bangIdx=6) -> 1 (start of Sheet2)
+ * - "=(Sheet2!A"        (bangIdx=7) -> 2 (start of Sheet2)
+ * - "='My Sheet'!A"     (bangIdx=11)-> 1 (start of quote)
+ *
+ * @param {string} textPrefix
+ * @param {number} bangIdx
+ * @returns {number | null}
+ */
+function findSheetQualifiedTokenStart(textPrefix, bangIdx) {
+  const text = typeof textPrefix === "string" ? textPrefix : "";
+  if (!Number.isInteger(bangIdx) || bangIdx <= 0 || bangIdx >= text.length) return null;
+  if (text[bangIdx] !== "!") return null;
+
+  // Quoted sheet name: ...'!...
+  if (text[bangIdx - 1] === "'") {
+    let i = bangIdx - 2;
+    while (i >= 0) {
+      if (text[i] !== "'") {
+        i -= 1;
+        continue;
+      }
+      // Escaped apostrophe inside the sheet name: ''.
+      if (i - 1 >= 0 && text[i - 1] === "'") {
+        i -= 2;
+        continue;
+      }
+      const start = i;
+      const before = start - 1 >= 0 ? text[start - 1] : "";
+      if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return null;
+      return start;
+    }
+    return null;
+  }
+
+  // Unquoted sheet name: scan backwards until we hit an operator/whitespace.
+  let start = bangIdx;
+  while (start - 1 >= 0 && !/[=\s(,;{+\\\-*/^@<>&]/.test(text[start - 1])) start -= 1;
+  const before = start - 1 >= 0 ? text[start - 1] : "";
+  if (before && !/[=\s(,;{+\\\-*/^@<>&]/.test(before)) return null;
+  return start;
 }
 
 function ratioBoost(prefix, full) {
