@@ -322,7 +322,7 @@ ambiguous. This can matter for uncommon paths containing bracket characters (e.g
     backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a multi-area
     reference) when all referenced sheets exist.
 * **External structured references:** structured refs cannot be workbook/sheet-qualified today
-  (e.g. `[Book.xlsx]Table1[Col]` evaluates to `#REF!`).
+  (e.g. `[Book.xlsx]Sheet1!Table1[Col]` evaluates to `#REF!`).
 * **External workbook defined names:** name references cannot be qualified to an external workbook
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
@@ -462,6 +462,130 @@ Formulas like `=A1+B1` in C1 and `=A2+B2` in C2 share the same normalized AST:
 This reduces memory usage significantly when formulas are dragged/filled.
 
 ---
+
+## External workbook references (links)
+
+Excel formulas can reference cells/ranges in **other workbooks**:
+
+- `[Book.xlsx]Sheet1!A1`
+- `[Book.xlsx]Sheet1:Sheet3!A1` (external **3D** span)
+- `[Book.xlsx]Sheet1!Table1[Col]` (external **structured reference** / table ref; not supported yet)
+
+The engine **does not load external workbooks itself**. Instead, evaluation delegates lookups to an
+integrator-provided resolver:
+
+- If you use [`Engine`](../crates/formula-engine/src/engine.rs), configure an `ExternalValueProvider` via
+  `Engine::set_external_value_provider(...)`.
+- If you embed the evaluator directly, implement [`ValueResolver`](../crates/formula-engine/src/eval/evaluator.rs).
+
+### Canonical external sheet key format
+
+For any external workbook reference, the parser produces a canonical **sheet key** string that is passed
+through to external resolvers:
+
+```
+"[workbook]sheet"
+```
+
+Examples:
+
+| Formula text | `sheet_key` passed to the provider |
+|---|---|
+| `[Book.xlsx]Sheet1!A1` | `"[Book.xlsx]Sheet1"` |
+| `='[Book.xlsx]My Sheet'!A1` | `"[Book.xlsx]My Sheet"` |
+
+Notes:
+
+- `workbook` is the literal text inside the brackets (e.g. `Book.xlsx`).
+- `sheet` is the **unquoted** worksheet display name (so quoted sheet literals like `'My Sheet'` are
+  passed as `My Sheet`).
+- Excel may quote the entire external prefix in the formula text (e.g. `='[Book.xlsx]My Sheet'!A1`), but
+  the provider always receives the unquoted key.
+
+### External 3D spans (`[Book]Sheet1:Sheet3!A1`)
+
+External 3D spans use the same `Sheet1:Sheet3` syntax as in-workbook 3D spans, but are represented as an
+external sheet key:
+
+```
+"[workbook]start:end"
+```
+
+Example:
+
+- `[Book.xlsx]Sheet1:Sheet3!A1` → `sheet_key = "[Book.xlsx]Sheet1:Sheet3"`
+
+To evaluate an external 3D span, the engine must **expand it into concrete sheets** using the *external
+workbook’s sheet order*. Because the engine cannot know the sheet ordering for an external workbook, the
+host must supply it:
+
+1. `workbook_sheet_names("Book.xlsx")` returns sheet names in workbook order (case-insensitive semantics).
+   - In the Rust `ExternalValueProvider` trait, this is exposed as
+     `ExternalValueProvider::sheet_order(workbook)`.
+   - When embedding the evaluator directly via `ValueResolver`, this is exposed as
+     `ValueResolver::external_sheet_order(workbook)`.
+2. The engine finds `start` and `end` within that list and selects the inclusive slice between them (order
+   independent, like Excel).
+3. Each sheet name `S` in that slice is queried as `sheet_key = "[Book.xlsx]S"`.
+
+If the sheet order cannot be retrieved, or `start` / `end` are missing, the span evaluates to `#REF!`.
+
+### External structured references (`[Book]Sheet!Table1[Col]`)
+
+External table references require table metadata (table range + column names) that is not available inside
+the current workbook. To resolve structured refs like:
+
+- `[Book.xlsx]Sheet1!Table1[Col]`
+
+the engine would need to ask the host for the external table definition (e.g. via a future
+`ExternalValueProvider::workbook_table(workbook, table_name)` API). The returned metadata would need to include:
+
+- the table’s worksheet name (within the external workbook)
+- the table’s absolute range
+- the table’s column headers / display names (for case-insensitive column matching)
+
+This metadata can then be used to expand the structured reference into one or more concrete external
+ranges, which are evaluated by calling `get("[Book.xlsx]Sheet…", addr)` (or `get_external_value(...)`) for
+each referenced cell.
+
+Current behavior: workbook- or sheet-qualified structured references are rejected and evaluate to `#REF!`
+(see “External structured references” in the “Current limitations / behavior notes” section above).
+
+If/when external structured refs are supported, missing table metadata (including an unknown table name)
+will evaluate to `#REF!`.
+
+### Provider API responsibilities
+
+To support external workbook links (cells/ranges and external 3D spans), integrators must implement:
+
+- `ValueResolver::get_external_value(sheet_key, addr)` — evaluator-facing hook (used when embedding the
+  evaluator directly).
+- `ExternalValueProvider::get(sheet_key, addr)` — return a scalar value for an external cell.
+- `ExternalValueProvider::sheet_order(workbook)` (aka `workbook_sheet_names`) — return sheet names for
+  `workbook` in workbook order (required for external 3D spans).
+
+To support **external structured references** like `[Book.xlsx]Sheet1!Table1[Col]`, the engine will need an
+additional host API to provide external table metadata (for example a future
+`ExternalValueProvider::workbook_table(workbook, table_name)` method), but this is not implemented yet.
+
+Failure semantics:
+
+- Missing provider data (including returning `None`) is treated as a broken external link and evaluates to
+  `#REF!`.
+- For the `ExternalValueProvider` API, note that `None` means different things depending on whether the lookup
+  is local vs external:
+  - For local sheet names (e.g. `"Sheet1"`), `None` is treated as a blank cell.
+  - For external sheet keys (e.g. `"[Book.xlsx]Sheet1"`), `None` evaluates to `#REF!` (a broken link). Use
+    `Some(Value::Blank)` to represent a blank external cell.
+
+### Dependency tracking / recalculation
+
+External workbooks are outside the engine’s dependency graph. By default, any formula that dereferences an
+external sheet key is treated as **volatile** (recalculated on every `recalculate_*` call), since the engine
+cannot know when the external workbook’s values change.
+
+If/when the engine exposes an opt-in external invalidation API, integrations can use it to replace this
+“always volatile” default with targeted invalidation.
 
 ## Dependency Graph
 
