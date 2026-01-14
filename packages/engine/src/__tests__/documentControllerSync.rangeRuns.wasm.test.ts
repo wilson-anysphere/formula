@@ -2,11 +2,38 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../../apps/desktop/src/document/documentController.js";
 
-import { engineApplyDocumentChange, engineHydrateFromDocument, type EngineSyncTarget } from "../documentControllerSync.ts";
+import {
+  engineApplyDocumentChange,
+  engineHydrateFromDocument,
+  type EngineSyncTarget,
+} from "../documentControllerSync.ts";
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 
 const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true";
 const describeWasm = skipWasmBuild ? describe.skip : describe;
+
+function engineWorkerAsSyncTarget(engine: EngineWorker): EngineSyncTarget {
+  // `engineHydrateFromDocument` / `engineApplyDocumentChange` operate on a sheet-first
+  // sync surface (matching wasm-bindgen workbook signatures). `EngineWorker` exposes the
+  // public EngineClient API which uses sheet-last for some calls (e.g. `setCellStyleId`).
+  // Adapt between the two for wasm integration tests.
+  return {
+    loadWorkbookFromJson: (json) => engine.loadWorkbookFromJson(json),
+    setCell: (address, value, sheet) => engine.setCell(address, value, sheet),
+    setCells: (updates) => engine.setCells(updates),
+    recalculate: (sheet) => engine.recalculate(sheet),
+    setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName?.(sheetId, name),
+    setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
+    setColWidthChars: (sheet, col, widthChars) => engine.setColWidthChars(sheet, col, widthChars),
+    setColWidth: (sheet, col, widthChars) => engine.setColWidth(col, widthChars, sheet),
+    internStyle: (styleObj) => engine.internStyle(styleObj as any),
+    setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
+    setRowStyleId: (sheet, row, styleId) => engine.setRowStyleId?.(sheet, row, styleId),
+    setColStyleId: (sheet, col, styleId) => engine.setColStyleId?.(sheet, col, styleId),
+    setSheetDefaultStyleId: (sheet, styleId) => engine.setSheetDefaultStyleId?.(sheet, styleId),
+    setFormatRunsByCol: (sheet, col, runs) => engine.setFormatRunsByCol?.(sheet, col, runs),
+  };
+}
 
 class MockWorkerGlobal {
   private readonly listeners = new Set<(event: MessageEvent<unknown>) => void>();
@@ -123,6 +150,7 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
 
     try {
       const doc = new DocumentController();
+      const syncTarget = engineWorkerAsSyncTarget(engine);
 
       doc.setCellValue("Sheet1", "A1", "x");
       // Keep the formula cell out of the formatted rectangle so only the referenced cell's format changes.
