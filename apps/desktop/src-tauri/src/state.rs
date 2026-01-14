@@ -11,8 +11,7 @@ use chrono::Datelike;
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::metadata::FormatRun;
-use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotTable as EnginePivotTable, PivotValue};
-use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
+use formula_engine::pivot::{PivotConfig, PivotEngine, PivotTable as EnginePivotTable, PivotValue};
 use formula_engine::style_bridge::ui_style_to_model_style;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
@@ -4872,44 +4871,6 @@ fn expand_precedent_nodes_to_cells(
     Ok(out)
 }
 
-fn engine_value_to_pivot_value(value: &EngineValue) -> PivotValue {
-    match value {
-        EngineValue::Blank => PivotValue::Blank,
-        EngineValue::Number(n) => PivotValue::Number(*n),
-        EngineValue::Text(s) => PivotValue::Text(s.clone()),
-        EngineValue::Bool(b) => PivotValue::Bool(*b),
-        // Errors are treated as text for pivot purposes (so aggregations won't treat them as numbers).
-        EngineValue::Error(e) => PivotValue::Text(e.as_code().to_string()),
-        // For rich values, use the user-visible display string so pivots behave like the grid.
-        EngineValue::Entity(v) => PivotValue::Text(v.display.clone()),
-        EngineValue::Record(v) => {
-            // Records may specify a `display_field` (Excel rich value displayField semantics).
-            // Mirror the grid behavior by degrading to the display-field value when present.
-            let text = v
-                .display_field
-                .as_deref()
-                .and_then(|field| v.get_field_case_insensitive(field))
-                .map(|value| {
-                    value
-                        .coerce_to_string()
-                        .unwrap_or_else(|e| e.as_code().to_string())
-                })
-                .unwrap_or_else(|| v.display.clone());
-            PivotValue::Text(text)
-        }
-        // Ranges should not contain these variants as stored cell values; treat them as blank to
-        // keep pivot cache building resilient to unexpected evaluator outputs.
-        EngineValue::Reference(_)
-        | EngineValue::ReferenceUnion(_)
-        | EngineValue::Lambda(_)
-        | EngineValue::Spill { .. } => PivotValue::Blank,
-        EngineValue::Array(arr) => {
-            let top_left = arr.get(0, 0).cloned().unwrap_or(EngineValue::Blank);
-            engine_value_to_pivot_value(&top_left)
-        }
-    }
-}
-
 fn pivot_value_to_scalar(value: &PivotValue, date_system: formula_engine::date::ExcelDateSystem) -> CellScalar {
     match value {
         PivotValue::Blank => CellScalar::Empty,
@@ -5001,7 +4962,7 @@ fn refresh_pivot_registration(
         });
     }
 
-    let (source_values, source_col_number_formats) = {
+    let (cache, source_col_number_formats) = {
         let source_sheet = workbook
             .sheet(&pivot.source_sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(pivot.source_sheet_id.clone()))?;
@@ -5021,8 +4982,8 @@ fn refresh_pivot_registration(
             formula_model::CellRef::new(end_row, end_col),
         );
 
-        let values = engine
-            .get_range_values(&sheet_name, range)
+        let cache = engine
+            .pivot_cache_from_range(&sheet_name, range)
             .map_err(|e| AppStateError::Pivot(e.to_string()))?;
 
         let cells = source_sheet.get_range_cells(
@@ -5051,18 +5012,9 @@ fn refresh_pivot_registration(
             }
         }
 
-        let source_values = build_pivot_source_range_with_number_formats(
-            source_rows,
-            source_cols,
-            |r, c| engine_value_to_pivot_value(&values[r][c]),
-            |r, c| cells[r][c].number_format.as_deref(),
-            engine.date_system(),
-        );
-        (source_values, col_number_formats)
+        (cache, col_number_formats)
     };
 
-    let cache =
-        PivotCache::from_range(&source_values).map_err(|e| AppStateError::Pivot(e.to_string()))?;
     // Infer date formats for row-field label columns so pivot date labels render as date serials
     // with a date number format (Excel semantics).
     let row_field_number_formats: Vec<Option<String>> = pivot
@@ -5070,10 +5022,7 @@ fn refresh_pivot_registration(
         .row_fields
         .iter()
         .map(|field| {
-            let Some(cache_field_name) = field.source_field.cache_field_name() else {
-                return None;
-            };
-            let idx = cache.field_index(cache_field_name)?;
+            let idx = cache.field_index_ref(&field.source_field)?;
             source_col_number_formats.get(idx).cloned().unwrap_or(None)
         })
         .collect();
@@ -10123,6 +10072,99 @@ mod tests {
             state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
             CellScalar::Number(30.0)
         );
+    }
+
+    #[test]
+    fn pivot_date_inference_respects_engine_column_number_formats() {
+        use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+        use formula_model::Style;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let data_sheet_name = workbook.sheets[0].name.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let date_serial =
+            ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Date".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Amount".to_string()))),
+        );
+        sheet.set_cell(1, 0, Cell::from_literal(Some(CellScalar::Number(date_serial))));
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(10.0))));
+
+        // Intentionally omit per-cell number formats: the engine column style should drive date
+        // typing for pivot cache building.
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let date_style = state.engine.intern_style(Style {
+            number_format: Some("m/d/yyyy".to_string()),
+            ..Style::default()
+        });
+        state
+            .engine
+            .set_col_style_id(&data_sheet_name, 0, Some(date_style));
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Date")],
+            column_fields: Vec::new(),
+            value_fields: vec![ValueField {
+                source_field: "Amount".into(),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        state
+            .create_pivot_table(
+                "By Date".to_string(),
+                data_sheet_id,
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 1,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                cfg,
+            )
+            .unwrap();
+
+        let label = state.get_cell(&pivot_sheet_id, 1, 0).unwrap();
+        assert_eq!(label.value, CellScalar::Number(date_serial));
+        assert_eq!(label.display_value, "1/15/2024".to_string());
+
+        let workbook = state.workbook.as_ref().unwrap();
+        let pivot_sheet = workbook.sheet(&pivot_sheet_id).unwrap();
+        assert_eq!(pivot_sheet.get_cell(1, 0).number_format.as_deref(), Some("m/d/yyyy"));
     }
 
     #[test]

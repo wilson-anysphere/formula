@@ -151,7 +151,19 @@ fn engine_value_to_pivot_value(value: &Value) -> PivotValue {
         },
         Value::Error(e) => PivotValue::Text(e.as_code().to_string()),
         Value::Entity(e) => PivotValue::Text(e.display.clone()),
-        Value::Record(r) => PivotValue::Text(r.display.clone()),
+        Value::Record(r) => {
+            // Records may specify a `display_field` (Excel rich value displayField semantics).
+            // Mirror grid behavior by degrading to the display-field value when present.
+            if let Some(display_field) = r.display_field.as_deref() {
+                if let Some(value) = r.get_field_case_insensitive(display_field) {
+                    let text = value
+                        .coerce_to_string()
+                        .unwrap_or_else(|e| e.as_code().to_string());
+                    return PivotValue::Text(text);
+                }
+            }
+            PivotValue::Text(r.display.clone())
+        }
         Value::Array(a) => {
             // If a dynamic array somehow lands in a cell value, match Excel's visible behavior
             // (top-left value shown in the origin cell).
