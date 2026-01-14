@@ -132,7 +132,7 @@ function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedR
   const obj = map ? null : value && typeof value === "object" ? (value as any) : null;
   const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
 
-  const sheetIdRaw = coerceString(get("sheetId"));
+  const sheetIdRaw = coerceString(get("sheetId")) ?? coerceString(get("sheetName")) ?? coerceString(get("sheet"));
   const keyIdRaw = coerceString(get("keyId"));
   const sheetId = sheetIdRaw?.trim() ?? "";
   const keyId = keyIdRaw?.trim() ?? "";

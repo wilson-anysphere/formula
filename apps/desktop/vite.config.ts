@@ -19,7 +19,6 @@ const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/
 const collabWorkbookEntry = fileURLToPath(new URL("../../packages/collab/workbook/src/index.ts", import.meta.url));
 const collabEncryptionEntry = fileURLToPath(new URL("../../packages/collab/encryption/src/index.ts", import.meta.url));
 const collabEncryptedRangesEntry = fileURLToPath(new URL("../../packages/collab/encrypted-ranges/src/index.ts", import.meta.url));
-const collabWorkbookEntry = fileURLToPath(new URL("../../packages/collab/workbook/src/index.ts", import.meta.url));
 const collabYjsUtilsEntry = fileURLToPath(new URL("../../packages/collab/yjs-utils/src/index.ts", import.meta.url));
 const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
 const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/persistence/src/index.ts", import.meta.url));
@@ -152,7 +151,6 @@ export default defineConfig({
       { find: "@formula/collab-workbook", replacement: collabWorkbookEntry },
       { find: "@formula/collab-encryption", replacement: collabEncryptionEntry },
       { find: "@formula/collab-encrypted-ranges", replacement: collabEncryptedRangesEntry },
-      { find: "@formula/collab-workbook", replacement: collabWorkbookEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
       // can run with stale node_modules (e.g. cached installs), which causes Vite to fail to

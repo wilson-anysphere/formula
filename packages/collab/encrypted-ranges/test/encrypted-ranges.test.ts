@@ -308,4 +308,32 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(stored && typeof stored.get === "function").toBe(true);
     expect(stored.get("id")).toBe(entry!.id);
   });
+
+  it("policy helper supports legacy `sheetName` field when `sheetId` is missing", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<any>();
+    ranges.push([
+      {
+        // Legacy-ish shape: `sheetName` instead of `sheetId`.
+        sheetName: "s1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        keyId: "k1",
+      },
+    ]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
+  });
 });
