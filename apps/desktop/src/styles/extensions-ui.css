@@ -12,7 +12,7 @@ dialog.extensions-ui {
 .extensions-ui .dialog__field {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -45,15 +45,15 @@ dialog.extensions-ui {
 .extensions-ui .quick-pick__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 8px;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
   max-height: min(340px, calc(100vh - 220px));
   overflow: auto;
 }
 
 .extensions-ui .quick-pick__item {
   text-align: left;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);

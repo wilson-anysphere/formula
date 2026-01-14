@@ -1176,13 +1176,13 @@
 .macros-panel__buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .macros-panel__preview {
   white-space: pre-wrap;
   margin: 0;
-  padding: 8px;
+  padding: var(--space-4);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   max-height: 240px;
@@ -1196,11 +1196,11 @@
 
 #toast-root {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
+  right: var(--space-5);
+  bottom: var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
   z-index: 100;
   pointer-events: none;
 }
@@ -1209,7 +1209,7 @@
   pointer-events: auto;
   min-width: 240px;
   max-width: min(520px, calc(100vw - (var(--space-6) * 2)));
-  padding: 8px 10px;
+  padding: var(--space-4) calc(var(--space-4) + var(--space-1));
   border-radius: var(--radius);
   border: 1px solid var(--panel-border);
   background: var(--panel-bg);
@@ -1253,9 +1253,9 @@
 .formula-diff-op--insert,
 .formula-diff-op--delete {
   display: inline-block;
-  padding: 0 2px;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
-  margin: 0 1px;
+  margin: 0 calc(var(--space-1) / 2);
 }
 
 .formula-diff-op--insert {
