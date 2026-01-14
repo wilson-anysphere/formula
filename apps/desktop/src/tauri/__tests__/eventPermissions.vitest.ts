@@ -181,6 +181,9 @@ describe("tauri capability event permissions", () => {
       "update-downloaded",
       "update-download-error",
 
+      // Pyodide cache
+      "pyodide-download-progress",
+
       // Startup instrumentation
       "startup:window-visible",
       "startup:webview-loaded",

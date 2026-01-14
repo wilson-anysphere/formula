@@ -1256,12 +1256,12 @@ export function shiftAnchor(
       return {
         ...anchor,
         pos: {
-          // DrawingML stores EMU values as integers. Pointer/keyboard deltas may
-          // produce fractional EMUs at non-1x zoom (e.g. 1px screen move at 2x
-          // zoom => 0.5px sheet move). Normalize to integers so persisted
-          // anchors and DrawingML patches remain consistent.
-          xEmu: Math.round(anchor.pos.xEmu + pxToEmu(dxPx / z)),
-          yEmu: Math.round(anchor.pos.yEmu + pxToEmu(dyPx / z)),
+          // Keep floating-point EMUs so zoom-scaled moves (e.g. 1px screen move
+          // at 2x zoom => 0.5px sheet move) remain reversible without accumulating
+          // integer rounding drift. DrawingML serialization rounds to integer
+          // EMUs when writing anchors.
+          xEmu: anchor.pos.xEmu + pxToEmu(dxPx / z),
+          yEmu: anchor.pos.yEmu + pxToEmu(dyPx / z),
         },
       };
   }
