@@ -352,6 +352,20 @@ describe("registerBuiltinCommands: Home tab core commands", () => {
       expect(commandRegistry.getCommand(commandId)).toBeTruthy();
     }
   });
+
+  it("hides clipboard.pasteSpecial.all from the command palette (alias of Paste)", () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(_panelId: string) {},
+      closePanel(_panelId: string) {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+
+    expect(commandRegistry.getCommand("clipboard.pasteSpecial.all")).toBeTruthy();
+    expect(commandRegistry.getCommand("clipboard.pasteSpecial.all")?.when).toBe("false");
+  });
 });
 
 describe("registerBuiltinCommands: read-only formatting defaults", () => {
@@ -1075,7 +1089,7 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
 });
 
 describe("registerBuiltinCommands: theme preference commands", () => {
-  it("registers theme commands that update ThemeController and refresh ribbon UI state", async () => {
+  it("registers canonical theme commands and hides ribbon aliases from the command palette", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {
       layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
@@ -1100,23 +1114,33 @@ describe("registerBuiltinCommands: theme preference commands", () => {
       refreshRibbonUiState,
     });
 
-    await commandRegistry.executeCommand("view.appearance.theme.dark");
-    expect(themeController.setThemePreference).toHaveBeenCalledWith("dark");
+    // Canonical commands (used by keybindings + command palette).
+    await commandRegistry.executeCommand("view.theme.dark");
+    expect(themeController.setThemePreference).toHaveBeenNthCalledWith(1, "dark");
     expect(refreshRibbonUiState).toHaveBeenCalledTimes(1);
     expect(app.focus).toHaveBeenCalledTimes(1);
 
-    await commandRegistry.executeCommand("view.appearance.theme.highContrast");
-    expect(themeController.setThemePreference).toHaveBeenCalledWith("high-contrast");
+    await commandRegistry.executeCommand("view.theme.highContrast");
+    expect(themeController.setThemePreference).toHaveBeenNthCalledWith(2, "high-contrast");
     expect(refreshRibbonUiState).toHaveBeenCalledTimes(2);
     expect(app.focus).toHaveBeenCalledTimes(2);
 
-    // Commands should be discoverable in the command palette under View.
-    expect(commandRegistry.getCommand("view.appearance.theme.dark")).toMatchObject({
-      commandId: "view.appearance.theme.dark",
+    // Ribbon ids are still registered for schema compatibility, but hidden from the palette.
+    await commandRegistry.executeCommand("view.appearance.theme.dark");
+    expect(themeController.setThemePreference).toHaveBeenNthCalledWith(3, "dark");
+    expect(refreshRibbonUiState).toHaveBeenCalledTimes(3);
+    expect(app.focus).toHaveBeenCalledTimes(3);
+
+    // Canonical commands should be visible in the command palette.
+    expect(commandRegistry.getCommand("view.theme.dark")).toMatchObject({
+      commandId: "view.theme.dark",
       category: "View",
     });
-    expect(commandRegistry.getCommand("view.appearance.theme.dark")?.keywords).toEqual(
+    expect(commandRegistry.getCommand("view.theme.dark")?.keywords).toEqual(
       expect.arrayContaining(["theme", "dark"]),
     );
+
+    expect(commandRegistry.getCommand("view.theme.dark")?.when).toBeNull();
+    expect(commandRegistry.getCommand("view.appearance.theme.dark")?.when).toBe("false");
   });
 });

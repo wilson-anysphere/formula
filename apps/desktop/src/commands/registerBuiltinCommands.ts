@@ -1576,6 +1576,9 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.clipboard.pasteSpecial.all"),
       keywords: ["paste", "clipboard", "all"],
+      // This command is effectively an alias of `clipboard.paste` (see description). Hide it from
+      // context-aware UI surfaces (command palette, etc) to avoid duplicate "Paste" entries.
+      when: "false",
     },
   );
 
@@ -2113,6 +2116,9 @@ export function registerBuiltinCommands(params: {
         icon: null,
         description: t("commandDescription.view.theme.system"),
         keywords: ["theme", "appearance", "system", "auto", "os", "dark mode", "light mode"],
+        // Ribbon schema uses `view.appearance.theme.*` ids for the View → Appearance menu, but the
+        // command palette should surface the canonical `view.theme.*` commands only.
+        when: "false",
       },
     );
 
@@ -2133,6 +2139,8 @@ export function registerBuiltinCommands(params: {
         icon: null,
         description: t("commandDescription.view.theme.light"),
         keywords: ["theme", "appearance", "light", "light mode"],
+        // Hide ribbon alias from command palette (canonical: `view.theme.light`).
+        when: "false",
       },
     );
 
@@ -2153,6 +2161,8 @@ export function registerBuiltinCommands(params: {
         icon: null,
         description: t("commandDescription.view.theme.dark"),
         keywords: ["theme", "appearance", "dark", "dark mode"],
+        // Hide ribbon alias from command palette (canonical: `view.theme.dark`).
+        when: "false",
       },
     );
 
@@ -2173,6 +2183,8 @@ export function registerBuiltinCommands(params: {
         icon: null,
         description: t("commandDescription.view.theme.highContrast"),
         keywords: ["theme", "appearance", "high contrast", "contrast", "accessibility", "a11y"],
+        // Hide ribbon alias from command palette (canonical: `view.theme.highContrast`).
+        when: "false",
       },
     );
 
