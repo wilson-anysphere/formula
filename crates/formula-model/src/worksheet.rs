@@ -913,6 +913,7 @@ impl Worksheet {
     /// remaining, its entry is removed from the map.
     pub fn set_row_style_id(&mut self, row_0based: u32, style_id: Option<u32>) {
         self.row_count = self.row_count.max(row_0based.saturating_add(1));
+        let style_id = style_id.filter(|id| *id != 0);
         match self.row_properties.get_mut(&row_0based) {
             Some(props) => {
                 props.style_id = style_id;
@@ -1011,6 +1012,7 @@ impl Worksheet {
             "col out of Excel bounds: {col_0based}"
         );
         self.col_count = self.col_count.max(col_0based.saturating_add(1));
+        let style_id = style_id.filter(|id| *id != 0);
         match self.col_properties.get_mut(&col_0based) {
             Some(props) => {
                 props.style_id = style_id;
