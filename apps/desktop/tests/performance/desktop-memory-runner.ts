@@ -639,6 +639,9 @@ async function main(): Promise<void> {
           // Keeping this explicit in the JSON helps cross-platform comparisons.
           measurement,
           binPath,
+          perfHome,
+          profileRoot,
+          // Backwards-compatible name: older consumers expect `profileDir`.
           profileDir: profileRoot,
           runs: results.length,
           settleMs,
