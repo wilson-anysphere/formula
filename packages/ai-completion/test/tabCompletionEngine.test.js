@@ -515,6 +515,23 @@ test("Typing =_xlfn.CHOOSERO suggests =_xlfn.CHOOSEROWS(", async () => {
   );
 });
 
+test("Function name completion works after '@' (implicit intersection operator)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=@VLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=@VLOOKUP("),
+    `Expected VLOOKUP suggestion after '@', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

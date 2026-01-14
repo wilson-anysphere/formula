@@ -176,3 +176,13 @@ test("parsePartialFormula can suggest function-name prefixes inside grouping par
   assert.equal(parsed.inFunctionCall, false);
   assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 2, end: 5 });
 });
+
+test("parsePartialFormula allows function-name completion after '@' (implicit intersection operator)", () => {
+  const registry = new FunctionRegistry();
+  const input = "=@VLO";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 2, end: 5 });
+});
