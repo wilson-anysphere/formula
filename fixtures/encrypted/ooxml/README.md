@@ -26,6 +26,20 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `""`
 
+## Usage in tests
+
+These fixtures are referenced explicitly by encryption-focused tests (they are not part of the
+ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
+
+- `crates/formula-io/tests/encrypted_ooxml.rs` and `crates/formula-io/tests/encrypted_ooxml_fixtures.rs`:
+  format/encryption detection (should surface `PasswordRequired`).
+- `crates/formula-io/tests/encrypted_ooxml_fixture_validation.rs`:
+  sanity checks that the OLE container and `EncryptionInfo` headers match expectations.
+- `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
+  end-to-end decryption for `agile.xlsx` + `standard.xlsx` against `plaintext.xlsx`.
+- `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs`:
+  decrypts `agile-empty-password.xlsx` and asserts empty password `""` is distinct from a missing password.
+
 ## Inspecting encryption headers
 
 You can inspect an encrypted OOXML container (and confirm Agile vs Standard) with:
