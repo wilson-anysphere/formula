@@ -247,8 +247,17 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
 
 fn quote_dax_identifier(raw: &str) -> String {
     // DAX quotes identifiers using single quotes; embedded quotes are escaped by doubling: `''`.
-    let escaped = raw.replace('\'', "''");
-    format!("'{escaped}'")
+    let mut out = String::with_capacity(raw.len() + 2);
+    out.push('\'');
+    for ch in raw.chars() {
+        if ch == '\'' {
+            out.push_str("''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
