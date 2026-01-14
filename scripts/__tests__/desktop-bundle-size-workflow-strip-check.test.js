@@ -48,6 +48,15 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
     buildIdx >= 0,
     `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
   );
+  const buildSnippet = yamlListItemBlock(lines, buildIdx);
+  // `scripts/cargo_agent.sh` sets CARGO_PROFILE_RELEASE_CODEGEN_UNITS based on its job count unless
+  // callers override it. Ensure this workflow pins it to 1 so bundle sizes match the repo's
+  // Cargo.toml release profile and remain comparable to tagged releases.
+  assert.match(
+    buildSnippet,
+    /\bCARGO_PROFILE_RELEASE_CODEGEN_UNITS:\s*["']?1["']?\b/,
+    `Expected the Tauri build step to set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1.\nSaw snippet:\n${buildSnippet}`,
+  );
 
   const stripNeedle = "Verify desktop binary is stripped (no symbols)";
   const idx = lines.findIndex((line) => line.includes(stripNeedle));
