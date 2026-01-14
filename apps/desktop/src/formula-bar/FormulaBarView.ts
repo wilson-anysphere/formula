@@ -2139,7 +2139,7 @@ export class FormulaBarView {
     } else {
       let ghostInserted = false;
       let previewInserted = false;
-      let highlightHtml = "";
+      const highlightParts: string[] = [];
 
       const refs = coloredReferences;
       let refCursor = 0;
@@ -2158,44 +2158,41 @@ export class FormulaBarView {
         span: { kind: string; start: number; end: number; className?: string },
         text: string
       ): string => {
-        const extraClass = span.className?.trim?.() || "";
         const classAttr = (base: string | null): string => {
-          const classes = [base, extraClass].filter(Boolean).join(" ").trim();
-          return classes ? ` class="${classes}"` : "";
+          const extra = span.className;
+          if (base) {
+            if (extra) return ` class="${base} ${extra}"`;
+            return ` class="${base}"`;
+          }
+          if (extra) return ` class="${extra}"`;
+          return "";
         };
 
         if (!isFormulaEditing) {
           return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
         }
 
-        let meta: { color: string; index: number; active: boolean } | null = null;
-        if (span.kind !== "error") {
-          const containing = findContainingRef(span.start, span.end);
-          if (containing) {
-            meta = {
-              color: containing.color,
-              index: containing.index,
-              active: activeReferenceIndex === containing.index,
-            };
-          }
-        }
-
-        if (!meta) {
+        if (span.kind === "error") {
           return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
         }
 
-        const activeClass = meta.active ? " formula-bar-reference--active" : "";
-        const baseClass = `formula-bar-reference${activeClass}`;
-        return `<span data-kind="${span.kind}" data-ref-index="${meta.index}"${classAttr(baseClass)} style="color: ${meta.color};">${escapeHtml(
+        const containing = findContainingRef(span.start, span.end);
+        if (!containing) {
+          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+        }
+
+        const isActive = activeReferenceIndex === containing.index;
+        const baseClass = isActive ? "formula-bar-reference formula-bar-reference--active" : "formula-bar-reference";
+        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr(baseClass)} style="color: ${containing.color};">${escapeHtml(
           text
         )}</span>`;
       };
 
       for (const span of highlightedSpans) {
         if (!ghostInserted && ghost && cursor <= span.start) {
-          highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+          highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
           if (previewText && !previewInserted) {
-            highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+            highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
             previewInserted = true;
           }
           ghostInserted = true;
@@ -2206,30 +2203,32 @@ export class FormulaBarView {
           const before = span.text.slice(0, split);
           const after = span.text.slice(split);
           if (before) {
-            highlightHtml += renderSpan(span, before);
+            highlightParts.push(renderSpan(span, before));
           }
-          highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+          highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
           if (previewText && !previewInserted) {
-            highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+            highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
             previewInserted = true;
           }
           ghostInserted = true;
           if (after) {
-            highlightHtml += renderSpan(span, after);
+            highlightParts.push(renderSpan(span, after));
           }
           continue;
         }
 
-        highlightHtml += renderSpan(span, span.text);
+        highlightParts.push(renderSpan(span, span.text));
       }
 
       if (!ghostInserted && ghost) {
-        highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
         if (previewText && !previewInserted) {
-          highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+          highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
           previewInserted = true;
         }
       }
+
+      const highlightHtml = highlightParts.join("");
 
       // Avoid forcing a full DOM re-parse/layout if the highlight HTML is unchanged.
       // Also keep cached reference-span node lists in sync with the current DOM.
