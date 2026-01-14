@@ -10408,6 +10408,7 @@ export class SpreadsheetApp {
 
     const outline = this.getOutlineForSheet(this.sheetId);
     let changed = false;
+    const changedCols: number[] = [];
     for (const raw of cols) {
       if (!Number.isFinite(raw)) continue;
       const col = Math.trunc(raw);
@@ -10416,10 +10417,48 @@ export class SpreadsheetApp {
       if (entry.hidden.user !== hidden) {
         entry.hidden.user = hidden;
         changed = true;
+        changedCols.push(col);
       }
     }
 
     if (!changed) return;
+
+    // Keep the DocumentController-level hidden column metadata (`__sheetHiddenCols`) in sync with
+    // UI hide/unhide actions so:
+    // - engine hydration (`engineHydrateFromDocument`) can observe the latest hidden state
+    // - hiding/unhiding before the WASM worker initializes still applies once it hydrates
+    //
+    // This metadata is best-effort and is not currently persisted in the DocumentController
+    // snapshot schema.
+    try {
+      const docAny = this.document as any;
+      const existing = docAny.__sheetHiddenCols;
+      const map: Record<string, number[]> =
+        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+      const rawCurrent = map[this.sheetId];
+      const next = new Set<number>();
+      if (Array.isArray(rawCurrent)) {
+        for (const entry of rawCurrent) {
+          const n = Number(entry);
+          if (!Number.isInteger(n) || n < 0) continue;
+          next.add(n);
+        }
+      }
+      for (const col of changedCols) {
+        if (hidden) next.add(col);
+        else next.delete(col);
+      }
+      const nextList = [...next].sort((a, b) => a - b);
+      if (nextList.length > 0) {
+        map[this.sheetId] = nextList;
+      } else {
+        delete map[this.sheetId];
+      }
+      docAny.__sheetHiddenCols = map;
+    } catch {
+      // ignore
+    }
+
     this.onOutlineUpdated();
   }
 
