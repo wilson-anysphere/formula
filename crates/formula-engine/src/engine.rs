@@ -9218,6 +9218,22 @@ fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
             table.range.end.col = end_col.saturating_add(count);
         }
 
+        if let Some(auto_filter) = table.auto_filter.as_mut() {
+            // Keep table-backed autofilter ranges in sync with the table's columns.
+            auto_filter.range.start.col = table.range.start.col;
+            auto_filter.range.end.col = table.range.end.col;
+
+            // Shift filter column ids for inserts that land within the table's column span.
+            if col >= start_col && col <= end_col.saturating_add(1) {
+                let insert_idx = col - start_col;
+                for filter_column in &mut auto_filter.filter_columns {
+                    if filter_column.col_id >= insert_idx {
+                        filter_column.col_id = filter_column.col_id.saturating_add(count);
+                    }
+                }
+            }
+        }
+
         normalize_table_columns(table);
     }
 }
@@ -9239,12 +9255,20 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
             // Deleting strictly before the table shifts it left without removing columns.
             table.range.start.col = start_col.saturating_sub(count);
             table.range.end.col = end_col.saturating_sub(count);
+            if let Some(auto_filter) = table.auto_filter.as_mut() {
+                auto_filter.range.start.col = table.range.start.col;
+                auto_filter.range.end.col = table.range.end.col;
+            }
             normalize_table_columns(table);
             return true;
         }
 
         if col > end_col {
             // Deleting strictly after the table does not affect it.
+            if let Some(auto_filter) = table.auto_filter.as_mut() {
+                auto_filter.range.start.col = table.range.start.col;
+                auto_filter.range.end.col = table.range.end.col;
+            }
             normalize_table_columns(table);
             return true;
         }
@@ -9275,6 +9299,25 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
         };
         table.range.start.col = start_col.saturating_sub(deleted_before);
         table.range.end.col = table.range.start.col.saturating_add(new_width - 1);
+
+        if let Some(auto_filter) = table.auto_filter.as_mut() {
+            auto_filter.range.start.col = table.range.start.col;
+            auto_filter.range.end.col = table.range.end.col;
+
+            // Shift or drop filter column ids so they remain aligned with the table's columns.
+            let rel_start = overlap_start.saturating_sub(start_col);
+            let rel_end = overlap_end.saturating_sub(start_col);
+            auto_filter.filter_columns.retain_mut(|filter_column| {
+                if filter_column.col_id < rel_start {
+                    return true;
+                }
+                if filter_column.col_id <= rel_end {
+                    return false;
+                }
+                filter_column.col_id = filter_column.col_id.saturating_sub(overlap_count);
+                true
+            });
+        }
 
         normalize_table_columns(table);
         true

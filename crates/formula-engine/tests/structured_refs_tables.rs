@@ -4,7 +4,7 @@ use formula_engine::structured_refs::{
     resolve_structured_ref, StructuredColumn, StructuredColumns, StructuredRefItem,
 };
 use formula_engine::{Engine, Value};
-use formula_model::table::TableColumn;
+use formula_model::table::{AutoFilter, FilterColumn, TableColumn};
 use formula_model::{Range, Table, TableError};
 
 fn table_fixture_single_col() -> Table {
@@ -160,6 +160,38 @@ fn setup_engine_with_table() -> Engine {
         .set_cell_value("Sheet1", "C4", 300.0_f64)
         .expect("C4");
 
+    engine
+}
+
+fn setup_engine_with_table_and_autofilter(filter_col_ids: &[u32]) -> Engine {
+    let mut engine = setup_engine_with_table();
+
+    let mut tables: Vec<Table> = engine
+        .get_sheet_tables("Sheet1")
+        .expect("tables")
+        .to_vec();
+    assert_eq!(tables.len(), 1);
+
+    let filter_columns = filter_col_ids
+        .iter()
+        .copied()
+        .map(|col_id| FilterColumn {
+            col_id,
+            join: Default::default(),
+            criteria: Vec::new(),
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        })
+        .collect();
+
+    tables[0].auto_filter = Some(AutoFilter {
+        range: Range::from_a1("A1:D1").unwrap(),
+        filter_columns,
+        sort_state: None,
+        raw_xml: Vec::new(),
+    });
+
+    engine.set_sheet_tables("Sheet1", tables);
     engine
 }
 
@@ -841,6 +873,28 @@ fn insert_cols_inside_table_updates_table_columns_and_preserves_structured_refs(
 }
 
 #[test]
+fn insert_cols_inside_table_updates_table_autofilter_metadata() {
+    let mut engine = setup_engine_with_table_and_autofilter(&[0, 2]);
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Insert inside the table (between Col1 and Col2).
+            count: 1,
+        })
+        .expect("insert cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:E4").unwrap());
+
+    let auto_filter = table.auto_filter.as_ref().expect("autofilter");
+    assert_eq!(auto_filter.range, Range::from_a1("A1:E1").unwrap());
+    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    assert_eq!(col_ids, vec![0, 3]);
+}
+
+#[test]
 fn delete_cols_removing_referenced_column_yields_ref_error() {
     let mut engine = setup_engine_with_table();
     engine
@@ -870,6 +924,28 @@ fn delete_cols_removing_referenced_column_yields_ref_error() {
     assert_eq!(table.columns.len(), table.range.width() as usize);
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col1", "Col2", "Col4"]);
+}
+
+#[test]
+fn delete_cols_overlapping_table_updates_table_autofilter_metadata() {
+    let mut engine = setup_engine_with_table_and_autofilter(&[1, 3]);
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 1, // Delete Col2.
+            count: 1,
+        })
+        .expect("delete cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:C4").unwrap());
+
+    let auto_filter = table.auto_filter.as_ref().expect("autofilter");
+    assert_eq!(auto_filter.range, Range::from_a1("A1:C1").unwrap());
+    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    assert_eq!(col_ids, vec![2]);
 }
 
 #[test]
