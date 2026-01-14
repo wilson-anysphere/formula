@@ -2786,6 +2786,14 @@ export class FormulaBarView {
           return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
         }
 
+        // Only `reference` and `identifier` spans can correspond to extracted references
+        // (A1 refs / structured refs are tokenized as `reference`, named ranges as `identifier`).
+        // Avoid the per-token reference containment checks for everything else.
+        if (span.kind !== "reference" && span.kind !== "identifier") {
+          const classAttr = extraClass ? ` class="${extraClass}"` : "";
+          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
+        }
+
         const containing = findContainingRef(span.start, span.end);
         if (!containing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
