@@ -546,6 +546,43 @@ fn eval_filter_bool(
             });
         };
 
+        if c.validity.is_none() {
+            // Byte-wise fast path for non-null boolean chunks.
+            let invert = match op {
+                CmpOp::Eq => !rhs,
+                CmpOp::Ne => rhs,
+                _ => false,
+            };
+
+            let full_bytes = chunk_rows / 8;
+            let rem_bits = chunk_rows % 8;
+
+            for b in c.data.iter().take(full_bytes) {
+                let byte = if invert { !*b } else { *b };
+                match byte {
+                    0x00 => out.extend_constant(false, 8),
+                    0xFF => out.extend_constant(true, 8),
+                    _ => {
+                        for bit in 0..8 {
+                            out.push(((byte >> bit) & 1) == 1);
+                        }
+                    }
+                }
+            }
+
+            if rem_bits > 0 {
+                let byte_idx = full_bytes;
+                if let Some(b) = c.data.get(byte_idx) {
+                    let byte = if invert { !*b } else { *b };
+                    for bit in 0..rem_bits {
+                        out.push(((byte >> bit) & 1) == 1);
+                    }
+                }
+            }
+
+            continue;
+        }
+
         for i in 0..chunk_rows {
             if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
                 out.push(false);
