@@ -2296,9 +2296,10 @@ export class FormulaBarView {
       this.textarea.focus();
     }
     if (opts.cursor === "all") {
-      this.textarea.setSelectionRange(0, this.textarea.value.length);
+      const end = this.model.draft.length;
+      this.textarea.setSelectionRange(0, end);
     } else if (opts.cursor === "end") {
-      const end = this.textarea.value.length;
+      const end = this.model.draft.length;
       this.textarea.setSelectionRange(end, end);
     }
     // Programmatic focus can be invoked while the textarea is already focused (e.g. after a commit/cancel
@@ -2887,8 +2888,11 @@ export class FormulaBarView {
     if (!this.root.isConnected) return;
     if (!this.model.isEditing) return;
 
-    const start = this.textarea.selectionStart ?? this.textarea.value.length;
-    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
+    // Opening the picker doesn't mutate the draft; avoid reading `textarea.value` to obtain
+    // a length fallback for these selection positions (which can allocate a large string).
+    const draftLen = this.model.draft.length;
+    const start = this.textarea.selectionStart ?? draftLen;
+    const end = this.textarea.selectionEnd ?? draftLen;
     this.#functionPickerAnchorSelection = { start, end };
 
     this.#functionPickerOpen = true;
@@ -2945,7 +2949,8 @@ export class FormulaBarView {
 
     if (anchor) {
       this.textarea.setSelectionRange(anchor.start, anchor.end);
-      this.model.updateDraft(this.textarea.value, anchor.start, anchor.end);
+      // Restoring selection doesn't change the textarea value; avoid reading `textarea.value` here.
+      this.model.updateDraft(this.model.draft, anchor.start, anchor.end);
       this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(anchor.start, anchor.end);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
