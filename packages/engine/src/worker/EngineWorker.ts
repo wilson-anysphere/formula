@@ -144,6 +144,7 @@ function pruneUndefinedShallow<T extends object>(value: T): T {
 export class EngineWorker {
   private readonly worker: WorkerLike;
   private readonly port: MessagePortLike;
+  private portListener: ((event: MessageEvent<unknown>) => void) | null = null;
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
 
@@ -157,6 +158,7 @@ export class EngineWorker {
     const handler = (event: MessageEvent<unknown>) => {
       this.onMessage(event.data as WorkerOutboundMessage);
     };
+    this.portListener = handler;
     this.port.addEventListener("message", handler);
     this.port.start?.();
   }
@@ -306,6 +308,15 @@ export class EngineWorker {
       pending.reject(new Error(`worker terminated (request ${id})`));
     }
     this.pending.clear();
+
+    if (this.portListener) {
+      try {
+        this.port.removeEventListener("message", this.portListener);
+      } catch {
+        // ignore
+      }
+      this.portListener = null;
+    }
     try {
       this.worker.terminate();
     } catch {

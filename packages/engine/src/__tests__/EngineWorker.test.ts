@@ -44,6 +44,10 @@ class MockMessagePort {
     this.listeners.delete(listener);
   }
 
+  getListenerCount(): number {
+    return this.listeners.size;
+  }
+
   private dispatchMessage(data: unknown): void {
     const event = { data } as MessageEvent<unknown>;
     this.onmessage?.(event);
@@ -1170,5 +1174,25 @@ describe("EngineWorker RPC", () => {
     };
 
     expect(() => engine.terminate()).not.toThrow();
+  });
+
+  it("removes the MessagePort message listener even when port.close() is unavailable", async () => {
+    const worker = new MockWorker();
+    const channel = createMockChannel();
+    const port1 = channel.port1 as unknown as MockMessagePort;
+    // Simulate an environment where MessagePortLike.close is not exposed.
+    (port1 as any).close = undefined;
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: () => channel,
+    });
+
+    expect(port1.getListenerCount()).toBeGreaterThan(0);
+
+    engine.terminate();
+
+    expect(port1.getListenerCount()).toBe(0);
   });
 });
