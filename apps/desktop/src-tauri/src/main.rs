@@ -112,13 +112,6 @@ fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
     );
 }
 
-fn webview_url_for_window<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<Url, String> {
-    let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
-        return Err("webview window not available".to_string());
-    };
-    webview.url().map_err(|err| err.to_string())
-}
-
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
