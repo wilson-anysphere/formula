@@ -4,18 +4,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
-
-function stripCssNonSemanticText(css) {
-  let out = String(css);
-  // Block comments.
-  out = out.replace(/\/\*[\s\S]*?\*\//g, " ");
-  // Quoted strings (handles escapes).
-  out = out.replace(/"(?:\\.|[^"\\])*"/g, '""');
-  out = out.replace(/'(?:\\.|[^'\\])*'/g, "''");
-  return out;
-}
 
 test("what-if styles keep spacing on the shared --space-* scale", () => {
   const cssPath = path.join(desktopRoot, "src", "styles", "what-if.css");
@@ -41,4 +33,3 @@ test("what-if styles keep spacing on the shared --space-* scale", () => {
     `Found pixel-based spacing declarations in what-if.css:\n${offenders.map((o) => `- ${o.prop}: ${o.value}`).join("\n")}`,
   );
 });
-
