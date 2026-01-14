@@ -415,6 +415,7 @@ fn default_offcrypto_max_output_size(encrypted_package_len: usize) -> u64 {
     default_offcrypto_max_output_size_u64(encrypted_package_len as u64)
 }
 
+#[cfg(feature = "encrypted-workbooks")]
 fn encrypted_package_plaintext_len_is_plausible(plaintext_len: u64, ciphertext_len: u64) -> bool {
     // The `EncryptedPackage` ciphertext should be >= plaintext length (encryption does not compress
     // and typically adds padding/metadata). Reject obviously inconsistent or pathological headers up
