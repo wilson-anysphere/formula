@@ -194,7 +194,8 @@ describe("engine.worker workbook metadata RPCs", () => {
         type: "request",
         id: 9,
         method: "setFormatRunsByCol",
-        params: { sheet: "Sheet1", col: 2, runs: [{ startRow: 0, endRowExclusive: 10, styleId: 17 }] }
+        // Omit sheet; worker should default to "Sheet1".
+        params: { col: 2, runs: [{ startRow: 0, endRowExclusive: 10, styleId: 17 }] }
       });
       expect(resp.ok).toBe(true);
 
