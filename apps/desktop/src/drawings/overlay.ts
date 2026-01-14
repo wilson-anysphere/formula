@@ -118,21 +118,15 @@ function resolveCssValue(
   style: CssVarStyle | null,
   value: unknown,
   fallback: string,
-  opts?: { maxDepth?: number; seen?: Set<string> },
+  maxDepth = 8,
+  seen?: Set<string>,
 ): string {
-  const maxDepth = opts?.maxDepth ?? 8;
-  const read = (name: string) => {
-    if (!style) return "";
-    const raw = style.getPropertyValue(name);
-    return typeof raw === "string" ? raw.trim() : "";
-  };
-
   let current = String(value ?? "").trim();
   let lastFallback: string | null = null;
   // Perf: resolving solid colors can be on the per-frame hot path when many
   // shapes are present. Avoid allocating a `Set` unless we actually encounter
   // a `var(--token)` indirection.
-  let seen = opts?.seen;
+  let seenSet = seen;
 
   for (let depth = 0; depth < maxDepth; depth += 1) {
     const parsed = parseCssVarFunction(current);
@@ -141,27 +135,31 @@ function resolveCssValue(
     const nextName = parsed.name;
     if (parsed.fallback != null) lastFallback = parsed.fallback;
 
-    if (!seen) seen = new Set<string>();
+    if (!seenSet) seenSet = new Set<string>();
 
     // Handle cycles and enforce a max indirection depth.
-    if (seen.has(nextName)) {
+    if (seenSet.has(nextName)) {
       current = parsed.fallback ?? lastFallback ?? "";
       continue;
     }
-    seen.add(nextName);
+    seenSet.add(nextName);
 
-    const nextValue = read(nextName);
+    let nextValue = "";
+    if (style) {
+      const raw = style.getPropertyValue(nextName);
+      nextValue = typeof raw === "string" ? raw.trim() : "";
+    }
     if (nextValue) {
       current = nextValue;
       continue;
     }
 
     const fb = parsed.fallback ?? lastFallback;
-    if (fb != null) return resolveCssValue(style, fb, fallback, { maxDepth, seen });
+    if (fb != null) return resolveCssValue(style, fb, fallback, maxDepth, seenSet);
     return fallback;
   }
 
-  if (lastFallback != null) return resolveCssValue(style, lastFallback, fallback, { maxDepth, seen });
+  if (lastFallback != null) return resolveCssValue(style, lastFallback, fallback, maxDepth, seenSet);
   return fallback;
 }
 
@@ -170,7 +168,7 @@ function resolveCssVarFromStyle(style: CssVarStyle | null, varName: string, fall
   const start = style.getPropertyValue(varName);
   const trimmed = typeof start === "string" ? start.trim() : "";
   if (!trimmed) return fallback;
-  return resolveCssValue(style, trimmed, fallback, { seen: new Set([varName]) });
+  return resolveCssValue(style, trimmed, fallback, 8, new Set([varName]));
 }
 
 function resolveOverlayColorTokens(style: CssVarStyle | null): OverlayColorTokens {
