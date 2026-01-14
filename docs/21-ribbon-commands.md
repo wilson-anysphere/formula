@@ -78,6 +78,29 @@ Why:
 
 Note: parts of the current schema still use location-based ids (e.g. `home.*`) for historical reasons. As command ids are normalized, some of these ids will change—see `testId` guidance below.
 
+#### Dropdown triggers vs dropdown menu items
+
+For dropdown buttons, there are often **two kinds of ids** involved:
+
+- the *dropdown trigger* id (the button you click to open the menu), and
+- the *menu item* ids (the actual executable actions).
+
+Prefer to make **menu items** canonical CommandRegistry ids, and treat the **trigger** as a UI-only id when it doesn’t represent a meaningful command by itself.
+
+Example (View → Freeze Panes):
+
+- Trigger id: `view.window.freezePanes` (menu opener; *not* a CommandRegistry command)
+- Menu item ids:
+  - `view.freezePanes`
+  - `view.freezeTopRow`
+  - `view.freezeFirstColumn`
+  - `view.unfreezePanes`
+
+Why:
+
+- Avoids a duplicate “Freeze Panes” entry in the command palette (trigger + action).
+- Keeps command palette recents/telemetry consistent by executing the canonical `view.*` command ids.
+
 ### Guideline: use `testId` for stable E2E hooks
 
 Use `testId` as the stable selector for Playwright / E2E tests:
