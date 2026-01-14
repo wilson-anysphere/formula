@@ -214,6 +214,7 @@ find_appimages() {
 
   # Fallback: traverse roots to locate AppImage bundles.
   find "${roots[@]}" \
+    -maxdepth 6 \
     -type f \
     -name '*.AppImage' \
     -path '*/release/bundle/appimage/*.AppImage' \

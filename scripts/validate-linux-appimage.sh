@@ -381,6 +381,7 @@ discover_appimages() {
 
   # Fallback: traverse only when the output layout is unexpected.
   find "$base" \
+    -maxdepth 6 \
     -type f \
     -name '*.AppImage' \
     -path '*/release/bundle/appimage/*.AppImage' \
