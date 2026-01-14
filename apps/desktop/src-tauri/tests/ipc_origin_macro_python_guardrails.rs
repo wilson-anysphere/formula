@@ -256,6 +256,10 @@ fn macro_and_python_commands_enforce_ipc_origin() {
     ] {
         let body = function_body(commands_rs, command);
         assert!(
+            body.contains("window: tauri::WebviewWindow"),
+            "{command} must accept window: tauri::WebviewWindow so Tauri can inject the caller window for origin enforcement"
+        );
+        assert!(
             body.contains("ensure_main_window("),
             "{command} must enforce ipc_origin::ensure_main_window"
         );
@@ -265,4 +269,3 @@ fn macro_and_python_commands_enforce_ipc_origin() {
         );
     }
 }
-
