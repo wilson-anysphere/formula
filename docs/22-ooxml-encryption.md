@@ -362,11 +362,22 @@ Notably:
 
 This detail has been the source of prior incorrect implementations.
 
-Compatibility note: some non-Excel producers have been observed to compute `dataIntegrity` over the
-**decrypted package bytes** (plaintext ZIP) instead of the `EncryptedPackage` stream bytes. For
-Excel parity, new implementations should follow the spec (authenticate the stream bytes). However,
-`crates/formula-xlsx::offcrypto` is permissive and will accept either target, while
-`crates/formula-office-crypto` requires the spec/Excel behavior (stream bytes).
+Compatibility note: some non-Excel producers have been observed to compute `dataIntegrity` over
+different byte ranges (e.g. ciphertext-only, or the decrypted plaintext ZIP) instead of the
+spec/Excel target (`EncryptedPackage` stream bytes). To maximize interoperability with real-world
+files (including our committed fixture corpus), Formula’s decryptors are currently permissive:
+
+- `crates/formula-xlsx::offcrypto` accepts:
+  - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
+  - fallback: HMAC over the decrypted package bytes (plaintext ZIP)
+- `crates/formula-office-crypto` accepts:
+  - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
+  - HMAC over ciphertext only (excludes the 8-byte size header)
+  - HMAC over plaintext only (decrypted ZIP bytes)
+  - HMAC over (8-byte size header + plaintext)
+
+Writers should follow MS-OFFCRYPTO/Excel (authenticate the stream bytes). If we ever decide to make
+`formula-office-crypto` strict, update this section and the corresponding compatibility tests.
 
 ### High-level integrity algorithm (Agile)
 
