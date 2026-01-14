@@ -638,6 +638,92 @@ describe("CanvasGridRenderer image cells", () => {
     expect(bitmap.close).toHaveBeenCalledTimes(1);
   });
 
+  it("closes a decoded bitmap when clearImageCache is called while a decode is in-flight", async () => {
+    // Avoid synchronous RAF side effects; this test controls when renders occur.
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    let resolveDecode!: (value: any) => void;
+    const decodePromise = new Promise<any>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const bitmap1 = { width: 10, height: 10, close: vi.fn() } as any;
+    const bitmap2 = { width: 10, height: 10, close: vi.fn() } as any;
+    const createImageBitmapSpy = vi.fn().mockReturnValueOnce(decodePromise).mockResolvedValueOnce(bitmap2);
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    renderer.renderImmediately();
+    await flushMicrotasks();
+    expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+
+    const pending = (renderer as any).imageBitmapCache.get("img1") as { state: "pending"; promise: Promise<void> } | undefined;
+    expect(pending?.state).toBe("pending");
+
+    renderer.clearImageCache();
+
+    resolveDecode(bitmap1);
+    await (pending?.promise ?? Promise.resolve());
+    await flushMicrotasks();
+
+    expect(bitmap1.close).toHaveBeenCalledTimes(1);
+
+    // Re-render should start a new decode (bitmap2) and keep it cached.
+    renderer.renderImmediately();
+    await flushMicrotasks();
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(createImageBitmapSpy).toHaveBeenCalledTimes(2);
+    expect(bitmap2.close).not.toHaveBeenCalled();
+  });
+
   it("dedupes image requests and marks content dirty when decoding completes", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>
