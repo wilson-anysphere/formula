@@ -51,7 +51,6 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   "home.number.moreFormats.formatCells": "format.openFormatCells",
   "home.alignment.orientation.formatCellAlignment": "format.openFormatCells",
   "format.openAlignmentDialog": "format.openFormatCells",
-  "home.number.moreFormats.custom": "format.openFormatCells",
 
   // --- Comments ---------------------------------------------------------------
   "comments.addComment": "comments.addComment",
