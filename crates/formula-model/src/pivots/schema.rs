@@ -35,7 +35,10 @@ impl PivotFieldRef {
     pub fn canonical_name(&self) -> Cow<'_, str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
-            _ => Cow::Owned(self.to_string()),
+            PivotFieldRef::DataModelColumn { table, column } => {
+                Cow::Owned(format!("{table}[{column}]"))
+            }
+            PivotFieldRef::DataModelMeasure(measure) => Cow::Owned(format!("[{measure}]")),
         }
     }
 
@@ -56,11 +59,7 @@ impl PivotFieldRef {
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
     pub fn display_string(&self) -> String {
-        match self {
-            PivotFieldRef::CacheFieldName(name) => name.clone(),
-            PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
-            PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
-        }
+        self.canonical_name().into_owned()
     }
 
     /// Best-effort parse of an unstructured field identifier.
