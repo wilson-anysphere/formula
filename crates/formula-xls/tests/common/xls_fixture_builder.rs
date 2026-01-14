@@ -4058,6 +4058,67 @@ pub fn build_autofilter_sort12_continuefrt12_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with an inferred AutoFilter range
+/// (DIMENSIONS + AUTOFILTERINFO) and a large number of malformed BIFF8 `SORT` records.
+///
+/// Each `SORT` record yields a best-effort warning during the importer's sort-state recovery pass.
+/// This is intended to stress-test the global warning cap.
+pub fn build_many_sort_state_warnings_fixture_xls(record_count: usize) -> Vec<u8> {
+    let workbook_stream = build_many_sort_state_warnings_workbook_stream(record_count);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_many_sort_state_warnings_workbook_stream(record_count: usize) -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` writes 16 style XFs followed by one cell XF, so the
+    // first cell XF index is 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_many_sort_state_warnings_sheet_stream(xf_cell, record_count);
+    build_single_sheet_workbook_stream("SortWarnings", &sheet_stream, 1252)
+}
+
+fn build_many_sort_state_warnings_sheet_stream(xf_cell: u16, record_count: usize) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) => A1:C5.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1 (A..C)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // AUTOFILTERINFO: cEntries = 3 (A..C).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
+
+    // Malformed/unsupported SORT records: valid shape but no usable key columns.
+    // The importer should emit a warning per record while still continuing the import.
+    let sort_payload = sort_record_payload(0, 4, 0, 2, true, &[]);
+
+    for _ in 0..record_count {
+        push_record(&mut sheet, RECORD_SORT, &sort_payload);
+    }
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet with an AutoFilter range and a
 /// BIFF8 Future Record Type `AutoFilter12` record.
 ///

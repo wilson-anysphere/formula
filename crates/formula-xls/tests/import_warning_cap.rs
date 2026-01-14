@@ -32,3 +32,28 @@ fn caps_total_import_warnings() {
         1
     );
 }
+
+#[test]
+fn caps_total_import_warnings_from_sort_state_recovery() {
+    // Deliberately exceed the global warning cap (1000) by generating many best-effort
+    // sort-state warnings from malformed BIFF8 `SORT` records.
+    //
+    // This exercises the warning-cap enforcement on warning propagation paths that previously
+    // bypassed `push_import_warning`.
+    let bytes = xls_fixture_builder::build_many_sort_state_warnings_fixture_xls(1200);
+    let result = import_fixture(&bytes);
+
+    assert_eq!(result.warnings.len(), 1001, "warnings={:?}", result.warnings);
+    assert_eq!(
+        result.warnings.last().map(|w| w.message.as_str()),
+        Some("additional `.xls` import warnings suppressed")
+    );
+    assert_eq!(
+        result
+            .warnings
+            .iter()
+            .filter(|w| w.message == "additional `.xls` import warnings suppressed")
+            .count(),
+        1
+    );
+}

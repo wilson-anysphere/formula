@@ -2995,9 +2995,7 @@ fn import_xls_path_with_biff_reader(
             let Some(sheet) = out.sheet_mut(sheet_id) else {
                 push_import_warning(
                     &mut warnings,
-                    format!(
-                        "skipping `.xls` AutoFilter post-processing for missing sheet id {sheet_id}"
-                    ),
+                    format!("skipping `.xls` AutoFilter post-processing for missing sheet id {sheet_id}"),
                     &mut warnings_suppressed,
                 );
                 continue;
