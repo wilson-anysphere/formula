@@ -97,6 +97,47 @@ describe("registerEncryptionUiCommands", () => {
     expect(manager.remove).toHaveBeenCalledWith("r2");
   });
 
+  it("removeEncryptedRange does not match by sheet-name fallback when a different sheet id equals the current sheet name", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const manager = {
+      list: () => [
+        {
+          id: "r1",
+          // Pretend this is a stable sheet id for a different sheet, but it happens to equal
+          // the display name of the current sheet ("Summary").
+          sheetId: "Summary",
+          startRow: 0,
+          startCol: 0,
+          endRow: 0,
+          endCol: 0,
+          keyId: "k1",
+        },
+      ],
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ getRole: () => "editor" }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "sheet-1",
+      getCurrentSheetDisplayName: () => "Summary",
+      getSheetDisplayNameById: (id: string) => {
+        if (id === "sheet-1") return "Summary";
+        if (id === "Summary") return "Data";
+        return id;
+      },
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    await commandRegistry.executeCommand("collab.removeEncryptedRange");
+
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/No encrypted ranges overlap/i), "info");
+  });
+
   it("removeEncryptedRange can remove all overlapping encrypted ranges", async () => {
     const commandRegistry = new CommandRegistry();
 

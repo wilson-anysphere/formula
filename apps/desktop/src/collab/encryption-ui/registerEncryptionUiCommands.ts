@@ -296,11 +296,27 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       const sheetName = app.getCurrentSheetDisplayName();
       const selection = normalizeRange(ranges[0]!);
 
+      const resolveSheetNameById = (id: string): string | null => {
+        try {
+          const name = app.getSheetDisplayNameById(id);
+          return typeof name === "string" ? name : null;
+        } catch {
+          return null;
+        }
+      };
+
       const matchesSheet = (rangeSheetId: string): boolean => {
         const rangeId = String(rangeSheetId ?? "").trim();
         if (!rangeId) return false;
         if (rangeId === sheetId) return true;
         if (rangeId.toLowerCase() === sheetId.toLowerCase()) return true;
+
+        const rangeName = resolveSheetNameById(rangeId);
+        // Avoid sheet id/name ambiguity: if the range sheet reference is a valid stable sheet id
+        // (i.e. we can resolve it to a display name different from the id) and it doesn't match
+        // the current sheet id, do not treat it as a sheet *name*.
+        if (rangeName && rangeName !== rangeId) return false;
+
         return normalizeSheetNameForCompare(rangeId) === normalizeSheetNameForCompare(sheetName);
       };
 
