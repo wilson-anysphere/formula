@@ -478,6 +478,78 @@ test("binder: collab undo/redo reverts local col width changes when sheet.view.c
   }
 });
 
+test("binder: collab undo/redo reverts local row height changes when sheet.view.rowHeights is a foreign Y.Map (CJS applyUpdate)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  remote.transact(() => {
+    const sheets = remote.getArray("sheets");
+    const sheet = new Ycjs.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Ycjs.Map();
+    view.set("frozenRows", 0);
+    view.set("frozenCols", 0);
+
+    const rowHeights = new Ycjs.Map();
+    rowHeights.set("10", 44);
+    view.set("rowHeights", rowHeights);
+    sheet.set("view", view);
+
+    sheets.push([sheet]);
+  });
+
+  const ydoc = new Y.Doc();
+  ydoc.getArray("sheets");
+  Ycjs.applyUpdate(ydoc, Ycjs.encodeStateAsUpdate(remote));
+
+  const sheets = ydoc.getArray("sheets");
+  const undo = createUndoService({ mode: "collab", doc: ydoc, scope: sheets });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    undoService: undo,
+    defaultSheetId: "Sheet1",
+  });
+
+  try {
+    await waitForCondition(() => documentController.getSheetView("Sheet1").rowHeights?.["10"] === 44);
+
+    const entry = findSheetEntry(ydoc, "Sheet1");
+    assert.ok(entry, "expected Sheet1 entry");
+    const rawView = entry.get("view");
+    assert.ok(rawView && typeof rawView === "object");
+    assert.equal(rawView instanceof Y.Map, false, "expected sheet.view to be a foreign (non-ESM) Y.Map");
+    const rawRowHeights = rawView?.get?.("rowHeights");
+    assert.ok(rawRowHeights && typeof rawRowHeights === "object");
+    assert.equal(rawRowHeights instanceof Y.Map, false, "expected view.rowHeights to be a foreign (non-ESM) Y.Map");
+
+    documentController.setRowHeight("Sheet1", 10, 55);
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").rowHeights?.["10"] === 55);
+
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const view = entry?.get?.("view");
+      const rowHeights = view?.get?.("rowHeights");
+      const height = Number(rowHeights?.get?.("10"));
+      return height === 55;
+    });
+
+    undo.undo();
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").rowHeights?.["10"] === 44);
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, rowHeights: { "10": 44 } });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remote.destroy();
+  }
+});
+
 test("binder: applies view state when sheet id is set after view", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
