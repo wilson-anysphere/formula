@@ -383,17 +383,16 @@ pub fn pivot_table_to_engine_config(
             let field_idx = df.fld? as usize;
             let source_field_name = cache_def.cache_fields.get(field_idx)?.name.clone();
             let aggregation = map_subtotal(df.subtotal.as_deref());
+            let default_name = format!(
+                "{} of {}",
+                aggregation_display_name(aggregation),
+                source_field_name
+            );
             let name = df
                 .name
                 .clone()
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    format!(
-                        "{} of {}",
-                        aggregation_display_name(aggregation),
-                        &source_field_name
-                    )
-                });
+                .unwrap_or(default_name);
 
             let show_as = map_show_data_as(df.show_data_as.as_deref());
 
