@@ -6889,12 +6889,105 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
+    fn build_shared_strings_phonetic_fixture_xlsx() -> Vec<u8> {
+        use std::io::{Cursor, Write};
+        use zip::write::FileOptions;
+        use zip::{CompressionMethod, ZipWriter};
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#;
+
+        let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1">
+        <f>PHONETIC(A1)</f>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si>
+    <t>Base</t>
+    <rPh sb="0" eb="4"><t>PHONETIC</t></rPh>
+  </si>
+</sst>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(root_rels.as_bytes()).unwrap();
+
+        zip.start_file("[Content_Types].xml", options).unwrap();
+        zip.write_all(content_types.as_bytes()).unwrap();
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
     #[test]
     fn from_xlsx_bytes_imports_cell_phonetic_metadata_for_phonetic_function() {
         let bytes = build_inline_string_phonetic_fixture_xlsx();
         let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
         wb.inner.recalculate_internal(None).unwrap();
 
+        assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("PHONETIC".to_string())
+        );
+    }
+
+    #[test]
+    fn from_xlsx_bytes_imports_shared_string_phonetic_metadata_for_phonetic_function() {
+        let bytes = build_shared_strings_phonetic_fixture_xlsx();
+        let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"), EngineValue::Text("Base".to_string()));
         assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
