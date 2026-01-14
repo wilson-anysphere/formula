@@ -1923,6 +1923,7 @@ fn main() {
             commands::set_cell,
             commands::get_range,
             commands::get_sheet_used_range,
+            commands::get_sheet_view_overrides,
             commands::get_sheet_formatting,
             commands::get_sheet_view_state,
             commands::get_sheet_imported_col_properties,

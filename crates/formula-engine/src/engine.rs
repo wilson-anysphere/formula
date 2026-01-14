@@ -2565,7 +2565,6 @@ impl Engine {
                 sheet_state.row_properties.remove(&row0);
             }
         }
-
         if dims_changed || !self.calc_settings.full_precision {
             self.mark_all_compiled_cells_dirty();
         }

@@ -1951,11 +1951,9 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             FnSheetId::External(_) => None,
         }
     }
-
     fn sheet_origin_cell(&self, sheet_id: usize) -> Option<CellAddr> {
         self.resolver.sheet_origin_cell(sheet_id)
     }
-
     fn iter_reference_cells<'b>(
         &'b self,
         reference: &'b FnReference,

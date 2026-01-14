@@ -1602,10 +1602,12 @@ impl AppState {
                     }
                 }
                 // Treat an all-empty payload as clearing the tab color.
+                //
+                // Note: `tint` is an adjustment applied to `rgb`/`theme` colors; a tint without a
+                // base color is ignored.
                 if color.rgb.is_none()
                     && color.theme.is_none()
                     && color.indexed.is_none()
-                    && color.tint.is_none()
                     && color.auto.is_none()
                 {
                     None

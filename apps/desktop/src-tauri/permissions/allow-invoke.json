@@ -35,6 +35,7 @@
           "get_sheet_imported_col_properties",
           "get_sheet_print_settings",
           "get_sheet_used_range",
+          "get_sheet_view_overrides",
           "get_sheet_view_state",
           "get_vba_project",
           "get_workbook_theme_palette",

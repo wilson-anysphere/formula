@@ -484,6 +484,22 @@ pub struct SheetUsedRange {
     pub end_col: usize,
 }
 
+/// Per-sheet view/layout overrides imported from the source workbook.
+///
+/// Currently this only exposes column widths + hidden columns needed for Excel-compatible
+/// `CELL("width")` semantics.
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetViewOverrides {
+    /// Sparse column width overrides in Excel "character" units (0-based column index).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub col_widths: BTreeMap<u32, f32>,
+    /// 0-based indices for user-hidden columns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_cols: Vec<u32>,
+}
+
 #[cfg(any(feature = "desktop", test))]
 const SHEET_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
 #[cfg(any(feature = "desktop", test))]
@@ -4795,6 +4811,38 @@ pub fn get_sheet_used_range(
         start_col: min_col,
         end_col: max_col,
     }))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_sheet_view_overrides(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<SheetViewOverrides, String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+    let sheet = workbook
+        .sheet(&sheet_id)
+        .ok_or_else(|| app_error(AppStateError::UnknownSheet(sheet_id)))?;
+
+    let mut col_widths = BTreeMap::<u32, f32>::new();
+    for (col, width) in &sheet.col_widths {
+        if let Ok(col_u32) = u32::try_from(*col) {
+            col_widths.insert(col_u32, *width);
+        }
+    }
+
+    let mut hidden_cols: Vec<u32> = sheet
+        .hidden_cols
+        .iter()
+        .filter_map(|c| u32::try_from(*c).ok())
+        .collect();
+    hidden_cols.sort_unstable();
+
+    Ok(SheetViewOverrides {
+        col_widths,
+        hidden_cols,
+    })
 }
 
 #[cfg(feature = "desktop")]
@@ -10347,6 +10395,21 @@ mod tests {
                 "expected hex color like '#RRGGBB', got {value}"
             );
         }
+    }
+
+    #[test]
+    fn read_xlsx_preserves_col_widths_and_hidden_cols() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/row-col-attrs.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+        let sheet = workbook.sheets.first().expect("expected a sheet");
+
+        // Fixture sanity check: Column B has a custom width and column C is hidden.
+        assert_eq!(sheet.col_widths.get(&1).copied(), Some(25.0));
+        assert!(sheet.hidden_cols.contains(&2));
     }
 
     #[test]

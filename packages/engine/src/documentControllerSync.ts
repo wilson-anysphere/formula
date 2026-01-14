@@ -151,6 +151,16 @@ export interface EngineSyncTarget {
    */
   setColWidth?: (sheet: string, col: number, widthChars: number | null) => Promise<void> | void;
   /**
+   * Update a worksheet's hidden column metadata.
+   *
+   * The engine treats this as sheet-scoped metadata that can affect worksheet information
+   * functions like `CELL("width")`.
+   *
+   * - `sheet` is the worksheet id/name (e.g. `"Sheet1"`).
+   * - `col` is 0-based (A=0).
+   */
+  setColHidden?: (sheet: string, col: number, hidden: boolean) => Promise<void> | void;
+  /**
    * Optional row/col/sheet formatting layer metadata APIs.
    *
    * These are additive and may not be implemented by all engine targets.
@@ -521,6 +531,28 @@ export async function engineHydrateFromDocument(
         const widthChars = docColWidthPxToExcelChars(widthPx);
         // Call via `.call(engine, ...)` to preserve `this` bindings for class-based engine targets.
         await setColWidthChars.call(engine as any, engineSheetId, col, widthChars);
+      }
+    }
+  }
+
+  // Sync hidden column metadata (best-effort).
+  //
+  // DocumentController does not currently persist hidden columns in its snapshot schema. Desktop
+  // XLSX import stashes this metadata on the DocumentController instance during workbook open so
+  // worksheet information functions like `CELL("width")` can match Excel immediately.
+  const setColHidden = typeof engine.setColHidden === "function" ? engine.setColHidden.bind(engine) : null;
+  const hiddenColsBySheetId = doc && typeof doc === "object" ? (doc as any).__sheetHiddenCols : null;
+  if (setColHidden && hiddenColsBySheetId && typeof hiddenColsBySheetId === "object") {
+    const ids = getDocumentSheetIds(doc);
+    for (const sheetId of ids) {
+      const raw = (hiddenColsBySheetId as any)[sheetId];
+      if (!Array.isArray(raw) || raw.length === 0) continue;
+
+      const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
+      for (const entry of raw) {
+        const col = Number(entry);
+        if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
+        await setColHidden.call(engine as any, engineSheetId, col, true);
       }
     }
   }

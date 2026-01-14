@@ -10310,13 +10310,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     name: string;
     visibility: SheetVisibility;
     tabColor?: TabColor;
+    colWidths?: Record<string, number>;
+    rowHeights?: Record<string, number>;
     cells: SnapshotCell[];
     defaultFormat?: unknown | null;
     rowFormats?: unknown;
     colFormats?: unknown;
     formatRunsByCol?: unknown;
-    colWidths?: unknown;
-    rowHeights?: unknown;
   }> = [];
   const truncations: WorkbookLoadTruncation[] = [];
 
@@ -10366,7 +10366,6 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       console.warn("[formula][desktop] Failed to list embedded cell images:", err);
       return [];
     });
-
   const clampCellFormatBoundsBySheetId = new Map<string, CellFormatClampBounds | null>();
 
   for (const sheet of sheets) {
@@ -10500,6 +10499,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const hiddenCols = hiddenColsFromImportedColProperties(importedColProperties);
     if (hiddenCols.length > 0) importedHiddenColsBySheetId.set(sheet.id, hiddenCols);
   }
+
+  // Hidden column metadata is not currently persisted in the DocumentController snapshot format,
+  // but `CELL("width")` needs it. Stash it on the DocumentController instance so
+  // `engineHydrateFromDocument` can apply it to the WASM engine during initial hydration.
+  const hiddenColsBySheetId: Record<string, number[]> = {};
+  for (const [sheetId, cols] of importedHiddenColsBySheetId) {
+    if (!Array.isArray(cols) || cols.length === 0) continue;
+    hiddenColsBySheetId[sheetId] = cols.slice();
+  }
+  (doc as any).__sheetHiddenCols = hiddenColsBySheetId;
 
   const importedChartObjectsRaw = await importedChartObjectsPromise;
   const importedChartObjects = Array.isArray(importedChartObjectsRaw) ? importedChartObjectsRaw : [];

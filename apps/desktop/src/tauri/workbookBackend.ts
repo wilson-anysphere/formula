@@ -12,6 +12,19 @@ import type {
 import type { ImportedEmbeddedCellImage as ImportedEmbeddedCellImageInfo } from "../workbook/load/embeddedCellImages.js";
 
 import { getTauriInvokeOrThrow, type TauriInvoke } from "./api";
+export type SheetViewOverrides = {
+  /**
+   * Sparse column width overrides in Excel "character" units, keyed by 0-based column index.
+   *
+   * Note: These widths still need to be converted into the UI's view units (px) before being
+   * stored in DocumentController sheet view state.
+   */
+  colWidths?: Record<string, number>;
+  /**
+   * 0-based indices for user-hidden columns.
+   */
+  hiddenCols?: number[];
+};
 
 export type {
   CellValue,
@@ -150,6 +163,16 @@ export class TauriWorkbookBackend implements WorkbookBackend {
       sheet_id: sheetId,
     });
     return (payload as SheetUsedRange | null) ?? null;
+  }
+
+  /**
+   * Best-effort: older desktop backends may not expose sheet view overrides.
+   */
+  async getSheetViewOverrides(sheetId: string): Promise<SheetViewOverrides | null> {
+    const payload = await this.invoke("get_sheet_view_overrides", {
+      sheet_id: sheetId,
+    });
+    return (payload as SheetViewOverrides | null) ?? null;
   }
 
   /**
