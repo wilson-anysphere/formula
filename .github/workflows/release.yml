@@ -2996,6 +2996,29 @@ jobs:
             echo "::warning::sbom.spdx.json did not contain any pkg:npm entries; JS dependency metadata may be missing (check pnpm-lock.yaml support)."
           fi
 
+      - name: SBOM summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## SBOM"
+            echo
+            if [[ -f sbom.spdx.json ]]; then
+              bytes="$(wc -c < sbom.spdx.json | tr -d ' ')"
+              cargo_count="$(grep -c 'pkg:cargo' sbom.spdx.json || true)"
+              npm_count="$(grep -c 'pkg:npm' sbom.spdx.json || true)"
+              echo "- File: \`sbom.spdx.json\` (${bytes} bytes)"
+              echo "- SPDX JSON generated via Syft (anchore/sbom-action)"
+              echo "- pkg:cargo purls: ${cargo_count}"
+              echo "- pkg:npm purls: ${npm_count}"
+              echo
+              echo "On tagged releases (\`upload=true\`), this file is also uploaded to the draft GitHub Release."
+            else
+              echo "- SBOM file was not generated (see workflow logs above)."
+            fi
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload SBOM (workflow artifact)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
