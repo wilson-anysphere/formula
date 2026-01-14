@@ -10,7 +10,7 @@ use md5::{Digest as _, Md5};
 use sha1::Sha1;
 use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
 
-use formula_io::Rc4CryptoApiDecryptReader;
+use formula_io::{HashAlg, Rc4CryptoApiDecryptReader};
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     // Keep parsing permissive for readability in expected-value literals.
@@ -220,6 +220,18 @@ fn standard_cryptoapi_rc4_derivation_vector() {
     );
     assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
 
+    // Ensure the production decrypt reader treats 56-bit keys as 7-byte keys (no padding).
+    let mut stream_56 = Vec::new();
+    stream_56.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    stream_56.extend_from_slice(&ciphertext_56);
+    let mut cursor = Cursor::new(stream_56);
+    cursor.seek(SeekFrom::Start(8)).unwrap();
+    let mut reader =
+        Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.to_vec(), 7).unwrap();
+    let mut decrypted = Vec::new();
+    reader.read_to_end(&mut decrypted).unwrap();
+    assert_eq!(decrypted, plaintext);
+
     // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
     let mut key0_56_padded = key0_56.clone();
     key0_56_padded.resize(16, 0);
@@ -276,6 +288,24 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
         hex_decode("acdabc88ff665d0454d32d952b18e05e8331dfb44e")
     );
     assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
+
+    // Ensure the production decrypt reader treats 56-bit keys as 7-byte keys (no padding).
+    let mut stream_56 = Vec::new();
+    stream_56.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+    stream_56.extend_from_slice(&ciphertext_56);
+    let mut cursor = Cursor::new(stream_56);
+    cursor.seek(SeekFrom::Start(8)).unwrap();
+    let mut reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
+        cursor,
+        plaintext.len() as u64,
+        h.to_vec(),
+        7,
+        HashAlg::Md5,
+    )
+    .unwrap();
+    let mut decrypted = Vec::new();
+    reader.read_to_end(&mut decrypted).unwrap();
+    assert_eq!(decrypted, plaintext);
 
     // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
     let mut key0_56_padded = key0_56.clone();
