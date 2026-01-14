@@ -95,6 +95,51 @@ fn preserves_shared_string_phonetic_bytes_without_preserve_parsed_parts() {
 }
 
 #[test]
+fn for_each_cell_preserves_shared_string_phonetic_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+
+    let phonetic_bytes = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    let sst_idx = builder.add_shared_string_with_phonetic("Hi", phonetic_bytes.clone());
+    builder.set_cell_sst(0, 0, sst_idx);
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let path = tmpdir.path().join("phonetic_for_each_cell.xlsb");
+    std::fs::write(&path, bytes).expect("write xlsb bytes");
+
+    // Exercise both worksheet-reading paths:
+    // - preserve_worksheets=false: stream from the ZIP entry
+    // - preserve_worksheets=true: parse from preserved worksheet bytes
+    for preserve_worksheets in [false, true] {
+        let wb = XlsbWorkbook::open_with_options(
+            &path,
+            OpenOptions {
+                preserve_parsed_parts: false,
+                preserve_worksheets,
+                ..OpenOptions::default()
+            },
+        )
+        .expect("open xlsb");
+
+        let mut cells = Vec::new();
+        wb.for_each_cell(0, |cell| cells.push(cell))
+            .expect("for_each_cell");
+        assert_eq!(cells.len(), 1);
+
+        let a1 = &cells[0];
+        assert_eq!(a1.value, CellValue::Text("Hi".to_string()));
+
+        let preserved = a1.preserved_string.as_ref().expect("preserved string");
+        assert_eq!(preserved.text, "Hi");
+        assert_eq!(
+            preserved.phonetic.as_deref(),
+            Some(phonetic_bytes.as_slice())
+        );
+    }
+}
+
+#[test]
 fn preserves_shared_string_rich_runs_on_string_cells() {
     let mut builder = XlsbFixtureBuilder::new();
 
