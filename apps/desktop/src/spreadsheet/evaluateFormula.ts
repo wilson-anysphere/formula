@@ -140,12 +140,19 @@ type FunctionTranslationMap = Map<string, string>;
 function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
   const localizedToCanonical: FunctionTranslationMap = new Map();
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const [canonical, localized] = line.split("\t");
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    // Parse the raw line (not the trimmed line) so trailing empty columns (`SUM\tSUMME\t`)
+    // do not silently pass.
+    const parts = rawLine.split("\t");
+    if (parts.length !== 2) continue;
+    const canonical = parts[0].trim();
+    const localized = parts[1].trim();
     if (!canonical || !localized) continue;
-    const canonUpper = casefoldIdent(canonical.trim());
-    const locUpper = casefoldIdent(localized.trim());
+
+    const canonUpper = casefoldIdent(canonical);
+    const locUpper = casefoldIdent(localized);
     // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
       localizedToCanonical.set(locUpper, canonUpper);
@@ -165,15 +172,24 @@ type ErrorTranslationMap = Map<string, string>;
 function parseErrorTranslationsTsv(tsv: string): ErrorTranslationMap {
   const localizedToCanonical: ErrorTranslationMap = new Map();
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const [canonical, localized] = line.split("\t");
-    if (!canonical || !localized) continue;
-    // Comment/header rows may begin with `#` but won't have `#...` in both columns.
-    if (!canonical.trim().startsWith("#") || !localized.trim().startsWith("#")) continue;
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    // Error literals themselves start with `#`, so treat comments as `#` followed by whitespace
+    // (or a bare `#`) rather than treating all `#` lines as comments.
+    const isComment = trimmed === "#" || (trimmed.startsWith("#") && /\s/u.test(trimmed[1] ?? ""));
+    if (isComment) continue;
 
-    const canonUpper = casefoldIdent(canonical.trim());
-    const locUpper = casefoldIdent(localized.trim());
+    // Parse the raw line (not the trimmed line) so trailing empty columns (`#VALUE!\t#WERT!\t`)
+    // do not silently pass.
+    const parts = rawLine.split("\t");
+    if (parts.length !== 2) continue;
+    const canonical = parts[0].trim();
+    const localized = parts[1].trim();
+    if (!canonical || !localized) continue;
+    if (!canonical.startsWith("#") || !localized.startsWith("#")) continue;
+
+    const canonUpper = casefoldIdent(canonical);
+    const locUpper = casefoldIdent(localized);
     // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
       localizedToCanonical.set(locUpper, canonUpper);

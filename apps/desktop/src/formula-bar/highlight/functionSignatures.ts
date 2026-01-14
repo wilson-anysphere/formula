@@ -88,12 +88,19 @@ type FunctionTranslationMap = Map<string, string>;
 function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
   const localizedToCanonical: FunctionTranslationMap = new Map();
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const [canonical, localized] = line.split("\t");
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    // Parse the raw line (not the trimmed line) so trailing empty columns (`SUM\tSUMME\t`)
+    // do not silently pass.
+    const parts = rawLine.split("\t");
+    if (parts.length !== 2) continue;
+    const canonical = parts[0].trim();
+    const localized = parts[1].trim();
     if (!canonical || !localized) continue;
-    const canonUpper = casefoldIdent(canonical.trim());
-    const locUpper = casefoldIdent(localized.trim());
+
+    const canonUpper = casefoldIdent(canonical);
+    const locUpper = casefoldIdent(localized);
     // Only store translations that differ; identity entries can fall back to `casefoldIdent`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
       localizedToCanonical.set(locUpper, canonUpper);

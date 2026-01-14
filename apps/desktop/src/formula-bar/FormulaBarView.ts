@@ -391,13 +391,18 @@ function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
   const localizedNamesUpper: Set<string> = new Set();
 
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const [canonical, localized] = line.split("\t");
-    if (!canonical || !localized) continue;
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
 
-    const canonUpper = casefoldIdent(canonical.trim());
-    const localizedTrimmed = localized.trim();
+    // Parse the raw line (not the trimmed line) so trailing empty columns (`SUM\tSUMME\t`)
+    // do not silently pass.
+    const parts = rawLine.split("\t");
+    if (parts.length !== 2) continue;
+    const canonical = parts[0].trim();
+    const localizedTrimmed = parts[1].trim();
+    if (!canonical || !localizedTrimmed) continue;
+
+    const canonUpper = casefoldIdent(canonical);
     const locUpper = casefoldIdent(localizedTrimmed);
     if (!canonUpper || !locUpper) continue;
 

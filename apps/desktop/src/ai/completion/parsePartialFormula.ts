@@ -84,12 +84,18 @@ function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
   const localizedToCanonical: FunctionTranslationMap = new Map();
   const canonicalToLocalized: Map<string, string> = new Map();
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const [canonical, localized] = line.split("\t");
-    if (!canonical || !localized) continue;
-    const canonUpper = casefoldIdent(canonical.trim());
-    const localizedTrimmed = localized.trim();
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    // Parse the raw line (not the trimmed line) so trailing empty columns (`SUM\tSOMME\t`)
+    // do not silently pass.
+    const parts = rawLine.split("\t");
+    if (parts.length !== 2) continue;
+    const canonical = parts[0].trim();
+    const localizedTrimmed = parts[1].trim();
+    if (!canonical || !localizedTrimmed) continue;
+
+    const canonUpper = casefoldIdent(canonical);
     const locUpper = casefoldIdent(localizedTrimmed);
     // Only store translations that differ; identity entries can fall back to `to_ascii_uppercase`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
