@@ -68,7 +68,6 @@ pub(crate) struct AgileEncryptionInfo {
     #[allow(dead_code)]
     pub(crate) flags: u32,
     pub(crate) key_data: AgileKeyData,
-    #[allow(dead_code)]
     pub(crate) data_integrity: Option<AgileDataIntegrity>,
     pub(crate) password_key_encryptor: AgilePasswordKeyEncryptor,
 }
@@ -1196,6 +1195,8 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
         key_data: key_data.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("missing keyData element".to_string())
         })?,
+        // Some third-party producers omit `<dataIntegrity>` entirely. Excel treats the HMAC as
+        // optional (integrity check is skipped when missing), so be permissive and allow it.
         data_integrity,
         password_key_encryptor: password_key_encryptor.ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("missing password keyEncryptor".to_string())
