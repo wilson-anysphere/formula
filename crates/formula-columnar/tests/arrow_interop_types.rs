@@ -2,8 +2,8 @@
 
 use arrow_array::builder::StringDictionaryBuilder;
 use arrow_array::{
-    ArrayRef, Float32Array, Int16Array, Int32Array, RecordBatch, StringViewArray, UInt16Array,
-    UInt32Array, UInt64Array,
+    ArrayRef, DictionaryArray, Float32Array, Int16Array, Int32Array, RecordBatch, StringViewArray,
+    UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use formula_columnar::arrow::{columnar_to_record_batch, record_batch_to_columnar};
@@ -50,6 +50,12 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
         Some("V2"),
         Some("V1"),
     ])) as ArrayRef;
+    let dict_view_values = Arc::new(StringViewArray::from(vec!["DV0", "DV1"])) as ArrayRef;
+    let dict_view_keys = Int32Array::from(vec![Some(0), Some(1), None, Some(0)]);
+    let dict_view_arr = Arc::new(DictionaryArray::<arrow_array::types::Int32Type>::try_new(
+        dict_view_keys,
+        dict_view_values,
+    )?) as ArrayRef;
 
     let mut dict_builder =
         StringDictionaryBuilder::<arrow_array::types::Int32Type>::new();
@@ -84,6 +90,11 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             true,
         ),
         Field::new("view", DataType::Utf8View, true),
+        Field::new(
+            "dict_view",
+            DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8View)),
+            true,
+        ),
     ]));
     let batch = RecordBatch::try_new(
         schema,
@@ -97,6 +108,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             dict_arr,
             dict_u16_arr,
             view_arr,
+            dict_view_arr,
         ],
     )?;
 
@@ -119,6 +131,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             ColumnType::String,
             ColumnType::String,
             ColumnType::String,
+            ColumnType::String,
         ]
     );
 
@@ -133,6 +146,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::String(Arc::<str>::from("A")),
             Value::String(Arc::<str>::from("X")),
             Value::String(Arc::<str>::from("V1")),
+            Value::String(Arc::<str>::from("DV0")),
         ],
         vec![
             Value::Null,
@@ -144,6 +158,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::String(Arc::<str>::from("B")),
             Value::Null,
             Value::Null,
+            Value::String(Arc::<str>::from("DV1")),
         ],
         vec![
             Value::Number(-3.5_f32 as f64),
@@ -155,6 +170,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::Null,
             Value::String(Arc::<str>::from("Y")),
             Value::String(Arc::<str>::from("V2")),
+            Value::Null,
         ],
         vec![
             Value::Number(0.0),
@@ -166,6 +182,7 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
             Value::String(Arc::<str>::from("A")),
             Value::String(Arc::<str>::from("X")),
             Value::String(Arc::<str>::from("V1")),
+            Value::String(Arc::<str>::from("DV0")),
         ],
     ];
 
