@@ -49,7 +49,6 @@ pub(crate) use sheet::{
     parse_biff_sheet_view_state,
     SheetRowColProperties,
 };
-pub(crate) use print_settings::parse_biff_sheet_print_settings;
 pub(crate) use sort::parse_biff_sheet_sort_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
