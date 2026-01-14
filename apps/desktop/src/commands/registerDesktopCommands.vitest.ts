@@ -14,12 +14,29 @@ describe("registerDesktopCommands", () => {
       // the minimal surface area required by registration-time code.
       app: { focus: vi.fn() } as any,
       layoutController: { layout: {} as any, openPanel: vi.fn(), closePanel: vi.fn() } as any,
+      // Include optional handler surfaces so this test covers the full set of commands
+      // that the real desktop app registers (and can catch duplicates introduced only
+      // when optional feature wiring is enabled).
+      themeController: { setThemePreference: vi.fn() } as any,
+      refreshRibbonUiState: vi.fn(),
       applyFormattingToSelection: vi.fn(),
       getActiveCellNumberFormat: () => null,
       getActiveCellIndentLevel: () => 0,
       openFormatCells: vi.fn(),
       showQuickPick: async () => null,
       findReplace: { openFind: vi.fn(), openReplace: vi.fn(), openGoTo: vi.fn() },
+      dataQueriesHandlers: {
+        getPowerQueryService: () =>
+          ({
+            ready: Promise.resolve(),
+            getQueries: () => [],
+            refreshAll: () => ({ promise: Promise.resolve() }),
+          }) as any,
+        showToast: vi.fn(),
+        notify: vi.fn(async () => {}),
+        now: () => 0,
+        focusAfterExecute: vi.fn(),
+      },
       workbenchFileHandlers: {
         newWorkbook: vi.fn(),
         openWorkbook: vi.fn(),
@@ -38,6 +55,12 @@ describe("registerDesktopCommands", () => {
         clearPrintArea: vi.fn(),
         addToPrintArea: vi.fn(),
         exportPdf: vi.fn(),
+      },
+      formatPainter: {
+        isArmed: () => false,
+        arm: vi.fn(),
+        disarm: vi.fn(),
+        onCancel: null,
       },
       ribbonMacroHandlers: {
         openPanel: vi.fn(),
