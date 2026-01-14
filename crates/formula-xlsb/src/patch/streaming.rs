@@ -458,10 +458,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                                 edit,
                             )?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(
+                            super::patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                &payload,
                                 col,
                                 style_out,
                                 edit,
@@ -484,7 +485,6 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                                 edit,
                             )?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_rk_cell(
                                 &mut writer,
@@ -593,10 +593,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                                 edit,
                             )?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(
+                            super::patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                &payload,
                                 col,
                                 style_out,
                                 edit,
@@ -619,10 +620,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                                 edit,
                             )?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(
+                            super::patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                &payload,
                                 col,
                                 style_out,
                                 edit,
@@ -645,10 +647,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                                 edit,
                             )?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(
+                            super::patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                &payload,
                                 col,
                                 style_out,
                                 edit,

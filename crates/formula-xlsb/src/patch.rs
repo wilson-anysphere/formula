@@ -641,10 +641,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                                 edit,
                             )?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            patch_value_cell(
+                            patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                payload,
                                 col,
                                 style_out,
                                 edit,
@@ -666,7 +667,6 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                                 edit,
                             )?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             patch_rk_cell(
                                 &mut writer,
@@ -771,10 +771,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                                 edit,
                             )?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            patch_value_cell(
+                            patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                payload,
                                 col,
                                 style_out,
                                 edit,
@@ -796,10 +797,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                                 edit,
                             )?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            patch_value_cell(
+                            patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                payload,
                                 col,
                                 style_out,
                                 edit,
@@ -821,10 +823,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                                 edit,
                             )?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            patch_value_cell(
+                            patch_fixed_value_cell_preserving_trailing_bytes(
                                 &mut writer,
+                                id,
+                                payload,
                                 col,
                                 style_out,
                                 edit,
@@ -2112,6 +2115,69 @@ fn patch_value_cell<W: io::Write>(
     Ok(())
 }
 
+fn patch_fixed_value_cell_preserving_trailing_bytes<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    record_id: u32,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
+) -> Result<(), Error> {
+    // Some fixed-size value records are fully specified by the MS-XLSB spec, but in practice we
+    // may encounter malformed streams or future-compatible extensions that append unexpected
+    // trailing bytes. When patching *within the same record type*, preserve those trailing bytes
+    // by rewriting the payload in-place instead of truncating to the spec-defined length.
+    reject_formula_payload_edit(edit, edit.row, edit.col)?;
+
+    match (record_id, &edit.new_value) {
+        (biff12::FLOAT, CellValue::Number(v)) => {
+            if payload.len() < 16 {
+                return Err(Error::UnexpectedEof);
+            }
+            let mut patched = payload.to_vec();
+            patched[0..4].copy_from_slice(&col.to_le_bytes());
+            patched[4..8].copy_from_slice(&style.to_le_bytes());
+            patched[8..16].copy_from_slice(&v.to_le_bytes());
+            write_record_preserving_varints(writer, biff12::FLOAT, &patched, existing)?;
+            Ok(())
+        }
+        (biff12::BOOL, CellValue::Bool(v)) => {
+            if payload.len() < 9 {
+                return Err(Error::UnexpectedEof);
+            }
+            let mut patched = payload.to_vec();
+            patched[0..4].copy_from_slice(&col.to_le_bytes());
+            patched[4..8].copy_from_slice(&style.to_le_bytes());
+            patched[8] = u8::from(*v);
+            write_record_preserving_varints(writer, biff12::BOOL, &patched, existing)?;
+            Ok(())
+        }
+        (biff12::BOOLERR, CellValue::Error(v)) => {
+            if payload.len() < 9 {
+                return Err(Error::UnexpectedEof);
+            }
+            let mut patched = payload.to_vec();
+            patched[0..4].copy_from_slice(&col.to_le_bytes());
+            patched[4..8].copy_from_slice(&style.to_le_bytes());
+            patched[8] = *v;
+            write_record_preserving_varints(writer, biff12::BOOLERR, &patched, existing)?;
+            Ok(())
+        }
+        (biff12::BLANK, CellValue::Blank) => {
+            if payload.len() < 8 {
+                return Err(Error::UnexpectedEof);
+            }
+            let mut patched = payload.to_vec();
+            patched[0..4].copy_from_slice(&col.to_le_bytes());
+            patched[4..8].copy_from_slice(&style.to_le_bytes());
+            write_record_preserving_varints(writer, biff12::BLANK, &patched, existing)?;
+            Ok(())
+        }
+        _ => patch_value_cell(writer, col, style, edit, existing),
+    }
+}
+
 fn patch_cell_st<W: io::Write>(
     writer: &mut Biff12Writer<W>,
     payload: &[u8],
@@ -2218,18 +2284,22 @@ fn patch_rk_cell<W: io::Write>(
     writer: &mut Biff12Writer<W>,
     col: u32,
     style: u32,
-    _payload: &[u8],
+    payload: &[u8],
     edit: &CellEdit,
     existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
+    reject_formula_payload_edit(edit, edit.row, edit.col)?;
     match &edit.new_value {
         CellValue::Number(v) => {
             if let Some(rk) = encode_rk_number(*v) {
-                let mut payload = [0u8; 12];
-                payload[0..4].copy_from_slice(&col.to_le_bytes());
-                payload[4..8].copy_from_slice(&style.to_le_bytes());
-                payload[8..12].copy_from_slice(&rk.to_le_bytes());
-                write_record_preserving_varints(writer, biff12::NUM, &payload, existing)?;
+                if payload.len() < 12 {
+                    return Err(Error::UnexpectedEof);
+                }
+                let mut patched = payload.to_vec();
+                patched[0..4].copy_from_slice(&col.to_le_bytes());
+                patched[4..8].copy_from_slice(&style.to_le_bytes());
+                patched[8..12].copy_from_slice(&rk.to_le_bytes());
+                write_record_preserving_varints(writer, biff12::NUM, &patched, existing)?;
                 return Ok(());
             }
         }
