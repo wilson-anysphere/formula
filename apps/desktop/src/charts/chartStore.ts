@@ -284,6 +284,7 @@ export class ChartStore {
       next[indices[i]!] = nextSubset[i]!;
     }
     this.charts = next;
+    this.rebuildIndexById();
     this.options.onChange?.();
     return true;
   }
