@@ -57,6 +57,7 @@ export class IndexedDbImageStore implements ImageStore {
   private readonly storeName: string;
   private readonly version: number;
   private dbPromise: Promise<IDBDatabase> | null = null;
+  private disposed = false;
 
   constructor(
     private readonly workbookId: string,
@@ -75,6 +76,7 @@ export class IndexedDbImageStore implements ImageStore {
   }
 
   set(entry: ImageEntry): void {
+    if (this.disposed) return;
     this.cache.set(entry.id, entry);
     // Best-effort persistence: failures should never block image insertion.
     void this.setAsync(entry).catch(() => {});
@@ -84,12 +86,14 @@ export class IndexedDbImageStore implements ImageStore {
     const imageId = String(id ?? "");
     if (!imageId) return;
     this.cache.delete(imageId);
+    if (this.disposed) return;
     // Best-effort: do not surface IndexedDB failures to callers.
     void this.deleteAsync(imageId).catch(() => {});
   }
 
   clear(): void {
     this.cache.clear();
+    if (this.disposed) return;
     // Best-effort: do not surface IndexedDB failures to callers.
     void this.clearAsync().catch(() => {});
   }
@@ -104,7 +108,35 @@ export class IndexedDbImageStore implements ImageStore {
     this.cache.clear();
   }
 
+  /**
+   * Best-effort teardown for tests/hot-reload.
+   *
+   * Clears in-memory caches and closes any open IndexedDB connection so disposed
+   * SpreadsheetApp instances do not retain image bytes or IDB resources via the
+   * image store.
+   */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.clearMemory();
+
+    const dbPromise = this.dbPromise;
+    this.dbPromise = null;
+    if (dbPromise) {
+      void dbPromise
+        .then((db) => {
+          try {
+            db.close();
+          } catch {
+            // ignore
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
   async getAsync(id: string): Promise<ImageEntry | undefined> {
+    if (this.disposed) return undefined;
     const cached = this.cache.get(id);
     if (cached) return cached;
 
@@ -118,6 +150,7 @@ export class IndexedDbImageStore implements ImageStore {
       const record = await requestToPromise<StoredImageRecord | undefined>(store.get(id));
       await done.catch(() => {});
       if (!record) return undefined;
+      if (this.disposed) return undefined;
       const entry: ImageEntry = {
         id: String(record.id),
         mimeType: String(record.mimeType ?? "application/octet-stream"),
@@ -131,6 +164,7 @@ export class IndexedDbImageStore implements ImageStore {
   }
 
   async setAsync(entry: ImageEntry): Promise<void> {
+    if (this.disposed) return;
     const db = await this.openDb();
     const tx = db.transaction(this.storeName, "readwrite");
     const done = transactionDone(tx);
@@ -145,6 +179,7 @@ export class IndexedDbImageStore implements ImageStore {
   }
 
   async deleteAsync(imageId: string): Promise<void> {
+    if (this.disposed) return;
     const db = await this.openDb();
     const tx = db.transaction(this.storeName, "readwrite");
     const done = transactionDone(tx);
@@ -155,6 +190,7 @@ export class IndexedDbImageStore implements ImageStore {
   }
 
   async clearAsync(): Promise<void> {
+    if (this.disposed) return;
     const db = await this.openDb();
     const tx = db.transaction(this.storeName, "readwrite");
     const done = transactionDone(tx);
@@ -168,6 +204,7 @@ export class IndexedDbImageStore implements ImageStore {
    * Best-effort garbage collection: remove any records not present in `keep`.
    */
   async garbageCollectAsync(keep: Iterable<string>): Promise<void> {
+    if (this.disposed) return;
     const keepSet = new Set(Array.from(keep, (id) => String(id)));
     const db = await this.openDb().catch(() => null);
     if (!db) return;
@@ -190,6 +227,7 @@ export class IndexedDbImageStore implements ImageStore {
   }
 
   private openDb(): Promise<IDBDatabase> {
+    if (this.disposed) return Promise.reject(new Error("IndexedDbImageStore is disposed"));
     if (this.dbPromise) return this.dbPromise;
 
     const indexedDb = (globalThis as any).indexedDB as IDBFactory | undefined;
@@ -206,11 +244,22 @@ export class IndexedDbImageStore implements ImageStore {
           db.createObjectStore(this.storeName, { keyPath: "id" });
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        if (this.disposed) {
+          try {
+            db.close();
+          } catch {
+            // ignore
+          }
+          reject(new Error("IndexedDbImageStore is disposed"));
+          return;
+        }
+        resolve(db);
+      };
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
 
     return this.dbPromise;
   }
 }
-

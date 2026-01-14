@@ -421,6 +421,7 @@ function lookupImageEntry(id: string, images: unknown): ImageEntry | undefined {
  */
 export class DocumentImageStore implements ImageStore {
   private readonly fallback = new Map<string, ImageEntry>();
+  private disposed = false;
 
   constructor(
     private readonly document: DocumentController,
@@ -436,6 +437,8 @@ export class DocumentImageStore implements ImageStore {
    * still referenced somewhere.
    */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.fallback.clear();
     // Clear ephemeral bytes stored on the controller so disposing a SpreadsheetApp does not
     // retain large collab-hydrated images if the app object is still referenced.
@@ -446,7 +449,9 @@ export class DocumentImageStore implements ImageStore {
       // ignore
     }
     try {
-      this.persisted.clearMemory();
+      const persisted = this.persisted as any;
+      if (typeof persisted?.dispose === "function") persisted.dispose();
+      else if (typeof persisted?.clearMemory === "function") persisted.clearMemory();
     } catch {
       // ignore
     }
@@ -476,6 +481,7 @@ export class DocumentImageStore implements ImageStore {
   }
 
   set(entry: ImageEntry): void {
+    if (this.disposed) return;
     if (!entry || typeof entry.id !== "string") return;
 
     // Best-effort persistence: never block callers on IndexedDB availability.
@@ -583,6 +589,7 @@ export class DocumentImageStore implements ImageStore {
   }
 
   async getAsync(id: string): Promise<ImageEntry | undefined> {
+    if (this.disposed) return undefined;
     const imageId = String(id ?? "");
     if (!imageId) return undefined;
 
@@ -592,6 +599,7 @@ export class DocumentImageStore implements ImageStore {
 
     const loaded = await this.persisted.getAsync(imageId);
     if (!loaded) return undefined;
+    if (this.disposed) return undefined;
 
     // Cache in-memory so subsequent sync `get()` calls can resolve quickly without
     // awaiting IndexedDB again. We intentionally do *not* mutate the DocumentController
@@ -601,10 +609,12 @@ export class DocumentImageStore implements ImageStore {
   }
 
   async setAsync(entry: ImageEntry): Promise<void> {
+    if (this.disposed) return;
     await this.persisted.setAsync(entry);
   }
 
   async garbageCollectAsync(keep: Iterable<string>): Promise<void> {
+    if (this.disposed) return;
     const keepSet = new Set(Array.from(keep, (id) => String(id)));
     // Remove unused records from the persistent store.
     await this.persisted.garbageCollectAsync(keepSet);

@@ -56,4 +56,28 @@ describe("IndexedDbImageStore", () => {
     store.clearMemory();
     expect(await store.getAsync(drop.id)).toBeUndefined();
   });
+
+  it("dispose prevents in-flight getAsync from repopulating the memory cache", async () => {
+    const workbookId = `wb_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const store = new IndexedDbImageStore(workbookId);
+
+    const entry = {
+      id: "image_dispose",
+      mimeType: "image/png",
+      bytes: new Uint8Array([5, 4, 3, 2, 1]),
+    };
+
+    await store.setAsync(entry);
+
+    // Ensure we're reading from IndexedDB (not just the in-memory cache).
+    store.clearMemory();
+    expect(store.get(entry.id)).toBeUndefined();
+
+    const promise = store.getAsync(entry.id);
+    store.dispose();
+
+    const loaded = await promise;
+    expect(loaded).toBeUndefined();
+    expect(store.get(entry.id)).toBeUndefined();
+  });
 });
