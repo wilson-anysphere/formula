@@ -311,7 +311,15 @@ toolchain.
 
 ## 3) Code signing (optional but recommended)
 
-The release workflow is wired for code signing if the following secrets are present.
+Code signing is **optional**. Unsigned macOS/Windows/Linux artifacts should build successfully (useful
+for forks, local development, and dry-run releases).
+
+Important: `apps/desktop/src-tauri/tauri.conf.json` intentionally does **not** hard-code a macOS
+`bundle.macOS.signingIdentity`. This prevents Tauri from attempting to code sign on macOS when no
+Developer ID certificate is available.
+
+Signing / notarization is enabled **only** when CI provides the relevant secrets via environment
+variables (wired in `.github/workflows/release.yml` by `tauri-apps/tauri-action@v0`).
 
 CI behavior note:
 
@@ -332,7 +340,7 @@ Note: `apps/desktop/src-tauri/tauri.conf.json` intentionally does **not** hardco
 Developer ID certificates installed, and ensures CI uses the explicit `APPLE_SIGNING_IDENTITY`
 provided as a secret (avoids ambiguous identity selection when multiple certs exist).
 
-Secrets used by `tauri-apps/tauri-action`:
+Secrets used by `tauri-apps/tauri-action` (if unset, the macOS build will be **unsigned**):
 
 - `APPLE_CERTIFICATE` – base64-encoded `.p12` Developer ID certificate
 - `APPLE_CERTIFICATE_PASSWORD`
@@ -459,7 +467,6 @@ If a signed/notarized build launches with a blank window or crashes immediately,
 3. macOS logs/crash reports:
    - Use **Console.app** → Crash Reports / log stream.
    - Look for `WebKit`, `JavaScriptCore`, or `EXC_BAD_ACCESS` crashes in a `WebContent` process.
- 
 ### Windows (Authenticode)
 
 Secrets:
