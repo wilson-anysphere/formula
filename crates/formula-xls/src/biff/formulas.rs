@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use formula_model::CellRef;
 
 use super::{records, rgce, worksheet_formulas};
+use super::worksheet_formulas::FormulaMembershipHint;
 
 // BIFF8 limits.
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64; // 0..=65535
@@ -69,7 +70,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     // Collect all cell formula rgce bytes first so PtgExp followers can reference bases that
     // appear later in the stream.
     let mut rgce_by_cell: HashMap<(u32, u32), Vec<u8>> = HashMap::new();
-    let mut ptgexp_cells: Vec<(u32, u32, u32, u32)> = Vec::new();
+    let mut ptgexp_cells: Vec<(u32, u32, u32, u32, worksheet_formulas::FormulaGrbit)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
     while let Some(next) = iter.next() {
@@ -103,18 +104,19 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         };
         let row = parsed.row as u32;
         let col = parsed.col as u32;
+        let grbit = parsed.grbit;
         let rgce = parsed.rgce;
 
         rgce_by_cell.insert((row, col), rgce.clone());
 
         if let Some((base_row, base_col)) = parse_ptg_exp(&rgce) {
-            ptgexp_cells.push((row, col, base_row, base_col));
+            ptgexp_cells.push((row, col, base_row, base_col, grbit));
         }
     }
 
     let mut recovered: HashMap<CellRef, String> = HashMap::new();
 
-    for (row, col, base_row, base_col) in ptgexp_cells {
+    for (row, col, base_row, base_col, grbit) in ptgexp_cells {
         let Some(base_rgce) = rgce_by_cell.get(&(base_row, base_col)) else {
             warnings.push(format!(
                 "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
@@ -127,8 +129,16 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
 
         if base_rgce.first().copied() == Some(0x01) {
             // Base cell also stores PtgExp; without SHRFMLA/ARRAY we can't resolve.
+            let expected = match grbit.membership_hint() {
+                Some(FormulaMembershipHint::Shared) => "missing SHRFMLA definition",
+                Some(FormulaMembershipHint::Array) => "missing ARRAY definition",
+                Some(FormulaMembershipHint::Table) => {
+                    "unexpected fTbl set (expected TABLE definition)"
+                }
+                None => "missing SHRFMLA/ARRAY definition",
+            };
             warnings.push(format!(
-                "failed to recover shared formula at {}: base cell {} stores PtgExp (missing SHRFMLA/ARRAY definition)",
+                "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
                 CellRef::new(row, col).to_a1(),
                 CellRef::new(base_row, base_col).to_a1()
             ));

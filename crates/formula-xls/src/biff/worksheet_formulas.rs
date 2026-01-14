@@ -76,7 +76,11 @@ impl FormulaGrbit {
             count += 1;
         }
 
-        (count == 1).then_some(out.expect("count==1 implies out set"))
+        if count == 1 {
+            out
+        } else {
+            None
+        }
     }
 }
 
@@ -1021,6 +1025,44 @@ mod tests {
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);
         out
+    }
+
+    #[test]
+    fn formula_grbit_membership_hint_is_unambiguous_only_when_single_bit_set() {
+        assert_eq!(FormulaGrbit(0).membership_hint(), None);
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_SHR_FMLA).membership_hint(),
+            Some(FormulaMembershipHint::Shared)
+        );
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_ARRAY).membership_hint(),
+            Some(FormulaMembershipHint::Array)
+        );
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_TBL).membership_hint(),
+            Some(FormulaMembershipHint::Table)
+        );
+
+        // Ambiguous combinations should yield no hint.
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_SHR_FMLA | FormulaGrbit::F_ARRAY).membership_hint(),
+            None
+        );
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_SHR_FMLA | FormulaGrbit::F_TBL).membership_hint(),
+            None
+        );
+        assert_eq!(
+            FormulaGrbit(FormulaGrbit::F_ARRAY | FormulaGrbit::F_TBL).membership_hint(),
+            None
+        );
+        assert_eq!(
+            FormulaGrbit(
+                FormulaGrbit::F_SHR_FMLA | FormulaGrbit::F_ARRAY | FormulaGrbit::F_TBL
+            )
+            .membership_hint(),
+            None
+        );
     }
 
     #[test]
