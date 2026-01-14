@@ -139,13 +139,19 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
     /** @type {{ re: RegExp, kind: string }[]} */
     const patterns = [
       // Style strings (e.g. `style: "border-radius: 4px;"`, or arrays joined into style strings)
-      { re: /\bborder-radius\s*:\s*(\d+)px\b/gi, kind: "border-radius" },
+      { re: /\bborder-radius\s*:\s*(\d+(?:\.\d+)?)px\b/gi, kind: "border-radius" },
+      // React style objects (e.g. `{ borderRadius: 4 }`) interpret numeric values as px.
+      { re: /\bborderRadius\s*:\s*(\d+(?:\.\d+)?)\b/gi, kind: "borderRadius-number" },
       // React/DOM style objects (e.g. `{ borderRadius: "4px" }`)
-      { re: /\bborderRadius\s*:\s*(["'`])\s*(\d+)px\b/gi, kind: "borderRadius" },
+      { re: /\bborderRadius\s*:\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "borderRadius" },
+      // DOM style assignment (e.g. `el.style.borderRadius = 4`)
+      { re: /\.style\.borderRadius\s*=\s*(\d+(?:\.\d+)?)\b/gi, kind: "style.borderRadius-number" },
       // DOM style assignment (e.g. `el.style.borderRadius = "4px"`)
-      { re: /\.style\.borderRadius\s*=\s*(["'`])\s*(\d+)px\b/gi, kind: "style.borderRadius" },
+      { re: /\.style\.borderRadius\s*=\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "style.borderRadius" },
+      // setProperty("border-radius", 4)
+      { re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(\d+(?:\.\d+)?)\b/gi, kind: "setProperty-number" },
       // setProperty("border-radius", "4px")
-      { re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(\d+)px\b/gi, kind: "setProperty" },
+      { re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "setProperty" },
     ];
 
     for (const { re } of patterns) {
@@ -157,7 +163,7 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
         if (px === 0) continue;
 
         // Find the absolute index of the numeric capture for stable line numbers.
-        const needle = `${numeric}px`;
+        const needle = match[0].includes(`${numeric}px`) ? `${numeric}px` : String(numeric);
         const relative = match[0].indexOf(needle);
         const absIndex = match.index + (relative >= 0 ? relative : 0);
         const line = getLineNumber(stripped, absIndex);
@@ -174,4 +180,3 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
       .join("\n")}`,
   );
 });
-

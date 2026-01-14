@@ -56,7 +56,7 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
       // `declMatch[0]` ends with the captured group, so this points at the first character of the value.
       const valueStart = declMatch.index + declMatch[0].length - value.length;
 
-      const pxRegex = /(\d+)px\b/g;
+      const pxRegex = /(\d+(?:\.\d+)?)px\b/g;
       let pxMatch;
       while ((pxMatch = pxRegex.exec(value))) {
         const px = Number(pxMatch[1]);
@@ -64,7 +64,9 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
 
         const absIndex = valueStart + pxMatch.index;
         const line = getLineNumber(stripped, absIndex);
-        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${pxMatch[1]}px`);
+        violations.push(
+          `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${pxMatch[1]}px`,
+        );
       }
     }
   }

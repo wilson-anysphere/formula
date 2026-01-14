@@ -19,7 +19,7 @@ test("shell.css should not hardcode border-radius pixel values (except 0)", () =
 
   /** @type {string[]} */
   const violations = [];
-  const regex = /\bborder-radius\s*:\s*(\d+)px\b/gi;
+  const regex = /\bborder-radius\s*:\s*(\d+(?:\.\d+)?)px\b/gi;
   let match;
   while ((match = regex.exec(stripped))) {
     const value = Number(match[1]);
