@@ -1211,7 +1211,7 @@ fn getpivotdata_returns_values_from_tabular_pivot_output() {
 fn getpivotdata_returns_values_from_compact_pivot_output() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotEngine, PivotField,
-        PivotFieldRef, PivotValue, SubtotalPosition, ValueField,
+        PivotValue, SubtotalPosition, ValueField,
     };
 
     fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
@@ -1241,7 +1241,7 @@ fn getpivotdata_returns_values_from_compact_pivot_output() {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+            source_field: "Sales".into(),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
