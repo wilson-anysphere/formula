@@ -103,6 +103,153 @@ const IMPLEMENTED_COMMAND_PREFIXES = [
   "home.styles.formatAsTable.",
 ];
 
+type OverrideKey = "commandOverrides" | "toggleOverrides";
+
+function extractObjectLiteral(source: string, key: OverrideKey): string | null {
+  const idx = source.indexOf(`${key}:`);
+  if (idx === -1) return null;
+  const braceStart = source.indexOf("{", idx);
+  if (braceStart === -1) return null;
+
+  let depth = 0;
+  let inString: '"' | "'" | "`" | null = null;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = braceStart; i < source.length; i += 1) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === inString) inString = null;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+      continue;
+    }
+
+    if (ch === "{") depth += 1;
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(braceStart, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function extractTopLevelStringKeys(objectText: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  const skipWhitespace = (idx: number): number => {
+    while (idx < objectText.length && /\s/.test(objectText[idx])) idx += 1;
+    return idx;
+  };
+
+  for (let i = 0; i < objectText.length; i += 1) {
+    const ch = objectText[i];
+    const next = objectText[i + 1];
+
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === "}") {
+      depth -= 1;
+      continue;
+    }
+
+    if (depth !== 1) continue;
+    if (ch !== '"' && ch !== "'") continue;
+
+    const quote = ch;
+    let j = i + 1;
+    let value = "";
+
+    for (; j < objectText.length; j += 1) {
+      const c = objectText[j];
+      if (c === "\\") {
+        value += objectText[j + 1] ?? "";
+        j += 1;
+        continue;
+      }
+      if (c === quote) break;
+      value += c;
+    }
+
+    if (j >= objectText.length) break;
+
+    const k = skipWhitespace(j + 1);
+    if (objectText[k] === ":") {
+      keys.push(value);
+    }
+
+    i = j;
+  }
+
+  return keys;
+}
+
 function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCommandIds: Set<string>): string[] {
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
   const ribbonHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
@@ -126,19 +273,13 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
   }
 
   // Keys in the `createRibbonActionsFromCommands({ ... })` overrides (commandOverrides/toggleOverrides).
-  //
-  // Use a structural regex anchored on the surrounding property names so we don't accidentally
-  // treat other large object literals (e.g. `disabledById`) as command handlers.
-  const extractOverrideKeys = (re: RegExp): void => {
-    const match = re.exec(mainTsSource);
-    const body = match?.[1];
-    if (!body) return;
-    for (const keyMatch of body.matchAll(/["']([^"']+)["']\s*:/g)) {
-      addIfSchema(keyMatch[1]!);
+  for (const key of ["commandOverrides", "toggleOverrides"] as const satisfies OverrideKey[]) {
+    const obj = extractObjectLiteral(mainTsSource, key);
+    if (!obj) continue;
+    for (const overrideId of extractTopLevelStringKeys(obj)) {
+      addIfSchema(overrideId);
     }
-  };
-  extractOverrideKeys(/commandOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onBeforeExecuteCommand\s*:/);
-  extractOverrideKeys(/toggleOverrides\s*:\s*\{([\s\S]*?)\}\s*,\s*onUnknownCommand\s*:/);
+  }
 
   const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => combinedSource.includes(prefix));
   for (const id of schemaCommandIds) {
