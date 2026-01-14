@@ -201,7 +201,9 @@ validate_desktop_mime_associations_extracted() {
 
   local tmpdir
   tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' RETURN
+  # Avoid referencing a local variable in the trap body (bash + set -u can evaluate traps
+  # after locals are torn down). Expand the path at trap installation time.
+  trap 'rm -rf "'"${tmpdir}"'"' RETURN
 
   note "Static desktop integration validation (extract RPM payload): ${rpm_path}"
 
@@ -470,6 +472,11 @@ validate_container() {
   local rpm_basename
   rpm_basename="$(basename "${rpm_path}")"
 
+  local -a docker_platform_args=()
+  if [[ -n "${DOCKER_PLATFORM}" ]]; then
+    docker_platform_args=(--platform "${DOCKER_PLATFORM}")
+  fi
+
   # Mount a temp directory that contains only the RPM under test so we don't
   # accidentally install multiple unrelated RPMs if the output directory has
   # leftovers from previous builds.
@@ -560,9 +567,9 @@ validate_container() {
   container_cmd+=$'fi\n'
 
   set +e
-  docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${FEDORA_IMAGE}"
+  docker pull "${docker_platform_args[@]}" "${FEDORA_IMAGE}"
   docker run --rm \
-    ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
+    "${docker_platform_args[@]}" \
     -v "${mount_dir}:/rpms:ro" \
     "${FEDORA_IMAGE}" \
     bash -lc "${container_cmd}"
