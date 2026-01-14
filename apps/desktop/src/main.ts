@@ -8334,8 +8334,7 @@ function handleRibbonCommand(commandId: string): void {
     }
     const cellStylesPrefix = "home.styles.cellStyles.";
     if (commandId.startsWith(cellStylesPrefix)) {
-      const kind = commandId.slice(cellStylesPrefix.length);
-      if (kind !== "goodBadNeutral") {
+      if (commandId !== "home.styles.cellStyles.goodBadNeutral") {
         showToast("Cell Styles are not implemented yet.");
         app.focus();
         return;
@@ -8453,15 +8452,41 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     const formatAsTablePrefix = "home.styles.formatAsTable.";
+    // Explicitly match these ids (vs prefix parsing) so ribbon command wiring coverage can
+    // validate that every enabled-but-unregistered ribbon id is intentionally handled here.
+    if (commandId === "home.styles.formatAsTable.light") {
+      applyFormatAsTable("light");
+      return;
+    }
+    if (commandId === "home.styles.formatAsTable.medium") {
+      applyFormatAsTable("medium");
+      return;
+    }
+    if (commandId === "home.styles.formatAsTable.dark") {
+      applyFormatAsTable("dark");
+      return;
+    }
+    if (commandId === "home.styles.formatAsTable.newStyle") {
+      showToast("New Table Style is not implemented yet.");
+      app.focus();
+      return;
+    }
     if (commandId.startsWith(formatAsTablePrefix)) {
-      const presetId = commandId.slice(formatAsTablePrefix.length);
-      if (presetId === "light" || presetId === "medium" || presetId === "dark") {
-        applyFormatAsTable(presetId);
-        return;
-      }
-      if (presetId === "newStyle") {
-        showToast("New Table Style is not implemented yet.");
-        app.focus();
+      showToast(`Unknown table style: ${commandId}`);
+      app.focus();
+      return;
+    }
+
+    // Merge commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (
+      commandId === "home.alignment.mergeCenter.mergeCenter" ||
+      commandId === "home.alignment.mergeCenter.mergeAcross" ||
+      commandId === "home.alignment.mergeCenter.mergeCells" ||
+      commandId === "home.alignment.mergeCenter.unmergeCells"
+    ) {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
         return;
       }
     }
