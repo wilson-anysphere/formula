@@ -237,11 +237,43 @@ fn encrypted_data_model_round_trip_columnar_calculated_columns() {
         .load_data_model_schema(workbook.id)
         .expect("schema-only load");
     assert_eq!(schema.calculated_columns.len(), 2);
+    assert!(
+        schema
+            .calculated_columns
+            .iter()
+            .any(|c| c.table == "FactSales" && c.name == "Double Amount" && c.expression == "[Amount] * 2"),
+        "expected schema-only load to include Double Amount definition"
+    );
+    assert!(
+        schema
+            .calculated_columns
+            .iter()
+            .any(|c| c.table == "FactSales"
+                && c.name == "Category From Dim"
+                && c.expression == "RELATED(DimProduct[Category])"),
+        "expected schema-only load to include Category From Dim definition"
+    );
 
     let loaded = storage2
         .load_data_model(workbook.id)
         .expect("load data model");
     assert_eq!(loaded.calculated_columns().len(), 2);
+    assert!(
+        loaded
+            .calculated_columns()
+            .iter()
+            .any(|c| c.table == "FactSales" && c.name == "Double Amount" && c.expression == "[Amount] * 2"),
+        "expected Double Amount to be registered after load"
+    );
+    assert!(
+        loaded
+            .calculated_columns()
+            .iter()
+            .any(|c| c.table == "FactSales"
+                && c.name == "Category From Dim"
+                && c.expression == "RELATED(DimProduct[Category])"),
+        "expected Category From Dim to be registered after load"
+    );
 
     let total_after = loaded
         .evaluate_measure("Total Double Amount", &FilterContext::empty())
@@ -279,11 +311,24 @@ fn encrypted_data_model_round_trip_columnar_calculated_columns() {
     );
 
     let col_table = fact_after.columnar_table().expect("columnar backend");
+    let idx_double = col_table
+        .schema()
+        .iter()
+        .position(|c| c.name == "Double Amount")
+        .expect("double amount column index");
     let idx_category = col_table
         .schema()
         .iter()
         .position(|c| c.name == "Category From Dim")
         .expect("category column index");
+    assert!(
+        !col_table.encoded_chunks(idx_double).unwrap().is_empty(),
+        "expected at least one chunk for Double Amount"
+    );
+    assert!(
+        !col_table.encoded_chunks(idx_category).unwrap().is_empty(),
+        "expected at least one chunk for Category From Dim"
+    );
     assert_eq!(
         col_table.get_cell(3, idx_category),
         Value::String(Arc::<str>::from("B"))
