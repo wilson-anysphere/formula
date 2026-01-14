@@ -235,6 +235,29 @@ export function registerDesktopCommands(params: {
       category: commandCategoryFormat,
       applyFormattingToSelection,
     });
+
+    // Register ribbon dropdown trigger ids that have a default action when invoked.
+    //
+    // These ids exist in the ribbon schema (`home.font.*`) for Excel-style UI parity, but the
+    // underlying behavior is owned by canonical `format.*` commands. Register them as hidden
+    // aliases so ribbon wiring coverage can treat them as implemented without surfacing
+    // duplicate entries in the command palette.
+    commandRegistry.registerBuiltinCommand("home.font.borders", "Borders", () => commandRegistry.executeCommand("format.borders.all"), {
+      category: commandCategoryFormat,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand("home.font.fillColor", "Fill Color", () => commandRegistry.executeCommand("format.fillColor"), {
+      category: commandCategoryFormat,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand("home.font.fontColor", "Font Color", () => commandRegistry.executeCommand("format.fontColor"), {
+      category: commandCategoryFormat,
+      when: "false",
+    });
+    commandRegistry.registerBuiltinCommand("home.font.fontSize", "Font Size", () => commandRegistry.executeCommand("format.fontSize.set"), {
+      category: commandCategoryFormat,
+      when: "false",
+    });
   }
 
   // Register number formats after `registerBuiltinCommands` so the desktop shell can override
