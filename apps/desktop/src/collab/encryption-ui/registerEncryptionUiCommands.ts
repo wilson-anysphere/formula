@@ -18,6 +18,23 @@ function normalizeRange(range: Range): { startRow: number; endRow: number; start
   return { startRow, endRow, startCol, endCol };
 }
 
+function normalizeSheetNameForCompare(name: string): string {
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
+function rangesIntersect(
+  a: { startRow: number; startCol: number; endRow: number; endCol: number },
+  b: { startRow: number; startCol: number; endRow: number; endCol: number },
+): boolean {
+  if (a.endRow < b.startRow || b.endRow < a.startRow) return false;
+  if (a.endCol < b.startCol || b.endCol < a.startCol) return false;
+  return true;
+}
+
 function roleCanEncrypt(role: string | null | undefined): boolean {
   return role === "owner" || role === "admin" || role === "editor";
 }
@@ -142,6 +159,99 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       category: COMMAND_CATEGORY,
       description: "Encrypt the current selection and generate a shareable key.",
       keywords: ["encrypt", "encryption", "protected range", "collaboration", "collaboration:"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "collab.removeEncryptedRange",
+    "Remove encrypted range…",
+    async () => {
+      const session = app.getCollabSession();
+      if (!session) {
+        showToast("This command requires collaboration mode.", "warning");
+        return;
+      }
+      const role = session.getRole();
+      if (!roleCanEncrypt(role)) {
+        showToast("You must have an editor role to remove encrypted ranges.", "warning");
+        return;
+      }
+
+      const manager = getEncryptionManager(app);
+      if (!manager) {
+        showToast("Encryption is not available for this workbook.", "error");
+        return;
+      }
+
+      const ranges = app.getSelectionRanges();
+      if (!ranges.length) {
+        showToast("Select a range to remove encryption from.", "warning");
+        return;
+      }
+      if (ranges.length > 1) {
+        showToast("Remove encrypted range currently supports a single rectangular selection.", "warning");
+        return;
+      }
+
+      const sheetId = app.getCurrentSheetId();
+      const sheetName = app.getCurrentSheetDisplayName();
+      const selection = normalizeRange(ranges[0]!);
+
+      const matchesSheet = (rangeSheetId: string): boolean => {
+        const rangeId = String(rangeSheetId ?? "").trim();
+        if (!rangeId) return false;
+        if (rangeId === sheetId) return true;
+        if (rangeId.toLowerCase() === sheetId.toLowerCase()) return true;
+        return normalizeSheetNameForCompare(rangeId) === normalizeSheetNameForCompare(sheetName);
+      };
+
+      const candidates = manager
+        .list()
+        .filter((r) => matchesSheet(r.sheetId))
+        .filter((r) =>
+          rangesIntersect(
+            { startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol },
+            selection,
+          ),
+        );
+
+      if (candidates.length === 0) {
+        showToast(`No encrypted ranges overlap ${sheetName}!${rangeToA1(selection)}.`, "info");
+        return;
+      }
+
+      const idToRemove =
+        candidates.length === 1
+          ? candidates[0]!.id
+          : await showQuickPick(
+              candidates.map((r) => {
+                const a1 = rangeToA1({ startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol });
+                const displaySheetName = app.getSheetDisplayNameById(r.sheetId);
+                return {
+                  label: `Remove ${displaySheetName}!${a1}`,
+                  description: `Key ID: ${r.keyId}`,
+                  value: r.id,
+                };
+              }),
+              { placeHolder: "Select encrypted range to remove" },
+            );
+
+      if (!idToRemove) return;
+
+      try {
+        manager.remove(idToRemove);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to remove encrypted range: ${message}`, "error");
+        return;
+      }
+
+      showToast("Encrypted range removed.", "info");
+    },
+    {
+      category: COMMAND_CATEGORY,
+      description: "Remove encrypted range metadata overlapping the current selection.",
+      keywords: ["encrypt", "encryption", "remove", "protected range", "collaboration", "collaboration:"],
     },
   );
 
