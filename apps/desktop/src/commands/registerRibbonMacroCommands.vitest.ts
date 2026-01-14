@@ -25,6 +25,11 @@ describe("registerRibbonMacroCommands", () => {
     for (const commandId of RIBBON_MACRO_COMMAND_IDS) {
       expect(commandRegistry.getCommand(commandId)).toBeTruthy();
     }
+
+    // Spot-check a few titles so the command palette matches the ribbon labels.
+    expect(commandRegistry.getCommand("view.macros.recordMacro")?.title).toBe("Record Macro…");
+    expect(commandRegistry.getCommand("developer.code.macroSecurity")?.title).toBe("Macro Security…");
+    expect(commandRegistry.getCommand("developer.code.macroSecurity.trustCenter")?.title).toBe("Trust Center…");
   });
 
   it("wires View → Macros → Run to set focus + open the Macros panel", async () => {
@@ -56,4 +61,3 @@ describe("registerRibbonMacroCommands", () => {
     expect(openedPanels).toEqual([PanelIds.MACROS]);
   });
 });
-
