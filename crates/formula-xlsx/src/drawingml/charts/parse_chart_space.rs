@@ -671,6 +671,10 @@ fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "layout"
 }
 
+fn is_manual_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "manualLayout"
+}
+
 fn is_style_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "style"
 }
@@ -1580,18 +1584,29 @@ fn parse_layout_manual(
         .find(|n| n.tag_name().name() == "layout")?;
     let manual_node = layout_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_manual_layout_node))
+        .find(|n| n.tag_name().name() == "manualLayout")?;
+
+    fn trim_non_empty(value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
 
     let model = ManualLayoutModel {
         x: parse_manual_layout_f64(manual_node, "x", diagnostics, context),
         y: parse_manual_layout_f64(manual_node, "y", diagnostics, context),
         w: parse_manual_layout_f64(manual_node, "w", diagnostics, context),
         h: parse_manual_layout_f64(manual_node, "h", diagnostics, context),
-        x_mode: child_attr(manual_node, "xMode", "val").map(|v| v.trim().to_string()),
-        y_mode: child_attr(manual_node, "yMode", "val").map(|v| v.trim().to_string()),
-        w_mode: child_attr(manual_node, "wMode", "val").map(|v| v.trim().to_string()),
-        h_mode: child_attr(manual_node, "hMode", "val").map(|v| v.trim().to_string()),
-        layout_target: child_attr(manual_node, "layoutTarget", "val").map(|v| v.trim().to_string()),
+        x_mode: child_attr(manual_node, "xMode", "val").and_then(trim_non_empty),
+        y_mode: child_attr(manual_node, "yMode", "val").and_then(trim_non_empty),
+        w_mode: child_attr(manual_node, "wMode", "val").and_then(trim_non_empty),
+        h_mode: child_attr(manual_node, "hMode", "val").and_then(trim_non_empty),
+        layout_target: child_attr(manual_node, "layoutTarget", "val").and_then(trim_non_empty),
     };
 
     if model == ManualLayoutModel::default() {

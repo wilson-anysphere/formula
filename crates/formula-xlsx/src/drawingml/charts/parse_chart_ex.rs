@@ -1055,6 +1055,10 @@ fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "layout"
 }
 
+fn is_manual_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "manualLayout"
+}
+
 fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
     let layout_node = node
         .children()
@@ -1063,10 +1067,21 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         .find(|n| n.tag_name().name() == "layout")?;
     let manual_node = layout_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_manual_layout_node))
+        .find(|n| n.tag_name().name() == "manualLayout")?;
 
     fn parse_f64(value: &str) -> Option<f64> {
         value.trim().parse::<f64>().ok()
+    }
+
+    fn trim_non_empty(value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 
     let model = ManualLayoutModel {
@@ -1074,11 +1089,11 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         y: child_attr(manual_node, "y", "val").and_then(parse_f64),
         w: child_attr(manual_node, "w", "val").and_then(parse_f64),
         h: child_attr(manual_node, "h", "val").and_then(parse_f64),
-        x_mode: child_attr(manual_node, "xMode", "val").map(|v| v.trim().to_string()),
-        y_mode: child_attr(manual_node, "yMode", "val").map(|v| v.trim().to_string()),
-        w_mode: child_attr(manual_node, "wMode", "val").map(|v| v.trim().to_string()),
-        h_mode: child_attr(manual_node, "hMode", "val").map(|v| v.trim().to_string()),
-        layout_target: child_attr(manual_node, "layoutTarget", "val").map(|v| v.trim().to_string()),
+        x_mode: child_attr(manual_node, "xMode", "val").and_then(trim_non_empty),
+        y_mode: child_attr(manual_node, "yMode", "val").and_then(trim_non_empty),
+        w_mode: child_attr(manual_node, "wMode", "val").and_then(trim_non_empty),
+        h_mode: child_attr(manual_node, "hMode", "val").and_then(trim_non_empty),
+        layout_target: child_attr(manual_node, "layoutTarget", "val").and_then(trim_non_empty),
     };
 
     if model == ManualLayoutModel::default() {
@@ -1178,6 +1193,41 @@ mod tests {
           </cx:layout>
         </mc:Fallback>
       </mc:AlternateContent>
+    </cx:legend>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let legend = model.legend.expect("legend should be parsed");
+        let layout = legend.layout.expect("legend should contain layout");
+        assert_eq!(layout.x, Some(0.1));
+    }
+
+    #[test]
+    fn parses_manual_layout_under_alternate_content_within_layout() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <cx:legend>
+      <cx:legendPos val="r"/>
+      <cx:layout>
+        <mc:AlternateContent>
+          <mc:Choice Requires="cx">
+            <cx:manualLayout>
+              <cx:x val="0.1"/>
+            </cx:manualLayout>
+          </mc:Choice>
+          <mc:Fallback>
+            <cx:manualLayout>
+              <cx:x val="0.2"/>
+            </cx:manualLayout>
+          </mc:Fallback>
+        </mc:AlternateContent>
+      </cx:layout>
     </cx:legend>
     <cx:plotArea>
       <cx:histogramChart/>
