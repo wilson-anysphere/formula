@@ -2,6 +2,7 @@ use formula_engine::{
     value::{EntityValue, RecordValue},
     Engine, Value,
 };
+use std::collections::HashMap;
 
 #[test]
 fn match_compares_entity_and_text_by_display_string_case_insensitive() {
@@ -92,4 +93,30 @@ fn xmatch_compares_record_and_text_by_display_string_case_insensitive() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+}
+
+#[test]
+fn xmatch_wildcards_compare_against_record_display_field() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "Fallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", r#"=XMATCH("App*", A1:A1, 2)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    }
 }

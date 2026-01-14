@@ -46,7 +46,14 @@ fn coerce_to_string_with_general_options(
     match value {
         Value::Text(s) => Ok(s.clone()),
         Value::Entity(entity) => Ok(entity.display.clone()),
-        Value::Record(record) => Ok(record.display.clone()),
+        Value::Record(record) => {
+            if let Some(display_field) = record.display_field.as_deref() {
+                if let Some(value) = record.get_field_case_insensitive(display_field) {
+                    return coerce_to_string_with_general_options(&value, locale, date_system);
+                }
+            }
+            Ok(record.display.clone())
+        }
         Value::Number(n) => Ok(format_number_general_with_options(*n, locale, date_system)),
         Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Blank => Ok(String::new()),
