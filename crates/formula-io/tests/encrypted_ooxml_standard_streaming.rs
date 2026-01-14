@@ -56,9 +56,9 @@ fn decrypts_standard_fixture_via_open_workbook_with_options() {
             // validate cell contents.
             let decrypted_bytes = package
                 .write_to_bytes()
-                .expect("serialize decrypted workbook package to bytes");
-            formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
-                .expect("parse decrypted bytes to model workbook")
+                .expect("serialize decrypted Standard workbook package");
+            formula_io::xlsx::read_workbook_from_reader(Cursor::new(decrypted_bytes))
+                .expect("read decrypted Standard workbook package into model")
         }
         other => panic!(
             "expected Workbook::Model or Workbook::Xlsx for decrypted Standard workbook, got {other:?}"

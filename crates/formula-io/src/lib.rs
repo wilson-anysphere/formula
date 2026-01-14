@@ -2238,6 +2238,16 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         // Agile (4.4): prefer the decryptor in `formula-xlsx` because it validates `<dataIntegrity>`
         // when present. Some producers omit `<dataIntegrity>` entirely; in that case, decryption
         // proceeds but no integrity verification is performed.
+        // Validate that the `EncryptionInfo` stream contains a well-formed XML descriptor. Some
+        // malformed/synthetic fixtures contain only the 8-byte header (and may include trailing
+        // garbage bytes), which some decryptors classify as "wrong password".
+        if extract_agile_encryption_info_xml(&encryption_info).is_err() {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major,
+                version_minor,
+            });
+        }
         match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
             &encryption_info,
             &encrypted_package,
@@ -2246,6 +2256,20 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             Ok(bytes) => bytes,
             Err(err) => match err {
                 xlsx::OffCryptoError::WrongPassword => {
+                    // Some malformed/partial encrypted containers are classified as "wrong password"
+                    // by decryptors because the verifier/integrity checks cannot be performed.
+                    //
+                    // If the input does not even have the minimal expected structure (Agile
+                    // `EncryptionInfo` should include an XML payload beyond the 8-byte header, and
+                    // `EncryptedPackage` should include the 8-byte plaintext size prefix), prefer an
+                    // "unsupported encryption"/compatibility error over "invalid password".
+                    if encryption_info.len() <= 8 || encrypted_package.len() < 8 {
+                        return Err(Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major,
+                            version_minor,
+                        });
+                    }
                     return Err(Error::InvalidPassword {
                         path: path.to_path_buf(),
                     })
