@@ -1528,7 +1528,13 @@ fn bytecode_backend_inlines_dynamic_defined_name_formulas() {
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    let via_bytecode = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(via_bytecode, Value::Number(1.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(via_bytecode, via_ast);
 }
 
 #[test]

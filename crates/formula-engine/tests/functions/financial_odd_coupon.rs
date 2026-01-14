@@ -4229,7 +4229,6 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
         );
 
         // (The above guard asserts `E == 360/frequency` and `E != DAYS360(PCD, NCD, TRUE)` for basis=4.)
-
         for basis in [0, 4] {
             let expected = oddf_price_excel_model(
                 settlement,

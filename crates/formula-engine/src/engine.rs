@@ -4601,6 +4601,16 @@ impl Engine {
             bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
             other => BytecodeCompileReason::LowerError(other),
         })?;
+
+        // The bytecode backend does not support external workbook references. Since `INDIRECT` can
+        // synthesize external references dynamically at runtime (via the external value provider),
+        // we conservatively fall back to the AST evaluator when an external provider is configured.
+        //
+        // This ensures `INDIRECT("[Book.xlsx]Sheet1!A1")` behaves like direct external references.
+        if self.external_value_provider.is_some() && bytecode_expr_contains_indirect(&expr) {
+            return Err(BytecodeCompileReason::IneligibleExpr);
+        }
+
         if let Some(name) = bytecode_expr_first_unsupported_function(&expr) {
             return Err(BytecodeCompileReason::UnsupportedFunction(name));
         }
@@ -10084,6 +10094,31 @@ fn bytecode_expr_first_unsupported_function(expr: &bytecode::Expr) -> Option<Arc
         | bytecode::Expr::RangeRef(_)
         | bytecode::Expr::MultiRangeRef(_)
         | bytecode::Expr::NameRef(_) => None,
+    }
+}
+
+fn bytecode_expr_contains_indirect(expr: &bytecode::Expr) -> bool {
+    match expr {
+        bytecode::Expr::FuncCall {
+            func: bytecode::ast::Function::Indirect,
+            ..
+        } => true,
+        bytecode::Expr::FuncCall { args, .. } => args.iter().any(bytecode_expr_contains_indirect),
+        bytecode::Expr::SpillRange(inner) => bytecode_expr_contains_indirect(inner),
+        bytecode::Expr::Unary { expr, .. } => bytecode_expr_contains_indirect(expr),
+        bytecode::Expr::Binary { left, right, .. } => {
+            bytecode_expr_contains_indirect(left) || bytecode_expr_contains_indirect(right)
+        }
+        bytecode::Expr::Lambda { body, .. } => bytecode_expr_contains_indirect(body),
+        bytecode::Expr::Call { callee, args } => {
+            bytecode_expr_contains_indirect(callee)
+                || args.iter().any(bytecode_expr_contains_indirect)
+        }
+        bytecode::Expr::Literal(_)
+        | bytecode::Expr::CellRef(_)
+        | bytecode::Expr::RangeRef(_)
+        | bytecode::Expr::MultiRangeRef(_)
+        | bytecode::Expr::NameRef(_) => false,
     }
 }
 

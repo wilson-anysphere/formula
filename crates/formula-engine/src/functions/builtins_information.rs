@@ -316,11 +316,31 @@ inventory::submit! {
 }
 
 fn t_value(v: &Value) -> Value {
+    fn text_like_value(value: &Value) -> Option<String> {
+        match value {
+            Value::Text(s) => Some(s.clone()),
+            Value::Entity(entity) => Some(entity.display.clone()),
+            Value::Record(record) => Some(record_display(record)),
+            _ => None,
+        }
+    }
+
+    fn record_display(record: &crate::value::RecordValue) -> String {
+        if let Some(display_field) = record.display_field.as_deref() {
+            if let Some(value) = record.get_field_case_insensitive(display_field) {
+                if let Some(text) = text_like_value(&value) {
+                    return text;
+                }
+            }
+        }
+        record.display.clone()
+    }
+
     match v {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
         Value::Entity(entity) => Value::Text(entity.display.clone()),
-        Value::Record(record) => Value::Text(record.display.clone()),
+        Value::Record(record) => Value::Text(record_display(record)),
         Value::Number(_)
         | Value::Bool(_)
         | Value::Blank

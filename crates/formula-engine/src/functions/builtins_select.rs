@@ -460,16 +460,23 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         return Err(*e);
     }
 
-    fn normalize_rich(value: Value) -> Value {
+    fn normalize_rich(value: Value) -> Result<Value, ErrorKind> {
         match value {
-            Value::Entity(entity) => Value::Text(entity.display),
-            Value::Record(record) => Value::Text(record.display),
-            other => other,
+            Value::Entity(entity) => Ok(Value::Text(entity.display)),
+            Value::Record(record) => {
+                if let Some(display_field) = record.display_field.as_deref() {
+                    if let Some(value) = record.get_field_case_insensitive(display_field) {
+                        return Ok(Value::Text(value.coerce_to_string()?));
+                    }
+                }
+                Ok(Value::Text(record.display))
+            }
+            other => Ok(other),
         }
     }
 
-    let left = normalize_rich(left.clone());
-    let right = normalize_rich(right.clone());
+    let left = normalize_rich(left.clone())?;
+    let right = normalize_rich(right.clone())?;
     if matches!(
         &left,
         Value::Array(_)

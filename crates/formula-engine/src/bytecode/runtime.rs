@@ -14,7 +14,7 @@ use crate::locale::ValueLocaleConfig;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
     cmp_case_insensitive, format_number_general_with_options, parse_number, ErrorKind as EngineErrorKind,
-    Value as EngineValue,
+    RecordValue, Value as EngineValue,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
@@ -1725,6 +1725,27 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
+
+    fn normalize_rich(value: &Value) -> Result<Value, ErrorKind> {
+        match value {
+            Value::Entity(v) => Ok(Value::Text(Arc::from(v.display.as_str()))),
+            Value::Record(v) => {
+                if let Some(display_field) = v.display_field.as_deref() {
+                    if let Some(field_value) = v.get_field_case_insensitive(display_field) {
+                        let s = field_value
+                            .coerce_to_string()
+                            .map_err(ErrorKind::from)?;
+                        return Ok(Value::Text(Arc::from(s.as_str())));
+                    }
+                }
+                Ok(Value::Text(Arc::from(v.display.as_str())))
+            }
+            other => Ok(other.clone()),
+        }
+    }
+
+    let left = normalize_rich(left)?;
+    let right = normalize_rich(right)?;
     if matches!(
         left,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_)
@@ -1738,14 +1759,12 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     fn text_like_str(value: &Value) -> Option<&str> {
         match value {
             Value::Text(s) => Some(s.as_ref()),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
             _ => None,
         }
     }
 
     // Blank coerces to the other type for comparisons.
-    let (l, r) = match (left, right) {
+    let (l, r) = match (&left, &right) {
         (Value::Empty | Value::Missing, Value::Number(_)) => (Value::Number(0.0), right.clone()),
         (Value::Number(_), Value::Empty | Value::Missing) => (left.clone(), Value::Number(0.0)),
         (Value::Empty | Value::Missing, Value::Bool(_)) => (Value::Bool(false), right.clone()),
@@ -4591,11 +4610,32 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
+
+    fn record_display_text_like(record: &RecordValue) -> String {
+        fn text_like_value(value: &EngineValue) -> Option<String> {
+            match value {
+                EngineValue::Text(s) => Some(s.clone()),
+                EngineValue::Entity(entity) => Some(entity.display.clone()),
+                EngineValue::Record(record) => Some(record_display_text_like(record)),
+                _ => None,
+            }
+        }
+
+        if let Some(display_field) = record.display_field.as_deref() {
+            if let Some(value) = record.get_field_case_insensitive(display_field) {
+                if let Some(text) = text_like_value(&value) {
+                    return text;
+                }
+            }
+        }
+        record.display.clone()
+    }
+
     map_arg(&args[0], grid, base, |v| match v {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
         Value::Entity(ent) => Value::Text(Arc::from(ent.display.as_str())),
-        Value::Record(rec) => Value::Text(Arc::from(rec.display.as_str())),
+        Value::Record(rec) => Value::Text(Arc::from(record_display_text_like(rec.as_ref()).as_str())),
         Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing | Value::Lambda(_) => {
             Value::Text(Arc::from(""))
         }
