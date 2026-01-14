@@ -8344,6 +8344,12 @@ const ribbonCommandHandlersCtx = {
 //
 // Note: Shared-grid mode does not currently support outline-based hidden rows; we disable the ribbon
 // controls in `scheduleRibbonSelectionFormatStateUpdate()` to avoid noisy toasts.
+//
+// Performance note: This MVP implementation scans the filter range to compute distinct values and
+// then scans again to apply the row-hiding filter. Keep the scan bounded to avoid freezing the UI
+// on very large selections.
+
+const DEFAULT_RIBBON_AUTOFILTER_ROW_LIMIT = 50_000;
 
 function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: number }): string {
   const doc = app.getDocument();
@@ -8483,6 +8489,17 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   const dataStartRow = range.startRow + headerRows;
   if (dataStartRow > range.endRow) {
     showToast("Select a range with a header row and at least one data row to filter.", "warning");
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+    return false;
+  }
+  const dataRowCount = range.endRow - dataStartRow + 1;
+  if (dataRowCount > DEFAULT_RIBBON_AUTOFILTER_ROW_LIMIT) {
+    showToast(
+      `Selection too large to filter (${dataRowCount.toLocaleString()} rows). ` +
+        `Reduce the selection to under ${DEFAULT_RIBBON_AUTOFILTER_ROW_LIMIT.toLocaleString()} rows and try again.`,
+      "warning",
+    );
     scheduleRibbonSelectionFormatStateUpdate();
     app.focus();
     return false;
