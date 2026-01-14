@@ -202,6 +202,29 @@ describe("sortRangeRowsInDocument", () => {
     expect(result).toMatchObject({ applied: false, reason: "tooLarge" });
     expect(doc.getStackDepths()).toEqual({ undo: 0, redo: 0 });
   });
+
+  it("does not resurrect deleted sheets when given a stale sheet id (no phantom creation)", () => {
+    const doc = new DocumentController();
+
+    // Ensure Sheet1 exists so deleting Sheet2 doesn't trip the last-sheet guard.
+    doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+    expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    const result = sortRangeRowsInDocument(
+      doc,
+      "Sheet2",
+      { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      { row: 0, col: 0 },
+      { order: "ascending" },
+    );
+
+    expect(result.applied).toBe(false);
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+  });
 });
 
 describe("applySortSpecToSelection", () => {
@@ -256,6 +279,29 @@ describe("applySortSpecToSelection", () => {
     expect(readRow(2)).toEqual(["A", 1, "first"]);
     expect(readRow(3)).toEqual(["A", 1, "second"]);
     expect(readRow(4)).toEqual(["B", 1, "fourth"]);
+  });
+
+  it("does not resurrect deleted sheets when given a stale sheet id (no phantom creation)", () => {
+    const doc = new DocumentController();
+
+    // Ensure Sheet1 exists so deleting Sheet2 doesn't trip the last-sheet guard.
+    doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+    expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    const ok = applySortSpecToSelection({
+      doc,
+      sheetId: "Sheet2",
+      selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+      spec: { hasHeader: false, keys: [{ column: 0, order: "ascending" }] },
+      getCellValue: () => null,
+    });
+
+    expect(ok).toBe(false);
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
   });
 
   it("moves formulas + formatting (styleId) with rows when sorting", () => {

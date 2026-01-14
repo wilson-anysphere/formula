@@ -224,6 +224,21 @@ test("CSV export respects sheet default formats (styleId may be 0)", () => {
   assert.equal(csv, "2024-01-31");
 });
 
+test("CSV export does not resurrect deleted sheets when called with a stale sheet id (no phantom creation)", () => {
+  const doc = new DocumentController();
+
+  // Ensure Sheet1 exists so deleting Sheet2 doesn't trip the last-sheet guard.
+  doc.getCell("Sheet1", { row: 0, col: 0 });
+  doc.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", "Sheet2"]);
+
+  doc.deleteSheet("Sheet2");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+
+  assert.throws(() => exportDocumentRangeToCsv(doc, "Sheet2", "A1"), /Unknown sheet/i);
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+});
+
 test("CSV export uses row formats to override column formats (layer precedence)", () => {
   const doc = new DocumentController();
   const dateTime = new Date(Date.UTC(2024, 0, 31, 12, 34, 56));

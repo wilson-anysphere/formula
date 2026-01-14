@@ -113,3 +113,18 @@ test("Parquet export rejects huge ranges before scanning cells", async () => {
   );
   assert.equal(scanned, 0);
 });
+
+test("Parquet export does not resurrect deleted sheets when called with a stale sheet id (no phantom creation)", async () => {
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  // Ensure Sheet1 exists so deleting Sheet2 doesn't trip the last-sheet guard.
+  doc.getCell("Sheet1", { row: 0, col: 0 });
+  doc.setCellValue("Sheet2", { row: 0, col: 0 }, "two");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", "Sheet2"]);
+
+  doc.deleteSheet("Sheet2");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+
+  await assert.rejects(() => exportDocumentRangeToParquet(doc, "Sheet2", "A1"), /Unknown sheet/i);
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+});

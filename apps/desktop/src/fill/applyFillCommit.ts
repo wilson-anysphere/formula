@@ -12,6 +12,37 @@ import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 export type RewriteFormulasForCopyDeltaRequest = { formula: string; deltaRow: number; deltaCol: number };
 
+/**
+ * DocumentController creates sheets lazily when referenced by `getCell()` / `getSheetView()`.
+ *
+ * Fill operations are triggered by UI state that can briefly hold a stale sheet id during
+ * sheet deletion / undo. Treat those ids as "known missing" so the fill engine doesn't
+ * recreate a deleted sheet just to read source cells.
+ */
+function isSheetKnownMissing(doc: DocumentController, sheetId: string): boolean {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return true;
+
+  const docAny = doc as any;
+  const sheets: any = docAny?.model?.sheets;
+  const sheetMeta: any = docAny?.sheetMeta;
+
+  if (
+    sheets &&
+    typeof sheets.has === "function" &&
+    typeof sheets.size === "number" &&
+    sheetMeta &&
+    typeof sheetMeta.has === "function" &&
+    typeof sheetMeta.size === "number"
+  ) {
+    const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+    if (!workbookHasAnySheets) return false;
+    return !sheets.has(id) && !sheetMeta.has(id);
+  }
+
+  return false;
+}
+
 function normalizeFormulaText(formula: unknown): string | null {
   if (formula == null) return null;
   const trimmed = String(formula).trim();
@@ -50,6 +81,9 @@ export interface ApplyFillCommitOptions {
  */
 export function applyFillCommitToDocumentController(options: ApplyFillCommitOptions): { editsApplied: number } {
   const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell, getCellComputedValue } = options;
+
+  // Avoid resurrecting deleted sheets when callers hold a stale sheet id.
+  if (isSheetKnownMissing(doc, sheetId)) return { editsApplied: 0 };
 
   const height = Math.max(0, sourceRange.endRow - sourceRange.startRow);
   const width = Math.max(0, sourceRange.endCol - sourceRange.startCol);
@@ -181,6 +215,9 @@ export async function computeFillEditsForDocumentControllerWithFormulaRewrite(
   }
 ): Promise<FillEdit[]> {
   const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell, getCellComputedValue } = options;
+
+  // Avoid resurrecting deleted sheets when callers hold a stale sheet id.
+  if (isSheetKnownMissing(doc, sheetId)) return [];
 
   const height = Math.max(0, sourceRange.endRow - sourceRange.startRow);
   const width = Math.max(0, sourceRange.endCol - sourceRange.startCol);

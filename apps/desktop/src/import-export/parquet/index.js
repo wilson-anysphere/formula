@@ -21,6 +21,41 @@ export const DEFAULT_MAX_PARQUET_EXPORT_CELLS = 200_000;
 
 const PARQUET_IMAGE_MARKER = Symbol("parquetImageValue");
 
+/**
+ * DocumentController creates sheets lazily when referenced by `getCell()`.
+ *
+ * Parquet export is a read-only operation and should never recreate a deleted sheet if callers
+ * pass a stale id (e.g. during sheet deletion/undo races). We treat a sheet as "known missing"
+ * when the workbook already has *some* sheets, but the requested id is present in neither the
+ * materialized `model.sheets` map nor the `sheetMeta` map.
+ *
+ * When the workbook has no sheets yet, we treat the id as "unknown" and preserve the historical
+ * lazy-creation behavior.
+ *
+ * @param {any} doc
+ * @param {string} sheetId
+ */
+function isSheetKnownMissing(doc, sheetId) {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return true;
+
+  const sheets = doc?.model?.sheets;
+  const sheetMeta = doc?.sheetMeta;
+  if (
+    sheets &&
+    typeof sheets.has === "function" &&
+    typeof sheets.size === "number" &&
+    sheetMeta &&
+    typeof sheetMeta.has === "function" &&
+    typeof sheetMeta.size === "number"
+  ) {
+    const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+    if (!workbookHasAnySheets) return false;
+    return !sheets.has(id) && !sheetMeta.has(id);
+  }
+  return false;
+}
+
 function wrapImageValueForParquet(image) {
   return {
     [PARQUET_IMAGE_MARKER]: true,
@@ -172,6 +207,13 @@ function makeUniqueColumnNames(names) {
  */
 export async function exportDocumentRangeToParquet(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+  const sheetKey = String(sheetId ?? "").trim();
+  if (!sheetKey) {
+    throw new Error("Sheet id is required.");
+  }
+  if (isSheetKnownMissing(doc, sheetKey)) {
+    throw new Error(`Unknown sheet: ${sheetKey}`);
+  }
   const headerRow = options.headerRow ?? true;
   const maxCells = options.maxCells ?? DEFAULT_MAX_PARQUET_EXPORT_CELLS;
 
@@ -188,7 +230,7 @@ export async function exportDocumentRangeToParquet(doc, sheetId, range, options 
   const columnNames = [];
   for (let col = r.start.col; col <= r.end.col; col++) {
     if (headerRow) {
-      const cell = doc.getCell(sheetId, { row: r.start.row, col });
+      const cell = doc.getCell(sheetKey, { row: r.start.row, col });
       const value = cell?.value;
       const raw = cellValueToHeaderText(value);
       const name = raw.trim() === "" ? columnIndexToName(col) : raw;
@@ -211,7 +253,7 @@ export async function exportDocumentRangeToParquet(doc, sheetId, range, options 
 
   for (let row = dataStartRow; row <= r.end.row; row++) {
     for (let col = r.start.col; col <= r.end.col; col++) {
-      const cell = doc.getCell(sheetId, { row, col });
+      const cell = doc.getCell(sheetKey, { row, col });
       columns[uniqueNames[col - r.start.col]][row - dataStartRow] = coerceCellValueForParquet(cell?.value);
     }
   }

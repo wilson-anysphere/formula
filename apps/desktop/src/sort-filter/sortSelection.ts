@@ -15,6 +15,37 @@ export const DEFAULT_SORT_CELL_LIMIT = 50_000;
 
 type CellSnapshot = { value: unknown; formula: string | null; styleId: number };
 
+/**
+ * DocumentController creates sheets lazily when referenced by `getCell()` / `getSheetView()`.
+ *
+ * Sort operations read a large amount of cell state and can run while UI state is briefly
+ * pointing at a deleted sheet (e.g. during undo/redo of sheet structure edits). Treat those
+ * ids as "known missing" so sorting can't resurrect a deleted sheet as a side-effect.
+ */
+function isSheetKnownMissing(doc: DocumentController, sheetId: string): boolean {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return true;
+
+  const docAny = doc as any;
+  const sheets: any = docAny?.model?.sheets;
+  const sheetMeta: any = docAny?.sheetMeta;
+
+  if (
+    sheets &&
+    typeof sheets.has === "function" &&
+    typeof sheets.size === "number" &&
+    sheetMeta &&
+    typeof sheetMeta.has === "function" &&
+    typeof sheetMeta.size === "number"
+  ) {
+    const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+    if (!workbookHasAnySheets) return false;
+    return !sheets.has(id) && !sheetMeta.has(id);
+  }
+
+  return false;
+}
+
 export type SortRangeRowsResult =
   | { applied: true; rowCount: number; colCount: number; keyCol: number }
   | { applied: false; reason: "invalidRange" | "tooLarge"; cellCount?: number; maxCells?: number };
@@ -95,6 +126,9 @@ export function sortRangeRowsInDocument(
   activeCell: CellCoord,
   options: { order: SortOrder; maxCells?: number; getCellValue?: GetSortValue } = { order: "ascending" },
 ): SortRangeRowsResult {
+  // Avoid resurrecting deleted sheets when callers hold a stale sheet id.
+  if (isSheetKnownMissing(doc, sheetId)) return { applied: false, reason: "invalidRange" };
+
   const { startRow, endRow, startCol, endCol } = normalizeSelectionRange(range);
   if (startRow < 0 || startCol < 0) return { applied: false, reason: "invalidRange" };
 
@@ -315,6 +349,9 @@ export function applySortSpecToSelection(params: {
   maxCells?: number;
   label?: string;
 }): boolean {
+  // Avoid resurrecting deleted sheets when callers hold a stale sheet id.
+  if (isSheetKnownMissing(params.doc, params.sheetId)) return false;
+
   const { startRow, endRow, startCol, endCol } = normalizeSelectionRange(params.selection);
   if (startRow < 0 || startCol < 0) return false;
 

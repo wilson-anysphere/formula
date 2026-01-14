@@ -23,6 +23,42 @@ import { enforceExport } from "../../dlp/enforceExport.js";
 // accidental multi-million-cell exports that would exhaust memory.
 const DEFAULT_MAX_EXPORT_CELLS = 200_000;
 
+/**
+ * DocumentController creates sheets lazily when referenced by `getCell()` / `getCellFormat()` /
+ * `getSheetView()`.
+ *
+ * Export is a read-only operation and should never recreate a deleted sheet if callers pass a
+ * stale id (e.g. during sheet deletion/undo races). We treat a sheet as "known missing" when the
+ * workbook already has *some* sheets, but the requested id is present in neither the materialized
+ * `model.sheets` map nor the `sheetMeta` map.
+ *
+ * When the workbook has no sheets yet, we treat the id as "unknown" and preserve the historical
+ * lazy-creation behavior.
+ *
+ * @param {any} doc
+ * @param {string} sheetId
+ */
+function isSheetKnownMissing(doc, sheetId) {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return true;
+
+  const sheets = doc?.model?.sheets;
+  const sheetMeta = doc?.sheetMeta;
+  if (
+    sheets &&
+    typeof sheets.has === "function" &&
+    typeof sheets.size === "number" &&
+    sheetMeta &&
+    typeof sheetMeta.has === "function" &&
+    typeof sheetMeta.size === "number"
+  ) {
+    const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+    if (!workbookHasAnySheets) return false;
+    return !sheets.has(id) && !sheetMeta.has(id);
+  }
+  return false;
+}
+
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
   const lower = fmt.toLowerCase();
@@ -132,11 +168,18 @@ export function exportCellGridToCsv(grid, options = {}) {
  */
 export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+  const sheetKey = String(sheetId ?? "").trim();
+  if (!sheetKey) {
+    throw new Error("Sheet id is required.");
+  }
+  if (isSheetKnownMissing(doc, sheetKey)) {
+    throw new Error(`Unknown sheet: ${sheetKey}`);
+  }
 
   if (options?.dlp) {
     enforceExport({
       documentId: options.dlp.documentId,
-      sheetId,
+      sheetId: sheetKey,
       range: r,
       format: "csv",
       classificationStore: options.dlp.classificationStore,
@@ -172,24 +215,24 @@ export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
-      const cell = doc.getCell(sheetId, { row, col });
+      const cell = doc.getCell(sheetKey, { row, col });
       let format = null;
       if (hasStyleIdTuple) {
-        const tuple = doc.getCellFormatStyleIds(sheetId, { row, col });
+        const tuple = doc.getCellFormatStyleIds(sheetKey, { row, col });
         if (Array.isArray(tuple) && tuple.length >= 4) {
           const key = tuple.join(",");
           if (formatCache.has(key)) {
             format = formatCache.get(key) ?? null;
           } else {
             const hasAnyFormat = tuple.some((id) => id !== 0);
-            format = hasAnyFormat ? doc.getCellFormat(sheetId, { row, col }) : null;
+            format = hasAnyFormat ? doc.getCellFormat(sheetKey, { row, col }) : null;
             formatCache.set(key, format);
           }
         } else {
-          format = doc.getCellFormat(sheetId, { row, col });
+          format = doc.getCellFormat(sheetKey, { row, col });
         }
       } else {
-        format = doc.getCellFormat(sheetId, { row, col });
+        format = doc.getCellFormat(sheetKey, { row, col });
       }
       // Export paths expect `cell.format` (not `styleId`) so downstream serialization can
       // respect number formats (including layered formats inherited from row/col/sheet defaults).
