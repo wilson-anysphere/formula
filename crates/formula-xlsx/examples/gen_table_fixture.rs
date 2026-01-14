@@ -10,35 +10,19 @@ fn main() {
     // Header row.
     sheet.set_cell(
         CellRef::from_a1("A1").unwrap(),
-        Cell {
-            value: CellValue::String("Item".into()),
-            formula: None,
-            style_id: 0,
-        },
+        Cell::new(CellValue::String("Item".into())),
     );
     sheet.set_cell(
         CellRef::from_a1("B1").unwrap(),
-        Cell {
-            value: CellValue::String("Qty".into()),
-            formula: None,
-            style_id: 0,
-        },
+        Cell::new(CellValue::String("Qty".into())),
     );
     sheet.set_cell(
         CellRef::from_a1("C1").unwrap(),
-        Cell {
-            value: CellValue::String("Price".into()),
-            formula: None,
-            style_id: 0,
-        },
+        Cell::new(CellValue::String("Price".into())),
     );
     sheet.set_cell(
         CellRef::from_a1("D1").unwrap(),
-        Cell {
-            value: CellValue::String("Total".into()),
-            formula: None,
-            style_id: 0,
-        },
+        Cell::new(CellValue::String("Total".into())),
     );
 
     // Data rows.
@@ -51,34 +35,22 @@ fn main() {
         let row = (idx as u32) + 2;
         sheet.set_cell(
             CellRef::from_a1(&format!("A{row}")).unwrap(),
-            Cell {
-                value: CellValue::String((*item).into()),
-                formula: None,
-                style_id: 0,
-            },
+            Cell::new(CellValue::String((*item).into())),
         );
         sheet.set_cell(
             CellRef::from_a1(&format!("B{row}")).unwrap(),
-            Cell {
-                value: CellValue::Number(*qty),
-                formula: None,
-                style_id: 0,
-            },
+            Cell::new(CellValue::Number(*qty)),
         );
         sheet.set_cell(
             CellRef::from_a1(&format!("C{row}")).unwrap(),
-            Cell {
-                value: CellValue::Number(*price),
-                formula: None,
-                style_id: 0,
-            },
+            Cell::new(CellValue::Number(*price)),
         );
         sheet.set_cell(
             CellRef::from_a1(&format!("D{row}")).unwrap(),
             Cell {
                 value: CellValue::Number(*total),
                 formula: Some("[@Qty]*[@Price]".into()),
-                style_id: 0,
+                ..Cell::default()
             },
         );
     }
@@ -89,7 +61,7 @@ fn main() {
         Cell {
             value: CellValue::Number(20.0),
             formula: Some("SUM(Table1[Total])".into()),
-            style_id: 0,
+            ..Cell::default()
         },
     );
 
@@ -98,7 +70,7 @@ fn main() {
         Cell {
             value: CellValue::String("Qty".into()),
             formula: Some("Table1[[#Headers],[Qty]]".into()),
-            style_id: 0,
+            ..Cell::default()
         },
     );
 
