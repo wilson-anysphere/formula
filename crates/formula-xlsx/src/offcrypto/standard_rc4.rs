@@ -53,6 +53,17 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
     out
 }
 
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// RC4 stream cipher.
 #[derive(Clone)]
 struct Rc4 {
@@ -185,7 +196,7 @@ impl StandardRc4CryptoApiVerifier {
         if expected_len > computed_hash.len() || expected_len > verifier_hash.len() {
             return false;
         }
-        computed_hash[..expected_len] == verifier_hash[..expected_len]
+        ct_eq(&computed_hash[..expected_len], &verifier_hash[..expected_len])
     }
 }
 
@@ -249,7 +260,7 @@ mod tests {
         if n == 0 || n > computed.len() || n > decrypted_hash.len() {
             return false;
         }
-        computed[..n] == decrypted_hash[..n]
+        ct_eq(&computed[..n], &decrypted_hash[..n])
     }
 
     #[test]

@@ -314,6 +314,17 @@ mod tests {
     use super::super::decrypt_aes_cbc_no_padding;
     use std::time::{Duration, Instant};
 
+    fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut diff = 0u8;
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            diff |= x ^ y;
+        }
+        diff == 0
+    }
+
     #[test]
     fn password_utf16le_encoding_no_bom_no_terminator() {
         assert_eq!(password_utf16le_bytes("A"), vec![0x41, 0x00]);
@@ -523,7 +534,7 @@ mod tests {
                 .get(..expected_hash_len)
                 .expect("expected hash");
 
-            computed_hash[..expected_hash_len] == *expected_hash
+            ct_eq(&computed_hash[..expected_hash_len], expected_hash)
         };
 
         assert!(verify("Password1234_"), "expected verifier to accept correct password");
