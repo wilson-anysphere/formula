@@ -66,10 +66,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "data.sortFilter.reapply",
   "data.sortFilter.advanced.clearFilter",
 
-  // Page Layout → Arrange.
-  // Selection Pane is wired directly in `main.ts` (opens/focuses the Selection Pane panel).
-  "pageLayout.arrange.selectionPane",
-
   // (Removed: Home → Styles items are either registered via CommandRegistry or intentionally disabled;
   // What-If Analysis + Solver are registered commands and do not require exemptions.)
 
