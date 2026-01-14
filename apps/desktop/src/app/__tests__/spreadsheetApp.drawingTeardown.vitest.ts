@@ -150,6 +150,21 @@ describe("SpreadsheetApp drawings teardown", () => {
     const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
 
+    // Register a few listeners and seed caches so destroy() can be validated as a
+    // best-effort memory release path even when the app object stays referenced.
+    app.subscribeSelection(() => {});
+    app.subscribeScroll(() => {});
+    app.subscribeZoom(() => {});
+    app.onFormulaBarOverlayChange(() => {});
+    app.onEditStateChange(() => {});
+    app.subscribeDrawings(() => {});
+    app.subscribeDrawingSelection(() => {});
+    const imageStore = (app as any).imageStore as { set: (id: string, entry: any) => void; get: (id: string) => unknown };
+    imageStore.set("in_cell_img", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" });
+    expect(imageStore.get("in_cell_img")).toBeTruthy();
+    (app as any).computedValuesByCoord.set(app.getCurrentSheetId(), new Map([[0, 123]]));
+    expect(((app as any).computedValuesByCoord as Map<string, unknown>).size).toBeGreaterThan(0);
+
     // Ensure the insert-image input (if created) is cleaned up on dispose.
     const input = (app as any).ensureInsertImageInput?.() as HTMLInputElement | undefined;
     expect(input).toBeTruthy();
@@ -201,6 +216,15 @@ describe("SpreadsheetApp drawings teardown", () => {
 
     // Overlay + caches should be cleared.
     expect(clearSpy).toHaveBeenCalled();
+    expect(((app as any).computedValuesByCoord as Map<string, unknown>).size).toBe(0);
+    expect(imageStore.get("in_cell_img")).toBeNull();
+    expect(((app as any).selectionListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).scrollListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).zoomListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).formulaBarOverlayListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).editStateListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).drawingsListeners as Set<unknown>).size).toBe(0);
+    expect(((app as any).drawingSelectionListeners as Set<unknown>).size).toBe(0);
     if (input) {
       expect(input.isConnected).toBe(false);
       expect(input.onchange).toBeNull();

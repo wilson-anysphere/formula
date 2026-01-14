@@ -4133,6 +4133,32 @@ export class SpreadsheetApp {
     this.auditingCache.clear();
     this.outlinesBySheet.clear();
     this.chartRecordLookupCache = null;
+
+    // Clear derived caches so a destroyed SpreadsheetApp instance doesn't retain large
+    // per-sheet allocations if it stays referenced (tests/hot reload).
+    this.computedValuesByCoord.clear();
+    this.lastComputedValuesSheetId = null;
+    this.lastComputedValuesSheetCache = null;
+    this.imageStore.clear();
+    this.remotePresences = [];
+    // Axis/viewport caches can hold very large arrays/maps for big sheets.
+    this.rowIndexByVisual = [];
+    this.colIndexByVisual = [];
+    this.visibleRows = [];
+    this.visibleCols = [];
+    this.frozenVisibleRows = [];
+    this.frozenVisibleCols = [];
+    this.rowToVisual.clear();
+    this.colToVisual.clear();
+
+    // Drop external listener references so disposed apps don't retain UI closures.
+    this.selectionListeners.clear();
+    this.scrollListeners.clear();
+    this.zoomListeners.clear();
+    this.formulaBarOverlayListeners.clear();
+    this.editStateListeners.clear();
+    this.drawingsListeners.clear();
+    this.drawingSelectionListeners.clear();
     // Ensure we don't keep a split-view SecondaryGridView alive via hit-test caches.
     this.splitViewSecondaryGrid = null;
     this.splitViewDrawingHitTestIndex = null;
@@ -13942,21 +13968,6 @@ export class SpreadsheetApp {
     return this.listDrawingObjectsForSheet();
   }
 
-  /**
-   * Force drawing caches for the active sheet to refresh from the DocumentController.
-   *
-   * This is primarily used by unit tests that mutate `document.setSheetDrawings(...)`
-   * directly and then need SpreadsheetApp hit testing/rendering to see the latest state.
-   */
-  syncSheetDrawings(): void {
-    if (this.disposed) return;
-    this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
-    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
-    this.renderDrawings(sharedViewport);
-  }
-
   private setDrawingObjectsForSheet(objects: DrawingObject[]): void {
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
@@ -17046,7 +17057,6 @@ export class SpreadsheetApp {
 
       const finalObjects = objects.slice();
       finalObjects[targetIndex] = after;
-
       this.drawingGesture = null;
       try {
         this.root.releasePointerCapture(e.pointerId);
@@ -17054,10 +17064,15 @@ export class SpreadsheetApp {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
 
-      this.commitDrawingInteraction({ kind: gesture.mode === "resize" ? "resize" : "move", id: gesture.objectId, before, after, objects: finalObjects });
+      this.commitDrawingInteraction({
+        kind: gesture.mode === "resize" ? "resize" : "move",
+        id: gesture.objectId,
+        before,
+        after,
+        objects: finalObjects,
+      });
 
       this.renderDrawings();
-      // Ensure selection handles reflect the final position.
       this.renderSelection();
       return;
     }
