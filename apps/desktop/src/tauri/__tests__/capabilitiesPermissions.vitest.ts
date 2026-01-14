@@ -219,7 +219,7 @@ describe("Tauri capabilities", () => {
     }
   });
 
-  it("grants the dialog + clipboard permissions required by the frontend", () => {
+  it("grants the dialog permissions required by the frontend", () => {
     const permissions = readPermissions();
 
     expect(permissions).toContain("dialog:allow-open");
@@ -229,9 +229,11 @@ describe("Tauri capabilities", () => {
     // Keep dialog permission surface minimal.
     expect(permissions).not.toContain("dialog:default");
 
-    expect(permissions).toContain("clipboard-manager:allow-read-text");
-    expect(permissions).toContain("clipboard-manager:allow-write-text");
-    // Keep clipboard permission surface minimal.
+    // Clipboard operations go through Formula's explicit IPC commands (`clipboard_read` / `clipboard_write`),
+    // which are gated by window + stable-origin checks and enforce resource limits during deserialization.
+    // Do not grant the clipboard-manager plugin API surface to the webview.
+    expect(permissions).not.toContain("clipboard-manager:allow-read-text");
+    expect(permissions).not.toContain("clipboard-manager:allow-write-text");
     expect(permissions).not.toContain("clipboard-manager:default");
     // Guard against legacy/unprefixed identifiers too (schema drift).
     expect(permissions).not.toContain("clipboard:default");

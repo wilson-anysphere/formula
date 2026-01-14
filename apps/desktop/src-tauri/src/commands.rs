@@ -1563,6 +1563,16 @@ where
 /// deserialization time and are converted to the core `PivotConfig` after validation.
 pub type PivotText = LimitedString<{ crate::resource_limits::MAX_PIVOT_TEXT_BYTES }>;
 
+fn pivot_field_ref_from_ipc(field: String) -> PivotFieldRef {
+    if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(&field) {
+        return PivotFieldRef::DataModelMeasure(measure);
+    }
+    if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(&field) {
+        return PivotFieldRef::DataModelColumn { table, column };
+    }
+    PivotFieldRef::CacheFieldName(field)
+}
+
 /// IPC-friendly mirror of `formula_engine::pivot::PivotKeyPart` with resource limits applied.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]

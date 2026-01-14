@@ -1595,9 +1595,8 @@ fn main() {
                 }
             }
         })
-        // Core platform plugins used by the frontend (dialog, clipboard, shell).
+        // Core platform plugins used by the app (dialog, shell).
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // OAuth PKCE deep-link redirect capture (e.g. `formula://oauth/callback?...`).
@@ -1784,7 +1783,7 @@ fn main() {
         // NOTE: IPC hardening / capabilities (Tauri v2)
         //
         // We avoid `core:default` and instead grant only the plugin APIs the frontend uses
-        // (events, dialogs, window ops, clipboard (plain text), updater, ...) in
+        // (events, dialogs, window ops, updater, ...) in
         // `src-tauri/capabilities/main.json`, scoped to the `main` window.
         //
         // Any new `#[tauri::command]` must be:

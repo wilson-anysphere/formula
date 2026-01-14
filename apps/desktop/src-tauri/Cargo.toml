@@ -23,7 +23,6 @@ desktop = [
     "dep:tauri-build",
     "dep:tauri-plugin-deep-link",
     "dep:tauri-plugin-dialog",
-    "dep:tauri-plugin-clipboard-manager",
     "dep:tauri-plugin-global-shortcut",
     "dep:tauri-plugin-single-instance",
     "dep:tauri-plugin-notification",
@@ -96,7 +95,6 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 tauri = { version = "2.9", optional = true, features = ["tray-icon", "custom-protocol"] }
 tauri-plugin-deep-link = { version = "2.4", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
-tauri-plugin-clipboard-manager = { version = "2", optional = true }
 tauri-plugin-global-shortcut = { version = "2.3", optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2.2", optional = true }

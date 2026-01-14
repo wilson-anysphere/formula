@@ -82,8 +82,6 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-is-maximized",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"

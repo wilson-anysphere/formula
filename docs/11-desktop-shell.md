@@ -368,8 +368,6 @@ Example excerpt:
     "core:event:allow-unlisten",
     "dialog:allow-open",
     "core:window:allow-set-focus",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
     "updater:allow-check"
   ]
 }
@@ -690,7 +688,6 @@ delete prior release assets.
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
   - `tauri_plugin_dialog` (native open/save dialogs; gated by `dialog:allow-*` permissions)
-  - `tauri_plugin_clipboard_manager` (plain-text clipboard helpers; gated by `clipboard-manager:allow-*` permissions)
   - `tauri_plugin_shell` (used by the Rust command `open_external_url` to open external links in the host OS; direct webview access is not granted)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_notification` (native notifications)
@@ -1074,10 +1071,9 @@ Desktop vs web behavior:
     the provider also tries the legacy command name `read_clipboard` as a best-effort merge (never
     clobbering WebView values).
   - If `clipboard_write` is missing (older builds) or errors, the provider also tries the legacy
-    command name `write_clipboard` before falling back to plain-text clipboard APIs.
+    command name `write_clipboard` before falling back to plain-text writes via the Web Clipboard API.
   - If native commands are unavailable/unimplemented, it falls back to the Web Clipboard API
-    (`navigator.clipboard`) and finally to `globalThis.__TAURI__.clipboard.readText` / `writeText`
-    (plain text).
+    (`navigator.clipboard`) for plain text.
 - **Web**: uses the browser Clipboard API only (permission + user-gesture gated).
 
 Supported MIME types (read + write, best-effort):
@@ -1195,7 +1191,7 @@ Where it’s defined:
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
     (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-dialog`,
-    `tauri-plugin-clipboard-manager`, `tauri-plugin-shell`, `tauri-plugin-updater`, `tauri-plugin-deep-link`), plus a few desktop-only helpers (e.g.
+    `tauri-plugin-shell`, `tauri-plugin-updater`, `tauri-plugin-deep-link`), plus a few desktop-only helpers (e.g.
     `http-range`, `percent-encoding`), plus Linux-only GTK deps for the clipboard backend, and enables the `parquet` feature.
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures the desktop binary is compiled with the correct feature set when running the Tauri CLI
@@ -1292,19 +1288,18 @@ It gates:
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
-- Additional core/plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
+- Additional core/plugin permissions for using JS plugin APIs (dialog/window/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`, `dialog:allow-confirm`, `dialog:allow-message`
   - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
-  - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are allowlisted by
 `allow-invoke`, but must still be hardened in Rust (window label + trusted-origin checks, argument validation,
 filesystem/network scope checks, etc.).
 
-Note: the clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
-(`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
-custom Rust IPC commands (`clipboard_read` / `clipboard_write`) and must validate/scoped in Rust.
+Note: the desktop app intentionally does **not** grant the clipboard-manager plugin permission surface.
+Clipboard reads/writes (rich + plain text) are handled via custom Rust IPC commands (`clipboard_read` / `clipboard_write`)
+and must validate/scope in Rust.
 
 External URL opening is also routed through a custom Rust IPC command:
 
@@ -1337,9 +1332,8 @@ High-level contents (see the file for the exhaustive list):
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
 - `core:event:allow-unlisten` is granted so the frontend can clean up its own temporary listeners.
-- Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
+- Plugin permissions include dialog/window APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
   - Window API permissions are `core:window:allow-*`.
-  - Plain-text clipboard permissions are `clipboard-manager:allow-*`.
 - Custom Rust commands are allowlisted by `allow-invoke`, but must still keep input validation and scope checks in Rust.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro
@@ -1353,7 +1347,7 @@ Guardrail tests (to prevent accidental “allow everything” capability drift):
   - otherwise, no window should specify `capabilities` (toolchain compatibility)
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `core:event:allow-listen` / `core:event:allow-emit`
   allowlists match the desktop shell’s real event usage (and contain no wildcards).
-- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that `allow-invoke.json` stays explicit and in sync with frontend invoke usage (no allow-all).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that `allow-invoke.json` stays explicit and in sync with frontend invoke usage (no allow-all).
 - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` — asserts the `allow-invoke` permission allowlist stays in sync with the `generate_handler![...]` list in `apps/desktop/src-tauri/src/main.rs`.
 - `apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts` — asserts the open-file IPC handshake (`open-file-ready`) is still wired in `main.ts` (prevents cold-start open drops).
 - `apps/desktop/src/tauri/__tests__/updaterMainListeners.vitest.ts` — asserts updater UX listeners remain consolidated in `tauri/updaterUi.ts` and the `updater-ui-ready` handshake stays intact.
@@ -1386,10 +1380,9 @@ WebView toolchain for your platform).
 
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `core:event:allow-listen` / `core:event:allow-emit`
   allowlists (in `apps/desktop/src-tauri/capabilities/main.json`).
-- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/updater), add the corresponding `*:allow-*`
+- If the frontend starts using a new Tauri core/plugin API (dialog/window/updater), add the corresponding `*:allow-*`
   permission string(s).
   - Window permissions are currently `core:window:allow-*`.
-  - Plain-text clipboard permissions are currently `clipboard-manager:allow-*`.
 - For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`:
   - register them in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
   - add them to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission `commands.allow`)

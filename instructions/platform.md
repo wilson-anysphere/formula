@@ -71,10 +71,11 @@ Build the native desktop application shell using **Tauri**. Handle system integr
       with fallbacks to:
       - legacy IPC command names: `read_clipboard` / `write_clipboard` (older builds / main-thread bridging on macOS)
       - `navigator.clipboard` (Web Clipboard API)
-      - legacy `globalThis.__TAURI__.clipboard.readText` / `writeText` (plain text)
+      - Note: the legacy Tauri clipboard-manager plugin API (`globalThis.__TAURI__.clipboard.readText` / `writeText`)
+        is intentionally not enabled in hardened builds to avoid unbounded IPC payloads.
    - Supported formats: `text/plain`, `text/html`, `text/rtf`, `image/png`.
    - JS-facing image API uses `imagePng: Uint8Array` (raw bytes); over Tauri IPC, PNG is transported as `pngBase64`
-     (raw base64, no `data:image/png;base64,` prefix).
+      (raw base64, no `data:image/png;base64,` prefix).
 4. **Drag and drop:** Files and data
 5. **System tray:** Background sync indicator
 6. **Global shortcuts:** Capture shortcuts even when unfocused
@@ -136,18 +137,16 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-confirm",
-    "dialog:allow-message",
-    "core:window:allow-hide",
-    "core:window:allow-show",
-    "core:window:allow-set-focus",
-    "core:window:allow-close",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
-    "updater:allow-check",
-    "updater:allow-download",
-    "updater:allow-install"
-  ]
-}
+     "dialog:allow-message",
+     "core:window:allow-hide",
+     "core:window:allow-show",
+     "core:window:allow-set-focus",
+     "core:window:allow-close",
+     "updater:allow-check",
+     "updater:allow-download",
+     "updater:allow-install"
+   ]
+ }
 ```
 
 Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
@@ -168,9 +167,9 @@ Note: external URL opening should go through the `open_external_url` Rust comman
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
 shell plugin (`shell:allow-open`).
 
-Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` grant access to the plain-text
-clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG)
-are handled via custom Rust commands (`__TAURI__.core.invoke(...)`) and must be kept input-validated/scoped in Rust.
+Note: the desktop app intentionally does **not** grant the clipboard-manager plugin permission surface.
+Clipboard reads/writes go through custom Rust commands (`clipboard_read` / `clipboard_write`) which enforce
+trusted-origin + window checks and apply resource limits during deserialization.
 
 ### Validating permission identifiers against the installed Tauri toolchain
 
@@ -207,7 +206,7 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops,
-  clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and `allow-invoke.json`
+  updater, etc), we don't accidentally grant dangerous extras, and `allow-invoke.json`
   stays scoped/explicit and in sync with frontend invoke usage; we never grant the unscoped string form
   `"core:allow-invoke"`, and if `core:allow-invoke` is present it uses the object form with an explicit per-command
   allowlist.
