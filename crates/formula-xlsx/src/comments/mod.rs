@@ -121,23 +121,48 @@ pub fn render_comment_parts(parts: &CommentParts) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+fn normalize_part_path_for_match(path: &str) -> String {
+    // XLSX part names are case-sensitive in the OPC spec, but in practice we want to be tolerant to
+    // common producer mistakes (Windows separators, leading slashes, ASCII casing differences).
+    path.strip_prefix('/')
+        .unwrap_or(path)
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
 fn is_comment_related_part(path: &str) -> bool {
+    let path = normalize_part_path_for_match(path);
     path.starts_with("xl/comments")
-        || path.starts_with("xl/threadedComments/")
+        || path.starts_with("xl/threadedcomments/")
         || path.starts_with("xl/persons/")
-        || path.starts_with("xl/drawings/vmlDrawing")
-        || path.starts_with("xl/drawings/commentsDrawing")
-        || path.contains("commentsExt")
+        || path.starts_with("xl/drawings/vmldrawing")
+        || path.starts_with("xl/drawings/commentsdrawing")
+        || path.contains("commentsext")
 }
 
 fn is_legacy_comments_xml(path: &str) -> bool {
-    path.starts_with("xl/comments") && path.ends_with(".xml") && !path.contains("threaded")
+    let path = normalize_part_path_for_match(path);
+    if !path.starts_with("xl/comments") || !path.ends_with(".xml") {
+        return false;
+    }
+    if path.contains("threaded") {
+        return false;
+    }
+    // Exclude other comment-related parts like `xl/commentsExt*.xml`.
+    let suffix = &path["xl/comments".len()..];
+    suffix.starts_with('.')
+        || suffix
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_digit())
 }
 
 fn is_threaded_comments_xml(path: &str) -> bool {
-    path.contains("threadedComments") && path.ends_with(".xml")
+    let path = normalize_part_path_for_match(path);
+    path.starts_with("xl/threadedcomments/") && path.ends_with(".xml")
 }
 
 fn is_persons_xml(path: &str) -> bool {
+    let path = normalize_part_path_for_match(path);
     path.starts_with("xl/persons/") && path.ends_with(".xml")
 }
