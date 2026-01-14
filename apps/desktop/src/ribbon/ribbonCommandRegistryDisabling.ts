@@ -99,14 +99,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.cells.delete.deleteSheet",
 
   // --- Home editing -----------------------------------------------------------
-  "home.editing.autoSum",
-  "home.editing.autoSum.sum",
   "home.editing.autoSum.average",
   "home.editing.autoSum.countNumbers",
   "home.editing.autoSum.max",
   "home.editing.autoSum.min",
-  "home.editing.fill.down",
-  "home.editing.fill.right",
   "home.editing.fill.up",
   "home.editing.fill.left",
   "home.editing.fill.series",
@@ -141,7 +137,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "review.comments.showComments",
 
   // --- Formula auditing -------------------------------------------------------
-  "formulas.formulaAuditing.showFormulas",
   "formulas.formulaAuditing.tracePrecedents",
   "formulas.formulaAuditing.traceDependents",
   "formulas.formulaAuditing.removeArrows",
@@ -164,7 +159,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "view.macros.recordMacro",
   "view.macros.recordMacro.stop",
   "view.macros.useRelativeReferences",
-  "view.show.showFormulas",
   "view.show.performanceStats",
   "view.window.split",
   "view.zoom.zoom",
