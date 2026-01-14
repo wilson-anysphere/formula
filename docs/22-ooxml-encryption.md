@@ -65,7 +65,7 @@ uses today: **Agile Encryption (version 4.4) with password-based key encryption*
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` HMAC verification (implemented in `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto`; algorithm documented below) |
+| Integrity | `dataIntegrity` HMAC verification (required by `crates/formula-xlsx::offcrypto` and `crates/formula-office-crypto`; algorithm documented below). `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`. |
 
 ### Explicitly unsupported (hard errors)
 
@@ -322,10 +322,15 @@ Agile encryption can include a package-level integrity check via:
 <dataIntegrity encryptedHmacKey="..." encryptedHmacValue="..."/>
 ```
 
-This is **not optional** for correctness when we want good error semantics:
+In Formula, this is **not optional** for correctness when we want good error semantics:
 
 - “password wrong” should not surface as “ZIP is corrupt”
 - file tampering/corruption should be detected even if the decrypted ZIP happens to parse
+
+Implementation note: the strict Agile decryptors in this repo currently **require** the
+`<dataIntegrity>` element to be present (they will treat a missing `dataIntegrity` as a malformed
+wrapper). `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`, so it
+may successfully open some inputs that the strict decryptors reject.
 
 ### What bytes are authenticated (critical)
 
