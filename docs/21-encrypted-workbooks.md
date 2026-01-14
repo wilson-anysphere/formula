@@ -64,6 +64,9 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   - Limitation: the WASM loader currently only supports decrypted packages that contain
     `xl/workbook.xml` (i.e. `.xlsx` / `.xlsm`); decrypted `.xlsb` packages (`xl/workbook.bin`) are
     rejected with a clear error.
+  - Implementation note: this path uses `crates/formula-office-crypto` for decryption, which currently
+    requires Agile `<dataIntegrity>` (HMAC). Some third-party encrypted workbooks omit
+    `<dataIntegrity>`; those may fail to decrypt in WASM even if native `formula-io` can open them.
 
 **Intended behavior / remaining work:**
 
