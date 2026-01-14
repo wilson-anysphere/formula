@@ -12,6 +12,8 @@ use formula_io::offcrypto::cryptoapi::{hash_password_fixed_spin, password_to_utf
 use formula_io::offcrypto::{CALG_MD5, CALG_RC4};
 use formula_io::{open_workbook_with_password, Workbook};
 
+const F_CRYPTOAPI: u32 = 0x0000_0004;
+
 struct Rc4 {
     s: [u8; 256],
     i: u8,
@@ -132,13 +134,18 @@ fn open_workbook_with_password_decrypts_standard_cryptoapi_rc4_md5() {
     let mut encryption_info = Vec::new();
     encryption_info.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor
     encryption_info.extend_from_slice(&2u16.to_le_bytes()); // VersionMinor (Standard)
-    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    // Standard/CryptoAPI EncryptionInfo commonly uses 0x0000_0040 for this outer flags field.
+    // The critical bits for decryptors are in the inner `EncryptionHeader.flags`.
+    encryption_info.extend_from_slice(&0x0000_0040u32.to_le_bytes()); // Flags
 
     let header_size: u32 = 32;
     encryption_info.extend_from_slice(&header_size.to_le_bytes());
 
     // EncryptionHeader (32 bytes fixed part).
-    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+    // MS-OFFCRYPTO Standard `EncryptionHeader.flags`:
+    // - fCryptoAPI must be set for Standard/CryptoAPI encryption.
+    // - fAES must be unset for RC4.
+    encryption_info.extend_from_slice(&F_CRYPTOAPI.to_le_bytes()); // flags
     encryption_info.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
     encryption_info.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
     encryption_info.extend_from_slice(&alg_id_hash.to_le_bytes()); // algIdHash (MD5)
@@ -188,4 +195,3 @@ fn open_workbook_with_password_decrypts_standard_cryptoapi_rc4_md5() {
         "expected decrypted package to be a valid XLSX zip"
     );
 }
-
