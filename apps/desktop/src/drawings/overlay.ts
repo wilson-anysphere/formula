@@ -2,7 +2,14 @@ import type { Anchor, DrawingObject, DrawingTransform, ImageEntry, ImageStore, R
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
-import { getResizeHandleCenters, getRotationHandleCenter, RESIZE_HANDLE_SIZE_PX, ROTATION_HANDLE_SIZE_PX } from "./selectionHandles";
+import {
+  getResizeHandleCentersInto,
+  getRotationHandleCenterInto,
+  RESIZE_HANDLE_SIZE_PX,
+  ROTATION_HANDLE_SIZE_PX,
+  type ResizeHandleCenter,
+  type RotationHandleCenter,
+} from "./selectionHandles";
 import { degToRad } from "./transform";
 import { DrawingSpatialIndex } from "./spatialIndex";
 
@@ -363,6 +370,8 @@ export class DrawingOverlay {
   private readonly localRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly selectedScreenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly selectedAabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly resizeHandleCentersScratch: ResizeHandleCenter[] = [];
+  private readonly rotationHandleCenterScratch: RotationHandleCenter = { x: 0, y: 0 };
   private readonly paneLayoutScratch: PaneLayout = {
     frozenRows: 0,
     frozenCols: 0,
@@ -1076,7 +1085,15 @@ export class DrawingOverlay {
         if (selectedClipRect.width > 0 && selectedClipRect.height > 0 && intersects(selectedAabb, selectedClipRect)) {
           pushClipRect(ctx, selectedClipRect);
           try {
-            drawSelection(ctx, selectedScreenRect, colors, selectedTransform, { drawRotationHandle: selectedDrawRotationHandle });
+            drawSelection(
+              ctx,
+              selectedScreenRect,
+              colors,
+              selectedTransform,
+              selectedDrawRotationHandle,
+              this.resizeHandleCentersScratch,
+              this.rotationHandleCenterScratch,
+            );
           } finally {
             ctx.restore();
           }
@@ -1118,7 +1135,15 @@ export class DrawingOverlay {
           if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
             pushClipRect(ctx, clipRect);
             try {
-              drawSelection(ctx, screenRectScratch, colors, selected.transform, { drawRotationHandle: selected.kind.type !== "chart" });
+              drawSelection(
+                ctx,
+                screenRectScratch,
+                colors,
+                selected.transform,
+                selected.kind.type !== "chart",
+                this.resizeHandleCentersScratch,
+                this.rotationHandleCenterScratch,
+              );
             } finally {
               ctx.restore();
             }
@@ -1263,6 +1288,7 @@ export class DrawingOverlay {
     this.hydrationRerenderScheduled = false;
     this.visibleObjectsScratch.length = 0;
     this.queryCandidatesScratch.length = 0;
+    this.resizeHandleCentersScratch.length = 0;
 
     // Release the canvas backing store even if the DOM element is still referenced
     // by a long-lived owner (tests/hot reload). Setting width/height resets the
@@ -1462,8 +1488,10 @@ function drawSelection(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
   colors: OverlayColorTokens,
-  transform?: DrawingTransform,
-  opts?: { drawRotationHandle?: boolean },
+  transform: DrawingTransform | undefined,
+  drawRotationHandle: boolean,
+  resizeHandlesScratch: ResizeHandleCenter[],
+  rotationHandleScratch: RotationHandleCenter,
 ): void {
   ctx.save();
   ctx.strokeStyle = colors.selectionStroke;
@@ -1477,7 +1505,7 @@ function drawSelection(
 
   const handle = RESIZE_HANDLE_SIZE_PX;
   const half = handle / 2;
-  const points = getResizeHandleCenters(rect, transform);
+  const points = getResizeHandleCentersInto(rect, transform, resizeHandlesScratch);
 
   ctx.fillStyle = colors.selectionHandleFill;
   ctx.strokeStyle = colors.selectionStroke;
@@ -1490,10 +1518,10 @@ function drawSelection(
   }
 
   // Optional Excel-style rotation handle.
-  if (opts?.drawRotationHandle !== false) {
+  if (drawRotationHandle) {
     const rotHandle = ROTATION_HANDLE_SIZE_PX;
     const rotHalf = rotHandle / 2;
-    const rot = getRotationHandleCenter(rect, transform);
+    const rot = getRotationHandleCenterInto(rect, transform, rotationHandleScratch);
     ctx.beginPath();
     ctx.rect(rot.x - rotHalf, rot.y - rotHalf, rotHandle, rotHandle);
     ctx.fill();

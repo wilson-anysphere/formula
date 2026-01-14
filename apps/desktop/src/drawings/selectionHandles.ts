@@ -1,5 +1,4 @@
 import type { DrawingTransform, Rect } from "./types";
-import { applyTransformVector } from "./transform";
 import { DRAWING_HANDLE_SIZE_PX } from "./constants";
 
 /**
@@ -29,7 +28,7 @@ export interface RotationHandleCenter {
   y: number;
 }
 
-function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): transform is DrawingTransform {
   if (!transform) return false;
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
@@ -48,43 +47,77 @@ function getTransformTrig(transform: DrawingTransform): CachedTrig {
   return next;
 }
 
-function applyTransformVectorFast(dx: number, dy: number, transform: DrawingTransform, trig: CachedTrig): { x: number; y: number } {
-  let x = dx;
-  let y = dy;
-  if (transform.flipH) x = -x;
-  if (transform.flipV) y = -y;
-  return {
-    x: x * trig.cos - y * trig.sin,
-    y: x * trig.sin + y * trig.cos,
-  };
+const RESIZE_HANDLE_ORDER: readonly ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const RESIZE_HANDLE_SX: readonly number[] = [-1, 0, 1, 1, 1, 0, -1, -1];
+const RESIZE_HANDLE_SY: readonly number[] = [-1, -1, -1, 0, 1, 1, 1, 0];
+const ROTATION_EDGE_SX: readonly number[] = [0, 1, 0, -1];
+const ROTATION_EDGE_SY: readonly number[] = [-1, 0, 1, 0];
+
+function ensureResizeHandleCentersOut(out: ResizeHandleCenter[]): ResizeHandleCenter[] {
+  for (let i = 0; i < RESIZE_HANDLE_ORDER.length; i += 1) {
+    const handle = RESIZE_HANDLE_ORDER[i]!;
+    const existing = out[i];
+    if (existing) {
+      existing.handle = handle;
+      continue;
+    }
+    out[i] = { handle, x: 0, y: 0 };
+  }
+  out.length = RESIZE_HANDLE_ORDER.length;
+  return out;
 }
 
-export function getResizeHandleCenters(bounds: Rect, transform?: DrawingTransform): ResizeHandleCenter[] {
+/**
+ * Computes resize handle centers, writing into `out` to avoid allocations.
+ *
+ * `out` is normalized to always contain 8 entries in the canonical handle order:
+ *
+ *   nw, n, ne, e, se, s, sw, w
+ */
+export function getResizeHandleCentersInto(
+  bounds: Rect,
+  transform: DrawingTransform | undefined,
+  out: ResizeHandleCenter[],
+): ResizeHandleCenter[] {
   const cx = bounds.x + bounds.width / 2;
   const cy = bounds.y + bounds.height / 2;
   const hw = bounds.width / 2;
   const hh = bounds.height / 2;
 
-  const local = [
-    { handle: "nw" as const, x: -hw, y: -hh },
-    { handle: "n" as const, x: 0, y: -hh },
-    { handle: "ne" as const, x: hw, y: -hh },
-    { handle: "e" as const, x: hw, y: 0 },
-    { handle: "se" as const, x: hw, y: hh },
-    { handle: "s" as const, x: 0, y: hh },
-    { handle: "sw" as const, x: -hw, y: hh },
-    { handle: "w" as const, x: -hw, y: 0 },
-  ];
+  const points = ensureResizeHandleCentersOut(out);
 
   if (!hasNonIdentityTransform(transform)) {
-    return local.map((p) => ({ handle: p.handle, x: cx + p.x, y: cy + p.y }));
+    for (let i = 0; i < points.length; i += 1) {
+      const dx = RESIZE_HANDLE_SX[i]! * hw;
+      const dy = RESIZE_HANDLE_SY[i]! * hh;
+      points[i]!.x = cx + dx;
+      points[i]!.y = cy + dy;
+    }
+    return points;
   }
 
-  const trig = getTransformTrig(transform!);
-  return local.map((p) => {
-    const t = applyTransformVectorFast(p.x, p.y, transform!, trig);
-    return { handle: p.handle, x: cx + t.x, y: cy + t.y };
-  });
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
+  const flipH = transform.flipH;
+  const flipV = transform.flipV;
+
+  for (let i = 0; i < points.length; i += 1) {
+    let x = RESIZE_HANDLE_SX[i]! * hw;
+    let y = RESIZE_HANDLE_SY[i]! * hh;
+    if (flipH) x = -x;
+    if (flipV) y = -y;
+    // Forward transform: scale(flip) then rotate(theta).
+    const tx = x * cos - y * sin;
+    const ty = x * sin + y * cos;
+    points[i]!.x = cx + tx;
+    points[i]!.y = cy + ty;
+  }
+  return points;
+}
+
+export function getResizeHandleCenters(bounds: Rect, transform?: DrawingTransform): ResizeHandleCenter[] {
+  return getResizeHandleCentersInto(bounds, transform, []);
 }
 
 export function hitTestResizeHandle(
@@ -121,55 +154,93 @@ export function hitTestResizeHandle(
   const cy = bounds.y + bounds.height / 2;
   const hw = bounds.width / 2;
   const hh = bounds.height / 2;
-  const trig = getTransformTrig(transform!);
-
-  const test = (handle: ResizeHandle, dx: number, dy: number): ResizeHandle | null => {
-    const t = applyTransformVectorFast(dx, dy, transform!, trig);
-    const hx = cx + t.x;
-    const hy = cy + t.y;
-    if (x >= hx - half && x <= hx + half && y >= hy - half && y <= hy + half) return handle;
-    return null;
-  };
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
+  const flipH = transform.flipH;
+  const flipV = transform.flipV;
 
   // Test in the same order as `getResizeHandleCenters` for deterministic behavior.
-  return (
-    test("nw", -hw, -hh) ??
-    test("n", 0, -hh) ??
-    test("ne", hw, -hh) ??
-    test("e", hw, 0) ??
-    test("se", hw, hh) ??
-    test("s", 0, hh) ??
-    test("sw", -hw, hh) ??
-    test("w", -hw, 0)
-  );
+  for (let i = 0; i < RESIZE_HANDLE_ORDER.length; i += 1) {
+    const handle = RESIZE_HANDLE_ORDER[i]!;
+    let dx = RESIZE_HANDLE_SX[i]! * hw;
+    let dy = RESIZE_HANDLE_SY[i]! * hh;
+    if (flipH) dx = -dx;
+    if (flipV) dy = -dy;
+    const tx = dx * cos - dy * sin;
+    const ty = dx * sin + dy * cos;
+    const hx = cx + tx;
+    const hy = cy + ty;
+    if (x >= hx - half && x <= hx + half && y >= hy - half && y <= hy + half) return handle;
+  }
+  return null;
 }
 
 export function getRotationHandleCenter(bounds: Rect, transform?: DrawingTransform): RotationHandleCenter {
+  const out: RotationHandleCenter = { x: 0, y: 0 };
+  return getRotationHandleCenterInto(bounds, transform, out);
+}
+
+/**
+ * Allocation-free rotation handle center calculation.
+ *
+ * Writes into `out` and returns it.
+ */
+export function getRotationHandleCenterInto(
+  bounds: Rect,
+  transform: DrawingTransform | undefined,
+  out: RotationHandleCenter,
+): RotationHandleCenter {
   const cx = bounds.x + bounds.width / 2;
   const cy = bounds.y + bounds.height / 2;
+  const hw = bounds.width / 2;
+  const hh = bounds.height / 2;
 
-  // Find the visually top edge midpoint after transforms so the rotation handle
-  // always appears above the selection, even when flips swap local edges.
-  let topEdge: { x: number; y: number } | null = null;
-  for (const c of getResizeHandleCenters(bounds, transform)) {
-    if (c.handle !== "n" && c.handle !== "e" && c.handle !== "s" && c.handle !== "w") continue;
-    if (!topEdge || c.y < topEdge.y) topEdge = { x: c.x, y: c.y };
-  }
-  if (!topEdge) {
-    // Degenerate bounds; fall back to an untransformed top handle location.
-    topEdge = { x: cx, y: bounds.y };
+  let topX = cx;
+  let topY = cy - hh;
+
+  if (hasNonIdentityTransform(transform)) {
+    const trig = getTransformTrig(transform);
+    const cos = trig.cos;
+    const sin = trig.sin;
+    const flipH = transform.flipH;
+    const flipV = transform.flipV;
+
+    let bestX = 0;
+    let bestY = 0;
+    let hasBest = false;
+
+    for (let i = 0; i < 4; i += 1) {
+      let dx = ROTATION_EDGE_SX[i]! * hw;
+      let dy = ROTATION_EDGE_SY[i]! * hh;
+      if (flipH) dx = -dx;
+      if (flipV) dy = -dy;
+      const tx = dx * cos - dy * sin;
+      const ty = dx * sin + dy * cos;
+      const wx = cx + tx;
+      const wy = cy + ty;
+      if (!hasBest || wy < bestY) {
+        bestX = wx;
+        bestY = wy;
+        hasBest = true;
+      }
+    }
+
+    if (hasBest) {
+      topX = bestX;
+      topY = bestY;
+    }
   }
 
-  const vx = topEdge.x - cx;
-  const vy = topEdge.y - cy;
+  const vx = topX - cx;
+  const vy = topY - cy;
   const len = Math.hypot(vx, vy);
   const ux = len > 0 ? vx / len : 0;
   const uy = len > 0 ? vy / len : -1;
 
-  return {
-    x: topEdge.x + ux * ROTATION_HANDLE_OFFSET_PX,
-    y: topEdge.y + uy * ROTATION_HANDLE_OFFSET_PX,
-  };
+  out.x = topX + ux * ROTATION_HANDLE_OFFSET_PX;
+  out.y = topY + uy * ROTATION_HANDLE_OFFSET_PX;
+  return out;
 }
 
 export function hitTestRotationHandle(
@@ -178,9 +249,56 @@ export function hitTestRotationHandle(
   y: number,
   transform?: DrawingTransform,
 ): boolean {
-  const c = getRotationHandleCenter(bounds, transform);
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const hw = bounds.width / 2;
+  const hh = bounds.height / 2;
+
+  let topX = cx;
+  let topY = cy - hh;
+
+  if (hasNonIdentityTransform(transform)) {
+    const trig = getTransformTrig(transform);
+    const cos = trig.cos;
+    const sin = trig.sin;
+    const flipH = transform.flipH;
+    const flipV = transform.flipV;
+
+    let bestX = 0;
+    let bestY = 0;
+    let hasBest = false;
+
+    for (let i = 0; i < 4; i += 1) {
+      let dx = ROTATION_EDGE_SX[i]! * hw;
+      let dy = ROTATION_EDGE_SY[i]! * hh;
+      if (flipH) dx = -dx;
+      if (flipV) dy = -dy;
+      const tx = dx * cos - dy * sin;
+      const ty = dx * sin + dy * cos;
+      const wx = cx + tx;
+      const wy = cy + ty;
+      if (!hasBest || wy < bestY) {
+        bestX = wx;
+        bestY = wy;
+        hasBest = true;
+      }
+    }
+    if (hasBest) {
+      topX = bestX;
+      topY = bestY;
+    }
+  }
+
+  const vx = topX - cx;
+  const vy = topY - cy;
+  const len = Math.hypot(vx, vy);
+  const ux = len > 0 ? vx / len : 0;
+  const uy = len > 0 ? vy / len : -1;
+
+  const handleX = topX + ux * ROTATION_HANDLE_OFFSET_PX;
+  const handleY = topY + uy * ROTATION_HANDLE_OFFSET_PX;
   const half = ROTATION_HANDLE_HIT_SIZE_PX / 2;
-  return x >= c.x - half && x <= c.x + half && y >= c.y - half && y <= c.y + half;
+  return x >= handleX - half && x <= handleX + half && y >= handleY - half && y <= handleY + half;
 }
 
 export function cursorForRotationHandle(active?: boolean): string {
@@ -254,8 +372,14 @@ export function cursorForResizeHandleWithTransform(handle: ResizeHandle, transfo
       break;
   }
 
-  const v = applyTransformVector(dx, dy, transform!);
-  const angleDeg = (Math.atan2(v.y, v.x) * 180) / Math.PI;
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
+  let vx = transform.flipH ? -dx : dx;
+  let vy = transform.flipV ? -dy : dy;
+  const tx = vx * cos - vy * sin;
+  const ty = vx * sin + vy * cos;
+  const angleDeg = (Math.atan2(ty, tx) * 180) / Math.PI;
   // Reduce to [0, 180) since cursor direction is symmetric under 180° rotation.
   const normalized = ((angleDeg % 180) + 180) % 180;
   // Snap to nearest 45° (0, 45, 90, 135) modulo 180.
