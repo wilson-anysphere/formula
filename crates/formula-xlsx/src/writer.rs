@@ -899,23 +899,6 @@ fn sheet_xml(
     };
     let sheet_format_pr_xml = render_sheet_format_pr(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
-    let sheet_format_pr_xml = {
-        let mut attrs = String::new();
-        if let Some(base) = sheet.base_col_width {
-            attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-        }
-        if let Some(width) = sheet.default_col_width {
-            attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
-        }
-        if let Some(height) = sheet.default_row_height {
-            attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
-        }
-        if attrs.is_empty() {
-            String::new()
-        } else {
-            format!(r#"<sheetFormatPr{attrs}/>"#)
-        }
-    };
 
     struct ColumnarInfo<'a> {
         origin: CellRef,

@@ -4762,8 +4762,8 @@ impl WasmWorkbook {
                         // cached value and still store the display formula in the input map.
                         let _ = wb.engine.set_cell_formula(&sheet_name, &address, &display);
                         if let Some(phonetic) = &phonetic {
-                            // `Engine::set_cell_formula` clears phonetic metadata, so re-apply it
-                            // after setting the formula.
+                            // `Engine::set_cell_formula` clears phonetic metadata, so re-apply it after
+                            // setting the formula.
                             wb.engine
                                 .set_cell_phonetic(&sheet_name, &address, Some(phonetic.clone()))
                                 .map_err(|err| js_err(err.to_string()))?;
@@ -7050,12 +7050,105 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
+    fn build_inline_string_formula_phonetic_fixture_xlsx() -> Vec<u8> {
+        use std::io::{Cursor, Write};
+        use zip::write::FileOptions;
+        use zip::{CompressionMethod, ZipWriter};
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#;
+
+        // A1 contains a formula with an inline string cached result that includes phonetic guides.
+        // Some real-world XLSX producers encode string formula results using `t="inlineStr"` with
+        // `<is>` content (instead of shared strings).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr">
+        <f>"Base"</f>
+        <is>
+          <t>Base</t>
+          <phoneticPr fontId="0" type="noConversion"/>
+          <rPh sb="0" eb="4"><t>PHONETIC</t></rPh>
+        </is>
+      </c>
+      <c r="B1">
+        <f>PHONETIC(A1)</f>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(root_rels.as_bytes()).unwrap();
+
+        zip.start_file("[Content_Types].xml", options).unwrap();
+        zip.write_all(content_types.as_bytes()).unwrap();
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
     #[test]
     fn from_xlsx_bytes_imports_cell_phonetic_metadata_for_phonetic_function() {
         let bytes = build_inline_string_phonetic_fixture_xlsx();
         let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
         wb.inner.recalculate_internal(None).unwrap();
 
+        assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("PHONETIC".to_string())
+        );
+    }
+
+    #[test]
+    fn from_xlsx_bytes_preserves_phonetic_guides_for_formula_cells() {
+        let bytes = build_inline_string_formula_phonetic_fixture_xlsx();
+        let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text("Base".to_string())
+        );
         assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
