@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
 
@@ -62,8 +64,8 @@ test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)"
 
 test("chart + drawing overlay hosts are styled via charts-overlay.css", async () => {
   const mainPath = path.join(desktopRoot, "src/main.ts");
-  const main = await readFile(mainPath, "utf8");
-  assert.match(main, /["']\.\/styles\/charts-overlay\.css["']/);
+  const main = stripComments(await readFile(mainPath, "utf8"));
+  assert.match(main, /^\s*import\s+["']\.\/styles\/charts-overlay\.css["']\s*;?/m);
 
   const cssPath = path.join(desktopRoot, "src/styles/charts-overlay.css");
   const css = await readFile(cssPath, "utf8");

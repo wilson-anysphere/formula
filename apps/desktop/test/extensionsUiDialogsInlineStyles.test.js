@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractSection(source, startMarker, endMarker) {
@@ -20,7 +22,7 @@ function extractSection(source, startMarker, endMarker) {
 
 test("extension UI dialogs avoid inline style assignments", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSource = fs.readFileSync(mainPath, "utf8");
+  const mainSource = stripComments(fs.readFileSync(mainPath, "utf8"));
 
   const extensionsDir = path.join(__dirname, "..", "src", "extensions");
   const uiCandidates = ["ui.js", "ui.ts"];
@@ -143,12 +145,12 @@ test("extension UI dialogs avoid inline style assignments", () => {
 
   assert.match(
     mainSource,
-    /import\s+["']\.\/styles\/dialogs\.css["'];/,
+    /^\s*import\s+["']\.\/styles\/dialogs\.css["']\s*;?/m,
     "main.ts should import dialogs.css so extension dialogs render correctly",
   );
   assert.match(
     mainSource,
-    /import\s+["']\.\/styles\/extensions-ui\.css["'];/,
+    /^\s*import\s+["']\.\/styles\/extensions-ui\.css["']\s*;?/m,
     "main.ts should import extensions-ui.css so extension dialogs render correctly",
   );
 });

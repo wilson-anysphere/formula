@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("AI chat React panels avoid inline styles (use ai-chat.css classes)", () => {
@@ -39,11 +41,10 @@ test("AI chat React panels avoid inline styles (use ai-chat.css classes)", () =>
     assert.ok(css.includes(selector), `Expected ai-chat.css to define ${selector}`);
   }
 
-  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  const mainSrc = stripComments(fs.readFileSync(mainPath, "utf8"));
   assert.match(
     mainSrc,
-    /import\s+["'][^"']*styles\/ai-chat\.css["']/,
+    /^\s*import\s+["'][^"']*styles\/ai-chat\.css["']\s*;?/m,
     "apps/desktop/src/main.ts should import src/styles/ai-chat.css so the AI chat UI is styled in production builds",
   );
 });
-

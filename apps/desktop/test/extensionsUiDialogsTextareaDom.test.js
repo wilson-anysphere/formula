@@ -4,12 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let showInputBox = null;
 try {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSource = fs.readFileSync(mainPath, "utf8");
+  const mainSource = stripComments(fs.readFileSync(mainPath, "utf8"));
   const uiImportMatch = mainSource.match(
     /import\s+\{[^}]*\bshowInputBox\b[^}]*\}\s+from\s+["'](\.\/extensions\/ui[^"']*)["'];/,
   );

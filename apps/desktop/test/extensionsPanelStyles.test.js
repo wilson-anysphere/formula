@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
 
@@ -37,12 +39,11 @@ test("ExtensionsPanel uses CSS classes (no React inline style props)", async () 
 
 test("extensions.css is imported and defines required classes", async () => {
   const mainPath = path.join(desktopRoot, "src", "main.ts");
-  const main = await readFile(mainPath, "utf8");
-  assert.match(main, /["']\.\/styles\/extensions\.css["']/);
+  const main = stripComments(await readFile(mainPath, "utf8"));
+  assert.match(main, /^\s*import\s+["']\.\/styles\/extensions\.css["']\s*;?/m);
 
   const cssPath = path.join(desktopRoot, "src", "styles", "extensions.css");
   const css = await readFile(cssPath, "utf8");
   assert.match(css, /\.extensions-panel\s*\{/);
   assert.match(css, /\.extension-webview\s*\{/);
 });
-

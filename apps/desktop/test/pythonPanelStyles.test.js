@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("PythonPanel DOM mount uses CSS classes (no inline style.*)", () => {
@@ -58,6 +60,10 @@ test("PythonPanel DOM mount uses CSS classes (no inline style.*)", () => {
 
 test("desktop main.ts imports python-panel.css", () => {
   const filePath = path.join(__dirname, "..", "src", "main.ts");
-  const content = fs.readFileSync(filePath, "utf8");
-  assert.match(content, /\.\/styles\/python-panel\.css/, "Expected main.ts to import ./styles/python-panel.css");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
+  assert.match(
+    content,
+    /^\s*import\s+["']\.\/styles\/python-panel\.css["']\s*;?/m,
+    "Expected main.ts to import ./styles/python-panel.css",
+  );
 });

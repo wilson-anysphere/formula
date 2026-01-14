@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("renderMacroRunner is class-driven (no inline style assignments)", () => {
@@ -28,9 +30,9 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  const mainSrc = stripComments(fs.readFileSync(mainPath, "utf8"));
   assert.equal(
-    /import\s+["'][^"']*styles\/macros-runner\.css["']/.test(mainSrc),
+    /^\s*import\s+["'][^"']*styles\/macros-runner\.css["']\s*;?/m.test(mainSrc),
     true,
     "apps/desktop/src/main.ts should import src/styles/macros-runner.css so the macro runner UI is styled in production builds",
   );

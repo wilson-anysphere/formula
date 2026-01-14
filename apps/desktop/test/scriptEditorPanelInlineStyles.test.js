@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractSection(source, startMarker, endMarker) {
@@ -70,9 +72,9 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  const mainSrc = stripComments(fs.readFileSync(mainPath, "utf8"));
   assert.equal(
-    /import\s+["'][^"']*styles\/script-editor\.css["']/.test(mainSrc),
+    /^\s*import\s+["'][^"']*styles\/script-editor\.css["']\s*;?/m.test(mainSrc),
     true,
     "apps/desktop/src/main.ts should import src/styles/script-editor.css so the Script Editor panel is styled in production builds",
   );

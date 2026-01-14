@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("Query editor React panels avoid inline styles (use query-editor.css classes)", () => {
@@ -34,11 +36,10 @@ test("Query editor React panels avoid inline styles (use query-editor.css classe
   }
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  const mainSrc = stripComments(fs.readFileSync(mainPath, "utf8"));
   assert.match(
     mainSrc,
-    /import\s+["'][^"']*styles\/query-editor\.css["']/,
+    /^\s*import\s+["'][^"']*styles\/query-editor\.css["']\s*;?/m,
     "apps/desktop/src/main.ts should import src/styles/query-editor.css so the query editor UI is styled in production builds",
   );
 });
-
