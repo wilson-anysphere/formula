@@ -1931,8 +1931,6 @@ impl DataModel {
                         .map(|p| display_path(p.as_slice()))
                         .unwrap_or_else(|| "<unknown>".to_string());
                     let second = display_path(table_path.as_slice());
-                    let start_table = display_table(start_table);
-                    let target_table = display_table(target_table);
                     return Err(DaxError::Eval(format!(
                         "ambiguous active relationship path between {start_display} and {target_display}: {first}; {second}"
                     )));
