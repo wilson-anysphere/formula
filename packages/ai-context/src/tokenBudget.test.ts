@@ -91,6 +91,12 @@ describe("tokenBudget", () => {
     expect(stableJsonStringify(set1)).toBe('["a","b"]');
   });
 
+  it("stableJsonStringify handles cyclic objects without crashing", () => {
+    const obj: any = { a: 1 };
+    obj.self = obj;
+    expect(stableJsonStringify(obj)).toBe('{"a":1,"self":"[Circular]"}');
+  });
+
   it("packSectionsToTokenBudgetWithReport reports token usage, trims, and drops", () => {
     const charEstimator = {
       estimateTextTokens: (text: string) => String(text ?? "").length,

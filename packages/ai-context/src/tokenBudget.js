@@ -52,61 +52,68 @@ export function stableJsonStringify(value) {
  * @param {unknown} value
  * @returns {unknown}
  */
-function stabilizeJson(value) {
-  if (value === undefined) return null;
+function stabilizeJson(value, stack = new WeakSet()) {
+  if (value === undefined || value === null) return null;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "symbol") return value.toString();
   if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
-  if (value instanceof Date) return value.toISOString();
-  if (value instanceof Map) {
-    const entries = Array.from(value.entries()).map(([k, v], index) => {
-      const stableKey = stabilizeJson(k);
-      const stableValue = stabilizeJson(v);
-      // Use a stable string form for sorting that is independent of insertion order.
-      const keySort = JSON.stringify(stableKey) ?? "";
-      const valueSort = JSON.stringify(stableValue) ?? "";
-      return { stableKey, stableValue, keySort, valueSort, index };
-    });
+  if (typeof value !== "object") return value;
 
-    entries.sort((a, b) => {
-      if (a.keySort < b.keySort) return -1;
-      if (a.keySort > b.keySort) return 1;
-      if (a.valueSort < b.valueSort) return -1;
-      if (a.valueSort > b.valueSort) return 1;
-      return a.index - b.index;
-    });
+  // Avoid infinite recursion for cyclic structures (common in user-provided attachment payloads).
+  if (stack.has(value)) return "[Circular]";
+  stack.add(value);
 
-    return entries.map((e) => [e.stableKey, e.stableValue]);
-  }
+  try {
+    if (value instanceof Date) return value.toISOString();
 
-  if (value instanceof Set) {
-    const values = Array.from(value.values()).map((v, index) => {
-      const stableValue = stabilizeJson(v);
-      const valueSort = JSON.stringify(stableValue) ?? "";
-      return { stableValue, valueSort, index };
-    });
+    if (value instanceof Map) {
+      const entries = Array.from(value.entries()).map(([k, v], index) => {
+        const stableKey = stabilizeJson(k, stack);
+        const stableValue = stabilizeJson(v, stack);
+        // Use a stable string form for sorting that is independent of insertion order.
+        const keySort = JSON.stringify(stableKey) ?? "";
+        const valueSort = JSON.stringify(stableValue) ?? "";
+        return { stableKey, stableValue, keySort, valueSort, index };
+      });
 
-    values.sort((a, b) => {
-      if (a.valueSort < b.valueSort) return -1;
-      if (a.valueSort > b.valueSort) return 1;
-      return a.index - b.index;
-    });
+      entries.sort((a, b) => {
+        if (a.keySort < b.keySort) return -1;
+        if (a.keySort > b.keySort) return 1;
+        if (a.valueSort < b.valueSort) return -1;
+        if (a.valueSort > b.valueSort) return 1;
+        return a.index - b.index;
+      });
 
-    return values.map((v) => v.stableValue);
-  }
+      return entries.map((e) => [e.stableKey, e.stableValue]);
+    }
 
-  if (Array.isArray(value)) return value.map((v) => stabilizeJson(v));
+    if (value instanceof Set) {
+      const values = Array.from(value.values()).map((v, index) => {
+        const stableValue = stabilizeJson(v, stack);
+        const valueSort = JSON.stringify(stableValue) ?? "";
+        return { stableValue, valueSort, index };
+      });
 
-  if (value && typeof value === "object") {
+      values.sort((a, b) => {
+        if (a.valueSort < b.valueSort) return -1;
+        if (a.valueSort > b.valueSort) return 1;
+        return a.index - b.index;
+      });
+
+      return values.map((v) => v.stableValue);
+    }
+
+    if (Array.isArray(value)) return value.map((v) => stabilizeJson(v, stack));
+
     const obj = /** @type {Record<string, unknown>} */ (value);
     const keys = Object.keys(obj).sort();
     /** @type {Record<string, unknown>} */
     const out = {};
-    for (const key of keys) out[key] = stabilizeJson(obj[key]);
+    for (const key of keys) out[key] = stabilizeJson(obj[key], stack);
     return out;
+  } finally {
+    stack.delete(value);
   }
-
-  return value;
 }
 
 /**
