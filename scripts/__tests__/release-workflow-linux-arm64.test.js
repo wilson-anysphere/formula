@@ -132,3 +132,36 @@ test("release workflow verifies Linux artifacts include .AppImage + .deb + .rpm 
     `Expected the Linux artifact verification step to run for both ubuntu-24.04 and ubuntu-24.04-arm64.\nSaw snippet:\n${snippet}`,
   );
 });
+
+test("release workflow installs required Linux build deps for both x86_64 and ARM64 runners", async () => {
+  const text = await readReleaseWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const stepNeedle = "Install Linux dependencies";
+  const idx = lines.findIndex((line) => line.includes(stepNeedle));
+  assert.ok(
+    idx >= 0,
+    `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
+  );
+
+  const snippet = lines.slice(idx, idx + 60).join("\n");
+
+  // This must run for both ubuntu-24.04 (x86_64) and ubuntu-24.04-arm64.
+  const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
+  const ubuntuPrefixGuard = /if:\s*startsWith\(matrix\.platform,\s*['"]ubuntu-24\.04['"]\)/;
+  const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
+
+  assert.doesNotMatch(
+    snippet,
+    x86OnlyGuard,
+    `Expected the Linux dependency install step NOT to be gated to only ubuntu-24.04 (x86_64).`,
+  );
+  assert.ok(
+    runnerOsGuard.test(snippet) || ubuntuPrefixGuard.test(snippet),
+    `Expected the Linux dependency install step to run for both ubuntu-24.04 and ubuntu-24.04-arm64.\nSaw snippet:\n${snippet}`,
+  );
+
+  // Keep this lightweight: assert the key GUI/webview deps remain present.
+  assert.match(snippet, /\blibgtk-3-dev\b/);
+  assert.match(snippet, /\blibwebkit2gtk-4\.1-dev\b/);
+});
