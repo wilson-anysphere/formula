@@ -537,7 +537,8 @@ export class DocumentCellProvider implements CellProvider {
               : typeof (docStyle as any).font_name === "string"
                 ? (docStyle as any).font_name
                 : null;
-    if (fontName && fontName.trim() !== "") out.fontFamily = fontName;
+    const fontNameTrimmed = typeof fontName === "string" ? fontName.trim() : "";
+    if (fontNameTrimmed) out.fontFamily = fontNameTrimmed;
 
     let fontSizePx: number | null = null;
     // Prefer the UI-style `font.size` (pt) when present so user edits override imported `size_100pt`.

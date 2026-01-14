@@ -266,6 +266,19 @@ test("DocumentWorkbookAdapter resolves DocumentController sheet meta names with 
   assert.equal(sheet.name, "Å");
 });
 
+test("DocumentWorkbookAdapter trims DocumentController sheet meta names when exposing sheet.name", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  // Bypass `renameSheet` validation/normalization so we cover defensive trimming behavior.
+  doc.sheetMeta.set("Sheet1", { name: "  Budget  ", visibility: "visible" });
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+  const sheet = workbook.getSheet("Budget");
+  assert.equal(sheet.sheetId, "Sheet1");
+  assert.equal(sheet.name, "Budget");
+});
+
 test("DocumentWorkbookAdapter exposes merged-cell metadata for search semantics", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", "hello");

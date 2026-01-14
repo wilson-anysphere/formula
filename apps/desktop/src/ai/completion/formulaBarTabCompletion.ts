@@ -407,7 +407,8 @@ function createPreviewEvaluator(params: {
 
   const resolveSheetDisplayNameById = (id: string): string => {
     const resolved = sheetNameResolver?.getSheetNameById(id) ?? null;
-    if (typeof resolved === "string" && resolved.trim() !== "") return resolved;
+    const resolvedTrimmed = typeof resolved === "string" ? resolved.trim() : "";
+    if (resolvedTrimmed) return resolvedTrimmed;
     const meta = typeof (document as any)?.getSheetMeta === "function" ? (document as any).getSheetMeta(id) : null;
     const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
     return metaName || id;

@@ -213,7 +213,7 @@ class DocumentSheetAdapter {
     const resolved = this.sheetNameResolver?.getSheetNameById?.(this.sheetId);
     if (resolved) return resolved;
     const metaName = this.document.getSheetMeta?.(this.sheetId)?.name;
-    if (typeof metaName === "string" && metaName.trim() !== "") return metaName;
+    if (typeof metaName === "string" && metaName.trim() !== "") return metaName.trim();
     return this.sheetId;
   }
 

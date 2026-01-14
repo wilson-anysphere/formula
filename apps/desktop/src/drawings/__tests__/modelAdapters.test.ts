@@ -143,6 +143,31 @@ describe("drawings/modelAdapters", () => {
     expect(ui.kind.label).toContain("rId5");
   });
 
+  it("trims ChartPlaceholder rel ids when falling back to them as chartIds", () => {
+    const model = {
+      id: "7",
+      kind: {
+        ChartPlaceholder: {
+          rel_id: "  rId5  ",
+          raw_xml: "<xdr:graphicFrame><a:graphic/></xdr:graphicFrame>",
+        },
+      },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 10,
+    };
+
+    // No sheetId context → chartId falls back to the rel id.
+    const ui = convertModelDrawingObjectToUiDrawingObject(model);
+    expect(ui.kind.type).toBe("chart");
+    expect(ui.kind.chartId).toBe("rId5");
+    expect(ui.kind.label).toBe("Chart (rId5)");
+  });
+
   it("hashes unsafe drawing object ids (beyond MAX_SAFE_INTEGER) into stable safe integers", () => {
     const unsafeId = "9007199254740993";
     const model = {

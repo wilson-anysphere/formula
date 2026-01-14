@@ -17,7 +17,7 @@ describe("DocumentCellProvider formatting integration", () => {
     const EXCEL_MAX_ROW = 1_048_576 - 1;
     doc.setRangeFormat("Sheet1", { start: { row: 0, col: 0 }, end: { row: EXCEL_MAX_ROW, col: 0 } }, {
       fill: { pattern: "solid", fgColor: "#FFFFFF00" },
-      font: { bold: true, color: "#FF00FF00", size: 12, name: "Arial" },
+      font: { bold: true, color: "#FF00FF00", size: 12, name: "  Arial  " },
       alignment: { horizontal: "right", wrapText: true }
     });
 

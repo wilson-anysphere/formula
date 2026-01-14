@@ -535,6 +535,7 @@ function convertModelDrawingObjectKind(
           : typeof relIdUnwrapped === "number" || typeof relIdUnwrapped === "bigint"
             ? String(relIdUnwrapped)
             : "";
+      const relIdTrimmed = relId.trim();
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
       const label = extractDrawingObjectName(rawXml);
@@ -547,7 +548,7 @@ function convertModelDrawingObjectKind(
       // rendering can use `graphicFramePlaceholderLabel(...)` for a stable label.
       const looksLikeChartGraphicFrame =
         typeof rawXml === "string" && rawXml.includes("drawingml/2006/chart");
-      if ((relId.trim() === "" || relId === "unknown") && !looksLikeChartGraphicFrame) {
+      if ((relIdTrimmed === "" || relIdTrimmed === "unknown") && !looksLikeChartGraphicFrame) {
         return {
           type: "unknown",
           rawXml,
@@ -562,11 +563,12 @@ function convertModelDrawingObjectKind(
         sheetId && objectId != null
           ? `${sheetId}:${String(objectId)}`
           : // Back-compat: when the sheet context isn't available, fall back to the drawing rel id.
-            relId.trim() !== "" && relId !== "unknown"
-              ? relId
+            relIdTrimmed !== "" && relIdTrimmed !== "unknown"
+              ? relIdTrimmed
               : undefined;
 
-      const fallbackLabel = relId.trim() !== "" && relId !== "unknown" ? `Chart (${relId})` : "Chart";
+      const fallbackLabel =
+        relIdTrimmed !== "" && relIdTrimmed !== "unknown" ? `Chart (${relIdTrimmed})` : "Chart";
       return { type: "chart", chartId, label: labelMeta ?? (label ?? fallbackLabel), rawXml, raw_xml: rawXml };
     }
     case "chart": {
