@@ -340,7 +340,7 @@ the existing artifacts:
 pnpm -C apps/desktop check:coi -- --no-build
 ```
 
-Optional: override the binary path explicitly (useful when multiple `target/**/release` outputs exist):
+Optional: override the binary path explicitly (useful when multiple Cargo target outputs exist, e.g. `target/release/...` vs `target/<triple>/release/...`):
 
 ```bash
 pnpm -C apps/desktop check:coi -- --no-build --bin <path-to-formula-desktop>
