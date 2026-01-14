@@ -79,6 +79,21 @@ import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
 import { NodeFileBinaryStorage } from "@formula/ai-audit/node";
 ```
 
+In Node, `createDefaultAIAuditStore()` defaults to an in-memory store (to avoid pulling in `sql.js` unless explicitly requested). To opt into SQLite persistence:
+
+```ts
+import { createDefaultAIAuditStore, NodeFileBinaryStorage } from "@formula/ai-audit/node";
+
+const store = await createDefaultAIAuditStore({
+  prefer: "sqlite",
+  sqlite_storage: new NodeFileBinaryStorage("ai_audit.sqlite"),
+  max_entries: 10_000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000,
+  // bounded is enabled by default
+  // bounded: false,
+});
+```
+
 In Node, `@formula/ai-audit/sqlite` also exposes helpers for resolving the `sql.js` wasm assets:
 
 ```ts
