@@ -1597,7 +1597,10 @@ impl Engine {
                 row: cell.row,
                 col: cell.col,
             };
-            let key = CellKey { sheet: sheet_id, addr };
+            let key = CellKey {
+                sheet: sheet_id,
+                addr,
+            };
 
             let existing_style_id = self
                 .workbook
@@ -1631,7 +1634,9 @@ impl Engine {
             self.mark_all_compiled_cells_dirty();
         }
 
-        if (sheet_dims_changed || style_changed) && self.calc_settings.calculation_mode != CalculationMode::Manual {
+        if (sheet_dims_changed || style_changed)
+            && self.calc_settings.calculation_mode != CalculationMode::Manual
+        {
             self.recalculate();
         }
 
