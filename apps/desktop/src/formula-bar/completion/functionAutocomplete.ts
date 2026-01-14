@@ -390,6 +390,13 @@ export class FormulaBarFunctionAutocompleteController {
       return true;
     }
 
+    // Excel/editor-style commit character: typing `(` completes the selected function name.
+    if (e.key === "(") {
+      e.preventDefault();
+      this.acceptSelected();
+      return true;
+    }
+
     // Match typical editor UX:
     // - Tab accepts the selected item (Shift+Tab should keep its usual meaning in the formula bar)
     // - Enter accepts (Shift+Enter remains available for formula-bar commit/navigation semantics)
