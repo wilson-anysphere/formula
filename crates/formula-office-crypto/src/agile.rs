@@ -180,8 +180,11 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
     // Agile password key-encryptor IV handling:
     //
-    // MS-OFFCRYPTO specifies IV derivation as `TruncateHash(Hash(saltValue || blockKey), blockSize)`
-    // for password-key-encryptor blobs, but some producers use `saltValue[..blockSize]` directly.
+    // Excel-compatible implementations use `saltValue[..blockSize]` as the AES-CBC IV for the
+    // password-key-encryptor blobs (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`,
+    // `encryptedKeyValue`). Some non-Excel producers appear to derive per-blob IVs as
+    // `TruncateHash(Hash(saltValue || blockKey), blockSize)` (similar to other Agile IV derivations).
+    //
     // Real-world fixture sets contain both variants, so we try both schemes.
     let password_block_size = info.password_key_encryptor.block_size;
     if password_block_size != 16 {
