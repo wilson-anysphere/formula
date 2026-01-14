@@ -117,6 +117,14 @@ export function extractFormulaReferences(
     if (token.type === "identifier" && opts?.resolveName) {
       const lower = token.text.toLowerCase();
       if (lower === "true" || lower === "false") continue;
+      // Treat `IDENT (` as a function call even when there is whitespace between the name
+      // and the opening paren (Excel permits this). Named-range extraction should avoid
+      // highlighting function names.
+      let scan = token.end;
+      while (scan < input.length && (input[scan] === " " || input[scan] === "\t" || input[scan] === "\n" || input[scan] === "\r")) {
+        scan += 1;
+      }
+      if (input[scan] === "(") continue;
       const resolved = opts.resolveName(token.text);
       if (!resolved) continue;
       references.push({

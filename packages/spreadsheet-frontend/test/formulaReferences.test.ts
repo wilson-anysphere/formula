@@ -148,6 +148,14 @@ describe("extractFormulaReferences", () => {
     expect(references.map((r) => r.text)).toEqual(["MyRange"]);
   });
 
+  it("does not treat identifiers followed by whitespace and '(' as named ranges", () => {
+    const input = "=MyFunc (MyRange)";
+    const { references } = extractFormulaReferences(input, 0, 0, {
+      resolveName: (name) => (name === "MyFunc" || name === "MyRange" ? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 } : null),
+    });
+    expect(references.map((r) => r.text)).toEqual(["MyRange"]);
+  });
+
   it("does not treat TRUE/FALSE identifiers as named ranges", () => {
     const input = "=TRUE+FALSE+MyRange";
     const { references } = extractFormulaReferences(input, 0, 0, {
