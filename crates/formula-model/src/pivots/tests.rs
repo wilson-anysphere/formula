@@ -65,10 +65,18 @@ fn pivot_grand_totals_defaults_true_when_fields_missing() {
     let decoded: GrandTotals = serde_json::from_value(json!({})).unwrap();
     assert_eq!(decoded, GrandTotals::default());
 
+    let decoded: PivotConfig = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(decoded.grand_totals, GrandTotals::default());
+
     // Back-compat: allow partial `grandTotals` payloads to deserialize by defaulting
     // missing keys to Excel-like defaults (true).
-    let decoded: PivotConfig = serde_json::from_value(json!({ "grandTotals": {} })).unwrap();
+    let decoded: PivotConfig = serde_json::from_value(json!({"grandTotals": {}})).unwrap();
     assert_eq!(decoded.grand_totals, GrandTotals::default());
+
+    let decoded: PivotConfig = serde_json::from_value(json!({"grandTotals": {"rows": false}}))
+        .unwrap();
+    assert!(!decoded.grand_totals.rows);
+    assert!(decoded.grand_totals.columns);
 }
 
 #[test]

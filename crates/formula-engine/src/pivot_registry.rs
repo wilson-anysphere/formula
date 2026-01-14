@@ -58,10 +58,10 @@ pub struct PivotRegistryEntry {
     pub field_indices: HashMap<String, usize>,
     /// Case-folded value-field caption -> value-field index in `pivot.config.value_fields`.
     pub value_field_indices: HashMap<String, usize>,
-    /// Case-folded cache field name -> canonical cache field name (used to access `cache.unique_values`).
-    pub cache_field_names: HashMap<String, String>,
-    /// Per value-field index, the source-cache column index for that value field.
-    pub value_field_source_indices: Vec<usize>,
+/// Case-folded cache field name -> canonical cache field name (used to access `cache.unique_values`).
+pub cache_field_names: HashMap<String, String>,
+/// Per value-field index, the source-cache column index for that value field.
+pub value_field_source_indices: Vec<usize>,
 }
 
 impl PivotRegistryEntry {
