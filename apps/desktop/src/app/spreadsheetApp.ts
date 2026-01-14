@@ -6453,6 +6453,10 @@ export class SpreadsheetApp {
   async restoreDocumentState(snapshot: Uint8Array): Promise<void> {
     this.wasmSyncSuspended = true;
     try {
+      // Restoring can happen while a legacy chart/drawing drag gesture is still active. Cancel any
+      // in-progress gestures first so the eventual pointerup cannot commit/cancel against a workbook
+      // state that is about to be replaced.
+      this.cancelLegacyGesturesForSheetChange();
       // Replacing the workbook state can invalidate any in-progress drawing gestures (drag/resize)
       // and the selected drawing. Cancel interactions up front so we don't attempt to commit/cancel
       // against a document that is about to be replaced.
@@ -6751,9 +6755,50 @@ export class SpreadsheetApp {
   /**
    * Switch the active sheet id and re-render.
    */
+  private cancelLegacyGesturesForSheetChange(): void {
+    // Legacy chart dragging (non-canvas charts) uses SpreadsheetApp-managed pointer listeners.
+    // If a sheet switch occurs mid-drag (e.g. programmatic navigation), cancel the gesture and
+    // revert the chart anchor to the initial pointerdown snapshot (Excel-like).
+    const chartDrag = this.chartDragState;
+    if (chartDrag) {
+      this.chartDragState = null;
+      try {
+        this.chartDragAbort?.abort();
+      } catch {
+        // ignore
+      }
+      this.chartDragAbort = null;
+      try {
+        this.chartStore.updateChartAnchor(chartDrag.chartId, chartDrag.startAnchor as any);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Legacy drawings drag/resize gestures are handled by SpreadsheetApp itself (no
+    // DrawingInteractionController). Cancel them so the eventual pointerup cannot commit into
+    // a different sheet after the sheet id changes.
+    const gesture = this.drawingGesture;
+    if (gesture) {
+      this.drawingGesture = null;
+      this.stopDrawingGestureAutoScroll();
+      this.drawingGesturePointerPos = null;
+      try {
+        this.root.releasePointerCapture(gesture.pointerId);
+      } catch {
+        // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+      }
+      // Drop any live preview cache so overlays/hit testing re-read the persisted document state.
+      this.drawingObjectsCache = null;
+      this.canvasChartCombinedDrawingObjectsCache = null;
+      this.invalidateDrawingHitTestIndexCaches();
+    }
+  }
+
   activateSheet(sheetId: string): void {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
+    this.cancelLegacyGesturesForSheetChange();
     // Switching sheets mid-drag/resize should cancel the active gesture before we
     // swap out the active-sheet drawing list; otherwise the interaction
     // controller could apply its cleanup (`setObjects`) to the new sheet.
@@ -6829,6 +6874,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
@@ -6902,6 +6948,7 @@ export class SpreadsheetApp {
     const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.cancelLegacyGesturesForSheetChange();
       this.chartDrawingInteraction?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;

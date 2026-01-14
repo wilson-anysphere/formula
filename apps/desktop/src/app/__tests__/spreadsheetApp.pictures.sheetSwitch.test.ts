@@ -249,6 +249,75 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     root.remove();
   });
 
+  it("cancels an in-progress picture drag in legacy mode when switching sheets (no cross-sheet commit)", async () => {
+    // Override the shared-grid default so this test exercises SpreadsheetApp's legacy drawing gesture state machine.
+    process.env.DESKTOP_GRID_MODE = "legacy";
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc: any = app.getDocument();
+
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "cat.png", { type: "image/png" });
+    await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
+
+    const sheet1Initial = app.getDrawingsDebugState();
+    expect(sheet1Initial.sheetId).toBe("Sheet1");
+    expect(sheet1Initial.drawings).toHaveLength(1);
+    const inserted = sheet1Initial.drawings[0]!;
+    expect(inserted.rectPx).not.toBeNull();
+
+    // Ensure Sheet2 exists and contains a drawing with the *same* id. Without canceling the in-flight gesture,
+    // the pointerup commit would update this drawing after the sheet id changes (cross-sheet leak).
+    doc.setSheetDrawings("Sheet2", [
+      {
+        id: String(inserted.id),
+        kind: { type: "shape", label: "Sheet2 Box" },
+        anchor: { type: "absolute", pos: { xEmu: pxToEmu(10), yEmu: pxToEmu(10) }, size: { cx: pxToEmu(80), cy: pxToEmu(40) } },
+        zOrder: 0,
+      },
+    ]);
+
+    const sheet2Before = Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : [];
+    expect(sheet2Before).toHaveLength(1);
+    const sheet2BeforeAnchor = JSON.parse(JSON.stringify((sheet2Before[0] as any).anchor));
+
+    const start = {
+      x: inserted.rectPx!.x + inserted.rectPx!.width / 2,
+      y: inserted.rectPx!.y + inserted.rectPx!.height / 2,
+    };
+    const move = { x: start.x + 40, y: start.y + 20 };
+
+    dispatchPointer(root, "pointerdown", { ...start, pointerId: 42 });
+    dispatchPointer(root, "pointermove", { ...move, pointerId: 42 });
+    expect((app as any).drawingGesture).not.toBeNull();
+
+    app.activateSheet("Sheet2");
+    expect((app as any).drawingGesture ?? null).toBeNull();
+
+    // Release pointer after the sheet switch. This must not update the drawing on Sheet2.
+    dispatchPointer(root, "pointerup", { ...move, pointerId: 42 });
+
+    const sheet2After = Array.isArray(doc.getSheetDrawings("Sheet2")) ? doc.getSheetDrawings("Sheet2") : [];
+    expect(sheet2After).toHaveLength(1);
+    expect((sheet2After[0] as any).anchor).toEqual(sheet2BeforeAnchor);
+
+    // And the original picture should still be on Sheet1.
+    app.activateSheet("Sheet1");
+    const sheet1After = app.getDrawingsDebugState();
+    expect(sheet1After.drawings).toHaveLength(1);
+    expect(sheet1After.drawings[0]!.id).toBe(inserted.id);
+    expect(sheet1After.selectedId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("clears drawing selection when restoreDocumentState changes the active sheet", async () => {
     const root = createRoot();
     const status = {
