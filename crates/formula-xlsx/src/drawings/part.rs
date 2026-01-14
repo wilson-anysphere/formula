@@ -58,12 +58,15 @@ impl DrawingPart {
         workbook: &mut formula_model::Workbook,
     ) -> Result<Self> {
         let rels_path = drawing_rels_path(path);
-        let rels_bytes = parts
+        // Best-effort: a drawing part may legitimately exist without a relationships
+        // part (`drawingN.xml.rels`), and real-world files sometimes include malformed
+        // `.rels` payloads. Treat these cases as an empty relationships set so that we
+        // can still parse and preserve anchors/shapes.
+        let relationships = parts
             .get(&rels_path)
-            .ok_or_else(|| XlsxError::MissingPart(format!("missing drawing rels: {rels_path}")))?;
-        let rels_xml = std::str::from_utf8(rels_bytes)
-            .map_err(|e| XlsxError::Invalid(format!("drawing rels not utf-8: {e}")))?;
-        let relationships = Relationships::from_xml(rels_xml)?;
+            .and_then(|rels_bytes| std::str::from_utf8(rels_bytes).ok())
+            .and_then(|rels_xml| Relationships::from_xml(rels_xml).ok())
+            .unwrap_or_default();
 
         let drawing_bytes = parts
             .get(path)
@@ -89,100 +92,63 @@ impl DrawingPart {
                 continue;
             }
 
-            let anchor = parse_anchor(&anchor_node)?;
+            // Preserve the anchor XML for best-effort/unknown objects.
+            let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
             let anchor_preserved = parse_anchor_preserved(&anchor_node, drawing_xml);
+
+            // Best-effort: if the anchor itself is malformed we cannot construct a valid
+            // `formula_model::drawings::Anchor` value, so skip it instead of aborting the
+            // entire drawing part.
+            let anchor = match parse_anchor(&anchor_node) {
+                Ok(anchor) => anchor,
+                Err(_) => continue,
+            };
 
             if let Some(pic) = anchor_node
                 .children()
                 .find(|n| n.is_element() && n.tag_name().name() == "pic")
             {
-                let (id, pic_xml, embed) = parse_pic(&pic, drawing_xml)?;
-                let image_id = resolve_image_id(&relationships, &embed, path, parts, workbook)?;
-                let mut preserved = anchor_preserved.clone();
-                preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
-                preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+                match parse_pic(&pic, drawing_xml) {
+                    Ok((id, pic_xml, embed)) => {
+                        match resolve_image_id(&relationships, &embed, path, parts, workbook) {
+                            Ok(image_id) => {
+                                let mut preserved = anchor_preserved.clone();
+                                preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
+                                preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
 
-                let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                                let size =
+                                    extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
 
-                objects.push(DrawingObject {
-                    id,
-                    kind: DrawingObjectKind::Image { image_id },
-                    anchor,
-                    z_order: z as i32,
-                    size,
-                    preserved,
-                });
-                continue;
-            }
-
-            if let Some(sp) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "sp")
-            {
-                let (id, sp_xml) = parse_named_node(&sp, drawing_xml, "cNvPr")?;
-                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
-                objects.push(DrawingObject {
-                    id,
-                    kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
-                    anchor,
-                    z_order: z as i32,
-                    size,
-                    preserved: anchor_preserved.clone(),
-                });
-                continue;
-            }
-
-            if let Some(frame) = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
-            {
-                let (id, frame_xml) = parse_named_node(&frame, drawing_xml, "cNvPr")?;
-
-                // `xdr:graphicFrame` is used for multiple object types (charts, SmartArt diagrams,
-                // etc). Treat it as a chart placeholder only when it actually references a chart.
-                //
-                // Excel chart frames contain either:
-                // - A `<c:chart r:id="...">` (or `cx:chart`) element, or
-                // - An `a:graphicData` node with `uri=".../chart"`.
-                let chart_node = frame
-                    .descendants()
-                    .find(|n| n.is_element() && n.tag_name().name() == "chart");
-
-                let graphic_data_is_chart = frame
-                    .descendants()
-                    .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
-                    .and_then(|n| n.attribute("uri"))
-                    .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
-
-                let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
-
-                if chart_node.is_some() || graphic_data_is_chart {
-                    if let Some(chart_rel_id) = chart_node
-                        .and_then(|n| {
-                            n.attribute((REL_NS, "id"))
-                                .or_else(|| n.attribute("r:id"))
-                                .or_else(|| n.attribute("id"))
-                        })
-                        .map(|s| s.to_string())
-                    {
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::Image { image_id },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved,
+                                });
+                            }
+                            Err(_) => {
+                                // Best-effort: preserve the entire anchor subtree so we can
+                                // round-trip the original XML even when the image relationship
+                                // is missing/invalid.
+                                let size =
+                                    extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved: anchor_preserved.clone(),
+                                });
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
                         objects.push(DrawingObject {
-                            id,
-                            kind: DrawingObjectKind::ChartPlaceholder {
-                                rel_id: chart_rel_id,
-                                raw_xml: frame_xml,
-                            },
-                            anchor,
-                            z_order: z as i32,
-                            size,
-                            preserved: anchor_preserved.clone(),
-                        });
-                    } else {
-                        // Chart frame without a relationship id: preserve as an unknown anchor
-                        // rather than inventing a placeholder rel id.
-                        let raw_anchor =
-                            slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
-                        objects.push(DrawingObject {
-                            id,
+                            id: DrawingObjectId((z + 1) as u32),
                             kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                             anchor,
                             z_order: z as i32,
@@ -190,23 +156,116 @@ impl DrawingPart {
                             preserved: anchor_preserved.clone(),
                         });
                     }
-                } else {
-                    // Non-chart `graphicFrame` (e.g. SmartArt): preserve the entire anchor subtree.
-                    let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
-                    objects.push(DrawingObject {
+                }
+                continue;
+            }
+
+            if let Some(sp) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "sp")
+            {
+                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
+                match parse_named_node(&sp, drawing_xml, "cNvPr") {
+                    Ok((id, sp_xml)) => objects.push(DrawingObject {
                         id,
+                        kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
+                        anchor,
+                        z_order: z as i32,
+                        size,
+                        preserved: anchor_preserved.clone(),
+                    }),
+                    Err(_) => objects.push(DrawingObject {
+                        id: DrawingObjectId((z + 1) as u32),
                         kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                         anchor,
                         z_order: z as i32,
                         size,
                         preserved: anchor_preserved.clone(),
-                    });
+                    }),
+                }
+                continue;
+            }
+
+            if let Some(frame) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+            {
+                let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
+                match parse_named_node(&frame, drawing_xml, "cNvPr") {
+                    Ok((id, frame_xml)) => {
+                        // `xdr:graphicFrame` is used for multiple object types (charts, SmartArt diagrams,
+                        // etc). Treat it as a chart placeholder only when it actually references a chart.
+                        //
+                        // Excel chart frames contain either:
+                        // - A `<c:chart r:id="...">` (or `cx:chart`) element, or
+                        // - An `a:graphicData` node with `uri=".../chart"`.
+                        let chart_node = frame
+                            .descendants()
+                            .find(|n| n.is_element() && n.tag_name().name() == "chart");
+
+                        let graphic_data_is_chart = frame
+                            .descendants()
+                            .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
+                            .and_then(|n| n.attribute("uri"))
+                            .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
+
+                        if chart_node.is_some() || graphic_data_is_chart {
+                            if let Some(chart_rel_id) = chart_node
+                                .and_then(|n| {
+                                    n.attribute((REL_NS, "id"))
+                                        .or_else(|| n.attribute("r:id"))
+                                        .or_else(|| n.attribute("id"))
+                                })
+                                .map(|s| s.to_string())
+                            {
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::ChartPlaceholder {
+                                        rel_id: chart_rel_id,
+                                        raw_xml: frame_xml,
+                                    },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved: anchor_preserved.clone(),
+                                });
+                            } else {
+                                // Chart frame without a relationship id: preserve as an unknown anchor
+                                // rather than inventing a placeholder rel id.
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved: anchor_preserved.clone(),
+                                });
+                            }
+                        } else {
+                            // Non-chart `graphicFrame` (e.g. SmartArt): preserve the entire anchor subtree.
+                            objects.push(DrawingObject {
+                                id,
+                                kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                anchor,
+                                z_order: z as i32,
+                                size,
+                                preserved: anchor_preserved.clone(),
+                            });
+                        }
+                    }
+                    Err(_) => objects.push(DrawingObject {
+                        id: DrawingObjectId((z + 1) as u32),
+                        kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                        anchor,
+                        z_order: z as i32,
+                        size,
+                        preserved: anchor_preserved.clone(),
+                    }),
                 }
                 continue;
             }
 
             // Unknown anchor type: preserve the entire anchor subtree.
-            let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
             objects.push(DrawingObject {
                 id: DrawingObjectId((z + 1) as u32),
                 kind: DrawingObjectKind::Unknown {
