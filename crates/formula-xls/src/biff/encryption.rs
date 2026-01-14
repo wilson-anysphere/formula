@@ -529,21 +529,24 @@ fn decrypt_biff_xor_obfuscation(
     // Fallback: simplified XOR scheme used by deterministic in-repo fixtures.
     // This uses the legacy worksheet/workbook protection password hash as a verifier and applies
     // a repeating XOR keystream across record payload bytes.
-    let expected = xor::xor_password_verifier(password);
+    let mut expected = xor::xor_password_verifier(password);
     let mut expected_bytes = expected.to_le_bytes();
     let mut verifier_bytes = verifier.to_le_bytes();
     let ok = ct_eq(&expected_bytes, &verifier_bytes);
     expected_bytes.zeroize();
     verifier_bytes.zeroize();
     if !ok {
+        expected.zeroize();
         return Err(DecryptError::WrongPassword);
     }
     // Guard against accidentally treating a real Method-1 XOR-encrypted workbook as a simplified
     // test fixture. The deterministic test encryptor uses `key = verifier ^ 0xFFFF`; real Excel
     // workbooks use `CreateXorKey_Method1` for the key.
     if key != (expected ^ 0xFFFF) {
+        expected.zeroize();
         return Err(DecryptError::WrongPassword);
     }
+    expected.zeroize();
 
     let xor_array = derive_xor_array(password);
     apply_xor_obfuscation_in_place(workbook_stream, encrypted_start, key, &xor_array)
@@ -726,8 +729,9 @@ fn xor_array_method1_for_password(
         if candidate.len() > 15 {
             continue;
         }
-        let key = create_xor_key_method1(&candidate);
-        let verifier = create_password_verifier_method1(&candidate);
+        // These values are derived from the password and should not linger longer than needed.
+        let mut key = create_xor_key_method1(&candidate);
+        let mut verifier = create_password_verifier_method1(&candidate);
 
         let mut key_bytes = key.to_le_bytes();
         let mut stored_key_bytes = stored_key.to_le_bytes();
@@ -741,8 +745,14 @@ fn xor_array_method1_for_password(
         stored_verifier_bytes.zeroize();
 
         if ok {
-            return Some(Zeroizing::new(create_xor_array_method1(&candidate, key)));
+            let out = Zeroizing::new(create_xor_array_method1(&candidate, key));
+            key.zeroize();
+            verifier.zeroize();
+            return Some(out);
         }
+
+        key.zeroize();
+        verifier.zeroize();
     }
     None
 }
