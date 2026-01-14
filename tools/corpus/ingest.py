@@ -28,6 +28,7 @@ def _triage_sanitized_workbook(workbook: WorkbookInput) -> dict:
         diff_limit=25,
         recalc=False,
         render_smoke=False,
+        privacy_mode=triage_mod._PRIVACY_PRIVATE,  # noqa: SLF001
     )
 
 

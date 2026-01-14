@@ -87,6 +87,13 @@ class IngestTriageInvocationTests(unittest.TestCase):
 
         self.assertTrue(report["result"]["open_ok"])
         self.assertTrue(report["result"]["round_trip_ok"])
+        # Ingest always generates privacy-safe reports because they are stored under the private
+        # corpus and may be uploaded/archived. Ensure the wrapper opts into triage's private
+        # redaction behavior (stable anonymized workbook name).
+        self.assertEqual(
+            report["display_name"],
+            f"workbook-{report['sha256'][:16]}.xlsx",
+        )
 
 
 if __name__ == "__main__":
