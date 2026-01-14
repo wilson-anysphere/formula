@@ -98,6 +98,7 @@ export class DocumentCellProvider implements CellProvider {
     fontWeight: "600",
     textAlign: "end"
   };
+  private resolvedDefaultHyperlinkStyle: CellStyle | null = null;
   private resolvedLinkColor: string | null = null;
   private readonly options: {
     document: DocumentController;
@@ -718,6 +719,16 @@ export class DocumentCellProvider implements CellProvider {
     return resolved;
   }
 
+  private resolveDefaultHyperlinkStyle(): CellStyle {
+    if (this.resolvedDefaultHyperlinkStyle != null) return this.resolvedDefaultHyperlinkStyle;
+    const style: any = {
+      color: this.resolveLinkColor(),
+      underline: true,
+    };
+    this.resolvedDefaultHyperlinkStyle = style as CellStyle;
+    return style as CellStyle;
+  }
+
   invalidateAll(): void {
     this.sheetCaches.clear();
     this.lastSheetId = null;
@@ -732,6 +743,7 @@ export class DocumentCellProvider implements CellProvider {
     this.sheetRunResolvedFormatCache.clear();
     this.sheetCellResolvedFormatCache.clear();
     this.resolvedFormatCache.clear();
+    this.resolvedDefaultHyperlinkStyle = null;
     this.resolvedLinkColor = null;
     this.mergedRangesBySheet.clear();
     this.mergedEpochBySheet.clear();
@@ -944,17 +956,21 @@ export class DocumentCellProvider implements CellProvider {
       const needsUnderline = resolvedStyle?.underline === undefined;
       const needsColor = resolvedStyle?.color === undefined;
       if (needsUnderline || needsColor) {
-        const linkColor = needsColor ? this.resolveLinkColor() : null;
-        if (!resolvedStyle) {
-          const style: any = {};
-          if (needsColor && linkColor) style.color = linkColor;
-          if (needsUnderline) style.underline = true;
-          resolvedStyle = style as CellStyle;
+        if (!resolvedStyle && needsUnderline && needsColor) {
+          resolvedStyle = this.resolveDefaultHyperlinkStyle();
         } else {
-          const next: any = { ...resolvedStyle };
-          if (needsColor && linkColor) next.color = linkColor;
-          if (needsUnderline) next.underline = true;
-          resolvedStyle = next as CellStyle;
+          const linkColor = needsColor ? this.resolveLinkColor() : null;
+          if (!resolvedStyle) {
+            const style: any = {};
+            if (needsColor && linkColor) style.color = linkColor;
+            if (needsUnderline) style.underline = true;
+            resolvedStyle = style as CellStyle;
+          } else {
+            const next: any = { ...resolvedStyle };
+            if (needsColor && linkColor) next.color = linkColor;
+            if (needsUnderline) next.underline = true;
+            resolvedStyle = next as CellStyle;
+          }
         }
       }
     }
