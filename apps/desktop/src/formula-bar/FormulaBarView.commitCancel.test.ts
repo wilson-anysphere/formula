@@ -289,11 +289,41 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(document.activeElement).toBe(view.textarea);
     expect(view.model.isEditing).toBe(false);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
     expect(onBeginEdit).not.toHaveBeenCalled();
     expect(cancel.hidden).toBe(true);
     expect(cancel.disabled).toBe(true);
     expect(commit.hidden).toBe(true);
     expect(commit.disabled).toBe(true);
+
+    host.remove();
+  });
+
+  it("focus({cursor:'all'}) begins editing and selects all text when not read-only", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    const { cancel, commit } = queryActions(host);
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+
+    expect(view.model.isEditing).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    view.focus({ cursor: "all" });
+
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.model.isEditing).toBe(true);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(view.textarea.selectionStart).toBe(0);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+    expect(onBeginEdit).toHaveBeenCalledTimes(1);
+    expect(onBeginEdit).toHaveBeenCalledWith("A1");
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
 
     host.remove();
   });
