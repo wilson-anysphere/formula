@@ -425,9 +425,12 @@ export function workbookStateFromYjsDoc(doc) {
   for (const sheetId of Array.from(sheetIds).sort()) {
     const cells = groupedCells.get(sheetId) ?? new Map();
     if (cells.size > 0) {
-      const layers = sheetFormatLayersFromSheetEntry(sheetEntriesById.get(sheetId) ?? null);
-      if (sheetHasLayeredFormats(layers)) {
-        applyLayeredFormatsToCells(cells, layers);
+      const sheetEntry = sheetEntriesById.get(sheetId) ?? null;
+      if (sheetEntry) {
+        const layers = sheetFormatLayersFromSheetEntry(sheetEntry);
+        if (sheetHasLayeredFormats(layers)) {
+          applyLayeredFormatsToCells(cells, layers);
+        }
       }
     }
     cellsBySheet.set(sheetId, { cells });
