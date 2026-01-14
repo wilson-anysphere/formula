@@ -186,7 +186,7 @@ fn canonicalize_accepts_thousands_grouping_in_es_es_but_localize_omits_grouping(
 
 #[test]
 fn localize_does_not_insert_thousands_separators_in_numeric_literals() {
-    // Verified against Excel `FormulaLocal` via `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
+    // Verified against Excel `FormulaLocal` via `tools/excel-oracle/extract-number-literal-formatting.ps1`.
     let canonical = "=SUM(1234567.89,0.5)";
     assert_eq!(
         locale::localize_formula(canonical, &locale::DE_DE).unwrap(),
@@ -199,6 +199,24 @@ fn localize_does_not_insert_thousands_separators_in_numeric_literals() {
     assert_eq!(
         locale::localize_formula(canonical, &locale::ES_ES).unwrap(),
         "=SUMA(1234567,89;0,5)"
+    );
+}
+
+#[test]
+fn localize_does_not_insert_thousands_separators_for_1000() {
+    // Verified against Excel `FormulaLocal` via `tools/excel-oracle/extract-number-literal-formatting.ps1`.
+    let canonical = "=SUM(1000,0)";
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::DE_DE).unwrap(),
+        "=SUMME(1000;0)"
+    );
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::FR_FR).unwrap(),
+        "=SOMME(1000;0)"
+    );
+    assert_eq!(
+        locale::localize_formula(canonical, &locale::ES_ES).unwrap(),
+        "=SUMA(1000;0)"
     );
 }
 
@@ -419,7 +437,7 @@ fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
 
     // Excel accepts locale-specific thousands separators in localized input, but `FormulaLocal`
     // does not insert grouping separators when serializing formulas back (it typically omits grouping).
-    // See `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
+    // See `tools/excel-oracle/extract-number-literal-formatting.ps1`.
     assert_eq!(
         locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
         "=SOMME(1234,56;0,5)"

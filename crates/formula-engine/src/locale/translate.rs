@@ -484,7 +484,8 @@ fn localize_number(raw: &str, decimal_in: char, dst: &LocaleConfig) -> String {
     // separator (and other surrounding syntax like argument separators and function names).
     //
     // To verify against a real Excel install, see:
-    // `tools/excel-oracle/extract-formula-local-number-formatting.ps1`.
+    // - `tools/excel-oracle/extract-formula-local-number-formatting.ps1`
+    // - `tools/excel-oracle/extract-number-literal-formatting.ps1`
     translate_number(raw, decimal_in, dst.decimal_separator)
 }
 
