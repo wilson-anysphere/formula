@@ -3230,7 +3230,8 @@ export class FormulaBarView {
       };
 
       if (!ghost) {
-        for (const span of highlightedSpans) {
+        for (let i = 0; i < highlightedSpans.length; i += 1) {
+          const span = highlightedSpans[i]!;
           highlightParts.push(renderSpan(span, span.text));
         }
       } else {
@@ -3239,7 +3240,8 @@ export class FormulaBarView {
         const ghostHtml = `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
         const previewHtml = previewText ? `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>` : "";
 
-        for (const span of highlightedSpans) {
+        for (let i = 0; i < highlightedSpans.length; i += 1) {
+          const span = highlightedSpans[i]!;
           if (!ghostInserted && cursor <= span.start) {
             highlightParts.push(ghostHtml);
             if (previewHtml && !previewInserted) {
