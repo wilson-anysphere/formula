@@ -123,6 +123,16 @@ function parseArgs(argv) {
       ]);
       return { repoRoot, entitlementsPathOverride: entitlementsPathOverride ?? "" };
     }
+
+    // Disallow positional args to avoid silently ignoring typos (e.g. passing a path without --path).
+    if (typeof arg === "string" && arg.trim().length > 0) {
+      errBlock("macOS entitlements preflight failed", [
+        `Unknown argument: ${arg}`,
+        `Expected flags only (use --path to override the entitlements plist).`,
+        `Run with --help for usage.`,
+      ]);
+      return { repoRoot, entitlementsPathOverride: entitlementsPathOverride ?? "" };
+    }
   }
 
   const resolvedEntitlementsPathOverride = entitlementsPathOverride
