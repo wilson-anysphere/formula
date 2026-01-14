@@ -340,6 +340,9 @@ fn delete_sheet_drops_pivot_definitions_that_referenced_it() {
         needs_refresh: true,
     });
 
+    // The engine disallows deleting the last remaining sheet.
+    engine.set_cell_value("Sheet2", "A1", "").unwrap();
+
     engine.delete_sheet("Sheet1").unwrap();
 
     assert!(engine.pivot_table(pivot_id).is_none());

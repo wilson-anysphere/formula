@@ -537,7 +537,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 });
 
             Some(ValueField {
-                source_field: PivotFieldRef::CacheFieldName(source_field_name),
+                source_field: source_field_name.into(),
                 name,
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),

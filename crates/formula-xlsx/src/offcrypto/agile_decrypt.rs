@@ -1754,7 +1754,7 @@ mod tests {
         let encryption_info = wrap_encryption_info(xml);
         let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw").unwrap_err();
         assert!(
-            matches!(err, OffCryptoError::InvalidAttribute { ref attr, .. } if attr == "blockSize"),
+            matches!(err, OffCryptoError::InvalidBlockSize { block_size: 32 }),
             "unexpected error: {err:?}"
         );
     }
@@ -1806,15 +1806,13 @@ fn hash_output_len(alg: HashAlgorithm) -> usize {
     }
 }
 
-fn validate_block_size(node: roxmltree::Node<'_, '_>, attr: &'static str, block_size: usize) -> Result<()> {
+fn validate_block_size(
+    _node: roxmltree::Node<'_, '_>,
+    _attr: &'static str,
+    block_size: usize,
+) -> Result<()> {
     if block_size != AES_BLOCK_SIZE {
-        return Err(OffCryptoError::InvalidAttribute {
-            element: node.tag_name().name().to_string(),
-            attr: attr.to_string(),
-            reason: format!(
-                "blockSize must be {AES_BLOCK_SIZE} for AES (got {block_size})"
-            ),
-        });
+        return Err(OffCryptoError::InvalidBlockSize { block_size });
     }
     Ok(())
 }
