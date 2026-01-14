@@ -609,6 +609,35 @@ fn external_3d_sheet_span_matches_endpoints_case_insensitively() {
 }
 
 #[test]
+fn external_3d_sheet_span_allows_reversed_endpoints() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet3:Sheet1!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
 fn external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
     let provider = Arc::new(TestExternalProvider::default());
 
