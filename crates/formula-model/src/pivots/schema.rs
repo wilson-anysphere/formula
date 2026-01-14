@@ -214,17 +214,7 @@ impl fmt::Display for PivotFieldRef {
             PivotFieldRef::DataModelColumn { table, column } => {
                 let table = format_dax_table_identifier(table.as_str());
                 let column = escape_dax_bracket_identifier(column);
-                // Match DAX/Excel display rules: table names are quoted when they contain spaces or
-                // other special characters. Within a quoted identifier, `'` is escaped as `''`.
-                let needs_quotes = table
-                    .chars()
-                    .any(|c| !c.is_ascii_alphanumeric() && c != '_');
-                if needs_quotes {
-                    let escaped_table = table.replace('\'', "''");
-                    write!(f, "'{escaped_table}'[{column}]")
-                } else {
-                    write!(f, "{table}[{column}]")
-                }
+                write!(f, "{table}[{column}]")
             }
             PivotFieldRef::DataModelMeasure(name) => {
                 let name = escape_dax_bracket_identifier(name);
@@ -238,6 +228,9 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let Some(first) = raw.chars().next() else {
         return Cow::Borrowed("''");
     };
+
+    // DAX allows unquoted identifiers in a conservative "C identifier" form; quote anything that
+    // doesn't match ASCII `[A-Za-z_][A-Za-z0-9_]*`.
     let is_simple = (first.is_ascii_alphabetic() || first == '_')
         && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     if is_simple {
@@ -245,34 +238,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     } else {
         Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
     }
-}
-
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return true;
-    }
-
-    // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
-    // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
-    //
-    // Note: we intentionally implement a conservative check here; quoting is always safe and keeps
-    // the `Display` output stable for table names that contain punctuation or whitespace.
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-    if !matches!(first, 'A'..='Z' | 'a'..='z' | '_') {
-        return true;
-    }
-    chars.any(|c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_'))
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX quotes table names using single quotes. A single quote inside the name is escaped as
-    // `''` (two consecutive quotes).
-    let escaped = raw.replace('\'', "''");
-    format!("'{escaped}'")
 }
 
 fn escape_dax_bracket_identifier(raw: &str) -> String {
