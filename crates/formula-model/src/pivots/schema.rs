@@ -69,6 +69,22 @@ impl PivotFieldRef {
             PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
         }
     }
+
+    /// Best-effort parse of an unstructured field identifier.
+    ///
+    /// This mirrors the behavior of the `Deserialize` implementation when parsing a string:
+    /// - `[Measure]` => `DataModelMeasure("Measure")`
+    /// - `Table[Column]` (or `'Table Name'[Column]`) => `DataModelColumn { table, column }`
+    /// - otherwise => `CacheFieldName(raw)`
+    pub fn from_unstructured(raw: &str) -> Self {
+        if let Some(measure) = parse_dax_measure_ref(raw) {
+            return PivotFieldRef::DataModelMeasure(measure);
+        }
+        if let Some((table, column)) = parse_dax_column_ref(raw) {
+            return PivotFieldRef::DataModelColumn { table, column };
+        }
+        PivotFieldRef::CacheFieldName(raw.to_string())
+    }
 }
 
 impl fmt::Display for PivotFieldRef {
