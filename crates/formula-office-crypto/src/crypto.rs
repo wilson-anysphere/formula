@@ -631,17 +631,23 @@ fn crypt_derive_key_aes(
     let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf1));
     let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf2));
 
-    let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(h1.len() + h2.len()));
-    out.extend_from_slice(&h1);
-    out.extend_from_slice(&h2);
-    if key_len > out.len() {
+    if key_len > h1.len() + h2.len() {
         return Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "requested key length {} exceeds CryptoAPI derivation output length {}",
             key_len,
-            out.len()
+            h1.len() + h2.len()
         )));
     }
-    out.truncate(key_len);
+
+    // Avoid `truncate()` (which can leave unused derived bytes in the `Vec` spare capacity) by
+    // allocating the exact output length and copying only the prefix we need.
+    let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0u8; key_len]);
+    let h1_take = std::cmp::min(key_len, h1.len());
+    out[..h1_take].copy_from_slice(&h1[..h1_take]);
+    if h1_take < key_len {
+        let rem = key_len - h1_take;
+        out[h1_take..].copy_from_slice(&h2[..rem]);
+    }
     Ok(out)
 }
 
