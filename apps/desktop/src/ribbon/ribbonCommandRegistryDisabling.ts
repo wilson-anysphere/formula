@@ -43,9 +43,6 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   //
   // These ids currently dispatch through `onUnknownCommand` / ribbon overrides in the
   // desktop shell. If/when they become real commands, remove them from this list.
-  // Home → Cells → Format.
-  "home.cells.format.organizeSheets",
-
   // Home → Editing.
   // Data → Sort & Filter.
   "data.sortFilter.filter",
