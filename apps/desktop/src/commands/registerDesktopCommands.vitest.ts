@@ -141,6 +141,11 @@ describe("registerDesktopCommands", () => {
       openFormatCells,
       showQuickPick: async () => null,
       findReplace: { openFind, openReplace, openGoTo },
+      sheetStructureHandlers: {
+        openOrganizeSheets: vi.fn(),
+        insertSheet: vi.fn(),
+        deleteSheet: vi.fn(),
+      },
       formatPainter: {
         isArmed: formatPainterIsArmed,
         arm: formatPainterArm,
@@ -275,6 +280,11 @@ describe("registerDesktopCommands", () => {
       openFormatCells: () => {},
       showQuickPick: async () => null,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},

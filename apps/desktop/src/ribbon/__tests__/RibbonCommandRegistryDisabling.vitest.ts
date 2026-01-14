@@ -181,8 +181,8 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // they should be disabled like any other unregistered ribbon id.
     expect(baselineDisabledById["file.save.save"]).toBe(true);
 
-    // Home → Cells structural edit commands should be disabled when the CommandRegistry does not
-    // register them (baseline allowlist behavior).
+    // Home → Cells structural edit commands should be disabled when the CommandRegistry
+    // does not include them.
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBe(true);
     expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBe(true);
     expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBe(true);

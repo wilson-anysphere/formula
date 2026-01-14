@@ -645,7 +645,7 @@ export function registerDesktopCommands(params: {
     "home.cells.format.organizeSheets",
     "Organize Sheets…",
     async () => {
-      if (isEditingFn() || isReadOnly()) return;
+      if (isEditingFn()) return;
       const handler = sheetStructureHandlers?.openOrganizeSheets;
       if (!handler) {
         safeShowToast("Organize Sheets is not available in this environment.", "warning");
@@ -660,7 +660,6 @@ export function registerDesktopCommands(params: {
       keywords: ["organize sheets", "sheets", "worksheets", "tabs", "reorder", "rename", "hide"],
     },
   );
-
   if (layoutController) {
     registerBuiltinCommands({
       commandRegistry,

@@ -19,6 +19,11 @@ describe("Home → Styles CommandRegistry commands", () => {
       openFormatCells: () => {},
       showQuickPick: async () => null,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},

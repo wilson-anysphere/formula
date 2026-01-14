@@ -33,6 +33,11 @@ describe("registerHomeStylesCommands (via registerDesktopCommands)", () => {
       openFormatCells: () => {},
       showQuickPick: showQuickPick as any,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},

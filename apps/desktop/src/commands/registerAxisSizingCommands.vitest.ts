@@ -37,6 +37,11 @@ describe("axis sizing ribbon commands", () => {
       openFormatCells: vi.fn(),
       showQuickPick: async () => null,
       findReplace: { openFind: vi.fn(), openReplace: vi.fn(), openGoTo: vi.fn() },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: vi.fn(),
         openWorkbook: vi.fn(),
@@ -64,4 +69,3 @@ describe("axis sizing ribbon commands", () => {
     expect(disabledById["home.cells.format.columnWidth"]).toBeUndefined();
   });
 });
-

@@ -184,6 +184,11 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       openFormatCells: () => {},
       showQuickPick: async () => null,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       ribbonMacroHandlers: {
         openPanel: (_panelId: string) => {},
         focusScriptEditorPanel: () => {},

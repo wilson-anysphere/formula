@@ -86,6 +86,11 @@ describe("Ribbon CommandRegistry exemptions drift-guards", () => {
         addToPrintArea: () => {},
         exportPdf: () => {},
       },
+      sheetStructureHandlers: {
+        openOrganizeSheets: () => {},
+        insertSheet: () => {},
+        deleteSheet: () => {},
+      },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},
