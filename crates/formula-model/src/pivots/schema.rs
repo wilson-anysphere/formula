@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::collections::HashSet;
+use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
