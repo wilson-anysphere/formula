@@ -122,6 +122,9 @@ export class DesktopSharedGrid {
   private selectionCanvasViewportOrigin: { left: number; top: number } | null = null;
   private transientRange: CellRange | null = null;
   private lastPointerViewport: { x: number; y: number } | null = null;
+  private readonly dragViewportPointScratch = { x: 0, y: 0 };
+  private readonly hoverViewportPointScratch = { x: 0, y: 0 };
+  private readonly pickCellScratch = { row: 0, col: 0 };
   private autoScrollFrame: number | null = null;
 
   private dragMode: "selection" | "fillHandle" | null = null;
@@ -807,7 +810,13 @@ export class DesktopSharedGrid {
         const target = event.target;
         const useOffsets =
           target === this.container || target === this.selectionCanvas || target === this.gridCanvas || target === this.contentCanvas;
-        const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : this.getViewportPoint(event);
+        const point = this.hoverViewportPointScratch;
+        if (useOffsets) {
+          point.x = event.offsetX;
+          point.y = event.offsetY;
+        } else {
+          this.getViewportPoint(event, point);
+        }
         const zoomFactor = Math.exp(-delta * 0.001);
         const nextZoom = startZoom * zoomFactor;
 
@@ -1215,7 +1224,7 @@ export class DesktopSharedGrid {
 
       const clampedX = Math.max(0, Math.min(viewport.width, point.x));
       const clampedY = Math.max(0, Math.min(viewport.height, point.y));
-      const picked = renderer.pickCellAt(clampedX, clampedY);
+      const picked = renderer.pickCellAt(clampedX, clampedY, this.pickCellScratch);
       if (picked) {
         if (this.dragMode === "fillHandle") this.applyFillHandleDrag(picked);
         else this.applyDragRange(picked);
@@ -1305,14 +1314,29 @@ export class DesktopSharedGrid {
     this.selectionCanvasViewportOrigin = null;
   }
 
-  private getViewportPoint(event: { clientX: number; clientY: number }): { x: number; y: number } {
+  private getViewportPoint(
+    event: { clientX: number; clientY: number },
+    out?: { x: number; y: number }
+  ): { x: number; y: number } {
     const origin = this.selectionCanvasViewportOrigin;
+    let x: number;
+    let y: number;
     if (origin) {
-      return { x: event.clientX - origin.left, y: event.clientY - origin.top };
+      x = event.clientX - origin.left;
+      y = event.clientY - origin.top;
+    } else {
+      const rect = this.selectionCanvas.getBoundingClientRect();
+      x = event.clientX - rect.left;
+      y = event.clientY - rect.top;
     }
 
-    const rect = this.selectionCanvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (out) {
+      out.x = x;
+      out.y = y;
+      return out;
+    }
+
+    return { x, y };
   }
 
   private getResizeHit(viewportX: number, viewportY: number): ResizeHit | null {
@@ -1735,10 +1759,10 @@ export class DesktopSharedGrid {
       if (event.pointerId !== this.selectionPointerId) return;
       event.preventDefault();
 
-      const point = this.getViewportPoint(event);
+      const point = this.getViewportPoint(event, this.dragViewportPointScratch);
       this.lastPointerViewport = point;
 
-      const picked = renderer.pickCellAt(point.x, point.y);
+      const picked = renderer.pickCellAt(point.x, point.y, this.pickCellScratch);
       if (!picked) return;
       if (this.dragMode === "fillHandle") this.applyFillHandleDrag(picked);
       else this.applyDragRange(picked);
@@ -1846,7 +1870,13 @@ export class DesktopSharedGrid {
       // when the event targets the selection canvas (viewport coords in this case).
       const useOffsets =
         event.target === selectionCanvas && Number.isFinite(event.offsetX) && Number.isFinite(event.offsetY);
-      const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : this.getViewportPoint(event);
+      const point = this.hoverViewportPointScratch;
+      if (useOffsets) {
+        point.x = event.offsetX;
+        point.y = event.offsetY;
+      } else {
+        this.getViewportPoint(event, point);
+      }
 
       if (options.enableResize) {
         const hit = this.getResizeHit(point.x, point.y);
