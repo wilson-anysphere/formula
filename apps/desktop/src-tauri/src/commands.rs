@@ -3343,7 +3343,7 @@ pub fn power_query_state_get(
 #[tauri::command]
 pub fn power_query_state_set(
     window: tauri::WebviewWindow,
-    xml: Option<String>,
+    xml: Option<LimitedString<{ crate::power_query_validation::MAX_POWER_QUERY_XML_BYTES }>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
@@ -3351,8 +3351,8 @@ pub fn power_query_state_set(
     ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query state", ipc_origin::Verb::Is)?;
 
-    if let Some(xml) = xml.as_deref() {
-        crate::power_query_validation::validate_power_query_xml_payload(xml)
+    if let Some(xml) = xml.as_ref() {
+        crate::power_query_validation::validate_power_query_xml_payload(xml.as_ref())
             .map_err(|e| e.to_string())?;
     }
 
@@ -3360,7 +3360,7 @@ pub fn power_query_state_set(
     let Ok(workbook) = state.get_workbook_mut() else {
         return Ok(());
     };
-    workbook.power_query_xml = xml.map(String::into_bytes);
+    workbook.power_query_xml = xml.map(|xml| xml.into_inner().into_bytes());
     Ok(())
 }
 
