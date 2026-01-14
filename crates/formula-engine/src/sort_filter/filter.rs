@@ -834,4 +834,49 @@ mod tests {
         assert_eq!(result1.visible_rows, vec![true, true, false]);
         assert_eq!(result2.visible_rows, vec![true, false, true]);
     }
+
+    #[test]
+    fn locale_aware_text_filters_format_numbers_and_bools_like_excel() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into()), CellValue::Text("Flag".into())],
+            vec![CellValue::Number(1.5), CellValue::Bool(true)],
+        ]);
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([
+                (
+                    0,
+                    ColumnFilter {
+                        join: FilterJoin::Any,
+                        criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                            kind: TextMatchKind::Contains,
+                            pattern: "1,5".into(),
+                            case_sensitive: false,
+                        })],
+                    },
+                ),
+                (
+                    1,
+                    ColumnFilter {
+                        join: FilterJoin::Any,
+                        criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                            kind: TextMatchKind::Contains,
+                            pattern: "TRU".into(),
+                            case_sensitive: false,
+                        })],
+                    },
+                ),
+            ]),
+        };
+
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        assert_eq!(result.visible_rows, vec![true, true]);
+        assert_eq!(result.hidden_sheet_rows, Vec::<usize>::new());
+
+        // Ensure boolean coercion uses Excel-style TRUE/FALSE rather than Rust's "true"/"false".
+        assert_eq!(
+            cell_to_string(&CellValue::Bool(true), ValueLocaleConfig::en_us()),
+            "TRUE"
+        );
+    }
 }

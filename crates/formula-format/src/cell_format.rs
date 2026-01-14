@@ -11,7 +11,7 @@ use crate::{builtin_format_code, FormatCode, BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREF
 /// - `"C<n>"` for currency formats (`n` = decimal places)
 /// - `"P<n>"` for percent formats (`n` = decimal places)
 /// - `"S<n>"` for scientific formats (`n` = decimal places)
-/// - `"D<n>"` for date/time formats (Excel uses `D1`..`D9` for both dates and times)
+/// - `"D<n>"` for date/time formats (Excel uses `D1`..`D9`)
 /// - `"@"` for text formats
 /// - `"N"` when the format does not match any of the recognized families (e.g. fractions)
 ///
@@ -196,8 +196,8 @@ fn classify_date_tokens_to_cell_code(
     has_month_name: bool,
     has_weekday: bool,
 ) -> String {
-    // Best-effort mapping to Excel's `CELL("format")` `D1..D5` date codes, based on the
-    // Microsoft Support table:
+    // Best-effort mapping to Excel's `CELL("format")` `D1..D5` *date* codes, based on the
+    // Microsoft Support table.
     //
     // - D1: `d-mmm-yy` / `dd-mmm-yy`
     // - D2: `d-mmm` / `dd-mmm`
@@ -217,13 +217,13 @@ fn classify_date_tokens_to_cell_code(
         if has_year {
             return "D3".to_string();
         }
-        // Month/weekday name without day/year is uncommon; treat it as the closest "day-month name"
+        // Month/weekday name without day/year is uncommon; treat it as the closest day/month-name
         // family.
         return "D2".to_string();
     }
 
     // Weekday-only formats like `ddd` / `dddd` don't match the Microsoft table exactly; treat them
-    // as the closest "day-month name" category.
+    // as a day/month-name category.
     if has_weekday && !has_month && !has_day_of_month && !has_year {
         return "D2".to_string();
     }
@@ -233,7 +233,7 @@ fn classify_date_tokens_to_cell_code(
         return "D5".to_string();
     }
 
-    // Default for full numeric dates (including date+time).
+    // Default for full numeric dates (including year-first ISO-like dates).
     "D4".to_string()
 }
 
@@ -244,7 +244,7 @@ fn classify_time_tokens_to_cell_code(
     has_ampm: bool,
     has_elapsed_hours: bool,
 ) -> String {
-    // Excel uses `D6..D9` for time-of-day formats (there are no `T*` codes).
+    // Excel uses `D6..D9` for time-of-day formats.
     //
     // Microsoft Support table:
     // - D6: `h:mm:ss AM/PM`

@@ -136,9 +136,9 @@ fn oddf_price_excel_model(
     );
 
     let eom = is_end_of_month(maturity, system);
-    // Keep in sync with `oddf_equation`:
-    // - basis=4 derives PCD by stepping back from the first coupon date
-    // - other bases derive PCD from the maturity-anchored schedule
+    // Keep in sync with `odd_coupon::oddf_equation`:
+    // - For basis=4, Excel determines the coupon period by stepping back from the first coupon.
+    // - Otherwise, derive PCD from the maturity-anchored cashflow schedule.
     let prev_coupon = if basis == 4 {
         coupon_date_with_eom(first_coupon, -months_per_period, eom, system)
     } else {
