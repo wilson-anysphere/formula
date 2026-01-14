@@ -7626,6 +7626,7 @@ export class SpreadsheetApp {
     this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
     this.drawingInteractionController?.reset({ clearSelection: true });
     this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+    this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
     this.canvasChartCombinedDrawingObjectsCache = null;
@@ -7702,6 +7703,7 @@ export class SpreadsheetApp {
       this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+      this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
@@ -7779,6 +7781,7 @@ export class SpreadsheetApp {
       this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.drawingInteractionController?.reset({ clearSelection: true });
       this.splitViewSecondaryDrawingInteractionController?.reset({ clearSelection: true });
+      this.splitViewSecondaryChartDrawingInteractionController?.reset({ clearSelection: true });
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
@@ -8453,6 +8456,12 @@ export class SpreadsheetApp {
         // so users can move/resize/rotate drawings from either split pane.
         const controller = this.ensureSplitViewSecondaryDrawingInteractionController(view);
         controller.setSelectedId(this.selectedDrawingId);
+        if (this.useCanvasCharts) {
+          // Canvas charts are rendered as drawing objects; attach a dedicated controller so users can
+          // move/resize charts from the secondary pane as well.
+          const chartController = this.ensureSplitViewSecondaryChartDrawingInteractionController(view);
+          chartController.setSelectedId(this.selectedChartId != null ? chartStoreIdToDrawingId(this.selectedChartId) : null);
+        }
       } else {
         // In shared-grid mode without drawing interactions, we still support click-to-select and
         // Excel-like context-click behavior via a lightweight capture handler.
@@ -8654,7 +8663,19 @@ export class SpreadsheetApp {
           // Only treat pointerdown events originating from the grid surface (canvases/root) as
           // drawing selection/interaction. This avoids interfering with interactive DOM overlays
           // (scrollbars, editor, etc) even when drawings extend underneath them.
-          return target === view.container || target.tagName === "CANVAS";
+          const isGridSurface = target === view.container || target.tagName === "CANVAS";
+          if (!isGridSurface) return false;
+
+          // In canvas-charts mode, ChartStore charts are rendered above workbook drawings. If a chart is under the
+          // pointer, let chart interactions win so drawings don't steal clicks from charts underneath.
+          if (this.useCanvasCharts) {
+            const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+            if (hit && isChartStoreDrawingId(hit.id)) {
+              return false;
+            }
+          }
+
+          return true;
         },
         onPointerDownHit: () => {
           if (this.editor.isOpen()) {
@@ -12501,6 +12522,7 @@ export class SpreadsheetApp {
     const controller = this.drawingInteractionController;
     // `drawingsInteraction` is a back-compat alias; avoid double invalidation when they are the same instance.
     this.chartDrawingInteraction?.invalidateHitTestIndex();
+    this.splitViewSecondaryChartDrawingInteractionController?.invalidateHitTestIndex();
     this.drawingsInteraction?.invalidateHitTestIndex();
     this.splitViewSecondaryDrawingInteractionController?.invalidateHitTestIndex();
     this.splitViewSecondaryChartDrawingInteractionController?.invalidateHitTestIndex();
