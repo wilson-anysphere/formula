@@ -25,6 +25,21 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const capabilitiesDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "capabilities");
 const appPermissionsDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "permissions");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
+
+const baseEnv = {
+  ...process.env,
+  // Keep output stable/parseable.
+  NO_COLOR: "1",
+  CARGO_TERM_COLOR: "never",
+};
+
+// `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+// globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift when
+// this script falls back to invoking `cargo` directly (e.g. Windows environments without `bash`).
+if (baseEnv.RUSTUP_TOOLCHAIN && fs.existsSync(path.join(repoRoot, "rust-toolchain.toml"))) {
+  delete baseEnv.RUSTUP_TOOLCHAIN;
+}
+
 const permissionLsCachePathRaw =
   process.env.FORMULA_TAURI_PERMISSION_LS_CACHE || process.env.FORMULA_TAURI_PERMISSION_LS_CACHE_PATH || null;
 const permissionLsCachePath = permissionLsCachePathRaw
@@ -93,10 +108,7 @@ function runTauriPermissionLs() {
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
       env: {
-        ...process.env,
-        // Keep output stable/parseable.
-        NO_COLOR: "1",
-        CARGO_TERM_COLOR: "never",
+        ...baseEnv,
       },
     },
   );
@@ -109,9 +121,7 @@ function runTauriPermissionLs() {
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
       env: {
-        ...process.env,
-        NO_COLOR: "1",
-        CARGO_TERM_COLOR: "never",
+        ...baseEnv,
       },
     });
   }

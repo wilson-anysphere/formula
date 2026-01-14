@@ -60,6 +60,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
+
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+# globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift for
+# this repo when running `cargo` directly.
+if ($env:RUSTUP_TOOLCHAIN -and (Test-Path -LiteralPath (Join-Path $repoRoot "rust-toolchain.toml"))) {
+  Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+}
+
 $defaultGlobalCargoHome = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".cargo"
 $cargoHomeNorm = if ($env:CARGO_HOME) { $env:CARGO_HOME.TrimEnd('\', '/') } else { "" }
 $defaultGlobalCargoHomeNorm = $defaultGlobalCargoHome.TrimEnd('\', '/')

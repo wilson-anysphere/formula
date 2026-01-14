@@ -12,6 +12,14 @@ const repoRoot = path.resolve(desktopDir, "../..");
 const DESKTOP_TAURI_PACKAGE = "formula-desktop-tauri";
 const DESKTOP_BINARY_NAME = "formula-desktop";
 
+const baseEnv = { ...process.env };
+// `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+// globally (often to `stable`), which would bypass the pinned toolchain when this script falls back
+// to invoking `cargo` directly (e.g. Windows environments without `bash`).
+if (baseEnv.RUSTUP_TOOLCHAIN && fs.existsSync(path.join(repoRoot, "rust-toolchain.toml"))) {
+  delete baseEnv.RUSTUP_TOOLCHAIN;
+}
+
 function cargoTargetDir() {
   // Respect `CARGO_TARGET_DIR` if set, since some developer/CI environments override it
   // for caching. Cargo interprets relative paths relative to the working directory used
@@ -24,7 +32,7 @@ function cargoTargetDir() {
 function run(
   cmd,
   args,
-  { cwd = repoRoot, env = process.env, shell = process.platform === "win32" } = {},
+  { cwd = repoRoot, env = baseEnv, shell = process.platform === "win32" } = {},
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -142,4 +150,3 @@ main().catch((err) => {
   console.error("[clipboard-check] ERROR:", err);
   process.exit(1);
 });
-

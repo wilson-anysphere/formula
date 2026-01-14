@@ -179,6 +179,18 @@ async function ensureBuilt({ repoRoot, binPath }) {
         CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
       };
 
+      // `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+      // globally (often to `stable`), which would bypass the pinned toolchain when we fall back to
+      // invoking `cargo` directly (notably on Windows).
+      if (baseEnv.RUSTUP_TOOLCHAIN) {
+        try {
+          await access(path.join(repoRoot, "rust-toolchain.toml"));
+          delete baseEnv.RUSTUP_TOOLCHAIN;
+        } catch {
+          // ignore
+        }
+      }
+
       let useCargoAgent = false;
       const cargoAgentPath = path.join(repoRoot, "scripts", "cargo_agent.sh");
       if (process.platform !== "win32") {
