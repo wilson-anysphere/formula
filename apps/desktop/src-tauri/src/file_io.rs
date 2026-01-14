@@ -1057,7 +1057,7 @@ fn read_encrypted_ooxml_workbook_blocking(
             )
             .with_context(|| format!("open decrypted xlsb workbook {:?}", path))?;
 
-            read_xlsb_from_open_workbook(
+            let mut workbook = read_xlsb_from_open_workbook(
                 path,
                 wb,
                 move |part_path| {
@@ -1066,10 +1066,14 @@ fn read_encrypted_ooxml_workbook_blocking(
                         part_path,
                     )
                 },
-                // This workbook is encrypted on disk (OLE container), so we don't have an on-disk XLSB
-                // ZIP package we can re-open for lossless `.xlsb` saves.
-                None,
-            )
+                 // This workbook is encrypted on disk (OLE container), so we don't have an on-disk XLSB
+                 // ZIP package we can re-open for lossless `.xlsb` saves.
+                 None,
+            )?;
+            // We cannot losslessly save back into the encrypted OLE container, and `.xlsb` writes
+            // require `origin_xlsb_path` (an on-disk XLSB zip). Force Save As.
+            workbook.path = None;
+            Ok(workbook)
         }
         Some(SniffedWorkbookFormat::Xlsx) => {
             // Mirror the non-encrypted XLSX open logic: only retain the decrypted ZIP bytes baseline when
@@ -4518,6 +4522,11 @@ mod tests {
         // See `fixtures/encrypted/README.md` for provenance and expected contents.
         let workbook =
             read_workbook_blocking_with_password(path, Some("tika")).expect("open encrypted xlsb");
+        assert_eq!(
+            workbook.path, None,
+            "encrypted XLSB opens should force Save As (no lossless .xlsb save path)"
+        );
+        assert_eq!(workbook.origin_xlsb_path, None);
         let sheet = workbook
             .sheets
             .iter()
