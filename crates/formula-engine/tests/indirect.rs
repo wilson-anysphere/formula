@@ -79,5 +79,7 @@ fn indirect_external_workbook_refs_resolve_via_provider() {
         1,
         "INDIRECT should query external providers when resolving external references"
     );
+    // `Engine::precedents()` reflects static parse-time references plus local dependency-graph edges.
+    // Today, dynamic external workbook references produced by INDIRECT are not represented.
     assert!(engine.precedents("Sheet1", "A1").unwrap().is_empty());
 }

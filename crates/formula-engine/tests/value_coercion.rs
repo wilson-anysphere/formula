@@ -76,6 +76,22 @@ fn number_to_text_general_formatting_is_excel_like() {
     assert_eq!(Value::Number(-0.0).coerce_to_string().unwrap(), "0");
     assert_eq!(Value::Number(1.0).coerce_to_string().unwrap(), "1");
     assert_eq!(Value::Number(1.25).coerce_to_string().unwrap(), "1.25");
+    // Preserve 15 significant digits even for small magnitudes (< 0.1).
+    assert_eq!(
+        Value::Number(0.0123456789012345)
+            .coerce_to_string()
+            .unwrap(),
+        "0.0123456789012345"
+    );
+    assert_eq!(
+        Value::Number(0.000123456789012345)
+            .coerce_to_string()
+            .unwrap(),
+        "0.000123456789012345"
+    );
+    // General switches to scientific at 1e11 but not 1e10.
+    assert_eq!(Value::Number(1e10).coerce_to_string().unwrap(), "10000000000");
+    assert_eq!(Value::Number(1e11).coerce_to_string().unwrap(), "1E+11");
     assert_eq!(Value::Number(1e20).coerce_to_string().unwrap(), "1E+20");
     assert_eq!(Value::Number(1e-10).coerce_to_string().unwrap(), "1E-10");
 }
@@ -103,4 +119,3 @@ fn engine_formulas_use_excel_like_implicit_coercions() {
     engine.recalculate();
     assert_number(&engine.get_cell_value("Sheet1", "A3"), 0.0);
 }
-

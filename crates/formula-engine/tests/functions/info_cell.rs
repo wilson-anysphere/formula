@@ -695,7 +695,8 @@ fn cell_format_classifies_locale_variant_datetime_formats() {
 
     engine.recalculate_single_threaded();
 
-    // Day-first dates + ISO-ish year-first dates should classify like the canonical short date.
+    // Day-first dates + ISO-ish year-first dates should classify like Excel's canonical short
+    // numeric date (`D4`, e.g. `m/d/yy`).
     let b1 = engine.get_cell_value("Sheet1", "B1");
     // Excel uses `D4` for numeric short dates like `m/d/yy` (ordering is locale-dependent).
     assert_eq!(b1, Value::Text("D4".to_string()));
