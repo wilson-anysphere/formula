@@ -457,7 +457,7 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
   const env = {
     ...wasmPackEnv,
     // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
-    // if the caller didn't source `scripts/agent-init.sh`.
+    // if the caller didn't initialize via `scripts/agent-init.sh`.
     CARGO_BUILD_JOBS: jobs,
     MAKEFLAGS: makeflags,
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS: releaseCodegenUnits,

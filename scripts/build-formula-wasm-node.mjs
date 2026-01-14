@@ -214,7 +214,7 @@ function buildWithWasmPack() {
     ...process.env,
     CARGO_HOME: cargoHome,
     // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
-    // if the caller didn't source `scripts/agent-init.sh`.
+    // if the caller didn't initialize via `scripts/agent-init.sh`.
     CARGO_BUILD_JOBS: jobs,
     MAKEFLAGS: makeflags,
     CARGO_PROFILE_DEV_CODEGEN_UNITS: process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? jobs,
