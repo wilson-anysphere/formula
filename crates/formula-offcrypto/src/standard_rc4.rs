@@ -97,7 +97,20 @@ pub(crate) fn decrypt_encrypted_package_with_h(
     isize::try_from(output_len)
         .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
-    let mut out = vec![0u8; output_len];
+    // `original_size` is attacker-controlled. Ensure we reject obviously truncated ciphertext
+    // before attempting large allocations.
+    let ciphertext_len = encrypted_package_stream.len().saturating_sub(8);
+    if ciphertext_len < output_len {
+        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size,
+            ciphertext_len,
+        });
+    }
+
+    let mut out = Vec::new();
+    out.try_reserve_exact(output_len)
+        .map_err(|_| OffcryptoError::EncryptedPackageAllocationFailed { total_size })?;
+    out.resize(output_len, 0);
     let mut remaining = output_len;
     let mut in_offset: usize = 8;
     let mut out_offset: usize = 0;
@@ -119,7 +132,8 @@ pub(crate) fn decrypt_encrypted_package_with_h(
         out[out_offset..out_offset + chunk_len]
             .copy_from_slice(&encrypted_package_stream[in_offset..end]);
 
-        let key = cryptoapi::rc4_key_for_block(h, block_index, info.header.key_size_bits, hash_alg)?;
+        let key =
+            cryptoapi::rc4_key_for_block(h, block_index, info.header.key_size_bits, hash_alg)?;
         let mut rc4 = Rc4::new(key.as_slice());
         rc4.apply_keystream(&mut out[out_offset..out_offset + chunk_len]);
 
@@ -142,4 +156,69 @@ pub fn decrypt_encrypted_package(
 ) -> Result<Vec<u8>, OffcryptoError> {
     let h = verify_password(info, password)?;
     decrypt_encrypted_package_with_h(info, encrypted_package_stream, h.as_slice())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_alloc::MAX_ALLOC;
+    use crate::{
+        StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionVerifier,
+    };
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn rc4_decrypt_rejects_truncated_ciphertext_without_large_allocation() {
+        // `original_size` is attacker-controlled. Ensure we reject obviously truncated ciphertext
+        // *before* attempting to allocate the full output buffer.
+        let total_size: u64 = 100 * 1024 * 1024; // 100MiB
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+        encrypted_package.extend_from_slice(&[0u8; 16]); // far too short
+
+        let info = StandardEncryptionInfo {
+            header: StandardEncryptionHeader {
+                flags: StandardEncryptionHeaderFlags::from_raw(0),
+                size_extra: 0,
+                alg_id: CALG_RC4,
+                alg_id_hash: CALG_SHA1,
+                key_size_bits: 128,
+                provider_type: 0,
+                reserved1: 0,
+                reserved2: 0,
+                csp_name: String::new(),
+            },
+            verifier: StandardEncryptionVerifier {
+                salt: vec![0u8; 16],
+                encrypted_verifier: [0u8; 16],
+                verifier_hash_size: 20,
+                encrypted_verifier_hash: vec![0u8; 20],
+            },
+        };
+
+        // SHA1 digest length for the CryptoAPI base hash `H`.
+        let h = vec![0u8; 20];
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let err = decrypt_encrypted_package_with_h(&info, &encrypted_package, &h)
+            .expect_err("expected ciphertext size mismatch");
+        assert!(
+            matches!(
+                err,
+                OffcryptoError::EncryptedPackageSizeMismatch {
+                    total_size: got_size,
+                    ciphertext_len: got_ct
+                } if got_size == total_size && got_ct == 16
+            ),
+            "expected EncryptedPackageSizeMismatch({total_size}, 16), got {err:?}"
+        );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 10 * 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
 }
