@@ -73,7 +73,9 @@ if [ ${#mac_app_targz[@]} -eq 0 ]; then
   filtered_fallback=()
   for f in "${fallback_targz[@]}"; do
     base="$(basename "$f")"
-    if [[ "$base" == *.AppImage.tar.gz ]] || [[ "$base" == *.AppImage.tgz ]]; then
+    # Be case-insensitive (some toolchains emit `.appimage`, while others use `.AppImage`).
+    base_lower="${base,,}"
+    if [[ "$base_lower" == *.appimage.tar.gz ]] || [[ "$base_lower" == *.appimage.tgz ]]; then
       continue
     fi
     if [[ "$base" == *.tar.gz.sig ]] || [[ "$base" == *.tgz.sig ]]; then
