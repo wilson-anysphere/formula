@@ -5974,7 +5974,21 @@ pub async fn validate_vba_migration(
     .map_err(|e| e.to_string())?
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
+fn macro_error_code_from_message(message: &str) -> Option<&'static str> {
+    if message.starts_with("macro produced too many cell updates") {
+        return Some("macro_updates_limit_exceeded");
+    }
+    if message.starts_with("cell value string is too large") {
+        return Some("macro_cell_value_too_large");
+    }
+    if message.starts_with("cell formula is too large") {
+        return Some("macro_cell_formula_too_large");
+    }
+    None
+}
+
+#[cfg(any(feature = "desktop", test))]
 fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> MacroRunResult {
     MacroRunResult {
         ok: outcome.ok,
@@ -5984,10 +5998,13 @@ fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> M
             .into_iter()
             .map(cell_update_from_state)
             .collect(),
-        error: outcome.error.map(|message| MacroError {
-            message,
-            code: None,
-            blocked: None,
+        error: outcome.error.map(|message| {
+            let code = macro_error_code_from_message(&message).map(|c| c.to_string());
+            MacroError {
+                message,
+                code,
+                blocked: None,
+            }
         }),
         permission_request: outcome.permission_request,
     }
@@ -7525,6 +7542,57 @@ mod tests {
             build_macro_security_status(&mut workbook, None, &trust_store).expect("macro status");
         let sig = status.signature.expect("signature info present");
         assert_eq!(sig.status, MacroSignatureStatus::SignedParseError);
+    }
+
+    #[test]
+    fn macro_result_from_outcome_sets_error_codes_for_host_limits() {
+        let outcome = crate::macros::MacroExecutionOutcome {
+            ok: false,
+            output: Vec::new(),
+            updates: Vec::new(),
+            error: Some(format!(
+                "macro produced too many cell updates (limit {})",
+                crate::resource_limits::MAX_MACRO_UPDATES
+            )),
+            permission_request: None,
+        };
+        let result = macro_result_from_outcome(outcome);
+        assert_eq!(
+            result.error.and_then(|e| e.code),
+            Some("macro_updates_limit_exceeded".to_string())
+        );
+
+        let outcome = crate::macros::MacroExecutionOutcome {
+            ok: false,
+            output: Vec::new(),
+            updates: Vec::new(),
+            error: Some(format!(
+                "cell value string is too large (max {} bytes)",
+                crate::resource_limits::MAX_CELL_VALUE_STRING_BYTES
+            )),
+            permission_request: None,
+        };
+        let result = macro_result_from_outcome(outcome);
+        assert_eq!(
+            result.error.and_then(|e| e.code),
+            Some("macro_cell_value_too_large".to_string())
+        );
+
+        let outcome = crate::macros::MacroExecutionOutcome {
+            ok: false,
+            output: Vec::new(),
+            updates: Vec::new(),
+            error: Some(format!(
+                "cell formula is too large (max {} bytes)",
+                crate::resource_limits::MAX_CELL_FORMULA_BYTES
+            )),
+            permission_request: None,
+        };
+        let result = macro_result_from_outcome(outcome);
+        assert_eq!(
+            result.error.and_then(|e| e.code),
+            Some("macro_cell_formula_too_large".to_string())
+        );
     }
 
     #[test]
