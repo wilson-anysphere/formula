@@ -1224,7 +1224,6 @@ export class SpreadsheetApp {
   // --- Sheet drawings / pictures -------------------------------------------
   private sheetDrawings: DrawingObject[] = [];
   private drawingsInteraction: DrawingInteractionController | null = null;
-  private selectedDrawingId: number | null = null;
 
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
