@@ -470,6 +470,8 @@ With the `formula-io/encrypted-workbooks` feature enabled, callers can opt into 
 
 - `save_workbook_with_options(.., SaveOptions { password: Some(..), encryption_scheme: .. })` to write
   a **new encrypted output** workbook, and/or
+  - Note: encrypted `.xlsb` output currently requires saving a `Workbook::Xlsb` to an `.xlsb` path
+    (Formula does not export arbitrary workbooks *to* `.xlsb`; save as `.xlsx` instead).
 - `formula_io::open_workbook_with_password_and_preserved_ole(..)` to capture non-encryption OLE
   streams/storages (e.g. `\u{0005}SummaryInformation`) from an **encrypted OOXML OLE/CFB input**, then
   `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` to re-encrypt the workbook **in
