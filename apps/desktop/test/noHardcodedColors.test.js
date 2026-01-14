@@ -196,6 +196,8 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     if (rel.startsWith("grid/text/rich-text/")) return false;
     // Conditional formatting colors are data-driven (cell formatting).
     if (rel.startsWith("grid/conditional-formatting/")) return false;
+    // Table formatting presets intentionally embed OOXML/Excel ARGB strings (cell formatting).
+    if (rel === "formatting/formatAsTablePresets.ts") return false;
     // Charts scene graph utilities build/parse CSS color strings and test fixtures
     // intentionally include hex colors.
     if (rel === "charts/scene/color.ts") return false;
