@@ -81,6 +81,8 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   const builtins = fs.readFileSync(builtinsPath, "utf8");
   const dropdownPath = path.join(__dirname, "..", "src", "commands", "registerFormatFontDropdownCommands.ts");
   const dropdown = fs.readFileSync(dropdownPath, "utf8");
+  const keybindingsPath = path.join(__dirname, "..", "src", "commands", "builtinKeybindings.ts");
+  const keybindings = fs.readFileSync(keybindingsPath, "utf8");
   const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
   const disabling = fs.readFileSync(disablingPath, "utf8");
   const editingDisabledPath = path.join(__dirname, "..", "src", "ribbon", "ribbonEditingDisabledById.ts");
@@ -112,6 +114,18 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
     "Expected registerFormatFontDropdownCommands.ts to not register format.clearContents",
   );
 
+  // Delete key should dispatch through the canonical edit command.
+  assert.match(
+    keybindings,
+    /\bcommand:\s*["']edit\.clearContents["'][\s\S]*?\bkey:\s*["']delete["']/,
+    "Expected builtinKeybindings.ts to bind Delete to edit.clearContents",
+  );
+  assert.doesNotMatch(
+    keybindings,
+    /\bcommand:\s*["']format\.clearContents["']/,
+    "Expected builtinKeybindings.ts to not reference legacy format.clearContents",
+  );
+
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
@@ -134,6 +148,29 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   // Ensure the old bespoke routing module isn't reintroduced.
   assert.doesNotMatch(main, /\bhomeEditingClearCommandRouting\b/);
   assert.doesNotMatch(main, /\bresolveHomeEditingClearCommandTarget\b/);
+
+  // Read-only ribbon disabling should keep Clear Contents / Clear All disabled, even for band selections.
+  // `format.clearFormats` is explicitly re-enabled (formatting defaults) in read-only mode.
+  const readOnlyStart = main.indexOf("const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY");
+  assert.ok(readOnlyStart >= 0, "Expected main.ts to define RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY");
+  const readOnlyEnd = main.indexOf("})();", readOnlyStart);
+  assert.ok(readOnlyEnd >= 0, "Expected to find end of RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY initializer");
+  const readOnlyBlock = main.slice(readOnlyStart, readOnlyEnd);
+  assert.match(
+    readOnlyBlock,
+    /delete\s+out\["format\.clearFormats"\]/,
+    "Expected RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY to re-enable format.clearFormats for formatting defaults",
+  );
+  assert.doesNotMatch(
+    readOnlyBlock,
+    /delete\s+out\["edit\.clearContents"\]/,
+    "Expected RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY to keep edit.clearContents disabled in read-only mode",
+  );
+  assert.doesNotMatch(
+    readOnlyBlock,
+    /delete\s+out\["format\.clearAll"\]/,
+    "Expected RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY to keep format.clearAll disabled in read-only mode",
+  );
 
   // Unimplemented Clear Comments / Clear Hyperlinks should remain disabled by default.
   // Guardrail: they must not be added to the CommandRegistry exemption list.
