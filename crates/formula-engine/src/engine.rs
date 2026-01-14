@@ -874,7 +874,6 @@ impl Engine {
         if original_index == new_index {
             return true;
         }
-
         if !self.workbook.reorder_sheet(sheet_id, new_index) {
             return false;
         }

@@ -3888,7 +3888,7 @@ mod tests {
 
     #[test]
     fn setup_f_nopls_ignores_printer_fields() {
-        // fNoPls=1 => iPaperSize/iScale/fPortrait are undefined and must be ignored.
+        // fNoPls=1 => iPaperSize/iScale/fLandscape are undefined and must be ignored.
         let grbit = 0x0004u16; // fNoPls
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
