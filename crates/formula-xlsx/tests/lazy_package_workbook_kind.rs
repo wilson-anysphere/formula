@@ -201,6 +201,10 @@ fn lazy_package_strip_macros_then_enforce_kind_updates_content_types() {
     let ct_bytes = read_zip_part(&out, "[Content_Types].xml");
     let ct_xml = std::str::from_utf8(&ct_bytes).unwrap();
     let overrides = content_types_override_map(ct_xml);
+    assert!(
+        !ct_xml.contains("vbaProject.bin"),
+        "expected macro-strip to remove the vbaProject content type override, got:\n{ct_xml}"
+    );
     assert_eq!(
         overrides.get("/xl/workbook.xml").map(String::as_str),
         Some(WorkbookKind::Template.workbook_content_type()),
@@ -228,6 +232,10 @@ fn lazy_package_remove_vba_project_patches_existing_content_types_override() {
     let ct_bytes = read_zip_part(&out, "[Content_Types].xml");
     let ct_xml = std::str::from_utf8(&ct_bytes).unwrap();
     let overrides = content_types_override_map(ct_xml);
+    assert!(
+        !ct_xml.contains("vbaProject.bin"),
+        "expected macro-strip to remove the vbaProject content type override even when a [Content_Types].xml override existed, got:\n{ct_xml}"
+    );
     assert_eq!(
         overrides.get("/xl/workbook.xml").map(String::as_str),
         Some(WorkbookKind::Workbook.workbook_content_type()),
@@ -260,6 +268,10 @@ fn lazy_package_enforce_workbook_kind_updates_existing_content_types_override_wh
     let ct_bytes = read_zip_part(&out, "[Content_Types].xml");
     let ct_xml = std::str::from_utf8(&ct_bytes).unwrap();
     let overrides = content_types_override_map(ct_xml);
+    assert!(
+        !ct_xml.contains("vbaProject.bin"),
+        "expected macro-strip to remove the vbaProject content type override even when updating a [Content_Types].xml override, got:\n{ct_xml}"
+    );
     assert_eq!(
         overrides.get("/xl/workbook.xml").map(String::as_str),
         Some(WorkbookKind::Template.workbook_content_type()),

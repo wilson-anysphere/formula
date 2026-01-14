@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use zip::ZipArchive;
 
 use crate::package::{MacroPresence, WorkbookKind, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
@@ -273,12 +275,23 @@ impl XlsxLazyPackage {
             return Ok(());
         };
 
-        let bytes = match op {
+        let original = match op {
             PartOverride::Replace(bytes) | PartOverride::Add(bytes) => bytes,
             PartOverride::Remove => return Ok(()),
         };
 
-        let Some(updated) = crate::rewrite_content_types_workbook_kind(&bytes, kind)? else {
+        let mut updated = original.clone();
+        if let Some(patched) = crate::rewrite_content_types_workbook_kind(&updated, kind)? {
+            updated = patched;
+        }
+        // If macro stripping is enabled, ensure we don't reintroduce macro part overrides via an
+        // existing `[Content_Types].xml` override.
+        if self.strip_macros.is_some() {
+            if let Some(stripped) = strip_content_types_macro_overrides(&updated)? {
+                updated = stripped;
+            }
+        }
+        if updated == original {
             return Ok(());
         };
 
@@ -504,6 +517,84 @@ fn is_macro_part_name(name: &str) -> bool {
     }
 
     false
+}
+
+fn strip_content_types_macro_overrides(xml: &[u8]) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+    let mut changed = false;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+
+        if skip_depth > 0 {
+            match ev {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth -= 1,
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match ev {
+            Event::Eof => break,
+            Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref())
+                    .eq_ignore_ascii_case(b"Override") =>
+            {
+                if content_types_override_is_macro_part(e)? {
+                    changed = true;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::Start(ref e)
+                if crate::openxml::local_name(e.name().as_ref())
+                    .eq_ignore_ascii_case(b"Override") =>
+            {
+                if content_types_override_is_macro_part(e)? {
+                    changed = true;
+                    skip_depth = 1;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        Ok(Some(writer.into_inner()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn content_types_override_is_macro_part(e: &BytesStart<'_>) -> Result<bool, XlsxError> {
+    let mut part_name = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"PartName") {
+            part_name = Some(attr.unescape_value()?.into_owned());
+            break;
+        }
+    }
+
+    let Some(part_name) = part_name else {
+        return Ok(false);
+    };
+
+    let normalized = part_name.trim_start_matches('/').replace('\\', "/");
+    Ok(is_macro_part_name(&normalized))
 }
 
 fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
