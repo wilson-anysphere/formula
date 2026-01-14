@@ -11,6 +11,7 @@ const BLOCK_KEY_VERIFIER_HASH: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x
 const BLOCK_KEY_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
 
 const ENCRYPTED_PACKAGE_CHUNK_SIZE: usize = 4096;
+const DEFAULT_MAX_SPIN_COUNT: u32 = 10_000_000;
 
 #[derive(Debug, Copy, Clone)]
 enum HashAlgorithm {
@@ -349,6 +350,14 @@ fn decrypt_agile_encrypted_package(
     let encrypted_key = &info.encrypted_key;
     let password_bytes = password_utf16le(password);
 
+    if encrypted_key.spin_count > DEFAULT_MAX_SPIN_COUNT {
+        anyhow::bail!(
+            "spinCount {} exceeds maximum allowed {} (refusing to run expensive password KDF)",
+            encrypted_key.spin_count,
+            DEFAULT_MAX_SPIN_COUNT
+        );
+    }
+
     // Password key derivation (Agile encryption).
     let mut h = {
         let mut buf = Vec::with_capacity(encrypted_key.salt_value.len() + password_bytes.len());
@@ -565,4 +574,3 @@ fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> 
 
     Ok(out)
 }
-

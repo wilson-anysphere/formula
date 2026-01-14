@@ -20,6 +20,12 @@ pub use crate::error::OfficeCryptoError;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
+/// Default maximum `spinCount` accepted during Agile password-based decryption.
+///
+/// `spinCount` is attacker-controlled in Agile-encrypted files; bounding it avoids CPU DoS from
+/// maliciously large values (Excel commonly uses 100,000).
+pub const DEFAULT_MAX_SPIN_COUNT: u32 = 10_000_000;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EncryptionScheme {
     Agile,
@@ -45,6 +51,22 @@ impl Default for EncryptOptions {
     }
 }
 
+/// Options controlling decryption resource limits.
+#[derive(Debug, Clone)]
+pub struct DecryptOptions {
+    /// Maximum allowed Agile `spinCount` before rejecting the file as unsafe/too expensive to
+    /// process.
+    pub max_spin_count: u32,
+}
+
+impl Default for DecryptOptions {
+    fn default() -> Self {
+        Self {
+            max_spin_count: DEFAULT_MAX_SPIN_COUNT,
+        }
+    }
+}
+
 /// Returns true if the provided bytes look like an OLE/CFB container holding an Office-encrypted
 /// OOXML package (streams `EncryptionInfo` and `EncryptedPackage`).
 pub fn is_encrypted_ooxml_ole(bytes: &[u8]) -> bool {
@@ -65,6 +87,15 @@ pub fn decrypt_encrypted_package_ole(
     bytes: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
+    decrypt_encrypted_package_ole_with_options(bytes, password, &DecryptOptions::default())
+}
+
+/// Like [`decrypt_encrypted_package_ole`], but allows overriding resource limits.
+pub fn decrypt_encrypted_package_ole_with_options(
+    bytes: &[u8],
+    password: &str,
+    opts: &DecryptOptions,
+) -> Result<Vec<u8>, OfficeCryptoError> {
     let cursor = Cursor::new(bytes);
     let mut ole = cfb::CompoundFile::open(cursor)?;
 
@@ -74,7 +105,7 @@ pub fn decrypt_encrypted_package_ole(
     let mut encrypted_package = Vec::new();
     open_stream(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
 
-    decrypt_encrypted_package_streams(&encryption_info, &encrypted_package, password)
+    decrypt_encrypted_package_streams_with_options(&encryption_info, &encrypted_package, password, opts)
 }
 
 /// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
@@ -85,7 +116,16 @@ pub fn decrypt_encrypted_package(
     ole_bytes: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
-    decrypt_encrypted_package_ole(ole_bytes, password)
+    decrypt_encrypted_package_with_options(ole_bytes, password, &DecryptOptions::default())
+}
+
+/// Like [`decrypt_encrypted_package`], but allows overriding resource limits.
+pub fn decrypt_encrypted_package_with_options(
+    ole_bytes: &[u8],
+    password: &str,
+    opts: &DecryptOptions,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    decrypt_encrypted_package_ole_with_options(ole_bytes, password, opts)
 }
 
 /// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
@@ -120,16 +160,17 @@ pub fn encrypt_package_to_ole(
     Ok(ole.into_inner().into_inner())
 }
 
-fn decrypt_encrypted_package_streams(
+fn decrypt_encrypted_package_streams_with_options(
     encryption_info: &[u8],
     encrypted_package: &[u8],
     password: &str,
+    opts: &DecryptOptions,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     let header = util::parse_encryption_info_header(encryption_info)?;
     match header.kind {
         util::EncryptionInfoKind::Agile => {
             let info = agile::parse_agile_encryption_info(encryption_info, &header)?;
-            let out = agile::decrypt_agile_encrypted_package(&info, encrypted_package, password)?;
+            let out = agile::decrypt_agile_encrypted_package(&info, encrypted_package, password, opts)?;
             validate_decrypted_package(&out)?;
             Ok(out)
         }
@@ -242,6 +283,52 @@ mod tests {
         assert_eq!(parsed.version_minor, 4);
         assert_eq!(parsed.key_data.key_bits, 256);
         assert_eq!(parsed.password_key_encryptor.spin_count, 100_000);
+    }
+
+    #[test]
+    fn rejects_agile_spin_count_above_default_max() {
+        // Construct a minimal Agile EncryptionInfo stream with an oversized spinCount. The
+        // EncryptedPackage body can be empty; we only want to assert we reject before running the
+        // expensive password KDF.
+        let xml = r#"
+            <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                        xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltValue="AAAAAAAAAAAAAAAAAAAAAA==" hashAlgorithm="SHA1"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" />
+              <dataIntegrity encryptedHmacKey="AA==" encryptedHmacValue="AA==" />
+              <keyEncryptors>
+                <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+                  <p:encryptedKey saltValue="AAAAAAAAAAAAAAAAAAAAAA==" spinCount="4294967295" hashAlgorithm="SHA1"
+                                  cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  keyBits="128" blockSize="16"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>
+        "#;
+
+        let mut encryption_info = Vec::new();
+        encryption_info.extend_from_slice(&4u16.to_le_bytes()); // versionMajor
+        encryption_info.extend_from_slice(&4u16.to_le_bytes()); // versionMinor
+        encryption_info.extend_from_slice(&0x40u32.to_le_bytes()); // flags (arbitrary)
+        encryption_info.extend_from_slice(xml.as_bytes());
+
+        let encrypted_package = 0u64.to_le_bytes().to_vec();
+
+        let err = decrypt_encrypted_package_streams_with_options(
+            &encryption_info,
+            &encrypted_package,
+            "password",
+            &DecryptOptions::default(),
+        )
+        .expect_err("expected error");
+        assert!(
+            matches!(err, OfficeCryptoError::SpinCountTooLarge { .. }),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -412,8 +499,13 @@ mod tests {
             "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
         );
 
-        let err = agile::decrypt_agile_encrypted_package(&dummy_agile, &encrypted_package, "")
-            .expect_err("expected size overflow");
+        let err = agile::decrypt_agile_encrypted_package(
+            &dummy_agile,
+            &encrypted_package,
+            "",
+            &DecryptOptions::default(),
+        )
+        .expect_err("expected size overflow");
         assert!(
             matches!(err, OfficeCryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
             "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"

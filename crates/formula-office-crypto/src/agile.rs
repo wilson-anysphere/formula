@@ -130,6 +130,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
     info: &AgileEncryptionInfo,
     encrypted_package: &[u8],
     password: &str,
+    opts: &crate::DecryptOptions,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     if encrypted_package.len() < 8 {
         return Err(OfficeCryptoError::InvalidFormat(
@@ -184,6 +185,14 @@ pub(crate) fn decrypt_agile_encrypted_package(
             "unsupported keyData blockSize {}",
             info.key_data.block_size
         )));
+    }
+
+    // `spinCount` is attacker-controlled; enforce limits up front to avoid CPU DoS.
+    if info.password_key_encryptor.spin_count > opts.max_spin_count {
+        return Err(OfficeCryptoError::SpinCountTooLarge {
+            spin_count: info.password_key_encryptor.spin_count,
+            max: opts.max_spin_count,
+        });
     }
 
     let schemes = [
@@ -1429,8 +1438,13 @@ pub(crate) mod tests {
             },
         };
 
-        let out =
-        decrypt_agile_encrypted_package(&info, &encrypted_package, password).expect("decrypt");
+        let out = decrypt_agile_encrypted_package(
+            &info,
+            &encrypted_package,
+            password,
+            &crate::DecryptOptions::default(),
+        )
+        .expect("decrypt");
         assert!(out.is_empty());
 
         // Alternative IV mode (seen in other producers): Hash(saltValue || blockKey).
@@ -1466,8 +1480,13 @@ pub(crate) mod tests {
         wrong_info.password_key_encryptor.encrypted_verifier_hash_value = wrong_enc_vhv;
         wrong_info.password_key_encryptor.encrypted_key_value = wrong_enc_kv;
 
-        let out = decrypt_agile_encrypted_package(&wrong_info, &encrypted_package, password)
-            .expect("decrypt derived-iv variant");
+        let out = decrypt_agile_encrypted_package(
+            &wrong_info,
+            &encrypted_package,
+            password,
+            &crate::DecryptOptions::default(),
+        )
+        .expect("decrypt derived-iv variant");
         assert!(out.is_empty());
     }
 }

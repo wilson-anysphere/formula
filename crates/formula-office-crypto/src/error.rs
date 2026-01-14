@@ -6,6 +6,10 @@ pub enum OfficeCryptoError {
     PasswordRequired,
     #[error("invalid password")]
     InvalidPassword,
+    #[error(
+        "spinCount {spin_count} exceeds maximum allowed {max} (refusing to run expensive password KDF)"
+    )]
+    SpinCountTooLarge { spin_count: u32, max: u32 },
     #[error("unsupported encryption: {0}")]
     UnsupportedEncryption(String),
     #[error("invalid encryption options: {0}")]
