@@ -113,7 +113,8 @@ Currently supported in `formula-xls`:
   - Note: this scheme uses only the first 15 UTF-16 code units of the password (Excel truncation).
 - **BIFF8 RC4 CryptoAPI** (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
   - RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi)).
-  - RC4 `KeySizeBits` values: `40`, `56`, `128`
+  - RC4 `KeySizeBits` values: `0/40`, `56`, `128`
+    - Some producers encode 40-bit RC4 as `keySize=0` (legacy export restrictions).
     - Note: for `KeySizeBits == 40`, the derived 5-byte key material must be **padded to 16 bytes**
       (`key_material || 0x00*11`) before running RC4 KSA (CryptoAPI interoperability quirk).
 - (best-effort) **BIFF5-era XOR obfuscation** (Excel 5/95)

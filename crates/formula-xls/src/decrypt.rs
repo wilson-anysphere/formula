@@ -45,6 +45,15 @@ const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 // Cap this defensively so malformed files cannot request unbounded allocations.
 const MAX_ENCRYPTION_HEADER_SIZE: usize = 4096;
 
+/// Normalize CryptoAPI RC4 `EncryptionHeader.keySize` (bits).
+///
+/// In MS-OFFCRYPTO Standard/CryptoAPI encryption, `keySize == 0` is defined to mean **40-bit RC4**
+/// (legacy export restrictions). Some BIFF8 `FILEPASS` CryptoAPI workbooks follow the same
+/// convention, so we treat `0` as `40` for compatibility.
+fn normalize_cryptoapi_rc4_key_size_bits(key_size_bits: u32) -> u32 {
+    if key_size_bits == 0 { 40 } else { key_size_bits }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CryptoApiHashAlg {
     Sha1,
@@ -833,15 +842,17 @@ mod filepass_tests {
         assert_eq!(key_40.as_slice(), expected_40.as_slice());
     }
 
-    #[test]
-    fn decrypts_rc4_cryptoapi_40_bit_by_using_padded_rc4_key() {
+    fn decrypts_rc4_cryptoapi_40_bit_impl(header_key_size_bits: u32) {
         // Build a minimal BIFF8 workbook stream:
         // BOF (plaintext) + FILEPASS (plaintext) + one record with encrypted payload + EOF.
         const RECORD_BOF: u16 = 0x0809;
         const RECORD_EOF: u16 = 0x000A;
 
         let password = "password";
-        let key_size_bits: u32 = 40;
+        // MS-OFFCRYPTO defines `keySize == 0` as 40-bit RC4. Some BIFF8 `FILEPASS` CryptoAPI
+        // producers follow the same convention.
+        let effective_key_size_bits: u32 =
+            if header_key_size_bits == 0 { 40 } else { header_key_size_bits };
         let salt: [u8; 16] = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
             0x0E, 0x0F, 0x10,
@@ -858,7 +869,7 @@ mod filepass_tests {
         ];
         let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
 
-        let key0 = derive_block_key_spec(hash_alg, key_material.as_slice(), 0, key_size_bits);
+        let key0 = derive_block_key_spec(hash_alg, key_material.as_slice(), 0, effective_key_size_bits);
         assert_eq!(key0.len(), 16, "40-bit RC4 key must be padded to 16 bytes");
 
         let mut rc4 = Rc4::new(&key0);
@@ -873,7 +884,7 @@ mod filepass_tests {
         enc_header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
         enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
         enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
-        enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize (bits)
+        enc_header.extend_from_slice(&header_key_size_bits.to_le_bytes()); // keySize (bits)
         enc_header.extend_from_slice(&0u32.to_le_bytes()); // providerType
         enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
         enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
@@ -923,7 +934,7 @@ mod filepass_tests {
         let mut payload_cipher = PayloadRc4Spec::new(
             hash_alg,
             key_material.as_slice().to_vec(),
-            key_size_bits,
+            effective_key_size_bits,
         );
 
         let mut offset = filepass_data_end;
@@ -944,6 +955,16 @@ mod filepass_tests {
         let mut expected = plaintext_stream;
         expected[filepass_offset..filepass_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
         assert_eq!(encrypted_stream, expected);
+    }
+
+    #[test]
+    fn decrypts_rc4_cryptoapi_40_bit_by_using_padded_rc4_key() {
+        decrypts_rc4_cryptoapi_40_bit_impl(40);
+    }
+
+    #[test]
+    fn decrypts_rc4_cryptoapi_keysize_zero_is_treated_as_40_bit() {
+        decrypts_rc4_cryptoapi_40_bit_impl(0);
     }
 
     #[test]
@@ -1375,7 +1396,7 @@ fn verify_password(
         )));
     }
 
-    let key_size_bits = info.header.key_size_bits;
+    let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
     if key_size_bits % 8 != 0 {
         return Err(DecryptError::UnsupportedEncryption(format!(
             "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
@@ -1442,7 +1463,7 @@ fn verify_password_legacy(
         )));
     }
 
-    let key_size_bits = info.header.key_size_bits;
+    let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
     if key_size_bits % 8 != 0 {
         return Err(DecryptError::UnsupportedEncryption(format!(
             "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
@@ -1635,13 +1656,15 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             ENCRYPTION_SUBTYPE_CRYPTOAPI => {
                 let info = parse_filepass_record_payload(filepass_payload)?;
                 let (hash_alg, key_material) = verify_password(&info, password)?;
-                let key_len = (info.header.key_size_bits / 8) as usize;
+                let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
+                let key_len = (key_size_bits / 8) as usize;
                 (CryptoApiMode::Modern, hash_alg, key_material, key_len)
             }
             ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
                 let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
                 let (hash_alg, key_material) = verify_password_legacy(&info, password)?;
-                let key_len = (info.header.key_size_bits / 8) as usize;
+                let key_size_bits = normalize_cryptoapi_rc4_key_size_bits(info.header.key_size_bits);
+                let key_len = (key_size_bits / 8) as usize;
                 (CryptoApiMode::Legacy, hash_alg, key_material, key_len)
             }
             _ => {
