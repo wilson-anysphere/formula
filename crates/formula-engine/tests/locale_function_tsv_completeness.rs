@@ -582,12 +582,49 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
             .collect();
 
         let mapping_matches_upstream = parsed.entries == upstream.entries;
+        let mut runtime_mismatches: Vec<String> = Vec::new();
+        let locale = match get_locale(locale_id) {
+            Some(locale) => Some(locale),
+            None => {
+                runtime_mismatches.push(format!(
+                    "upstream error TSV exists for locale {locale_id}, but locale is not registered in formula_engine::locale::get_locale"
+                ));
+                None
+            }
+        };
+
+        if let Some(locale) = locale {
+            for (canon, localized_list) in &parsed.entries {
+                let preferred = localized_list.first().unwrap_or_else(|| {
+                    panic!(
+                        "expected {locale_id} error TSV entry for {canon:?} to contain at least one localized spelling"
+                    )
+                });
+                if locale.localized_error_literal(canon) != Some(preferred.as_str()) {
+                    runtime_mismatches.push(format!(
+                        "canonical {canon:?}: preferred localized mismatch (tsv preferred={preferred:?}, runtime={:?})",
+                        locale.localized_error_literal(canon)
+                    ));
+                }
+                for localized in localized_list {
+                    if locale.canonical_error_literal(localized) != Some(canon.as_str()) {
+                        runtime_mismatches.push(format!(
+                            "localized {localized:?}: canonical mismatch (expected {canon:?}, runtime={:?})",
+                            locale.canonical_error_literal(localized)
+                        ));
+                    }
+                }
+            }
+        }
+
+        let runtime_ok = runtime_mismatches.is_empty();
 
         if missing.is_empty()
             && extra.is_empty()
             && upstream_missing.is_empty()
             && upstream_extra.is_empty()
             && mapping_matches_upstream
+            && runtime_ok
         {
             continue;
         }
@@ -640,6 +677,12 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
         if !mapping_matches_upstream {
             failures
                 .push_str("\n  Error TSV does not match upstream mapping source. Regenerate it.\n");
+        }
+        if !runtime_ok {
+            failures.push_str("\n  Runtime locale error translation mismatch:\n");
+            for entry in &runtime_mismatches {
+                failures.push_str(&format!("    - {entry}\n"));
+            }
         }
 
         failures.push_str(&format!(
