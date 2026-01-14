@@ -833,18 +833,18 @@ All What‑If tools are written against the `what_if::WhatIfModel` trait (get/se
 
 Rust:
 
-- `what_if::CellRef` — a `#[serde(transparent)]` A1-style cell reference string.
+- `what_if::CellRef` — a `#[serde(transparent)]` A1-style cell reference string (defined in [`what_if/types.rs`](../crates/formula-engine/src/what_if/types.rs)).
   - For engine-backed usage (`EngineWhatIfModel`), accepted forms include:
     - `"A1"` (uses the adapter’s `default_sheet`)
     - `"Sheet1!A1"`
     - `"'My Sheet'!A1"` (Excel-style quoting for spaces)
     - `"'O''Brien'!A1"` (escaped `'` via doubled apostrophe)
-- `what_if::CellValue` — scalar-only values: `Number(f64)`, `Text(String)`, `Bool(bool)`, `Blank`.
-- `what_if::WhatIfError<E>` — returned for invalid parameters, non-numeric cells, or underlying model failures.
+- `what_if::CellValue` — scalar-only values: `Number(f64)`, `Text(String)`, `Bool(bool)`, `Blank` (defined in [`what_if/types.rs`](../crates/formula-engine/src/what_if/types.rs)).
+- `what_if::WhatIfError<E>` — returned for invalid parameters, non-numeric cells, or underlying model failures (defined in [`what_if/types.rs`](../crates/formula-engine/src/what_if/types.rs)).
 
 Engine adapter notes (in-tree today):
 
-- `what_if::EngineWhatIfModel` defaults to **single-threaded** recalculation (`RecalcMode::SingleThreaded`) to reduce per-iteration overhead; hosts can opt into `RecalcMode::MultiThreaded` via `EngineWhatIfModel::with_recalc_mode(...)`.
+- `what_if::EngineWhatIfModel` (defined in [`what_if/engine_model.rs`](../crates/formula-engine/src/what_if/engine_model.rs)) defaults to **single-threaded** recalculation (`RecalcMode::SingleThreaded`) to reduce per-iteration overhead; hosts can opt into `RecalcMode::MultiThreaded` via `EngineWhatIfModel::with_recalc_mode(...)`.
 - `EngineWhatIfModel` intentionally exposes a *scalar-only* view of engine values:
   - arrays/spills are degraded to their top-left value
   - errors are degraded to their error code string (e.g. `"#DIV/0!"`)
