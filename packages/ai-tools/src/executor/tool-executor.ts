@@ -1198,7 +1198,8 @@ export class ToolExecutor {
       }
     }
 
-    const title = params.title != null && String(params.title).trim() !== "" ? String(params.title) : undefined;
+    const titleRaw = params.title != null ? String(params.title) : "";
+    const title = titleRaw.trim() !== "" ? titleRaw.trim() : undefined;
 
     const spec: CreateChartSpec = {
       chart_type: chartType,
@@ -1211,10 +1212,11 @@ export class ToolExecutor {
     if (!result || typeof result.chart_id !== "string" || result.chart_id.trim() === "") {
       throw toolError("runtime_error", "create_chart host returned an invalid chart_id", result);
     }
+    const chartId = result.chart_id.trim();
 
     return {
       status: "ok",
-      chart_id: result.chart_id,
+      chart_id: chartId,
       chart_type: chartType,
       data_range: dataRangeForUser,
       ...(title ? { title } : {}),

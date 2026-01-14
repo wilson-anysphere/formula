@@ -1111,6 +1111,33 @@ describe("ToolExecutor", () => {
     });
   });
 
+  it("create_chart trims chart_id/title returned by the host (canonical identifiers)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]) as any;
+    const originalCreateChart = workbook.createChart.bind(workbook);
+    workbook.createChart = (spec: any) => {
+      const result = originalCreateChart(spec);
+      return { ...result, chart_id: ` ${result.chart_id} ` };
+    };
+
+    const executor = new ToolExecutor(workbook as SpreadsheetApi, { default_sheet: "Sheet1" });
+    const result = await executor.execute({
+      name: "create_chart",
+      parameters: {
+        chart_type: "bar",
+        data_range: "A1:B3",
+        title: " Sales "
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_chart");
+    if (!result.ok || result.tool !== "create_chart") throw new Error("Unexpected tool result");
+    expect(result.data?.status).toBe("ok");
+    expect(result.data?.chart_id).toBe("chart_1");
+    expect(result.data?.title).toBe("Sales");
+    expect(workbook.listCharts()[0]?.spec.title).toBe("Sales");
+  });
+
   it("create_chart returns not_implemented when SpreadsheetApi lacks chart support", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]) as any;
     workbook.createChart = undefined;
