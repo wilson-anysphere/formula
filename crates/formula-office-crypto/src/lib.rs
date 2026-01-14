@@ -14,7 +14,7 @@ mod ole;
 mod standard;
 mod util;
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 
 pub use crate::crypto::HashAlgorithm;
 pub use crate::error::OfficeCryptoError;
@@ -127,11 +127,15 @@ pub fn decrypt_encrypted_package_ole_with_options(
     let cursor = Cursor::new(bytes);
     let mut ole = cfb::CompoundFile::open(cursor)?;
 
-    let mut encryption_info = Vec::new();
-    open_stream_case_tolerant(&mut ole, "EncryptionInfo")?.read_to_end(&mut encryption_info)?;
+    // Reading the two OLE streams into memory is necessary for downstream decryption, but both
+    // stream sizes are attacker-controlled. Avoid unbounded reads/allocations by:
+    // - bounding `EncryptionInfo` to its declared header size (and the global XML/header limits),
+    // - bounding `EncryptedPackage` to the ciphertext required for the declared plaintext size,
+    //   plus a small allowance for producer quirks / OLE sector slack.
+    let encryption_info = read_encryption_info_stream(&mut ole)?;
+    let header = util::parse_encryption_info_header(&encryption_info)?;
 
-    let mut encrypted_package = Vec::new();
-    open_stream_case_tolerant(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
+    let encrypted_package = read_encrypted_package_stream(&mut ole, &encryption_info, &header)?;
 
     decrypt_encrypted_package_streams_with_options(
         &encryption_info,
@@ -139,6 +143,292 @@ pub fn decrypt_encrypted_package_ole_with_options(
         password,
         opts,
     )
+}
+
+/// Maximum number of trailing ciphertext bytes allowed beyond the minimum required ciphertext length.
+///
+/// Some real-world writers include small amounts of "sector slack" or padding in the OLE stream.
+/// We allow a limited suffix so we can still validate Agile `dataIntegrity` HMACs against the full
+/// stream bytes without reading unbounded attacker-controlled data.
+const MAX_ENCRYPTED_PACKAGE_TRAILING_BYTES: usize = 1024 * 1024; // 1 MiB
+
+fn read_encryption_info_stream<R: Read + Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    let mut stream = open_stream_case_tolerant(ole, "EncryptionInfo")?;
+
+    // Read the 8-byte version header + 4-byte size/prefix field.
+    let mut prefix = [0u8; 12];
+    stream
+        .read_exact(&mut prefix)
+        .map_err(|err| match err.kind() {
+            std::io::ErrorKind::UnexpectedEof => OfficeCryptoError::InvalidFormat(
+                "EncryptionInfo stream too short".to_string(),
+            ),
+            _ => OfficeCryptoError::Io(err),
+        })?;
+
+    let version_major = u16::from_le_bytes([prefix[0], prefix[1]]);
+    let version_minor = u16::from_le_bytes([prefix[2], prefix[3]]);
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&prefix);
+
+    match (version_major, version_minor) {
+        // Agile: either [8-byte version header][u32 xml_len][xml bytes...] or
+        //        [8-byte version header][xml bytes...] (no length prefix).
+        (4, 4) => {
+            let candidate_len = u32::from_le_bytes([prefix[8], prefix[9], prefix[10], prefix[11]]);
+            let max_xml = MAX_AGILE_ENCRYPTION_INFO_XML_BYTES;
+
+            // If the candidate length fits within our XML limit, treat it as an explicit length
+            // prefix. Otherwise treat it as the first 4 bytes of the XML document (no-prefix
+            // variant) and read until EOF (bounded by the global XML limit).
+            if (candidate_len as usize) <= max_xml {
+                let xml_len = candidate_len as usize;
+                // `xml_len` is already bounded by `MAX_AGILE_ENCRYPTION_INFO_XML_BYTES` (1 MiB),
+                // so a direct allocation is acceptable here.
+                let start = out.len();
+                out.resize(start.saturating_add(xml_len), 0);
+                stream
+                    .read_exact(&mut out[start..])
+                    .map_err(|err| match err.kind() {
+                        std::io::ErrorKind::UnexpectedEof => OfficeCryptoError::InvalidFormat(
+                            "EncryptionInfo header size out of range".to_string(),
+                        ),
+                        _ => OfficeCryptoError::Io(err),
+                    })?;
+                Ok(out)
+            } else {
+                // No-prefix: xml starts at offset 8, and `prefix[8..12]` belongs to the XML.
+                // Enforce the XML byte limit by capping total stream bytes to `8 + max_xml`.
+                let max_total = 8usize
+                    .checked_add(max_xml)
+                    .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptionInfo size overflow".to_string()))?;
+                if out.len() > max_total {
+                    return Err(OfficeCryptoError::SizeLimitExceeded {
+                        context: "EncryptionInfo XML",
+                        limit: max_xml,
+                    });
+                }
+
+                let remaining_budget = max_total
+                    .checked_sub(out.len())
+                    .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptionInfo size overflow".to_string()))?;
+                let mut limited = stream.take((remaining_budget + 1) as u64);
+                limited.read_to_end(&mut out).map_err(OfficeCryptoError::Io)?;
+                if out.len() > max_total {
+                    return Err(OfficeCryptoError::SizeLimitExceeded {
+                        context: "EncryptionInfo XML",
+                        limit: max_xml,
+                    });
+                }
+                Ok(out)
+            }
+        }
+
+        // Standard: [8-byte version header][u32 headerSize][header bytes...][verifier bytes...]
+        (major, 2) if (2..=4).contains(&major) => {
+            let header_size = u32::from_le_bytes([prefix[8], prefix[9], prefix[10], prefix[11]]);
+            let header_size = header_size as usize;
+            if header_size > MAX_STANDARD_ENCRYPTION_HEADER_BYTES {
+                return Err(OfficeCryptoError::SizeLimitExceeded {
+                    context: "EncryptionInfo.headerSize",
+                    limit: MAX_STANDARD_ENCRYPTION_HEADER_BYTES,
+                });
+            }
+
+            // Upper bound for verifier bytes based on the parser's own limits:
+            //   saltSize (u32) + salt (<=1024) + encryptedVerifier (16) +
+            //   verifierHashSize (u32) + encryptedVerifierHash (<=64, padded for AES but 64 is multiple of 16).
+            const MAX_VERIFIER_SALT_SIZE: usize = 1024;
+            const MAX_VERIFIER_HASH_SIZE: usize = 64;
+            const MAX_VERIFIER_BYTES: usize =
+                4 + MAX_VERIFIER_SALT_SIZE + 16 + 4 + MAX_VERIFIER_HASH_SIZE;
+
+            // Read header bytes + enough verifier bytes for any valid file, then stop. Trailing
+            // bytes after the verifier are ignored by the parser and are not required for
+            // decryption.
+            let start = out.len();
+            out.resize(start.saturating_add(header_size), 0);
+            stream
+                .read_exact(&mut out[start..])
+                .map_err(|err| match err.kind() {
+                    std::io::ErrorKind::UnexpectedEof => OfficeCryptoError::InvalidFormat(
+                        "EncryptionInfo header size out of range".to_string(),
+                    ),
+                    _ => OfficeCryptoError::Io(err),
+                })?;
+
+            let mut verifier = Vec::new();
+            stream
+                .take(MAX_VERIFIER_BYTES as u64)
+                .read_to_end(&mut verifier)
+                .map_err(OfficeCryptoError::Io)?;
+            out.extend_from_slice(&verifier);
+            Ok(out)
+        }
+
+        _ => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported EncryptionInfo version {version_major}.{version_minor}"
+        ))),
+    }
+}
+
+fn read_encrypted_package_stream<R: Read + Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    encryption_info: &[u8],
+    header: &util::EncryptionInfoHeader,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    let mut stream = open_stream_case_tolerant(ole, "EncryptedPackage")?;
+
+    // Obtain the stream length without reading the payload (for size-header plausibility checks).
+    let stream_len = stream.seek(SeekFrom::End(0)).map_err(OfficeCryptoError::Io)?;
+    stream.seek(SeekFrom::Start(0)).map_err(OfficeCryptoError::Io)?;
+
+    if stream_len < 8 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptedPackage stream too short".to_string(),
+        ));
+    }
+    let ciphertext_len_u64 = stream_len.saturating_sub(8);
+
+    let mut size_prefix = [0u8; 8];
+    stream
+        .read_exact(&mut size_prefix)
+        .map_err(|err| match err.kind() {
+            std::io::ErrorKind::UnexpectedEof => OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage stream too short".to_string(),
+            ),
+            _ => OfficeCryptoError::Io(err),
+        })?;
+
+    // Mirror `util::parse_encrypted_package_original_size`, but use the stream length rather than
+    // requiring the whole ciphertext in memory up front.
+    let len_lo = u32::from_le_bytes(size_prefix[..4].try_into().unwrap()) as u64;
+    let len_hi = u32::from_le_bytes(size_prefix[4..].try_into().unwrap()) as u64;
+    let size_u64 = len_lo | (len_hi << 32);
+    let total_size = if len_lo != 0
+        && len_hi != 0
+        && size_u64 > ciphertext_len_u64
+        && len_lo <= ciphertext_len_u64
+    {
+        len_lo
+    } else {
+        size_u64
+    };
+
+    if total_size > MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE {
+        return Err(OfficeCryptoError::SizeLimitExceededU64 {
+            context: "EncryptedPackage.originalSize",
+            limit: MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE,
+        });
+    }
+
+    let expected_len = util::checked_vec_len(total_size)?;
+
+    // Reject the "zero size but non-empty ciphertext" special case early to keep behavior stable.
+    if expected_len == 0 {
+        if ciphertext_len_u64 != 0 {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage size is zero but ciphertext is non-empty".to_string(),
+            ));
+        }
+        // Return exactly 8 bytes (size header) so downstream decryptors keep their assumptions.
+        return Ok(size_prefix.to_vec());
+    }
+    if ciphertext_len_u64 == 0 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptedPackage ciphertext missing".to_string(),
+        ));
+    }
+
+    let required_ciphertext_len = required_ciphertext_len_for_header(header, encryption_info, expected_len)?;
+    let max_ciphertext_len = required_ciphertext_len
+        .checked_add(MAX_ENCRYPTED_PACKAGE_TRAILING_BYTES)
+        .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptedPackage size overflow".to_string()))?;
+    let max_ciphertext_len_u64 = max_ciphertext_len as u64;
+    if ciphertext_len_u64 > max_ciphertext_len_u64 {
+        return Err(OfficeCryptoError::SizeLimitExceeded {
+            context: "EncryptedPackage ciphertext",
+            limit: max_ciphertext_len,
+        });
+    }
+
+    let ciphertext_len = usize::try_from(ciphertext_len_u64).map_err(|_| {
+        OfficeCryptoError::EncryptedPackageSizeOverflow {
+            total_size: ciphertext_len_u64,
+        }
+    })?;
+
+    let mut out = Vec::new();
+    out.try_reserve_exact(8 + ciphertext_len).map_err(|source| {
+        OfficeCryptoError::EncryptedPackageAllocationFailed {
+            total_size,
+            source,
+        }
+    })?;
+    out.extend_from_slice(&size_prefix);
+
+    let start = out.len();
+    out.resize(start + ciphertext_len, 0);
+    stream
+        .read_exact(&mut out[start..])
+        .map_err(|err| match err.kind() {
+            std::io::ErrorKind::UnexpectedEof => OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage ciphertext truncated".to_string(),
+            ),
+            _ => OfficeCryptoError::Io(err),
+        })?;
+    Ok(out)
+}
+
+fn required_ciphertext_len_for_header(
+    header: &util::EncryptionInfoHeader,
+    encryption_info: &[u8],
+    expected_len: usize,
+) -> Result<usize, OfficeCryptoError> {
+    match header.kind {
+        util::EncryptionInfoKind::Agile => {
+            // Agile stores ciphertext in 4096-byte segments; only the final segment is padded to
+            // the AES block size (16 bytes).
+            const SEGMENT_LEN: usize = 4096;
+            let full_segments_len = (expected_len / SEGMENT_LEN) * SEGMENT_LEN;
+            let rem = expected_len % SEGMENT_LEN;
+            let last_padded = if rem == 0 {
+                0usize
+            } else {
+                rem.checked_add(15)
+                    .ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "EncryptedPackage expected length overflow".to_string(),
+                        )
+                    })?
+                    / 16
+                    * 16
+            };
+            full_segments_len.checked_add(last_padded).ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string())
+            })
+        }
+        util::EncryptionInfoKind::Standard => {
+            let info = standard::parse_standard_encryption_info(encryption_info, header)?;
+            match info.header.alg_id {
+                // RC4: stream cipher, no padding.
+                0x0000_6801 => Ok(expected_len),
+                // AES: payload padded to 16-byte blocks.
+                0x0000_660E | 0x0000_660F | 0x0000_6610 => {
+                    Ok(expected_len.checked_add(15).ok_or_else(|| {
+                        OfficeCryptoError::InvalidFormat(
+                            "EncryptedPackage expected length overflow".to_string(),
+                        )
+                    })? / 16
+                        * 16)
+                }
+                _ => Ok(expected_len),
+            }
+        }
+    }
 }
 
 /// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return the decrypted raw ZIP bytes.
