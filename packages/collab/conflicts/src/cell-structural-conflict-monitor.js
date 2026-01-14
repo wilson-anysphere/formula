@@ -73,6 +73,7 @@ export class CellStructuralConflictMonitor {
     this._lastAgePruneAt = 0;
     /** @type {ReturnType<typeof setTimeout> | null} */
     this._agePruneTimer = null;
+    this._disposed = false;
     this.doc = opts.doc;
     this.cells = opts.cells ?? getMapRoot(this.doc, "cells");
     this.localUserId = opts.localUserId;
@@ -119,6 +120,7 @@ export class CellStructuralConflictMonitor {
   }
  
   dispose() {
+    this._disposed = true;
     this.cells.unobserveDeep(this._onCellsDeepEvent);
     this._ops.unobserve(this._onOpsEvent);
     if (this._agePruneTimer) {
@@ -530,9 +532,14 @@ export class CellStructuralConflictMonitor {
   _scheduleAgePruneTimer(delayMs) {
     // If a timer is already scheduled, keep it; a single deferred prune is
     // sufficient to eventually clean up any late-arriving expired records.
+    if (this._disposed) return;
     if (this._agePruneTimer) return;
 
     this._agePruneTimer = setTimeout(() => {
+      if (this._disposed) {
+        this._agePruneTimer = null;
+        return;
+      }
       this._agePruneTimer = null;
       // Force to ensure we actually run even if the timer fires slightly early
       // (and therefore the normal throttle window hasn't fully elapsed yet).
