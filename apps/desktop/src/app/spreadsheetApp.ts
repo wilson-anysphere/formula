@@ -25277,7 +25277,7 @@ export class SpreadsheetApp {
       ctx.clip();
       ctx.strokeStyle = options.color;
       ctx.lineWidth = options.lineWidth ?? 2;
-      ctx.setLineDash(options.dash ?? []);
+      ctx.setLineDash(options.dash ?? LINE_DASH_NONE);
       const inset = ctx.lineWidth / 2;
       if (width > ctx.lineWidth && height > ctx.lineWidth) {
         ctx.strokeRect(x + inset, y + inset, width - ctx.lineWidth, height - ctx.lineWidth);
@@ -25296,7 +25296,7 @@ export class SpreadsheetApp {
       const endRow = Math.max(highlight.start.row, highlight.end.row);
       const startCol = Math.min(highlight.start.col, highlight.end.col);
       const endCol = Math.max(highlight.start.col, highlight.end.col);
-      drawRangeOutline(startRow, endRow, startCol, endCol, { color: highlight.color, dash: [4, 3] });
+      drawRangeOutline(startRow, endRow, startCol, endCol, { color: highlight.color, dash: LINE_DASH_FILL_PREVIEW });
     }
 
     for (const highlight of this.referenceHighlights) {
@@ -25315,7 +25315,7 @@ export class SpreadsheetApp {
       const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
       drawRangeOutline(startRow, endRow, startCol, endCol, {
         color: resolveCssVar("--warning", { root: this.root, fallback: "CanvasText" }),
-        dash: [4, 3],
+        dash: LINE_DASH_FILL_PREVIEW,
       });
     }
   }
