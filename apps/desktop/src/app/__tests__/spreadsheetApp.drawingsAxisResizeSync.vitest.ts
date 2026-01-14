@@ -30,10 +30,6 @@ function createInMemoryLocalStorage(): Storage {
 
 type CtxCall = { method: string; args: unknown[] };
 
-function flushPromises(): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
-}
-
 function createMockCanvasContext(calls: CtxCall[]): CanvasRenderingContext2D {
   const noop = () => {};
   const gradient = { addColorStop: noop } as any;
