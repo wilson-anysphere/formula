@@ -38,14 +38,7 @@ import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFr
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
-import {
-  bringForward,
-  bringToFront,
-  deleteSelected as deleteDrawingSelected,
-  duplicateSelected as duplicateDrawingSelected,
-  sendBackward,
-  sendToBack,
-} from "../drawings/commands";
+import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -4997,24 +4990,6 @@ export class SpreadsheetApp {
     }
   }
 
-  bringSelectedDrawingForward(): void {
-    this.arrangeSelectedDrawing("forward");
-  }
-
-  sendSelectedDrawingBackward(): void {
-    this.arrangeSelectedDrawing("backward");
-  }
-
-  // Future menu items (not currently wired).
-  bringSelectedDrawingToFront(): void {
-    this.arrangeSelectedDrawing("front");
-  }
-
-  // Future menu items (not currently wired).
-  sendSelectedDrawingToBack(): void {
-    this.arrangeSelectedDrawing("back");
-  }
-
   private arrangeSelectedDrawing(direction: "forward" | "backward" | "front" | "back"): void {
     const sheetId = this.sheetId;
     const selectedId = this.selectedDrawingId;
@@ -5048,7 +5023,25 @@ export class SpreadsheetApp {
       });
 
     const selectedKey = String(selectedId);
-    const index = ordered.findIndex((entry) => entry.idKey === selectedKey);
+    let index = ordered.findIndex((entry) => entry.idKey === selectedKey);
+    if (index === -1) {
+      // Drawings may be stored with non-numeric ids (e.g. historical snapshots). In that case,
+      // `selectedDrawingId` is a stable numeric mapping produced by the adapter layer. Resolve the
+      // selected raw entry by comparing via `convertDocumentSheetDrawingsToUiDrawingObjects`.
+      for (let i = 0; i < ordered.length; i += 1) {
+        const entry = ordered[i]!;
+        let uiId: number | null = null;
+        try {
+          uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry.drawing], { sheetId })[0]?.id ?? null;
+        } catch {
+          uiId = null;
+        }
+        if (uiId === selectedId) {
+          index = i;
+          break;
+        }
+      }
+    }
     if (index === -1) return;
 
     let nextOrder = ordered;
@@ -6318,11 +6311,107 @@ export class SpreadsheetApp {
   }
 
   deleteSelectedDrawing(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
-    const objects = this.listDrawingObjectsForSheet();
-    this.setDrawingObjectsForSheet(deleteDrawingSelected(objects, selected));
-    this.selectDrawing(null);
+    const drawingId = this.selectedDrawingId;
+    if (drawingId == null) return;
+
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
+    const imageId = selected?.kind.type === "image" ? selected.kind.imageId : null;
+
+    const docAny: any = this.document as any;
+    const deleteDrawing =
+      typeof docAny.deleteDrawing === "function"
+        ? (docAny.deleteDrawing as (sheetId: string, drawingId: string | number, options?: unknown) => void)
+        : null;
+    const getSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    const deleteImage =
+      typeof docAny.deleteImage === "function" ? (docAny.deleteImage as (imageId: string, options?: unknown) => void) : null;
+
+    // `DrawingObject.id` is numeric in the UI layer, but DocumentController drawings can be stored with
+    // string ids (and we map them through a stable numeric hash). To delete the correct raw entry,
+    // scan the raw drawings list and compare via the adapter layer.
+    const rawIdsToDelete = new Set<string | number>();
+    if (getSheetDrawings) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry !== "object") continue;
+          let uiId: number | null = null;
+          try {
+            uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
+          } catch {
+            uiId = null;
+          }
+          if (uiId !== drawingId) continue;
+          const rawId = (entry as any).id;
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) rawIdsToDelete.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            rawIdsToDelete.add(rawId);
+          }
+        }
+      }
+    }
+    if (rawIdsToDelete.size === 0) rawIdsToDelete.add(drawingId);
+
+    let batchStarted = false;
+    try {
+      this.document.beginBatch({ label: "Delete Drawing" });
+      batchStarted = true;
+    } catch {
+      batchStarted = false;
+    }
+
+    if (deleteDrawing) {
+      for (const rawId of rawIdsToDelete) {
+        try {
+          deleteDrawing.call(docAny, sheetId, rawId, { label: "Delete Drawing" });
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (imageId && deleteImage && !this.isImageReferencedByAnyDrawing(imageId)) {
+      try {
+        deleteImage.call(docAny, imageId, { label: "Delete Drawing" });
+      } catch {
+        // ignore
+      }
+      this.drawingOverlay.invalidateImage(imageId);
+    }
+
+    if (batchStarted) {
+      try {
+        this.document.endBatch();
+      } catch {
+        // ignore
+      }
+    }
+
+    this.selectedDrawingId = null;
+    this.drawingOverlay.setSelectedId(null);
+    this.drawingInteractionController?.setSelectedId(null);
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
   }
 
   duplicateSelectedDrawing(): void {
@@ -6335,31 +6424,19 @@ export class SpreadsheetApp {
   }
 
   bringSelectedDrawingForward(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
-    this.setDrawingObjectsForSheet(bringForward(this.listDrawingObjectsForSheet(), selected));
-    this.renderDrawings();
+    this.arrangeSelectedDrawing("forward");
   }
 
   sendSelectedDrawingBackward(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
-    this.setDrawingObjectsForSheet(sendBackward(this.listDrawingObjectsForSheet(), selected));
-    this.renderDrawings();
+    this.arrangeSelectedDrawing("backward");
   }
 
   bringSelectedDrawingToFront(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
-    this.setDrawingObjectsForSheet(bringToFront(this.listDrawingObjectsForSheet(), selected));
-    this.renderDrawings();
+    this.arrangeSelectedDrawing("front");
   }
 
   sendSelectedDrawingToBack(): void {
-    const selected = this.selectedDrawingId;
-    if (selected == null) return;
-    this.setDrawingObjectsForSheet(sendToBack(this.listDrawingObjectsForSheet(), selected));
-    this.renderDrawings();
+    this.arrangeSelectedDrawing("back");
   }
 
   fillDown(): void {
@@ -10548,107 +10625,6 @@ export class SpreadsheetApp {
     }
 
     return false;
-  }
-
-  private deleteSelectedDrawing(): void {
-    const drawingId = this.selectedDrawingId;
-    if (drawingId == null) return;
-
-    if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
-      return;
-    }
-    if (this.isEditing()) return;
-
-    const sheetId = this.sheetId;
-    const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
-    const imageId = selected?.kind.type === "image" ? selected.kind.imageId : null;
-
-    const docAny: any = this.document as any;
-    const deleteDrawing =
-      typeof docAny.deleteDrawing === "function"
-        ? (docAny.deleteDrawing as (sheetId: string, drawingId: string | number, options?: unknown) => void)
-        : null;
-    const getSheetDrawings =
-      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
-    const deleteImage =
-      typeof docAny.deleteImage === "function" ? (docAny.deleteImage as (imageId: string, options?: unknown) => void) : null;
-
-    const rawIdsToDelete = new Set<string | number>();
-    if (getSheetDrawings) {
-      let raw: unknown = null;
-      try {
-        raw = getSheetDrawings.call(docAny, sheetId);
-      } catch {
-        raw = null;
-      }
-      if (Array.isArray(raw)) {
-        for (const entry of raw) {
-          if (!entry || typeof entry !== "object") continue;
-          let uiId: number | null = null;
-          try {
-            uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
-          } catch {
-            uiId = null;
-          }
-          if (uiId !== drawingId) continue;
-          const rawId = (entry as any).id;
-          if (typeof rawId === "string") {
-            const trimmed = rawId.trim();
-            if (trimmed) rawIdsToDelete.add(trimmed);
-          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
-            rawIdsToDelete.add(rawId);
-          }
-        }
-      }
-    }
-    if (rawIdsToDelete.size === 0) rawIdsToDelete.add(drawingId);
-
-    let batchStarted = false;
-    try {
-      this.document.beginBatch({ label: "Delete Drawing" });
-      batchStarted = true;
-    } catch {
-      batchStarted = false;
-    }
-
-    if (deleteDrawing) {
-      for (const rawId of rawIdsToDelete) {
-        try {
-          deleteDrawing.call(docAny, sheetId, rawId, { label: "Delete Drawing" });
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (imageId && deleteImage && !this.isImageReferencedByAnyDrawing(imageId)) {
-      try {
-        deleteImage.call(docAny, imageId, { label: "Delete Drawing" });
-      } catch {
-        // ignore
-      }
-      this.drawingOverlay.invalidateImage(imageId);
-    }
-
-    if (batchStarted) {
-      try {
-        this.document.endBatch();
-      } catch {
-        // ignore
-      }
-    }
-
-    this.selectedDrawingId = null;
-    this.drawingOverlay.setSelectedId(null);
-    this.drawingInteractionController?.setSelectedId(null);
-    this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
-    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
   }
 
   private renderAuditing(): void {
