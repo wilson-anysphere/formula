@@ -332,6 +332,34 @@ fn quote_dax_identifier(raw: &str) -> String {
     out
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return true;
+    }
+
+    // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
+    // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
+    //
+    // Note: we intentionally implement a conservative check here; quoting is always safe and keeps
+    // the `Display` output stable for table names that contain punctuation or whitespace.
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    if !matches!(first, 'A'..='Z' | 'a'..='z' | '_') {
+        return true;
+    }
+    chars.any(|c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_'))
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // DAX quotes table names using single quotes. A single quote inside the name is escaped as
+    // `''` (two consecutive quotes).
+    let escaped = raw.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
