@@ -116,7 +116,18 @@ for wf in "${workflows[@]}"; do
             v = q[1];
           }
           low = tolower(v);
-          if (!(low == "false" || low == "0")) {
+          compact = low;
+          gsub(/[[:space:]]+/, "", compact);
+          # Treat explicit "false"/0 values (including `${{ false }}`) as disabled.
+          is_false = (compact == "false" ||
+            compact == "0" ||
+            compact == "${{false}}" ||
+            compact == "${{0}}" ||
+            compact == "${{'false'}}" ||
+            compact == "${{\"false\"}}" ||
+            compact == "${{'0'}}" ||
+            compact == "${{\"0\"}}");
+          if (!is_false) {
             has_auto_push = 1;
           }
         }
