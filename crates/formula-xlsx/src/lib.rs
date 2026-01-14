@@ -156,6 +156,8 @@ pub use streaming::{
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles,
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides,
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy,
     strip_vba_project_streaming, strip_vba_project_streaming_with_kind, PartOverride,
     StreamingPatchError, WorksheetCellPatch,

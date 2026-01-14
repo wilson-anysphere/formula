@@ -1711,13 +1711,72 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
     style_table: &StyleTable,
     policy_on_formula_change: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
+    let part_overrides = HashMap::new();
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy(
+        input,
+        output,
+        patches,
+        style_table,
+        &part_overrides,
+        policy_on_formula_change,
+    )
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, resolving `style_id` overrides
+/// via `styles.xml`, plus arbitrary part overrides.
+///
+/// This variant updates `styles.xml` deterministically when new styles are introduced and applies
+/// [`PartOverride::{Replace,Add,Remove}`] to non-worksheet parts without inflating the entire
+/// workbook package into a [`crate::XlsxPackage`].
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    style_table: &StyleTable,
+    part_overrides: &HashMap<String, PartOverride>,
+) -> Result<(), StreamingPatchError> {
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy(
+        input,
+        output,
+        patches,
+        style_table,
+        part_overrides,
+        RecalcPolicy::default(),
+    )
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, resolving `style_id` overrides
+/// via `styles.xml`, plus arbitrary part overrides, with a configurable [`RecalcPolicy`].
+///
+/// `policy_on_formula_change` is applied **only** when the patch set changes formulas (including
+/// removing formulas). When no formulas change, [`RecalcPolicy::PRESERVE`] is used regardless of
+/// the provided policy.
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides_and_recalc_policy<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    style_table: &StyleTable,
+    part_overrides: &HashMap<String, PartOverride>,
+    policy_on_formula_change: RecalcPolicy,
+) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
-        return patch_xlsx_streaming_with_recalc_policy(
-            input,
+        let mut archive = ZipArchive::new(input)?;
+        patch_xlsx_streaming_with_archive(
+            &mut archive,
             output,
-            &[],
-            policy_on_formula_change,
-        );
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            part_overrides,
+            RecalcPolicy::PRESERVE,
+        )?;
+        return Ok(());
     }
 
     let mut archive = ZipArchive::new(input)?;
@@ -1842,8 +1901,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
 
     let mut formula_changed = saw_formula_patch;
     if !formula_changed {
-        formula_changed =
-            streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
         policy_on_formula_change
@@ -1858,7 +1916,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
         &col_properties_by_part,
         &pre_read_parts,
         &updated_parts,
-        &HashMap::new(),
+        part_overrides,
         recalc_policy,
     )?;
     Ok(())
