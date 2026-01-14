@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("startup metrics bootstrap wiring", () => {
-  it("imports startupMetricsBootstrap as the first import in main.ts (minimizes metric skew)", () => {
+  it("imports startupMetricsBootstrap as the first import in main.ts (minimizes dropped startup events)", () => {
     // `main.ts` has a lot of side effects and isn't safe to import in unit tests.
     // Read the source and assert the bootstrap module is imported first, so the
     // frontend installs its startup timing listeners as early as possible.
