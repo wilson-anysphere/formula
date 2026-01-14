@@ -23,6 +23,7 @@ import { applyTransformVectorInto, inverseTransformVectorInto, normalizeRotation
 const A1_CELL = { row: 0, col: 0 };
 const CELL_SCRATCH = { row: 0, col: 0 };
 const TRANSFORM_VEC_SCRATCH = { x: 0, y: 0 };
+const IDENTITY_DRAWING_TRANSFORM: DrawingTransform = { rotationDeg: 0, flipH: false, flipV: false };
 
 export type DrawingInteractionCommitKind = "move" | "resize" | "rotate";
 
@@ -177,6 +178,7 @@ export class DrawingInteractionController {
   })();
   private escapeListenerAttached = false;
   private autoScrollRaf: number | null = null;
+  private readonly localPointScratch: { x: number; y: number } = { x: 0, y: 0 };
   private readonly lastPointerScratch: { x: number; y: number; shiftKey: boolean } = { x: 0, y: 0, shiftKey: false };
   private lastPointer: { x: number; y: number; shiftKey: boolean } | null = null;
   private readonly sheetPointScratch: { x: number; y: number } = { x: 0, y: 0 };
@@ -287,7 +289,11 @@ export class DrawingInteractionController {
   private readonly listenerOptions: AddEventListenerOptions;
 
   private getLocalPoint(e: PointerEvent, rect: DOMRect): { x: number; y: number } {
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    // Perf: this is called on the pointermove hot path; avoid allocating a new `{x,y}` object.
+    const out = this.localPointScratch;
+    out.x = e.clientX - rect.left;
+    out.y = e.clientY - rect.top;
+    return out;
   }
 
   private stopPointerEvent(e: PointerEvent): void {
@@ -557,19 +563,22 @@ export class DrawingInteractionController {
       const angle = Math.atan2(y - this.rotating.centerY, x - this.rotating.centerX);
       const deltaDeg = ((angle - this.rotating.startAngleRad) * 180) / Math.PI;
       const rotationDeg = normalizeRotationDeg(this.rotating.startRotationDeg + deltaDeg);
-      const baseTransform = this.rotating.transform ?? { rotationDeg: 0, flipH: false, flipV: false };
-      const nextTransform = { ...baseTransform, rotationDeg };
+      const baseTransform = this.rotating.transform ?? IDENTITY_DRAWING_TRANSFORM;
+      const flipH = baseTransform.flipH;
+      const flipV = baseTransform.flipV;
+      const needsTransform = rotationDeg !== 0 || flipH || flipV;
+      const nextTransform: DrawingTransform | null = needsTransform ? { rotationDeg, flipH, flipV } : null;
 
       const startObjects = this.rotating.startObjects;
       const startIndex = this.rotating.startIndex;
       const base = startObjects[startIndex];
       const next = startObjects.slice();
       if (base && base.id === this.rotating.id) {
-        if (rotationDeg === 0 && !nextTransform.flipH && !nextTransform.flipV) {
+        if (!needsTransform) {
           const { transform: _old, ...rest } = base;
           next[startIndex] = rest;
         } else {
-          next[startIndex] = { ...base, transform: nextTransform };
+          next[startIndex] = { ...base, transform: nextTransform! };
         }
       } else {
         // Defensive fallback: if the cached start index is invalid, fall back to a
@@ -577,11 +586,11 @@ export class DrawingInteractionController {
         const fallbackIndex = findObjectIndex(startObjects, this.rotating.id);
         if (fallbackIndex >= 0) {
           const fallbackBase = startObjects[fallbackIndex]!;
-          if (rotationDeg === 0 && !nextTransform.flipH && !nextTransform.flipV) {
+          if (!needsTransform) {
             const { transform: _old, ...rest } = fallbackBase;
             next[fallbackIndex] = rest;
           } else {
-            next[fallbackIndex] = { ...fallbackBase, transform: nextTransform };
+            next[fallbackIndex] = { ...fallbackBase, transform: nextTransform! };
           }
         }
       }
