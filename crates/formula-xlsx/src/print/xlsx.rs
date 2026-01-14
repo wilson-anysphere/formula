@@ -13,6 +13,14 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::zip_util::open_zip_part;
 
+/// Maximum uncompressed size permitted for any ZIP part inflated by the print-settings helpers.
+///
+/// The print-settings code only needs a handful of XML parts (`workbook.xml`, `workbook.xml.rels`,
+/// and worksheet XML). These should remain small in legitimate workbooks; a very large part is
+/// more likely to be a zip bomb (tiny compressed size, huge uncompressed size) that could OOM the
+/// desktop backend while parsing print settings.
+const MAX_PRINT_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256MiB
+
 #[derive(Debug, Clone)]
 pub(crate) enum DefinedNameEdit {
     Set(String),
@@ -30,12 +38,27 @@ pub fn read_workbook_print_settings(
 /// This allows callers to extract print settings from an on-disk XLSX/XLSM package without first
 /// reading the entire ZIP container into memory.
 pub fn read_workbook_print_settings_from_reader<R: Read + Seek>(
+    reader: R,
+) -> Result<WorkbookPrintSettings, PrintError> {
+    read_workbook_print_settings_from_reader_with_limit(reader, MAX_PRINT_ZIP_PART_BYTES)
+}
+
+#[cfg(test)]
+pub(crate) fn read_workbook_print_settings_with_limit(
+    xlsx_bytes: &[u8],
+    max_part_bytes: u64,
+) -> Result<WorkbookPrintSettings, PrintError> {
+    read_workbook_print_settings_from_reader_with_limit(Cursor::new(xlsx_bytes), max_part_bytes)
+}
+
+fn read_workbook_print_settings_from_reader_with_limit<R: Read + Seek>(
     mut reader: R,
+    max_part_bytes: u64,
 ) -> Result<WorkbookPrintSettings, PrintError> {
     reader.seek(SeekFrom::Start(0))?;
     let mut zip = ZipArchive::new(reader)?;
-    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml")?;
-    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels")?;
+    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml", max_part_bytes)?;
+    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels", max_part_bytes)?;
 
     let workbook = parse_workbook_xml(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
@@ -49,7 +72,7 @@ pub fn read_workbook_print_settings_from_reader<R: Read + Seek>(
         // `worksheets/sheet1.xml`) or absolute (e.g. `/xl/worksheets/sheet1.xml`). Use the shared
         // OpenXML resolver to handle both.
         let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
-        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
+        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path, max_part_bytes)?;
 
         let (page_setup, manual_page_breaks) = parse_worksheet_print_settings(&sheet_xml)?;
 
@@ -83,9 +106,17 @@ pub fn write_workbook_print_settings(
     xlsx_bytes: &[u8],
     settings: &WorkbookPrintSettings,
 ) -> Result<Vec<u8>, PrintError> {
+    write_workbook_print_settings_impl(xlsx_bytes, settings, MAX_PRINT_ZIP_PART_BYTES)
+}
+
+fn write_workbook_print_settings_impl(
+    xlsx_bytes: &[u8],
+    settings: &WorkbookPrintSettings,
+    max_part_bytes: u64,
+) -> Result<Vec<u8>, PrintError> {
     let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
-    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml")?;
-    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels")?;
+    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml", max_part_bytes)?;
+    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels", max_part_bytes)?;
 
     let workbook = parse_workbook_xml(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
@@ -142,7 +173,7 @@ pub fn write_workbook_print_settings(
             continue;
         };
         let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
-        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
+        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path, max_part_bytes)?;
         let updated_xml = update_worksheet_xml(&sheet_xml, sheet_settings)?;
         updated_sheets.insert(sheet_path, updated_xml);
     }
@@ -183,10 +214,30 @@ pub fn write_workbook_print_settings(
 fn read_zip_bytes<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
+    max_part_bytes: u64,
 ) -> Result<Vec<u8>, PrintError> {
-    let mut file = open_zip_part(zip, name)?;
+    let file = open_zip_part(zip, name)?;
+    let declared_size = file.size();
+    if declared_size > max_part_bytes {
+        return Err(PrintError::PartTooLarge {
+            part: name.to_string(),
+            size: declared_size,
+            max: max_part_bytes,
+        });
+    }
+
+    // Don't trust ZIP metadata alone. Guard against incorrect/forged size fields by limiting reads
+    // to `max_part_bytes + 1` and erroring if we see more than `max_part_bytes` bytes.
     let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+    let mut reader = file.take(max_part_bytes.saturating_add(1));
+    reader.read_to_end(&mut buf)?;
+    if buf.len() as u64 > max_part_bytes {
+        return Err(PrintError::PartTooLarge {
+            part: name.to_string(),
+            size: buf.len() as u64,
+            max: max_part_bytes,
+        });
+    }
     Ok(buf)
 }
 
@@ -1177,8 +1228,21 @@ fn write_col_breaks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Cursor, Write};
 
     const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    fn build_test_xlsx(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
 
     #[test]
     fn update_workbook_xml_expands_self_closing_prefixed_root_and_inserts_defined_names() {
@@ -1458,6 +1522,28 @@ mod tests {
                 && n.attribute("localSheetId") == Some("0")
         });
         assert!(kept.is_some(), "expected unrelated definedName to remain");
+    }
+
+    #[test]
+    fn read_workbook_print_settings_errors_when_worksheet_part_exceeds_limit() {
+        let max = 64u64;
+        let workbook_xml = br#"<sheet name="S" id="rId1"/>"#;
+        let rels_xml = br#"<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>"#;
+        let sheet_xml = vec![b'a'; (max + 1) as usize];
+        let xlsx_bytes = build_test_xlsx(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", rels_xml),
+            ("xl/worksheets/sheet1.xml", sheet_xml.as_slice()),
+        ]);
+
+        let err = read_workbook_print_settings_with_limit(&xlsx_bytes, max).unwrap_err();
+        match err {
+            PrintError::PartTooLarge { part, size, max } => {
+                assert_eq!(part, "xl/worksheets/sheet1.xml");
+                assert_eq!(size, max + 1);
+            }
+            other => panic!("expected PartTooLarge error, got {other:?}"),
+        }
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub enum PrintError {
 
     #[error("missing required xlsx part: {0}")]
     MissingPart(&'static str),
+
+    #[error("xlsx part '{part}' is too large ({size} bytes, max {max})")]
+    PartTooLarge { part: String, size: u64, max: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
