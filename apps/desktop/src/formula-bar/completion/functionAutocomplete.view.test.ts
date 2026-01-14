@@ -258,6 +258,11 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     view.textarea.setSelectionRange(4, 4);
     view.textarea.dispatchEvent(new Event("input"));
 
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("true");
+    expect(view.textarea.getAttribute("aria-controls")).toBe(dropdown?.id);
+
     // Initial selection should populate aria-activedescendant.
     const initial = view.textarea.getAttribute("aria-activedescendant");
     expect(typeof initial).toBe("string");
@@ -270,6 +275,7 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     // Closing clears aria-activedescendant.
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("false");
 
     host.remove();
   });
