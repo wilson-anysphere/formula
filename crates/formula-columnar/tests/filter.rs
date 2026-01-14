@@ -120,6 +120,63 @@ fn filter_numeric_comparisons() {
 }
 
 #[test]
+fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
+    let schema = vec![ColumnSchema {
+        name: "n".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    let rows = [
+        Value::Number(0.0),
+        Value::Number(-0.0),
+        Value::Number(f64::NAN),
+        Value::Null,
+        Value::Number(1.0),
+        Value::Number(f64::NAN),
+    ];
+    for v in rows {
+        builder.append_row(&[v]);
+    }
+    let table = builder.finalize();
+
+    let eq0 = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(0.0),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq0),
+        vec![true, true, false, false, false, false]
+    );
+
+    let eq_nan = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(f64::NAN),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_nan),
+        vec![false, false, true, false, false, true]
+    );
+
+    let ne_nan = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Ne,
+            value: FilterValue::Number(f64::NAN),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_nan),
+        vec![true, true, false, false, true, false]
+    );
+}
+
+#[test]
 fn filter_boolean_and_nulls() {
     let table = build_table();
 
@@ -254,4 +311,3 @@ fn filter_is_null_and_materialize_table() {
     assert_eq!(filtered.get_cell(1, 1), Value::Boolean(true));
     assert_eq!(filtered.get_cell(1, 2), Value::String(Arc::<str>::from("a")));
 }
-

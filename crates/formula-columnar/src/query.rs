@@ -350,6 +350,7 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
         .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
     let rows = table.row_count();
     let page = table.page_size_rows();
+    let rhs_bits = canonical_f64_bits(rhs);
 
     let mut out = BitVec::with_capacity_bits(rows);
     for (chunk_idx, chunk) in chunks.iter().enumerate() {
@@ -374,8 +375,10 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
             }
             let v = c.values[i];
             let passed = match op {
-                CmpOp::Eq => v == rhs,
-                CmpOp::Ne => v != rhs,
+                // Canonicalize float equality so `-0.0 == 0.0` and all NaNs compare equal,
+                // matching group-by and distinct-count semantics.
+                CmpOp::Eq => canonical_f64_bits(v) == rhs_bits,
+                CmpOp::Ne => canonical_f64_bits(v) != rhs_bits,
                 CmpOp::Lt => v < rhs,
                 CmpOp::Lte => v <= rhs,
                 CmpOp::Gt => v > rhs,
