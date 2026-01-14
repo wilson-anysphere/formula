@@ -88,6 +88,32 @@ test('agent-init does not leak REPO_ROOT helper variable (bash)', { skip: !hasBa
   assert.equal(out, 'ok');
 });
 
+test('agent-init preserves existing NODE_OPTIONS flags while adding heap cap (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'export NODE_OPTIONS="--trace-warnings"',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$NODE_OPTIONS"',
+    ].join(' && '),
+  );
+  assert.equal(out, '--max-old-space-size=3072 --trace-warnings');
+});
+
+test('agent-init does not duplicate NODE_OPTIONS heap cap when already set (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'export NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings"',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$NODE_OPTIONS"',
+    ].join(' && '),
+  );
+  assert.equal(out, '--max-old-space-size=4096 --trace-warnings');
+});
+
 test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
   const cargoHome = runBash(
     [
@@ -426,6 +452,40 @@ test('agent-init does not leak REPO_ROOT helper variable under /bin/sh', { skip:
 
   assert.equal(stderr, '');
   assert.equal(stdout, 'ok');
+});
+
+test(
+  'agent-init preserves existing NODE_OPTIONS flags while adding heap cap under /bin/sh',
+  { skip: !hasSh },
+  () => {
+    const { stdout, stderr } = runSh(
+      [
+        'export NODE_OPTIONS="--trace-warnings"',
+        // Prevent agent-init from spawning Xvfb during this test.
+        'export DISPLAY=:99',
+        '. scripts/agent-init.sh >/dev/null',
+        'printf "%s" "$NODE_OPTIONS"',
+      ].join(' && '),
+    );
+
+    assert.equal(stderr, '');
+    assert.equal(stdout, '--max-old-space-size=3072 --trace-warnings');
+  },
+);
+
+test('agent-init does not duplicate NODE_OPTIONS heap cap under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'export NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings"',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$NODE_OPTIONS"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, '--max-old-space-size=4096 --trace-warnings');
 });
 
 test('agent-init exports CARGO_HOME when set without export under /bin/sh', { skip: !hasSh }, () => {

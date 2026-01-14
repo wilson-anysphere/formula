@@ -67,8 +67,19 @@ fi
 # Memory Limits (CRITICAL)
 # ============================================================================
 
-# Node.js: 3GB heap limit (leaves room for other processes)
-export NODE_OPTIONS="--max-old-space-size=3072"
+# Node.js: 3GB heap limit (leaves room for other processes).
+#
+# Preserve any existing NODE_OPTIONS flags (some environments set global flags) and only inject the
+# heap cap when callers haven't set one already.
+if [ -z "${NODE_OPTIONS:-}" ]; then
+  NODE_OPTIONS="--max-old-space-size=3072"
+else
+  case " ${NODE_OPTIONS} " in
+    *" --max-old-space-size="*) ;;
+    *) NODE_OPTIONS="--max-old-space-size=3072 ${NODE_OPTIONS}" ;;
+  esac
+fi
+export NODE_OPTIONS
 
 # Rust: Limit parallel compilation jobs (each can use 1-2GB).
 #
