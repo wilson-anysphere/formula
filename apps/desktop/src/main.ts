@@ -8187,6 +8187,53 @@ const ribbonActions = createRibbonActionsFromCommands({
     "file.options.close": async () => {
       await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
     },
+    "file.export.createPdf": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
+    },
+    "file.export.export.pdf": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
+    },
+    "file.export.changeFileType.pdf": async () => {
+      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
+    },
+    "file.export.export.csv": async () => {
+      handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
+    },
+    "file.export.changeFileType.csv": async () => {
+      handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
+    },
+    "file.export.changeFileType.tsv": async () => {
+      handleExportDelimitedText({
+        delimiter: "\t",
+        extension: "tsv",
+        mime: "text/tab-separated-values",
+        label: "TSV",
+      });
+    },
+    "file.export.export.xlsx": async () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
+        return;
+      }
+      try {
+        await handleSaveAs();
+      } catch (err) {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      }
+    },
+    "file.export.changeFileType.xlsx": async () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
+        return;
+      }
+      try {
+        await handleSaveAs();
+      } catch (err) {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      }
+    },
     "pageLayout.arrange.bringForward": async () => {
       app.bringSelectedDrawingForward();
       app.focus();
@@ -8194,6 +8241,12 @@ const ribbonActions = createRibbonActionsFromCommands({
     "pageLayout.arrange.sendBackward": async () => {
       app.sendSelectedDrawingBackward();
       app.focus();
+    },
+    // Insert → PivotTable dropdown contains Excel-style submenu variants. We only implement
+    // the selection-based Pivot Builder flow today, so route "From Table/Range…" to the
+    // same built-in command.
+    "insert.tables.pivotTable.fromTableRange": async () => {
+      await commandRegistry.executeCommand("view.insertPivotTable");
     },
   },
   onBeforeExecuteCommand: async (_commandId, source) => {
@@ -8418,38 +8471,6 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     switch (commandId) {
-      case "file.export.createPdf":
-      case "file.export.export.pdf":
-      case "file.export.changeFileType.pdf": {
-        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-        return;
-      }
-
-      case "file.export.export.csv":
-      case "file.export.changeFileType.csv":
-        handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
-        return;
-      case "file.export.changeFileType.tsv":
-        handleExportDelimitedText({
-          delimiter: "\t",
-          extension: "tsv",
-          mime: "text/tab-separated-values",
-          label: "TSV",
-        });
-        return;
-      case "file.export.export.xlsx":
-      case "file.export.changeFileType.xlsx": {
-        if (!tauriBackend) {
-          showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
-          return;
-        }
-        void handleSaveAs().catch((err) => {
-          console.error("Failed to save workbook:", err);
-          showToast(`Failed to save workbook: ${String(err)}`, "error");
-        });
-        return;
-      }
-
       case "view.appearance.theme.system":
         themeController.setThemePreference("system");
         scheduleRibbonSelectionFormatStateUpdate();
