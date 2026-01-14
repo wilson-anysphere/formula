@@ -161,6 +161,7 @@ Notes:
   For long-running **idle memory** history on main (Linux only), see:
   - `.github/workflows/desktop-memory-perf.yml`
     - publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action `gh-pages` history (non-gating)
+    - manual `workflow_dispatch` runs support overriding the memory runner with inputs: `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`
 
 ### Idle memory benchmark (desktop process RSS)
 

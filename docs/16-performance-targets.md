@@ -357,6 +357,7 @@ startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON art
       - `desktop.platform.windows.memory.idle_working_set_mb.p95` (Windows uses Working Set, not true RSS)
   - manual `workflow_dispatch` runs support overriding run counts/timeouts via inputs (e.g. `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`) and can optionally restrict the OS via `os`
 - `.github/workflows/desktop-memory-perf.yml` (Linux-only; publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action gh-pages history for long-term trending; non-gating)
+  - manual `workflow_dispatch` runs support overriding the memory runner via inputs: `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`
 
 For **on-demand** cross-platform desktop perf checks on a PR, apply the `desktop-perf-matrix` (or
 `run-desktop-perf`) label. This triggers:

@@ -2,6 +2,22 @@ name: Desktop idle memory (history)
 
 on:
   workflow_dispatch:
+    inputs:
+      memoryRuns:
+        description: "Number of idle-memory iterations (default: 3)"
+        required: false
+        default: "3"
+        type: string
+      memoryTimeoutMs:
+        description: "Per-memory-run timeout in milliseconds (default: 30000)"
+        required: false
+        default: "30000"
+        type: string
+      memorySettleMs:
+        description: "Idle-memory settle delay after TTI in milliseconds (default: 5000)"
+        required: false
+        default: "5000"
+        type: string
   schedule:
     # Daily (UTC). Keeps idle memory trends visible without gating PRs.
     - cron: "0 7 * * *"
@@ -23,6 +39,10 @@ env:
   # This workflow is for tracking/visibility, not gating. Force enforcement off even if repo/organization
   # variables set these for other workflows.
   FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: "0"
+  # Defaults for `workflow_dispatch` inputs. (Scheduled runs will always use these.)
+  DESKTOP_MEMORY_RUNS: 3
+  DESKTOP_MEMORY_TIMEOUT_MS: 30000
+  DESKTOP_MEMORY_SETTLE_MS: 5000
 
 jobs:
   measure:
@@ -82,6 +102,50 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         run: pnpm install --frozen-lockfile --prefer-offline
+ 
+      - name: Apply workflow_dispatch perf overrides
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          INPUT_MEMORY_RUNS: ${{ github.event.inputs.memoryRuns }}
+          INPUT_MEMORY_TIMEOUT_MS: ${{ github.event.inputs.memoryTimeoutMs }}
+          INPUT_MEMORY_SETTLE_MS: ${{ github.event.inputs.memorySettleMs }}
+        run: |
+          set -euo pipefail
+          
+          trim() {
+            local s="$1"
+            # ltrim
+            s="${s#"${s%%[![:space:]]*}"}"
+            # rtrim
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+          
+          write_int_override() {
+            local env_key="$1"
+            local input_name="$2"
+            local raw="$3"
+            local min="$4"
+            local value
+            value="$(trim "${raw}")"
+            if [[ -z "$value" ]]; then
+              return 0
+            fi
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::workflow_dispatch input '${input_name}' must be an integer (got: '${value}')" >&2
+              exit 1
+            fi
+            if (( value < min )); then
+              echo "::error::workflow_dispatch input '${input_name}' must be >= ${min} (got: '${value}')" >&2
+              exit 1
+            fi
+            echo "${env_key}=${value}" >> "$GITHUB_ENV"
+          }
+          
+          write_int_override "DESKTOP_MEMORY_RUNS" "memoryRuns" "$INPUT_MEMORY_RUNS" 1
+          write_int_override "DESKTOP_MEMORY_TIMEOUT_MS" "memoryTimeoutMs" "$INPUT_MEMORY_TIMEOUT_MS" 1
+          write_int_override "DESKTOP_MEMORY_SETTLE_MS" "memorySettleMs" "$INPUT_MEMORY_SETTLE_MS" 0
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
@@ -173,16 +237,16 @@ jobs:
             --release \
             --locked
 
-      - name: Run idle memory benchmark (3 runs)
+      - name: Run idle memory benchmark
         id: memory
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p perf-artifacts
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts \
-            --runs 3 \
-            --timeout-ms 30000 \
-            --settle-ms 5000 \
+            --runs "${DESKTOP_MEMORY_RUNS}" \
+            --timeout-ms "${DESKTOP_MEMORY_TIMEOUT_MS}" \
+            --settle-ms "${DESKTOP_MEMORY_SETTLE_MS}" \
             --json perf-artifacts/desktop-memory-metrics.json \
             --allow-ci 2>&1 | tee perf-artifacts/desktop-memory.log
 
