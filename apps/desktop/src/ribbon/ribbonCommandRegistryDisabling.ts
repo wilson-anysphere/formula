@@ -93,8 +93,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // Home → Cells structural edits are handled directly by `main.ts` (not CommandRegistry).
   "home.cells.insert.insertSheetRows",
   "home.cells.insert.insertSheetColumns",
+  "home.cells.insert.insertSheet",
   "home.cells.delete.deleteSheetRows",
   "home.cells.delete.deleteSheetColumns",
+  "home.cells.delete.deleteSheet",
 
   // --- Home editing -----------------------------------------------------------
   "home.editing.autoSum",
@@ -107,16 +109,32 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.fill.right",
   "home.editing.fill.up",
   "home.editing.fill.left",
+  "home.editing.fill.series",
+
+  // Find & Select dropdown menu items are canonical commands; keep these legacy ids enabled in case
+  // older ribbon schemas emit them (the current schema uses `edit.find` / `edit.replace` / `navigation.goTo`).
   "home.editing.findSelect.find",
   "home.editing.findSelect.replace",
   "home.editing.findSelect.goTo",
+
   // Sort/filter (ribbon-only handlers / partially implemented).
+  "home.editing.sortFilter.customSort",
   "home.editing.sortFilter.sortAtoZ",
   "home.editing.sortFilter.sortZtoA",
+
+  // Data → Sort & Filter (same implementations as Home tab).
+  "data.sortFilter.sort.customSort",
   "data.sortFilter.sortAtoZ",
   "data.sortFilter.sortZtoA",
   "data.sortFilter.sort.sortAtoZ",
   "data.sortFilter.sort.sortZtoA",
+
+  // Home → Styles
+  "home.styles.formatAsTable",
+  "home.styles.formatAsTable.light",
+  "home.styles.formatAsTable.medium",
+  "home.styles.formatAsTable.dark",
+  "home.styles.formatAsTable.newStyle",
 
   // --- Comments ---------------------------------------------------------------
   "review.comments.newComment",
@@ -130,6 +148,13 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
 
   // --- Pivot table (panel) ----------------------------------------------------
   "insert.tables.pivotTable",
+
+  // --- Insert pictures --------------------------------------------------------
+  "insert.illustrations.pictures",
+  "insert.illustrations.pictures.thisDevice",
+  "insert.illustrations.pictures.stockImages",
+  "insert.illustrations.pictures.onlinePictures",
+  "insert.illustrations.onlinePictures",
 
   // --- View -------------------------------------------------------------------
   "view.macros.viewMacros",
