@@ -381,9 +381,36 @@ fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
     hash
 }
 
+fn derive_cryptoapi_key_material_md5(password: &str, salt: &[u8; 16]) -> [u8; 16] {
+    // Matches `crates/formula-xls/src/decrypt.rs` for AlgIDHash=CALG_MD5.
+    const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
+
+    let pw_bytes = utf16le_bytes(password);
+    let mut hash = md5_bytes(&[salt, &pw_bytes]);
+
+    for i in 0..PASSWORD_HASH_ITERATIONS {
+        let iter = i.to_le_bytes();
+        hash = md5_bytes(&[&iter, &hash]);
+    }
+
+    hash
+}
+
 fn derive_cryptoapi_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
+    if key_len == 5 {
+        // CryptoAPI 40-bit RC4 keys are expressed as a 128-bit key where the high 88 bits are zero.
+        let mut key = digest[..5].to_vec();
+        key.resize(16, 0);
+        return key;
+    }
+    digest[..key_len].to_vec()
+}
+
+fn derive_cryptoapi_block_key_md5(key_material: &[u8; 16], block: u32, key_len: usize) -> Vec<u8> {
+    let block_bytes = block.to_le_bytes();
+    let digest = md5_bytes(&[key_material, &block_bytes]);
     if key_len == 5 {
         // CryptoAPI 40-bit RC4 keys are expressed as a 128-bit key where the high 88 bits are zero.
         let mut key = digest[..5].to_vec();
@@ -434,6 +461,50 @@ struct PayloadRc4 {
     block: u32,
     pos_in_block: usize,
     rc4: Rc4,
+}
+
+struct PayloadRc4Md5 {
+    key_material: [u8; 16],
+    key_len: usize,
+    block: u32,
+    pos_in_block: usize,
+    rc4: Rc4,
+}
+
+impl PayloadRc4Md5 {
+    fn new(key_material: [u8; 16], key_len: usize) -> Self {
+        let key0 = derive_cryptoapi_block_key_md5(&key_material, 0, key_len);
+        Self {
+            key_material,
+            key_len,
+            block: 0,
+            pos_in_block: 0,
+            rc4: Rc4::new(&key0),
+        }
+    }
+
+    fn rekey(&mut self) {
+        self.block = self.block.wrapping_add(1);
+        let key = derive_cryptoapi_block_key_md5(&self.key_material, self.block, self.key_len);
+        self.rc4 = Rc4::new(&key);
+        self.pos_in_block = 0;
+    }
+
+    fn apply_keystream(&mut self, mut data: &mut [u8]) {
+        const PAYLOAD_BLOCK_SIZE: usize = 1024;
+        while !data.is_empty() {
+            if self.pos_in_block == PAYLOAD_BLOCK_SIZE {
+                self.rekey();
+            }
+
+            let remaining_in_block = PAYLOAD_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+            let chunk_len = data.len().min(remaining_in_block);
+            let (chunk, rest) = data.split_at_mut(chunk_len);
+            self.rc4.apply_keystream(chunk);
+            self.pos_in_block += chunk_len;
+            data = rest;
+        }
+    }
 }
 
 impl PayloadRc4 {
@@ -790,6 +861,84 @@ fn build_filepass_cryptoapi_payload(
     payload
 }
 
+fn build_filepass_cryptoapi_md5_payload(
+    password: &str,
+    salt: &[u8; 16],
+    version_major: u16,
+    version_minor: u16,
+    provider_type: u32,
+    csp_name: Option<&str>,
+) -> Vec<u8> {
+    // CryptoAPI FILEPASS payload that uses MD5 for password hashing + verifier hashing.
+    const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
+    const ENCRYPTION_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
+    const CALG_RC4: u32 = 0x0000_6801;
+    const CALG_MD5: u32 = 0x0000_8003;
+
+    // Deterministic verifier bytes.
+    let verifier_plain: [u8; 16] = [
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E,
+        0x0F,
+    ];
+    let verifier_hash_plain = md5_bytes(&[&verifier_plain]);
+
+    // Encrypt verifier + hash using block 0 key.
+    let key_material = derive_cryptoapi_key_material_md5(password, salt);
+    let key0 = derive_cryptoapi_block_key_md5(&key_material, 0, 16);
+    let mut rc4 = Rc4::new(&key0);
+
+    let mut verifier_buf = [0u8; 32];
+    verifier_buf[..16].copy_from_slice(&verifier_plain);
+    verifier_buf[16..].copy_from_slice(&verifier_hash_plain);
+    rc4.apply_keystream(&mut verifier_buf);
+
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(&verifier_buf[..16]);
+    let mut encrypted_verifier_hash = [0u8; 16];
+    encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
+
+    // EncryptionHeader (fixed 32 bytes + optional CSPName UTF-16LE NUL-terminated) [MS-OFFCRYPTO].
+    let mut header = Vec::<u8>::new();
+    header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+    header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+    header.extend_from_slice(&CALG_MD5.to_le_bytes()); // AlgIDHash
+    header.extend_from_slice(&128u32.to_le_bytes()); // KeySize bits
+    header.extend_from_slice(&provider_type.to_le_bytes()); // ProviderType
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+    if let Some(csp_name) = csp_name {
+        for cu in csp_name.encode_utf16() {
+            header.extend_from_slice(&cu.to_le_bytes());
+        }
+        header.extend_from_slice(&0u16.to_le_bytes());
+    }
+
+    // EncryptionVerifier.
+    let mut verifier = Vec::<u8>::new();
+    verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+    verifier.extend_from_slice(salt);
+    verifier.extend_from_slice(&encrypted_verifier);
+    verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
+    verifier.extend_from_slice(&encrypted_verifier_hash);
+
+    // EncryptionInfo:
+    let mut enc_info = Vec::<u8>::new();
+    enc_info.extend_from_slice(&version_major.to_le_bytes()); // Major
+    enc_info.extend_from_slice(&version_minor.to_le_bytes()); // Minor
+    enc_info.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    enc_info.extend_from_slice(&(header.len() as u32).to_le_bytes()); // HeaderSize
+    enc_info.extend_from_slice(&header);
+    enc_info.extend_from_slice(&verifier);
+
+    let mut payload = Vec::<u8>::new();
+    payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+    payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+    payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+    payload.extend_from_slice(&enc_info);
+    payload
+}
+
 fn encrypt_payloads_after_filepass<T>(
     workbook_stream: &mut [u8],
     filepass_data_end: usize,
@@ -1009,6 +1158,14 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     )
 }
 
+fn build_cryptoapi_md5_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    let salt: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x0E, 0x0F,
+    ];
+    build_cryptoapi_md5_encrypted_xls_bytes_with_config(password, &salt, 4, 2, 0, None)
+}
+
 fn build_cryptoapi_encrypted_xls_bytes_with_config(
     password: &str,
     salt: &[u8; 16],
@@ -1047,6 +1204,43 @@ fn build_cryptoapi_encrypted_xls_bytes_with_config(
         cipher.apply_keystream(data);
     });
 
+    build_xls_bytes(&workbook_stream)
+}
+
+fn build_cryptoapi_md5_encrypted_xls_bytes_with_config(
+    password: &str,
+    salt: &[u8; 16],
+    version_major: u16,
+    version_minor: u16,
+    provider_type: u32,
+    csp_name: Option<&str>,
+) -> Vec<u8> {
+    let filepass_payload = build_filepass_cryptoapi_md5_payload(
+        password,
+        salt,
+        version_major,
+        version_minor,
+        provider_type,
+        csp_name,
+    );
+    let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 0);
+    let mut offset = 0usize;
+    let mut filepass_data_end = None::<usize>;
+    while let Some((record_id, payload, next)) = super_read_record(&workbook_stream, offset) {
+        if record_id == RECORD_FILEPASS {
+            filepass_data_end = Some(offset + 4 + payload.len());
+            break;
+        }
+        offset = next;
+    }
+    let filepass_data_end =
+        filepass_data_end.expect("generated workbook stream should contain FILEPASS");
+
+    let key_material = derive_cryptoapi_key_material_md5(password, salt);
+    let mut cipher = PayloadRc4Md5::new(key_material, 16);
+    encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
+        cipher.apply_keystream(data);
+    });
     build_xls_bytes(&workbook_stream)
 }
 
@@ -1161,6 +1355,13 @@ fn regenerate_encrypted_xls_fixtures() {
     let cryptoapi_bytes = build_cryptoapi_encrypted_xls_bytes("correct horse battery staple");
     std::fs::write(&cryptoapi_path, cryptoapi_bytes).unwrap_or_else(|err| {
         panic!("write encrypted fixture {cryptoapi_path:?} failed: {err}");
+    });
+
+    // Decryptable BIFF8 RC4 CryptoAPI fixture using MD5 for password hashing / verifier hashing.
+    let cryptoapi_md5_path = fixtures_dir.join("biff8_rc4_cryptoapi_md5_pw_open.xls");
+    let cryptoapi_md5_bytes = build_cryptoapi_md5_encrypted_xls_bytes("password");
+    std::fs::write(&cryptoapi_md5_path, cryptoapi_md5_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {cryptoapi_md5_path:?} failed: {err}");
     });
 
     // Unicode-password variant (non-ASCII).
