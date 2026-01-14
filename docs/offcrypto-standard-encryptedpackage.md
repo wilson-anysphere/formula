@@ -23,8 +23,11 @@ High-level behavior in `formula-io`:
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
     - This is used for some compatibility fallbacks (for example Agile files that omit
-      `<dataIntegrity>`), but the high-level open APIs still read decrypted bytes into an in-memory
-      buffer before parsing.
+      `<dataIntegrity>`) and to open Standard/CryptoAPI AES-encrypted `.xlsx`/`.xlsm` into a model
+      without materializing the decrypted ZIP bytes (`open_workbook_model_with_password` /
+      `open_workbook_model_with_options`).
+    - The workbook-returning open APIs (`open_workbook_with_options` / `open_workbook_with_password`)
+      still decrypt `EncryptedPackage` into an in-memory buffer first.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
 `crates/formula-offcrypto` and `crates/formula-office-crypto`). The high-level open path in

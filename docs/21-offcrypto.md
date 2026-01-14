@@ -149,8 +149,11 @@ Current state in this repo (important nuance):
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
     - This is used for some compatibility fallbacks (for example Agile files that omit
-      `<dataIntegrity>`), but the high-level open APIs currently still decrypt `EncryptedPackage`
-      into an in-memory buffer before opening/parsing.
+      `<dataIntegrity>`) and to open Standard/CryptoAPI AES-encrypted `.xlsx`/`.xlsm` into a model
+      without materializing the decrypted ZIP bytes (`open_workbook_model_with_password` /
+      `open_workbook_model_with_options`).
+    - The workbook-returning open APIs (`open_workbook_with_options` / `open_workbook_with_password`)
+      still decrypt `EncryptedPackage` into an in-memory buffer first.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
 because it determines which scheme you’re dealing with:
