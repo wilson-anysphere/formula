@@ -6,6 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const CANONICAL_FREEZE_PANES_IDS = [
+  "view.freezePanes",
+  "view.freezeTopRow",
+  "view.freezeFirstColumn",
+  "view.unfreezePanes",
+];
+
+const LEGACY_FREEZE_PANES_IDS = [
+  "view.window.freezePanes.freezePanes",
+  "view.window.freezePanes.freezeTopRow",
+  "view.window.freezePanes.freezeFirstColumn",
+  "view.window.freezePanes.unfreeze",
+];
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -33,19 +47,12 @@ test("Ribbon schema uses canonical View → Freeze Panes command ids", () => {
   assert.match(schema, /\bid:\s*["']view\.window\.freezePanes["']/);
 
   // Menu items should be the canonical CommandRegistry ids.
-  const canonicalIds = ["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn", "view.unfreezePanes"];
-  for (const id of canonicalIds) {
+  for (const id of CANONICAL_FREEZE_PANES_IDS) {
     assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbon schema to include ${id}`);
   }
 
   // Guardrail: do not regress to the old hierarchical ids.
-  const legacyIds = [
-    "view.window.freezePanes.freezePanes",
-    "view.window.freezePanes.freezeTopRow",
-    "view.window.freezePanes.freezeFirstColumn",
-    "view.window.freezePanes.unfreeze",
-  ];
-  for (const id of legacyIds) {
+  for (const id of LEGACY_FREEZE_PANES_IDS) {
     assert.doesNotMatch(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbon schema to not include legacy id ${id}`);
   }
 });
@@ -55,12 +62,7 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
   const main = fs.readFileSync(mainPath, "utf8");
 
   // Legacy ribbon-only ids should not exist anywhere in main.ts.
-  for (const id of [
-    "view.window.freezePanes.freezePanes",
-    "view.window.freezePanes.freezeTopRow",
-    "view.window.freezePanes.freezeFirstColumn",
-    "view.window.freezePanes.unfreeze",
-  ]) {
+  for (const id of LEGACY_FREEZE_PANES_IDS) {
     assert.doesNotMatch(main, new RegExp(escapeRegExp(id)), `Expected main.ts to not mention legacy id ${id}`);
   }
 
@@ -75,3 +77,16 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
   assert.doesNotMatch(main, /\bapp\.unfreezePanes\(/, "Expected ribbon Unfreeze Panes action to not call app.unfreezePanes() directly in main.ts");
 });
 
+test("Builtin command catalog exposes canonical Freeze Panes ids (and does not register the dropdown trigger id)", () => {
+  const commandsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const commands = fs.readFileSync(commandsPath, "utf8");
+
+  for (const id of CANONICAL_FREEZE_PANES_IDS) {
+    const pattern = new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`);
+    assert.match(commands, pattern, `Expected builtin command '${id}' to be registered in registerBuiltinCommands.ts`);
+  }
+
+  // `view.window.freezePanes` is a ribbon dropdown trigger id (menu opener). It should not be a real
+  // command, otherwise the command palette would show duplicate "Freeze Panes" entries.
+  assert.doesNotMatch(commands, /\bregisterBuiltinCommand\(\s*["']view\.window\.freezePanes["']/);
+});
