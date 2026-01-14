@@ -545,6 +545,33 @@ impl UnmatchedFactRows {
         }
     }
 
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&usize) -> bool) {
+        match self {
+            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| keep(row)),
+            UnmatchedFactRows::Dense { bits, len, count } => {
+                let mut new_bits = vec![0u64; bits.len()];
+                let mut new_count = 0usize;
+                for (word_idx, &word) in bits.iter().enumerate() {
+                    let mut w = word;
+                    while w != 0 {
+                        let tz = w.trailing_zeros() as usize;
+                        let row = word_idx * 64 + tz;
+                        if row >= *len {
+                            break;
+                        }
+                        if keep(&row) {
+                            new_bits[word_idx] |= 1u64 << tz;
+                            new_count += 1;
+                        }
+                        w &= w - 1;
+                    }
+                }
+                *bits = new_bits;
+                *count = new_count;
+            }
+        }
+    }
+
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {
