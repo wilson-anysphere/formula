@@ -2287,8 +2287,17 @@ export function bindYjsToDocumentController(options) {
             if (sheetMap.get("frozenRows") !== view.frozenRows) sheetMap.set("frozenRows", view.frozenRows);
             if (sheetMap.get("frozenCols") !== view.frozenCols) sheetMap.set("frozenCols", view.frozenCols);
             if (view.backgroundImageId != null || before.backgroundImageId != null) {
-              if (nextBg) sheetMap.set("backgroundImageId", nextBg);
-              else sheetMap.delete("backgroundImageId");
+              const prevBgRaw = sheetMap.get("backgroundImageId");
+              if (nextBg) {
+                // Avoid emitting redundant Yjs updates when another binder has already mirrored
+                // the same background id (e.g. desktop sheet-view binder). Still coerce non-string
+                // representations (Y.Text, etc) into the canonical string form.
+                if (typeof prevBgRaw !== "string" || prevBgRaw !== nextBg) {
+                  sheetMap.set("backgroundImageId", nextBg);
+                }
+              } else if (prevBgRaw !== undefined) {
+                sheetMap.delete("backgroundImageId");
+              }
               sheetMap.delete("background_image_id");
               sheetMap.delete("backgroundImage");
               sheetMap.delete("background_image");
@@ -2342,8 +2351,14 @@ export function bindYjsToDocumentController(options) {
           if (sheetMap.get("frozenCols") !== view.frozenCols) sheetMap.set("frozenCols", view.frozenCols);
           if (view.backgroundImageId != null || before.backgroundImageId != null) {
             const nextBg = normalizeOptionalId(view.backgroundImageId);
-            if (nextBg) sheetMap.set("backgroundImageId", nextBg);
-            else sheetMap.delete("backgroundImageId");
+            const prevBgRaw = sheetMap.get("backgroundImageId");
+            if (nextBg) {
+              if (typeof prevBgRaw !== "string" || prevBgRaw !== nextBg) {
+                sheetMap.set("backgroundImageId", nextBg);
+              }
+            } else if (prevBgRaw !== undefined) {
+              sheetMap.delete("backgroundImageId");
+            }
             sheetMap.delete("background_image_id");
             sheetMap.delete("backgroundImage");
             sheetMap.delete("background_image");

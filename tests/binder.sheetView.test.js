@@ -57,9 +57,9 @@ test("binder: DocumentController→Yjs syncs sheet view state (freeze panes + ro
       rowHeights: { "5": 40 },
     });
 
-    // Binder should not write legacy top-level frozen rows/cols.
-    assert.equal(entry.get?.("frozenRows") ?? entry.frozenRows, undefined);
-    assert.equal(entry.get?.("frozenCols") ?? entry.frozenCols, undefined);
+    // Backwards compatibility: mirror frozen panes at the sheet root (legacy schema).
+    assert.equal(entry.get?.("frozenRows") ?? entry.frozenRows, 2);
+    assert.equal(entry.get?.("frozenCols") ?? entry.frozenCols, 3);
   } finally {
     binder.destroy();
     ydoc.destroy();
