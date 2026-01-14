@@ -1553,6 +1553,38 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn compute_hmac_two_matches_compute_hmac_over_concatenated_bytes() {
+        // Regression test for the `header + plaintext` HMAC compatibility target.
+        // `compute_hmac_two` is used to avoid allocating a temporary `header||plaintext` buffer.
+        let key = b"formula-hmac-key";
+        let a = b"header";
+        let b = b"plaintext";
+        for hash_alg in [
+            HashAlgorithm::Md5,
+            HashAlgorithm::Sha1,
+            HashAlgorithm::Sha256,
+            HashAlgorithm::Sha384,
+            HashAlgorithm::Sha512,
+        ] {
+            let mut combined = Vec::new();
+            combined.extend_from_slice(a);
+            combined.extend_from_slice(b);
+            let one = compute_hmac(hash_alg, key, &combined);
+            let two = compute_hmac_two(hash_alg, key, a, b);
+            assert_eq!(one, two, "hash_alg={hash_alg:?}");
+
+            // Also exercise empty suffix/prefix combinations.
+            let one = compute_hmac(hash_alg, key, a);
+            let two = compute_hmac_two(hash_alg, key, a, b"");
+            assert_eq!(one, two, "hash_alg={hash_alg:?} (empty b)");
+
+            let one = compute_hmac(hash_alg, key, b);
+            let two = compute_hmac_two(hash_alg, key, b"", b);
+            assert_eq!(one, two, "hash_alg={hash_alg:?} (empty a)");
+        }
+    }
+
     pub(crate) fn agile_encryption_info_fixture() -> Vec<u8> {
         // A small, deterministic Agile EncryptionInfo fixture for parsing tests.
         let xml = agile_descriptor_fixture_xml();
