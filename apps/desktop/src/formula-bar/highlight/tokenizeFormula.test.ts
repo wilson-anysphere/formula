@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { tokenizeFormula } from "./tokenizeFormula.js";
+import { tokenizeFormula } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
 describe("tokenizeFormula", () => {
   it("highlights functions, refs, strings, numbers, operators", () => {

@@ -1,4 +1,4 @@
-import { tokenizeFormula } from "./tokenizeFormula.js";
+import { tokenizeFormula } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 import type { HighlightSpan } from "./types.js";
 
 export function highlightFormula(input: string): HighlightSpan[] {

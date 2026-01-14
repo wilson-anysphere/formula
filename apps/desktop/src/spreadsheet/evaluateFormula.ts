@@ -1,5 +1,5 @@
 import { parseA1Range, type RangeAddress } from "./a1.js";
-import { tokenizeFormula } from "../formula-bar/highlight/tokenizeFormula.js";
+import { tokenizeFormula } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
 export type SpreadsheetValue = number | string | boolean | null;
 export const PROVENANCE_REF_SEPARATOR = "\u001f";
