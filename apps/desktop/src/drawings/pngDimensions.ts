@@ -881,12 +881,87 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
   if (width == null || height == null) {
     const style = getAttr("style");
     if (style) {
+      const vars = (() => {
+        const map = new Map<string, string>();
+        for (const rawDecl of style.split(";")) {
+          const decl = rawDecl.trim();
+          if (!decl) continue;
+          const colon = decl.indexOf(":");
+          if (colon === -1) continue;
+          const name = decl.slice(0, colon).trim();
+          if (!name.startsWith("--")) continue;
+          const value = decl.slice(colon + 1).replace(/!important\\b/i, "").trim();
+          if (!value) continue;
+          map.set(name, value);
+        }
+        return map;
+      })();
+
+      const resolveCssVars = (value: string): string => {
+        let current = value;
+        for (let iter = 0; iter < 10; iter += 1) {
+          const lower = current.toLowerCase();
+          const first = lower.indexOf("var(");
+          if (first === -1) break;
+          let out = "";
+          let idx = 0;
+          while (idx < current.length) {
+            const start = lower.indexOf("var(", idx);
+            if (start === -1) {
+              out += current.slice(idx);
+              break;
+            }
+            out += current.slice(idx, start);
+            let i = start + 4;
+            let depth = 1;
+            while (i < current.length && depth > 0) {
+              const ch = current[i]!;
+              if (ch === "(") depth += 1;
+              else if (ch === ")") depth -= 1;
+              i += 1;
+            }
+            if (depth !== 0) {
+              // Unbalanced; keep the rest as-is.
+              out += current.slice(start);
+              idx = current.length;
+              break;
+            }
+            const inner = current.slice(start + 4, i - 1).trim();
+            // Split "name, fallback" by the first comma at depth 0.
+            let namePart = inner;
+            let fallback: string | null = null;
+            {
+              let j = 0;
+              let paren = 0;
+              for (; j < inner.length; j += 1) {
+                const ch = inner[j]!;
+                if (ch === "(") paren += 1;
+                else if (ch === ")") paren = Math.max(0, paren - 1);
+                else if (ch === "," && paren === 0) break;
+              }
+              if (j < inner.length) {
+                namePart = inner.slice(0, j);
+                fallback = inner.slice(j + 1);
+              }
+            }
+
+            const name = namePart.trim();
+            const replacement = vars.get(name) ?? (fallback != null ? fallback.trim() : "");
+            out += replacement;
+            idx = i;
+          }
+          if (out === current) break;
+          current = out;
+        }
+        return current;
+      };
+
       const getStyleProp = (prop: "width" | "height"): number | null => {
         const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, "i");
         const match = re.exec(style);
         if (!match) return null;
         const raw = String(match[1] ?? "").replace(/!important\\b/i, "").trim();
-        return parseLength(raw);
+        return parseLength(resolveCssVars(raw));
       };
       if (width == null) width = getStyleProp("width");
       if (height == null) height = getStyleProp("height");

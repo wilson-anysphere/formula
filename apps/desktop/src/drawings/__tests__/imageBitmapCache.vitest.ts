@@ -546,6 +546,30 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).not.toHaveBeenCalled();
   });
 
+  it("rejects SVG images with huge dimensions specified via CSS var() without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="--w: 10001px; --h: 1px; width: var(--w); height: var(--h)"></svg>`;
+    const entry: ImageEntry = { id: "svg_var_style_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects SVG images with huge dimensions specified via calc(var()) without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="--w: 10000px; width: calc(var(--w) + 1px); height: 1px"></svg>`;
+    const entry: ImageEntry = { id: "svg_var_calc_style_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
   it("rejects PNG images that exceed the pixel limit without invoking createImageBitmap", async () => {
     const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
