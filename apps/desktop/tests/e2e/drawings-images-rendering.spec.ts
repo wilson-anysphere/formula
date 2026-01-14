@@ -206,10 +206,12 @@ test.describe("drawing + image rendering regressions", () => {
       if (!obj) throw new Error("Expected rendered image object to exist");
       const viewport = last.viewport;
       if (!viewport) throw new Error("Missing drawing overlay viewport from render()");
+      const headerOffsetX = typeof viewport.headerOffsetX === "number" && Number.isFinite(viewport.headerOffsetX) ? viewport.headerOffsetX : 0;
+      const headerOffsetY = typeof viewport.headerOffsetY === "number" && Number.isFinite(viewport.headerOffsetY) ? viewport.headerOffsetY : 0;
       const rect = anchorToRectPx(obj.anchor, geom);
       const sampleRect = (() => {
-        const centerX = rect.x + rect.width / 2 - viewport.scrollX;
-        const centerY = rect.y + rect.height / 2 - viewport.scrollY;
+        const centerX = rect.x + rect.width / 2 - viewport.scrollX + headerOffsetX;
+        const centerY = rect.y + rect.height / 2 - viewport.scrollY + headerOffsetY;
         const size = 20;
         const x = Math.max(0, Math.floor(centerX - size / 2));
         const y = Math.max(0, Math.floor(centerY - size / 2));

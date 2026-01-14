@@ -138,13 +138,16 @@ test.describe("drawing shape text rendering regressions", () => {
 
       const viewport = last.viewport;
       if (!viewport) throw new Error("Missing drawing overlay viewport from render()");
+      const headerOffsetX = typeof viewport.headerOffsetX === "number" && Number.isFinite(viewport.headerOffsetX) ? viewport.headerOffsetX : 0;
+      const headerOffsetY = typeof viewport.headerOffsetY === "number" && Number.isFinite(viewport.headerOffsetY) ? viewport.headerOffsetY : 0;
 
       const rect = anchorToRectPx(obj.anchor, geom);
       // Sample a small area near the expected text position (top + centered), avoiding
       // placeholder label rendering at the top-left corner.
       const sampleRect = (() => {
-        const centerX = rect.x + rect.width / 2 - viewport.scrollX;
-        const centerY = rect.y + 12 - viewport.scrollY;
+        // DrawingOverlay adds header offsets when painting onto the root-positioned drawing canvas.
+        const centerX = rect.x + rect.width / 2 - viewport.scrollX + headerOffsetX;
+        const centerY = rect.y + 12 - viewport.scrollY + headerOffsetY;
         const size = 20;
         const x = Math.max(0, Math.floor(centerX - size / 2));
         const y = Math.max(0, Math.floor(centerY - size / 2));
