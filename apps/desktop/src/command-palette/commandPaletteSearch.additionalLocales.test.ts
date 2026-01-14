@@ -94,4 +94,20 @@ describe("command palette function search (localized function names)", () => {
       document.documentElement.lang = prevLang;
     }
   });
+
+  it("normalizes locale variants to the supported formula locale (de / de_DE.UTF-8 / de-CH-1996 → de-DE)", () => {
+    const prevLang = document.documentElement.lang;
+
+    try {
+      for (const lang of ["de", "de_DE.UTF-8", "de-CH-1996"]) {
+        document.documentElement.lang = lang;
+        const results = searchFunctionResults("summe", { limit: 10 });
+        expect(results[0]?.name).toBe("SUMME");
+        // The engine treats these German variants as `de-DE` today, so list separators should match.
+        expect(results[0]?.signature ?? "").toContain(";");
+      }
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
 });

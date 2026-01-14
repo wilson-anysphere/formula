@@ -143,6 +143,42 @@ describe("FormulaBarView fx function picker", () => {
     }
   });
 
+  it("normalizes locale variants so separators and names match engine behavior (de-CH-1996 behaves like de-DE)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-CH-1996";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+      fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+      pickerInput.value = "summe";
+      pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const summeItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUMME"]');
+      expect(summeItem).toBeTruthy();
+
+      const desc = summeItem!.querySelector<HTMLElement>(".command-palette__item-description");
+      expect(desc).toBeTruthy();
+      // `de-CH` would normally use `,` as list separator, but the formula engine currently
+      // normalizes German variants to `de-DE`, so we should also show `;`.
+      expect(desc!.textContent).toContain(";");
+
+      pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+      expect(view.textarea.value).toBe("=SUMME()");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("uses getLocaleId() to localize results (even if document.lang differs)", () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "en-US";
