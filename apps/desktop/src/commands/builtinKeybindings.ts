@@ -325,15 +325,15 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     // Excel: Ctrl+Shift++ opens the Insert Cells dialog (Shift cells right/down, entire row/column).
     command: "home.cells.insert.insertCells",
-    key: "ctrl+shift+=",
-    mac: "ctrl+shift+=",
+    key: "ctrl+shift+plus",
+    mac: "ctrl+shift+plus",
     when: WHEN_SPREADSHEET_READY,
   },
   {
-    // Some layouts report the key as a literal "+" when Shift is held (rather than "=" + code fallback).
+    // Some environments report the underlying "=" key even when Shift is held.
     command: "home.cells.insert.insertCells",
-    key: "ctrl+shift+plus",
-    mac: "ctrl+shift+plus",
+    key: "ctrl+shift+=",
+    mac: "ctrl+shift+=",
     when: WHEN_SPREADSHEET_READY,
   },
   {
@@ -346,13 +346,13 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
     command: "home.cells.insert.insertCells",
-    key: "ctrl+cmd+shift+=",
+    key: "ctrl+cmd+shift+plus",
     when: WHEN_SPREADSHEET_READY,
   },
   {
     // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
     command: "home.cells.insert.insertCells",
-    key: "ctrl+cmd+shift+plus",
+    key: "ctrl+cmd+shift+=",
     when: WHEN_SPREADSHEET_READY,
   },
   {

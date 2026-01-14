@@ -464,7 +464,7 @@ export function registerDesktopCommands(params: {
   // Home → Cells → Insert/Delete Cells… (shift structural edits).
   //
   // These were originally ribbon-only ids handled in `main.ts`. Register them as commands so:
-  // - keybindings can invoke them (Excel: Ctrl+Shift+= / Ctrl+-),
+  // - keybindings can invoke them (Excel: Ctrl+Shift+Plus / Ctrl+-),
   // - they appear in the command palette, and
   // - ribbon disabling can rely on CommandRegistry as the source of truth.
   const showToastForStructuralCellsCommand = (message: string, type?: "info" | "warning" | "error") => showToast(message, type);
