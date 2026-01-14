@@ -166,7 +166,7 @@ import { reservedRootGuardUiMessage, subscribeToReservedRootGuardDisconnect } fr
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { ImageBitmapCache } from "../drawings/imageBitmapCache";
-import { applyTransformVector, inverseTransformVector } from "../drawings/transform";
+import { applyTransformVectorInto, inverseTransformVectorInto } from "../drawings/transform";
 import { WorkbookImageManager } from "../drawings/workbookImageManager";
 
 import * as Y from "yjs";
@@ -848,23 +848,47 @@ type DrawingGestureState =
       aspectRatio: number | null;
     };
 
-function lockAspectRatioResize(args: {
-  handle: ResizeHandle;
-  dx: number;
-  dy: number;
-  startWidthPx: number;
-  startHeightPx: number;
-  aspectRatio: number;
-  minSizePx: number;
-}): { dx: number; dy: number } {
-  const { handle, startWidthPx, startHeightPx } = args;
-  let { dx, dy, aspectRatio } = args;
+type DrawingViewportLayout = {
+  headerOffsetX: number;
+  headerOffsetY: number;
+  rootWidth: number;
+  rootHeight: number;
+  cellAreaWidth: number;
+  cellAreaHeight: number;
+  /** Frozen boundary position in selection/root coordinates (includes header offsets). */
+  frozenBoundaryXRoot: number;
+  frozenBoundaryYRoot: number;
+  /** Frozen boundary position in cell-area coordinates (excludes header offsets). */
+  frozenBoundaryXCellArea: number;
+  frozenBoundaryYCellArea: number;
+  frozenRows: number;
+  frozenCols: number;
+};
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+function lockAspectRatioResize(
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  startWidthPx: number,
+  startHeightPx: number,
+  aspectRatio: number,
+  minSizePx: number,
+  out: { dx: number; dy: number },
+): { dx: number; dy: number } {
+  out.dx = dx;
+  out.dy = dy;
 
   // Only lock corner-handle resizes (edge handles remain unconstrained).
-  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return { dx, dy };
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return { dx, dy };
-  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return { dx, dy };
-  if (startWidthPx <= 0 || startHeightPx <= 0) return { dx, dy };
+  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return out;
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return out;
+  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return out;
+  if (startWidthPx <= 0 || startHeightPx <= 0) return out;
 
   const sx = handle === "ne" || handle === "se" ? 1 : -1;
   const sy = handle === "sw" || handle === "se" ? 1 : -1;
@@ -877,26 +901,30 @@ function lockAspectRatioResize(args: {
   const widthDriven = Math.abs(scaleW - 1) >= Math.abs(scaleH - 1);
 
   const minScale = Math.max(
-    startWidthPx > args.minSizePx ? args.minSizePx / startWidthPx : 0,
-    startHeightPx > args.minSizePx ? args.minSizePx / startHeightPx : 0,
+    startWidthPx > minSizePx ? minSizePx / startWidthPx : 0,
+    startHeightPx > minSizePx ? minSizePx / startHeightPx : 0,
+    0,
   );
 
-  const clampScale = (s: number): number => {
-    if (!Number.isFinite(s)) return 1;
-    return Math.max(s, minScale, 0);
-  };
-
   if (widthDriven) {
-    const scale = clampScale(scaleW);
+    let scale = scaleW;
+    if (!Number.isFinite(scale)) scale = 1;
+    scale = Math.max(scale, minScale);
     const nextWidth = startWidthPx * scale;
     const nextHeight = nextWidth / aspectRatio;
-    return { dx: (nextWidth - startWidthPx) * sx, dy: (nextHeight - startHeightPx) * sy };
+    out.dx = (nextWidth - startWidthPx) * sx;
+    out.dy = (nextHeight - startHeightPx) * sy;
+    return out;
   }
 
-  const scale = clampScale(scaleH);
+  let scale = scaleH;
+  if (!Number.isFinite(scale)) scale = 1;
+  scale = Math.max(scale, minScale);
   const nextHeight = startHeightPx * scale;
   const nextWidth = nextHeight * aspectRatio;
-  return { dx: (nextWidth - startWidthPx) * sx, dy: (nextHeight - startHeightPx) * sy };
+  out.dx = (nextWidth - startWidthPx) * sx;
+  out.dy = (nextHeight - startHeightPx) * sy;
+  return out;
 }
 
 export interface SpreadsheetAppStatusElements {
@@ -1249,6 +1277,34 @@ export class SpreadsheetApp {
         dpr: number;
       }
     | null = null;
+  private readonly drawingViewportLayoutScratch: DrawingViewportLayout = {
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    rootWidth: 0,
+    rootHeight: 0,
+    cellAreaWidth: 0,
+    cellAreaHeight: 0,
+    frozenBoundaryXRoot: 0,
+    frozenBoundaryYRoot: 0,
+    frozenBoundaryXCellArea: 0,
+    frozenBoundaryYCellArea: 0,
+    frozenRows: 0,
+    frozenCols: 0,
+  };
+  private readonly drawingInteractionViewportScratch: DrawingViewport = {
+    scrollX: 0,
+    scrollY: 0,
+    width: 0,
+    height: 0,
+    dpr: 1,
+    zoom: 1,
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    frozenRows: 0,
+    frozenCols: 0,
+    frozenWidthPx: 0,
+    frozenHeightPx: 0,
+  };
   private referenceCanvas: HTMLCanvasElement;
   private auditingCanvas: HTMLCanvasElement;
   private presenceCanvas: HTMLCanvasElement | null = null;
@@ -1407,7 +1463,11 @@ export class SpreadsheetApp {
 
   private drawingGesture: DrawingGestureState | null = null;
   private drawingGesturePointerPos: { x: number; y: number; shiftKey: boolean } | null = null;
+  private readonly drawingGesturePointerPosScratch: { x: number; y: number; shiftKey: boolean } = { x: 0, y: 0, shiftKey: false };
   private drawingGestureAutoScrollRaf: number | null = null;
+  private readonly drawingGestureAutoScrollDeltaScratch: { dx: number; dy: number } = { dx: 0, dy: 0 };
+  private readonly drawingGestureTransformVecScratch: { x: number; y: number } = { x: 0, y: 0 };
+  private readonly drawingGestureAspectRatioDeltaScratch: { dx: number; dy: number } = { dx: 0, dy: 0 };
 
   private resizeObserver: ResizeObserver;
   private disposed = false;
@@ -2659,7 +2719,7 @@ export class SpreadsheetApp {
       (this.gridMode === "shared" ? true : this.drawingsDemoEnabled);
     if (enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
-        getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
+        getViewport: () => this.getDrawingInteractionViewportScratch(this.sharedGrid?.renderer.scroll.getViewportState()),
         getObjects: () => this.listDrawingObjectsForSheet(),
         setObjects: (next) => {
           this.setDrawingObjectsForSheet(next);
@@ -2917,7 +2977,7 @@ export class SpreadsheetApp {
           this.root,
           geom,
           {
-            getViewport: () => this.getDrawingInteractionViewport(),
+            getViewport: () => this.getDrawingInteractionViewportScratch(),
             getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId),
             shouldHandlePointerDown: (e) => {
               // When the formula bar is in range-selection mode, chart hits should not steal the
@@ -8565,7 +8625,7 @@ export class SpreadsheetApp {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     if (x < 0 || y < 0 || x > canvasRect.width || y > canvasRect.height) return null;
 
-    const viewport = this.getDrawingInteractionViewport();
+    const viewport = this.getDrawingInteractionViewportScratch();
     const index = this.getDrawingHitTestIndex(objects);
     const hit = hitTestDrawingsInto(index, viewport, x, y, this.drawingHitTestScratchRect);
     return hit?.id ?? null;
@@ -9972,15 +10032,32 @@ export class SpreadsheetApp {
     if (existing) return existing;
 
     const callbacks: DrawingInteractionCallbacks = {
-      getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
+      getViewport: () => this.getDrawingInteractionViewportScratch(this.sharedGrid?.renderer.scroll.getViewportState()),
       getObjects: () => this.listDrawingObjectsForSheet(),
       setObjects: (next) => {
         this.setDrawingObjectsForSheet(next);
         this.renderDrawings();
-        const selected = this.selectedDrawingId != null ? next.find((obj) => obj.id === this.selectedDrawingId) : undefined;
-        if (selected?.kind.type === "chart") {
-          // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
-          this.renderCharts(false);
+        const selectedId = this.selectedDrawingId;
+        if (selectedId != null) {
+          // `setObjects` is on the pointer-move hot path during drag/resize/rotate interactions.
+          // Avoid allocating a `.find` callback and avoid repeated scans by reusing the cached index.
+          let idx = this.selectedDrawingIndex;
+          const hasCachedIndex =
+            typeof idx === "number" && idx >= 0 && idx < next.length && next[idx]?.id === selectedId;
+          if (!hasCachedIndex) {
+            idx = -1;
+            for (let i = 0; i < next.length; i += 1) {
+              if (next[i]!.id === selectedId) {
+                idx = i;
+                break;
+              }
+            }
+            this.selectedDrawingIndex = idx >= 0 ? idx : null;
+          }
+          if (idx != null && idx >= 0 && next[idx]?.kind.type === "chart") {
+            // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
+            this.renderCharts(false);
+          }
         }
         this.emitDrawingsChanged();
       },
@@ -10879,7 +10956,7 @@ export class SpreadsheetApp {
     const objects = this.drawingObjects;
     if (objects.length === 0) return null;
 
-    const viewport = this.getDrawingInteractionViewport();
+    const viewport = this.getDrawingInteractionViewportScratch();
     const bounds = this.drawingHitTestScratchRect;
     const index = this.getDrawingHitTestIndex(objects);
 
@@ -14039,27 +14116,17 @@ export class SpreadsheetApp {
   }
 
   private computeDrawingViewportLayout(
-    sharedViewport?: GridViewportState,
-  ): {
-    headerOffsetX: number;
-    headerOffsetY: number;
-    rootWidth: number;
-    rootHeight: number;
-    cellAreaWidth: number;
-    cellAreaHeight: number;
-    /** Frozen boundary position in selection/root coordinates (includes header offsets). */
-    frozenBoundaryXRoot: number;
-    frozenBoundaryYRoot: number;
-    /** Frozen boundary position in cell-area coordinates (excludes header offsets). */
-    frozenBoundaryXCellArea: number;
-    frozenBoundaryYCellArea: number;
-    frozenRows: number;
-    frozenCols: number;
-  } {
-    const { frozenRows, frozenCols } = this.getFrozen();
-
-    const zoom = this.getZoom();
-    const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+    sharedViewport: GridViewportState | undefined,
+    out: DrawingViewportLayout,
+  ): DrawingViewportLayout {
+    // Avoid `getFrozen()` allocations; compute frozen counts directly.
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const rawFrozenRows = Number(view?.frozenRows);
+    const rawFrozenCols = Number(view?.frozenCols);
+    const maxRows = this.limits.maxRows;
+    const maxCols = this.limits.maxCols;
+    const frozenRows = Number.isFinite(rawFrozenRows) ? Math.max(0, Math.min(Math.trunc(rawFrozenRows), maxRows)) : 0;
+    const frozenCols = Number.isFinite(rawFrozenCols) ? Math.max(0, Math.min(Math.trunc(rawFrozenCols), maxCols)) : 0;
 
     if (this.sharedGrid) {
       const viewport = sharedViewport ?? this.sharedGrid.renderer.scroll.getViewportState();
@@ -14079,25 +14146,24 @@ export class SpreadsheetApp {
       // drawings viewports expect sheet-level frozen row/col counts. Keep the pixel
       // boundary positions from the renderer (so hidden/variable row/col sizes stay
       // aligned) while passing sheet-level frozenRows/frozenCols counts separately.
-      const frozenBoundaryXRoot = clamp(viewport.frozenWidth, headerOffsetX, rootWidth);
-      const frozenBoundaryYRoot = clamp(viewport.frozenHeight, headerOffsetY, rootHeight);
-      const frozenBoundaryXCellArea = clamp(frozenBoundaryXRoot - headerOffsetX, 0, cellAreaWidth);
-      const frozenBoundaryYCellArea = clamp(frozenBoundaryYRoot - headerOffsetY, 0, cellAreaHeight);
+      const frozenBoundaryXRoot = clampNumber(viewport.frozenWidth, headerOffsetX, rootWidth);
+      const frozenBoundaryYRoot = clampNumber(viewport.frozenHeight, headerOffsetY, rootHeight);
+      const frozenBoundaryXCellArea = clampNumber(frozenBoundaryXRoot - headerOffsetX, 0, cellAreaWidth);
+      const frozenBoundaryYCellArea = clampNumber(frozenBoundaryYRoot - headerOffsetY, 0, cellAreaHeight);
 
-      return {
-        headerOffsetX,
-        headerOffsetY,
-        rootWidth,
-        rootHeight,
-        cellAreaWidth,
-        cellAreaHeight,
-        frozenBoundaryXRoot,
-        frozenBoundaryYRoot,
-        frozenBoundaryXCellArea,
-        frozenBoundaryYCellArea,
-        frozenRows,
-        frozenCols,
-      };
+      out.headerOffsetX = headerOffsetX;
+      out.headerOffsetY = headerOffsetY;
+      out.rootWidth = rootWidth;
+      out.rootHeight = rootHeight;
+      out.cellAreaWidth = cellAreaWidth;
+      out.cellAreaHeight = cellAreaHeight;
+      out.frozenBoundaryXRoot = frozenBoundaryXRoot;
+      out.frozenBoundaryYRoot = frozenBoundaryYRoot;
+      out.frozenBoundaryXCellArea = frozenBoundaryXCellArea;
+      out.frozenBoundaryYCellArea = frozenBoundaryYCellArea;
+      out.frozenRows = frozenRows;
+      out.frozenCols = frozenCols;
+      return out;
     }
 
     // Legacy renderer: frozen pane extents are derived from visible (non-hidden) rows/cols.
@@ -14110,25 +14176,24 @@ export class SpreadsheetApp {
     const cellAreaWidth = Math.max(0, rootWidth - headerOffsetX);
     const cellAreaHeight = Math.max(0, rootHeight - headerOffsetY);
 
-    const frozenBoundaryXCellArea = clamp(this.frozenWidth, 0, cellAreaWidth);
-    const frozenBoundaryYCellArea = clamp(this.frozenHeight, 0, cellAreaHeight);
-    const frozenBoundaryXRoot = clamp(headerOffsetX + frozenBoundaryXCellArea, headerOffsetX, rootWidth);
-    const frozenBoundaryYRoot = clamp(headerOffsetY + frozenBoundaryYCellArea, headerOffsetY, rootHeight);
+    const frozenBoundaryXCellArea = clampNumber(this.frozenWidth, 0, cellAreaWidth);
+    const frozenBoundaryYCellArea = clampNumber(this.frozenHeight, 0, cellAreaHeight);
+    const frozenBoundaryXRoot = clampNumber(headerOffsetX + frozenBoundaryXCellArea, headerOffsetX, rootWidth);
+    const frozenBoundaryYRoot = clampNumber(headerOffsetY + frozenBoundaryYCellArea, headerOffsetY, rootHeight);
 
-    return {
-      headerOffsetX,
-      headerOffsetY,
-      rootWidth,
-      rootHeight,
-      cellAreaWidth,
-      cellAreaHeight,
-      frozenBoundaryXRoot,
-      frozenBoundaryYRoot,
-      frozenBoundaryXCellArea,
-      frozenBoundaryYCellArea,
-      frozenRows,
-      frozenCols,
-    };
+    out.headerOffsetX = headerOffsetX;
+    out.headerOffsetY = headerOffsetY;
+    out.rootWidth = rootWidth;
+    out.rootHeight = rootHeight;
+    out.cellAreaWidth = cellAreaWidth;
+    out.cellAreaHeight = cellAreaHeight;
+    out.frozenBoundaryXRoot = frozenBoundaryXRoot;
+    out.frozenBoundaryYRoot = frozenBoundaryYRoot;
+    out.frozenBoundaryXCellArea = frozenBoundaryXCellArea;
+    out.frozenBoundaryYCellArea = frozenBoundaryYCellArea;
+    out.frozenRows = frozenRows;
+    out.frozenCols = frozenCols;
+    return out;
   }
 
   /**
@@ -14140,11 +14205,9 @@ export class SpreadsheetApp {
    * the DrawingOverlay can clip to the cell grid body area.
    */
   getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
-    const layout = this.computeDrawingViewportLayout(sharedViewport);
-    const zoom = (() => {
-      const raw = this.getZoom();
-      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
-    })();
+    const layout = this.computeDrawingViewportLayout(sharedViewport, this.drawingViewportLayoutScratch);
+    const zoomRaw = this.getZoom();
+    const zoom = typeof zoomRaw === "number" && Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
 
     // Reset any legacy positioning so the drawing canvas always covers the full grid root.
     this.drawingCanvas.style.left = "0px";
@@ -14186,27 +14249,34 @@ export class SpreadsheetApp {
    * headers (e.g. `selectionCanvas` in shared-grid mode).
    */
   getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
-    const layout = this.computeDrawingViewportLayout(sharedViewport);
-    const zoom = (() => {
-      const raw = this.getZoom();
-      return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 1;
-    })();
+    const out: DrawingViewport = { scrollX: 0, scrollY: 0, width: 0, height: 0, dpr: this.dpr };
+    return this.getDrawingInteractionViewportInto(sharedViewport, out);
+  }
+
+  private getDrawingInteractionViewportScratch(sharedViewport?: GridViewportState): DrawingViewport {
+    return this.getDrawingInteractionViewportInto(sharedViewport, this.drawingInteractionViewportScratch);
+  }
+
+  private getDrawingInteractionViewportInto(sharedViewport: GridViewportState | undefined, out: DrawingViewport): DrawingViewport {
+    const layout = this.computeDrawingViewportLayout(sharedViewport, this.drawingViewportLayoutScratch);
+    const zoomRaw = this.getZoom();
+    const zoom = typeof zoomRaw === "number" && Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
     const scrollX = this.sharedGrid && sharedViewport ? sharedViewport.scrollX : this.scrollX;
     const scrollY = this.sharedGrid && sharedViewport ? sharedViewport.scrollY : this.scrollY;
-    return {
-      scrollX,
-      scrollY,
-      width: layout.rootWidth,
-      height: layout.rootHeight,
-      dpr: this.dpr,
-      zoom,
-      headerOffsetX: layout.headerOffsetX,
-      headerOffsetY: layout.headerOffsetY,
-      frozenRows: layout.frozenRows,
-      frozenCols: layout.frozenCols,
-      frozenWidthPx: layout.frozenBoundaryXRoot,
-      frozenHeightPx: layout.frozenBoundaryYRoot,
-    };
+
+    out.scrollX = scrollX;
+    out.scrollY = scrollY;
+    out.width = layout.rootWidth;
+    out.height = layout.rootHeight;
+    out.dpr = this.dpr;
+    out.zoom = zoom;
+    out.headerOffsetX = layout.headerOffsetX;
+    out.headerOffsetY = layout.headerOffsetY;
+    out.frozenRows = layout.frozenRows;
+    out.frozenCols = layout.frozenCols;
+    out.frozenWidthPx = layout.frozenBoundaryXRoot;
+    out.frozenHeightPx = layout.frozenBoundaryYRoot;
+    return out;
   }
 
   private documentChangeAffectsDrawings(payload: any): boolean {
@@ -14880,7 +14950,7 @@ export class SpreadsheetApp {
         }
       }
       if (selected) {
-        const viewport = this.getDrawingInteractionViewport();
+        const viewport = this.getDrawingInteractionViewportScratch();
         const rootRect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
         const transform = selected.transform;
         const hasNonIdentityTransform = !!(
@@ -15133,7 +15203,7 @@ export class SpreadsheetApp {
     if (index === -1) return;
     const selected = objects[index]!;
 
-    const viewport = this.getDrawingInteractionViewport();
+    const viewport = this.getDrawingInteractionViewportScratch();
     const zoom = typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
 
     const nextAnchor = shiftAnchor(selected.anchor, dxPx, dyPx, this.drawingGeom, zoom);
@@ -16792,17 +16862,21 @@ export class SpreadsheetApp {
     pointer: { x: number; y: number },
     viewport: DrawingViewport,
   ): { dx: number; dy: number } {
+    const out = this.drawingGestureAutoScrollDeltaScratch;
     const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
     const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
     const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
     const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
 
     const inHeader = pointer.x < headerOffsetX || pointer.y < headerOffsetY;
-    if (inHeader) return { dx: 0, dy: 0 };
+    if (inHeader) {
+      out.dx = 0;
+      out.dy = 0;
+      return out;
+    }
 
     const threshold = 24;
     const maxSpeed = 20;
-    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
     const pointInFrozenCols = pointer.x < frozenBoundaryX;
     const pointInFrozenRows = pointer.y < frozenBoundaryY;
@@ -16815,10 +16889,14 @@ export class SpreadsheetApp {
     let dx = 0;
     if (!pointInFrozenCols) {
       if (pointer.x >= leftEdge && pointer.x < leftEdge + threshold) {
-        const t = clamp01((leftEdge + threshold - pointer.x) / threshold);
+        let t = (leftEdge + threshold - pointer.x) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dx = -Math.round(t * maxSpeed);
       } else if (pointer.x > rightEdge - threshold) {
-        const t = clamp01((pointer.x - (rightEdge - threshold)) / threshold);
+        let t = (pointer.x - (rightEdge - threshold)) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dx = Math.round(t * maxSpeed);
       }
     }
@@ -16826,15 +16904,21 @@ export class SpreadsheetApp {
     let dy = 0;
     if (!pointInFrozenRows) {
       if (pointer.y >= topEdge && pointer.y < topEdge + threshold) {
-        const t = clamp01((topEdge + threshold - pointer.y) / threshold);
+        let t = (topEdge + threshold - pointer.y) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dy = -Math.round(t * maxSpeed);
       } else if (pointer.y > bottomEdge - threshold) {
-        const t = clamp01((pointer.y - (bottomEdge - threshold)) / threshold);
+        let t = (pointer.y - (bottomEdge - threshold)) / threshold;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
         dy = Math.round(t * maxSpeed);
       }
     }
 
-    return { dx, dy };
+    out.dx = dx;
+    out.dy = dy;
+    return out;
   }
 
   private stopDrawingGestureAutoScroll(): void {
@@ -16850,7 +16934,7 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return;
     if (this.drawingGestureAutoScrollRaf != null) return;
 
-    const viewport = this.getDrawingInteractionViewport();
+    const viewport = this.getDrawingInteractionViewportScratch();
     const { dx, dy } = this.computeDrawingGestureAutoScrollDelta(this.drawingGesturePointerPos, viewport);
     if (dx === 0 && dy === 0) return;
 
@@ -16866,7 +16950,7 @@ export class SpreadsheetApp {
       if (!this.drawingGesture || !this.drawingGesturePointerPos) return;
       if (this.editor.isOpen()) return;
 
-      const viewport = this.getDrawingInteractionViewport();
+      const viewport = this.getDrawingInteractionViewportScratch();
       const { dx, dy } = this.computeDrawingGestureAutoScrollDelta(this.drawingGesturePointerPos, viewport);
       if (dx === 0 && dy === 0) return;
 
@@ -16936,7 +17020,7 @@ export class SpreadsheetApp {
     if (!formulaEditing) {
       // Drawing hit testing must happen before cell-selection logic so clicks on
       // overlaid objects (charts/images/shapes) behave like Excel.
-      const drawingViewport = this.getDrawingInteractionViewport();
+      const drawingViewport = this.getDrawingInteractionViewportScratch();
       const frozenRows = Number.isFinite(drawingViewport.frozenRows) ? Math.max(0, Math.trunc(drawingViewport.frozenRows!)) : 0;
       const frozenCols = Number.isFinite(drawingViewport.frozenCols) ? Math.max(0, Math.trunc(drawingViewport.frozenCols!)) : 0;
       const drawings = this.listDrawingObjectsForSheet();
@@ -17308,7 +17392,7 @@ export class SpreadsheetApp {
     if (!gesture) return;
     if (this.editor.isOpen()) return;
 
-    const viewport = this.getDrawingInteractionViewport();
+    const viewport = this.getDrawingInteractionViewportScratch();
     const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
     const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
     const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
@@ -17328,46 +17412,52 @@ export class SpreadsheetApp {
     let dxPx = sheetX - gesture.startSheetX;
     let dyPx = sheetY - gesture.startSheetY;
 
-    const nextAnchor = (() => {
-      if (gesture.mode !== "resize") {
-        return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
-      }
-
+    let nextAnchor: DrawingAnchor;
+    if (gesture.mode !== "resize") {
+      nextAnchor = shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+    } else {
       const transform = gesture.transform;
       const hasNonIdentityTransform = !!(transform && (transform.rotationDeg !== 0 || transform.flipH || transform.flipV));
 
       if (pointer.shiftKey && gesture.aspectRatio != null) {
         if (hasNonIdentityTransform) {
-          const local = inverseTransformVector(dxPx, dyPx, transform!);
-          const lockedLocal = lockAspectRatioResize({
-            handle: gesture.handle,
-            dx: local.x,
-            dy: local.y,
-            startWidthPx: gesture.startWidthPx,
-            startHeightPx: gesture.startHeightPx,
-            aspectRatio: gesture.aspectRatio,
-            minSizePx: 8,
-          });
-          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+          const local = inverseTransformVectorInto(dxPx, dyPx, transform!, this.drawingGestureTransformVecScratch);
+          const lockedLocal = lockAspectRatioResize(
+            gesture.handle,
+            local.x,
+            local.y,
+            gesture.startWidthPx,
+            gesture.startHeightPx,
+            gesture.aspectRatio,
+            8,
+            this.drawingGestureAspectRatioDeltaScratch,
+          );
+          const world = applyTransformVectorInto(
+            lockedLocal.dx,
+            lockedLocal.dy,
+            transform!,
+            this.drawingGestureTransformVecScratch,
+          );
           dxPx = world.x;
           dyPx = world.y;
         } else {
-          const locked = lockAspectRatioResize({
-            handle: gesture.handle,
-            dx: dxPx,
-            dy: dyPx,
-            startWidthPx: gesture.startWidthPx,
-            startHeightPx: gesture.startHeightPx,
-            aspectRatio: gesture.aspectRatio,
-            minSizePx: 8,
-          });
+          const locked = lockAspectRatioResize(
+            gesture.handle,
+            dxPx,
+            dyPx,
+            gesture.startWidthPx,
+            gesture.startHeightPx,
+            gesture.aspectRatio,
+            8,
+            this.drawingGestureAspectRatioDeltaScratch,
+          );
           dxPx = locked.dx;
           dyPx = locked.dy;
         }
       }
 
-      return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
-    })();
+      nextAnchor = resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
+    }
 
     const objects = this.listDrawingObjectsForSheet();
     const targetId = gesture.objectId;
@@ -17421,8 +17511,12 @@ export class SpreadsheetApp {
       if (this.editor.isOpen()) return;
       const x = e.clientX - this.rootLeft;
       const y = e.clientY - this.rootTop;
-      this.drawingGesturePointerPos = { x, y, shiftKey: Boolean(e.shiftKey) };
-      this.applyDrawingGestureAtPointer(this.drawingGesturePointerPos);
+      const pointer = this.drawingGesturePointerPosScratch;
+      pointer.x = x;
+      pointer.y = y;
+      pointer.shiftKey = Boolean(e.shiftKey);
+      this.drawingGesturePointerPos = pointer;
+      this.applyDrawingGestureAtPointer(pointer);
       this.maybeStartDrawingGestureAutoScroll();
       return;
     }
@@ -17642,7 +17736,7 @@ export class SpreadsheetApp {
       const x = e.clientX - this.rootLeft;
       const y = e.clientY - this.rootTop;
 
-      const viewport = this.getDrawingInteractionViewport();
+      const viewport = this.getDrawingInteractionViewportScratch();
       const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
@@ -17664,46 +17758,52 @@ export class SpreadsheetApp {
       let dxPx = sheetX - gesture.startSheetX;
       let dyPx = sheetY - gesture.startSheetY;
 
-      const nextAnchor = (() => {
-        if (gesture.mode !== "resize") {
-          return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
-        }
-
+      let nextAnchor: DrawingAnchor;
+      if (gesture.mode !== "resize") {
+        nextAnchor = shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+      } else {
         const transform = gesture.transform;
         const hasNonIdentityTransform = !!(transform && (transform.rotationDeg !== 0 || transform.flipH || transform.flipV));
 
         if (e.shiftKey && gesture.aspectRatio != null) {
           if (hasNonIdentityTransform) {
-            const local = inverseTransformVector(dxPx, dyPx, transform!);
-            const lockedLocal = lockAspectRatioResize({
-              handle: gesture.handle,
-              dx: local.x,
-              dy: local.y,
-              startWidthPx: gesture.startWidthPx,
-              startHeightPx: gesture.startHeightPx,
-              aspectRatio: gesture.aspectRatio,
-              minSizePx: 8,
-            });
-            const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+            const local = inverseTransformVectorInto(dxPx, dyPx, transform!, this.drawingGestureTransformVecScratch);
+            const lockedLocal = lockAspectRatioResize(
+              gesture.handle,
+              local.x,
+              local.y,
+              gesture.startWidthPx,
+              gesture.startHeightPx,
+              gesture.aspectRatio,
+              8,
+              this.drawingGestureAspectRatioDeltaScratch,
+            );
+            const world = applyTransformVectorInto(
+              lockedLocal.dx,
+              lockedLocal.dy,
+              transform!,
+              this.drawingGestureTransformVecScratch,
+            );
             dxPx = world.x;
             dyPx = world.y;
           } else {
-            const locked = lockAspectRatioResize({
-              handle: gesture.handle,
-              dx: dxPx,
-              dy: dyPx,
-              startWidthPx: gesture.startWidthPx,
-              startHeightPx: gesture.startHeightPx,
-              aspectRatio: gesture.aspectRatio,
-              minSizePx: 8,
-            });
+            const locked = lockAspectRatioResize(
+              gesture.handle,
+              dxPx,
+              dyPx,
+              gesture.startWidthPx,
+              gesture.startHeightPx,
+              gesture.aspectRatio,
+              8,
+              this.drawingGestureAspectRatioDeltaScratch,
+            );
             dxPx = locked.dx;
             dyPx = locked.dy;
           }
         }
 
-        return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
-      })();
+        nextAnchor = resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
+      }
 
       const objects = this.listDrawingObjectsForSheet();
       const targetId = gesture.objectId;
