@@ -87,7 +87,7 @@ function filenameFromUrl(maybeUrl) {
  * still be unusable if it points at a non-updater artifact type:
  * - macOS: `.dmg` is an installer; updater typically needs `.app.tar.gz`
  * - Linux: `.deb`/`.rpm` are installers; updater typically needs AppImage
- * - Windows: updater payloads are typically `.zip` (`.msi.zip` / `.exe.zip`)
+ * - Windows: updater payloads are typically `.msi` (Windows Installer; updater runs this)
  *
  * @param {string} platformKey
  * @param {{ allowWindowsMsi?: boolean; allowWindowsExe?: boolean }} [opts]
@@ -104,8 +104,7 @@ function expectedUpdaterExtensions(platformKey, opts = {}) {
   }
   if (lower.includes("windows")) {
     /** @type {string[]} */
-    const out = [".zip", ".msi.zip", ".exe.zip"];
-    if (opts.allowWindowsMsi) out.push(".msi");
+    const out = [".msi"];
     if (opts.allowWindowsExe) out.push(".exe");
     return out;
   }
@@ -146,18 +145,18 @@ function validateUpdaterFilenameForPlatform(platformKey, filename, opts = {}) {
   }
 
   if (lowerPlatform.includes("windows")) {
-    if (lowerFilename.endsWith(".msi") && !opts.allowWindowsMsi) {
-      return 'Windows updater entries must not reference a raw \".msi\" (pass --allow-windows-msi to permit).';
-    }
     if (lowerFilename.endsWith(".exe") && !opts.allowWindowsExe) {
       return 'Windows updater entries must not reference a raw \".exe\" installer (pass --allow-windows-exe to permit).';
     }
 
-    const allowed = [".zip"];
-    if (opts.allowWindowsMsi) allowed.push(".msi");
+    if (lowerFilename.endsWith(".msi")) {
+      return null;
+    }
+
+    const allowed = [".msi"];
     if (opts.allowWindowsExe) allowed.push(".exe");
     if (!allowed.some((ext) => lowerFilename.endsWith(ext))) {
-      return "Windows updater entries must reference an updater payload archive (typically .zip / .msi.zip / .exe.zip).";
+      return "Windows updater entries must reference a Windows installer payload (typically .msi).";
     }
     return null;
   }
@@ -403,7 +402,7 @@ function containsArchToken(name, arch) {
 function osArtifactRegex(os) {
   switch (os) {
     case "windows":
-      // Includes updater artifacts like `.msi.zip`, `.exe.sig`, etc.
+      // Includes updater artifacts like `.msi`, `.exe.sig`, etc.
       return /(?:\.msi|\.exe)(?:\.|$)/i;
     case "macos":
       // Includes `.dmg`, `.pkg`, updater `.app.tar.gz`, etc.

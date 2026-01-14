@@ -49,8 +49,8 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula_0.1.0_x86_64.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
       // macOS universal builds are published as a single updater archive but are referenced by
       // both macOS arch updater keys.
       "darwin-x86_64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
@@ -61,8 +61,8 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
   const assets = assetMap([
     "Formula_0.1.0_x86_64.AppImage",
     "Formula_0.1.0_arm64.AppImage",
-    "Formula_0.1.0_x64.msi.zip",
-    "Formula_0.1.0_arm64.msi.zip",
+    "Formula_0.1.0_x64.msi",
+    "Formula_0.1.0_arm64.msi",
     "Formula_0.1.0.app.tar.gz",
   ]);
 
@@ -76,8 +76,8 @@ test("validateLatestJson finds a nested platforms map", () => {
       platforms: {
         "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
         "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-        "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-        "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
         "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
         "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       },
@@ -87,8 +87,8 @@ test("validateLatestJson finds a nested platforms map", () => {
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
   assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
@@ -100,8 +100,8 @@ test("validateLatestJson fails when a required OS is missing", () => {
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       // Include one macOS entry, but intentionally omit the other to exercise required-key validation.
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -110,8 +110,8 @@ test("validateLatestJson fails when a required OS is missing", () => {
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
   assert.throws(
@@ -126,8 +126,8 @@ test("validateLatestJson fails when a platform URL references a missing asset", 
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -136,8 +136,8 @@ test("validateLatestJson fails when a platform URL references a missing asset", 
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
   ]);
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
@@ -151,8 +151,8 @@ test("validateLatestJson accepts missing inline signature when a sibling .sig as
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "" },
     },
@@ -163,10 +163,10 @@ test("validateLatestJson accepts missing inline signature when a sibling .sig as
     "Formula.AppImage.sig",
     "Formula_arm64.AppImage",
     "Formula_arm64.AppImage.sig",
-    "Formula_x64.msi.zip",
-    "Formula_x64.msi.zip.sig",
-    "Formula_arm64.msi.zip",
-    "Formula_arm64.msi.zip.sig",
+    "Formula_x64.msi",
+    "Formula_x64.msi.sig",
+    "Formula_arm64.msi",
+    "Formula_arm64.msi.sig",
     "Formula.app.tar.gz",
     "Formula.app.tar.gz.sig",
   ]);
@@ -180,8 +180,8 @@ test("validateLatestJson fails when both inline signature and sibling .sig are m
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -190,8 +190,8 @@ test("validateLatestJson fails when both inline signature and sibling .sig are m
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
   assert.throws(
@@ -206,8 +206,8 @@ test("validateLatestJson rejects macOS .dmg updater URLs (even if asset exists)"
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.dmg", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -216,8 +216,8 @@ test("validateLatestJson rejects macOS .dmg updater URLs (even if asset exists)"
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
     "Formula.dmg",
     "Formula.app.tar.gz",
   ]);
@@ -238,8 +238,8 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.deb", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -248,8 +248,8 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
   const assets = assetMap([
     "Formula.deb",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi.zip",
-    "Formula_arm64.msi.zip",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
     "Formula.app.tar.gz",
   ]);
 
@@ -262,13 +262,13 @@ test("validateLatestJson rejects Linux .deb/.rpm updater URLs (even if asset exi
   );
 });
 
-test("validateLatestJson rejects raw Windows installers by default", () => {
+test("validateLatestJson rejects Windows updater archives by default (.zip)", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi.zip", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_arm64.msi.zip", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
@@ -278,7 +278,7 @@ test("validateLatestJson rejects raw Windows installers by default", () => {
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi",
+    "Formula_x64.msi.zip",
     "Formula_arm64.msi.zip",
     "Formula.app.tar.gz",
   ]);
@@ -288,18 +288,18 @@ test("validateLatestJson rejects raw Windows installers by default", () => {
     (err) =>
       err instanceof ActionableError &&
       err.message.includes("windows-x86_64") &&
-      err.message.includes("--allow-windows-msi"),
+      err.message.includes("Expected file extensions"),
   );
 });
 
-test("validateLatestJson allows raw Windows installers when explicitly enabled", () => {
+test("validateLatestJson rejects raw Windows .exe installers by default", () => {
   const manifest = {
     version: "0.1.0",
     platforms: {
       "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
       "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
-      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.exe", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.exe", signature: "sig" },
       "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
     },
@@ -308,13 +308,43 @@ test("validateLatestJson allows raw Windows installers when explicitly enabled",
   const assets = assetMap([
     "Formula.AppImage",
     "Formula_arm64.AppImage",
-    "Formula_x64.msi",
-    "Formula_arm64.msi",
+    "Formula_x64.exe",
+    "Formula_arm64.exe",
+    "Formula.app.tar.gz",
+  ]);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assets),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("windows-x86_64") &&
+      err.message.includes("--allow-windows-exe"),
+  );
+});
+
+test("validateLatestJson allows raw Windows .exe installers when explicitly enabled", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.exe", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.exe", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.exe",
+    "Formula_arm64.exe",
     "Formula.app.tar.gz",
   ]);
 
   assert.doesNotThrow(() =>
-    validateLatestJson(manifest, "0.1.0", assets, { allowWindowsMsi: true }),
+    validateLatestJson(manifest, "0.1.0", assets, { allowWindowsExe: true }),
   );
 });
 
