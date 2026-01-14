@@ -225,4 +225,59 @@ describe("registerEncryptionUiCommands", () => {
     expect(manager.add).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/already used by an encrypted range/i), "warning");
   });
+
+  it("encryptSelectedRange refuses to generate new key bytes for a keyId already used by encrypted cells when key bytes are missing", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => null),
+      set: vi.fn(async (_docId: string, keyId: string) => ({ keyId })),
+    };
+
+    const manager = {
+      add: vi.fn(() => "r1"),
+      list: () => [],
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    // Simulate an existing encrypted payload for the top-left cell in the selection.
+    const cells = new Map<string, any>();
+    const cellMap = new Map<string, any>();
+    cellMap.set("enc", {
+      v: 1,
+      alg: "AES-256-GCM",
+      keyId: "k1",
+      ivBase64: "AA==",
+      tagBase64: "AA==",
+      ciphertextBase64: "AA==",
+    });
+    cells.set("Sheet1:0:0", cellMap);
+
+    const app: any = {
+      getCollabSession: () => ({
+        doc: { guid: "doc-1" },
+        cells,
+        getRole: () => "editor",
+        getPermissions: () => ({ userId: "u1" }),
+      }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("k1");
+
+    await commandRegistry.executeCommand("collab.encryptSelectedRange");
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(keyStore.set).not.toHaveBeenCalled();
+    expect(manager.add).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/already used by encrypted cells/i), "warning");
+  });
 });

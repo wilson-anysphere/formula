@@ -207,6 +207,39 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         } catch {
           // Best-effort; fall through to the existing-key-lookup-failed warning prompt below.
         }
+
+        // Also guard against reusing an existing `keyId` that already appears in encrypted cell payloads
+        // (for example if the encrypted range metadata was removed but ciphertext remains).
+        // Generating new key material for the same id would make those cells undecryptable.
+        try {
+          const checkCells: Array<{ sheetId: string; row: number; col: number }> = [
+            { sheetId, row: range.startRow, col: range.startCol },
+          ];
+          try {
+            const getActiveCell = (app as any).getActiveCell;
+            if (typeof getActiveCell === "function") {
+              const active = getActiveCell.call(app);
+              if (active && Number.isInteger(active.row) && active.row >= 0 && Number.isInteger(active.col) && active.col >= 0) {
+                checkCells.push({ sheetId, row: active.row, col: active.col });
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          for (const cell of checkCells) {
+            const usedKeyId = keyIdFromEncryptedCellPayload(session as any, cell);
+            if (usedKeyId && usedKeyId === keyId) {
+              showToast(
+                `Key ID "${keyId}" is already used by encrypted cells. Import the key first (or choose a new Key ID) to avoid key conflicts.`,
+                "warning",
+              );
+              return;
+            }
+          }
+        } catch {
+          // Best-effort; don't block encryption if we can't inspect existing cell payloads.
+        }
       }
 
       const confirmed = await showQuickPick(
