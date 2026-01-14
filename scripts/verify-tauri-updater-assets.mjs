@@ -31,6 +31,23 @@ const tauriConfigPath = path.join(repoRoot, tauriConfigRelativePath);
 
 const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
 
+/**
+ * macOS updater artifacts are tarballs (often `*.app.tar.gz`, but allow other `*.tar.gz`/`*.tgz`
+ * archives). Guard against accidentally matching Linux `*.AppImage.tar.gz` bundles.
+ *
+ * Keep this in sync with:
+ * - scripts/ci/validate-updater-manifest.mjs
+ * - scripts/verify-desktop-release-assets.mjs
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isMacUpdaterArchiveAssetName(name) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
+  return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
+}
+
 // Updater platform key mapping is intentionally strict.
 //
 // Source of truth:
@@ -46,11 +63,7 @@ const EXPECTED_PLATFORMS = [
     label: "macOS (x86_64)",
     expectedUpdaterAsset: {
       description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      matches: isMacUpdaterArchiveAssetName,
     },
   },
   {
@@ -58,11 +71,7 @@ const EXPECTED_PLATFORMS = [
     label: "macOS (aarch64)",
     expectedUpdaterAsset: {
       description: "macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)",
-      matches: (name) => {
-        const lower = name.toLowerCase();
-        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-      },
+      matches: isMacUpdaterArchiveAssetName,
     },
   },
   {
@@ -960,12 +969,8 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
     const signedKinds = [
       { label: "macOS installer (.dmg)", matches: (name) => name.toLowerCase().endsWith(".dmg") },
       {
-        label: "macOS updater archive (.app.tar.gz/.tar.gz/.tgz)",
-        matches: (name) => {
-          const lower = name.toLowerCase();
-          if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
-          return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
-        },
+        label: "macOS updater archive (.tar.gz/.tgz)",
+        matches: isMacUpdaterArchiveAssetName,
       },
       { label: "Windows installer (.msi)", matches: (name) => name.toLowerCase().endsWith(".msi") },
       { label: "Windows installer (.exe)", matches: (name) => name.toLowerCase().endsWith(".exe") },

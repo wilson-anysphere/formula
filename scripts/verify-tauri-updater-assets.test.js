@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { findPlatformsObject } from "./verify-tauri-updater-assets.mjs";
+import { findPlatformsObject, isMacUpdaterArchiveAssetName } from "./verify-tauri-updater-assets.mjs";
+
+test("isMacUpdaterArchiveAssetName matches macOS updater tarballs but rejects Linux AppImage tarballs", () => {
+  assert.equal(isMacUpdaterArchiveAssetName("Formula.app.tar.gz"), true);
+  assert.equal(isMacUpdaterArchiveAssetName("Formula.tar.gz"), true);
+  assert.equal(isMacUpdaterArchiveAssetName("Formula.tgz"), true);
+
+  assert.equal(isMacUpdaterArchiveAssetName("Formula.AppImage.tar.gz"), false);
+  assert.equal(isMacUpdaterArchiveAssetName("Formula.AppImage.tgz"), false);
+});
 
 test("findPlatformsObject finds top-level platforms", () => {
   const result = findPlatformsObject({

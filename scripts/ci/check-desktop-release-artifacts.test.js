@@ -60,8 +60,8 @@ test("signed mode: macOS requires latest.json + installer/archive signatures", (
   touch(path.join(bundleDir, "latest.json.sig"));
   touch(path.join(bundleDir, "dmg", "Formula.dmg"));
   touch(path.join(bundleDir, "dmg", "Formula.dmg.sig"));
-  touch(path.join(bundleDir, "macos", "Formula.tar.gz"));
-  touch(path.join(bundleDir, "macos", "Formula.tar.gz.sig"));
+  touch(path.join(bundleDir, "macos", "Formula_universal.tgz"));
+  touch(path.join(bundleDir, "macos", "Formula_universal.tgz.sig"));
 
   const proc = run(
     {
