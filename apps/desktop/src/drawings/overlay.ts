@@ -391,7 +391,6 @@ export class DrawingOverlay {
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
     const prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
-    const canDecodeImages = typeof createImageBitmap === "function";
 
     const selectedId = this.selectedId;
     let selectedScreenRect: Rect | null = null;
@@ -402,40 +401,38 @@ export class DrawingOverlay {
     if (drawObjects) {
       // First pass: kick off image decodes for all visible images without awaiting so
       // multiple images can decode concurrently on cold render.
-      if (canDecodeImages) {
-        for (const obj of ordered) {
-          if (obj.kind.type !== "image") continue;
-          if (seq !== this.renderSeq || signal?.aborted) return;
+      for (const obj of ordered) {
+        if (obj.kind.type !== "image") continue;
+        if (seq !== this.renderSeq || signal?.aborted) return;
 
-          const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
-          const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-          const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-          const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-          const screenRect = {
-            x: rect.x - scrollX + paneLayout.headerOffsetX,
-            y: rect.y - scrollY + paneLayout.headerOffsetY,
-            width: rect.width,
-            height: rect.height,
-          };
-          const clipRect = paneLayout.quadrants[pane.quadrant];
-          const aabb = getAabbForObject(screenRect, obj.transform);
+        const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
+        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+        const screenRect = {
+          x: rect.x - scrollX + paneLayout.headerOffsetX,
+          y: rect.y - scrollY + paneLayout.headerOffsetY,
+          width: rect.width,
+          height: rect.height,
+        };
+        const clipRect = paneLayout.quadrants[pane.quadrant];
+        const aabb = getAabbForObject(screenRect, obj.transform);
 
-          if (clipRect.width <= 0 || clipRect.height <= 0) continue;
-          if (!intersects(aabb, clipRect)) continue;
-          if (!intersects(clipRect, viewportRect)) continue;
-          if (!intersects(aabb, viewportRect)) continue;
+        if (clipRect.width <= 0 || clipRect.height <= 0) continue;
+        if (!intersects(aabb, clipRect)) continue;
+        if (!intersects(clipRect, viewportRect)) continue;
+        if (!intersects(aabb, viewportRect)) continue;
 
-          const imageId = obj.kind.imageId;
-          if (prefetchedImageBitmaps.has(imageId)) continue;
-          const entry = this.images.get(imageId);
-          if (!entry) continue;
-          const bitmapPromise = this.bitmapCache.get(entry, signal ? { signal } : undefined);
-          // Attach a no-op rejection handler immediately so failures for images later in the
-          // z-order (or in cancelled render passes) don't surface as unhandled promise
-          // rejections before we reach their draw pass.
-          void bitmapPromise.catch(() => {});
-          prefetchedImageBitmaps.set(imageId, bitmapPromise);
-        }
+        const imageId = obj.kind.imageId;
+        if (prefetchedImageBitmaps.has(imageId)) continue;
+        const entry = this.images.get(imageId);
+        if (!entry) continue;
+        const bitmapPromise = this.bitmapCache.get(entry, signal ? { signal } : undefined);
+        // Attach a no-op rejection handler immediately so failures for images later in the
+        // z-order (or in cancelled render passes) don't surface as unhandled promise
+        // rejections before we reach their draw pass.
+        void bitmapPromise.catch(() => {});
+        prefetchedImageBitmaps.set(imageId, bitmapPromise);
       }
 
       for (const obj of ordered) {
@@ -521,42 +518,37 @@ export class DrawingOverlay {
             continue;
           }
 
-          // Some environments (e.g. JSDOM) don't implement `createImageBitmap`. In that case
-          // we can't decode and draw images, but we still want to render a placeholder box
-          // (and avoid flooding the test runner with decode promise rejections).
-          if (canDecodeImages) {
-            try {
-              const bitmapPromise =
-                prefetchedImageBitmaps.get(obj.kind.imageId) ??
-                this.bitmapCache.get(entry, signal ? { signal } : undefined);
-              const bitmap = await bitmapPromise;
-              if (signal?.aborted) return;
-              if (seq !== this.renderSeq) return;
-              withClip(() => {
-                if (hasNonIdentityTransform(obj.transform)) {
-                  withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                    ctx.save();
-                    try {
-                      // Clip to the (possibly rotated/flipped) image bounds so we don't
-                      // overdraw neighboring cells when transforms extend beyond the anchor.
-                      ctx.beginPath();
-                      ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
-                      ctx.clip();
-                      ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
-                    } finally {
-                      ctx.restore();
-                    }
-                  });
-                } else {
-                  ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-                }
-              });
-              continue;
-            } catch (err) {
-              if (signal?.aborted || isAbortError(err)) return;
-              if (seq !== this.renderSeq) return;
-              // Fall through to placeholder rendering.
-            }
+          try {
+            const bitmapPromise =
+              prefetchedImageBitmaps.get(obj.kind.imageId) ??
+              this.bitmapCache.get(entry, signal ? { signal } : undefined);
+            const bitmap = await bitmapPromise;
+            if (signal?.aborted) return;
+            if (seq !== this.renderSeq) return;
+            withClip(() => {
+              if (hasNonIdentityTransform(obj.transform)) {
+                withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                  ctx.save();
+                  try {
+                    // Clip to the (possibly rotated/flipped) image bounds so we don't
+                    // overdraw neighboring cells when transforms extend beyond the anchor.
+                    ctx.beginPath();
+                    ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                    ctx.clip();
+                    ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
+                  } finally {
+                    ctx.restore();
+                  }
+                });
+              } else {
+                ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              }
+            });
+            continue;
+          } catch (err) {
+            if (signal?.aborted || isAbortError(err)) return;
+            if (seq !== this.renderSeq) return;
+            // Fall through to placeholder rendering.
           }
         }
 
