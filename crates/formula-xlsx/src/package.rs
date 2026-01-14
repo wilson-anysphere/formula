@@ -331,7 +331,7 @@ pub enum XlsxError {
     #[error("invalid xlsx: {0}")]
     Invalid(String),
     #[error(
-        "xlsx package part is too large to load safely: {part} is {size} bytes (max {max}). \
+        "xlsx package part is too large to load safely: {part} is {size} bytes (max {max} bytes). \
 Try reducing workbook size or saving without preserved parts."
     )]
     PartTooLarge { part: String, size: u64, max: u64 },
