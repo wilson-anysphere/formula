@@ -482,8 +482,8 @@ impl CreatePivotTableRequest {
                         .name
                         .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, &field));
                     ValueField {
-                        name,
                         source_field: PivotFieldRef::CacheFieldName(field),
+                        name,
                         aggregation: vf.aggregation,
                         number_format: None,
                         show_as: None,

@@ -15,6 +15,7 @@ pub mod offcrypto;
 pub use encryption_info::{extract_agile_encryption_info_xml, EncryptionInfoXmlError};
 mod rc4_cryptoapi;
 pub use rc4_cryptoapi::{HashAlg, Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
+#[cfg(any(test, feature = "offcrypto"))]
 mod ms_offcrypto;
 mod rc4_encrypted_package;
 mod encrypted_package;

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -23,8 +24,25 @@ pub enum PivotFieldRef {
 }
 
 impl PivotFieldRef {
-    /// Returns the underlying worksheet/pivot-cache field name, if this is a cache-backed field.
-    pub fn as_cache_field_name(&self) -> Option<&str> {
+    /// Returns a canonical string representation for this field reference.
+    ///
+    /// - Cache fields use the raw header text.
+    /// - Data Model fields use a DAX-like display form (`Table[Column]` / `[Measure]`).
+    ///
+    /// This is intended for UI labels and for matching against pivot cache column names.
+    pub fn canonical_name(&self) -> Cow<'_, str> {
+        match self {
+            PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name),
+            PivotFieldRef::DataModelColumn { table, column } => {
+                Cow::Owned(format!("{table}[{column}]"))
+            }
+            PivotFieldRef::DataModelMeasure(measure) => Cow::Owned(format!("[{measure}]")),
+        }
+    }
+
+    /// Returns the underlying worksheet/pivot-cache field name if this reference is backed by a
+    /// cache field header.
+    pub fn cache_field_name(&self) -> Option<&str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Some(name.as_str()),
             _ => None,
@@ -45,6 +63,11 @@ impl PivotFieldRef {
             PivotFieldRef::DataModelColumn { table, column } => format!("{table}[{column}]"),
             PivotFieldRef::DataModelMeasure(name) => format!("[{name}]"),
         }
+    }
+
+    /// Back-compat alias for [`Self::cache_field_name`].
+    pub fn as_cache_field_name(&self) -> Option<&str> {
+        self.cache_field_name()
     }
 }
 
