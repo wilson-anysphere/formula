@@ -275,6 +275,8 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
 
       let keyBytes: Uint8Array;
       let storedKeyId = displayKeyId;
+      let didStoreNewKey = false;
+      const canSafelyDeleteStoredKeyOnFailure = !existingKeyLookupFailed;
       if (existingKeyBytes) {
         keyBytes = existingKeyBytes;
         storedKeyId = displayKeyId;
@@ -283,6 +285,7 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         try {
           const result = await keyStore.set(docId, keyId, bytesToBase64(keyBytes));
           storedKeyId = result.keyId;
+          didStoreNewKey = true;
         } catch {
           showToast("Failed to store encryption key.", "error");
           return;
@@ -293,6 +296,18 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       try {
         manager.add({ sheetId, ...range, keyId: storedKeyId, createdAt: Date.now(), ...(createdBy ? { createdBy } : {}) });
       } catch (err) {
+        // If we generated and stored a brand-new key id, clean it up on failure to avoid leaving orphaned keys.
+        // (If we could not verify whether the key already existed, do not delete.)
+        if (didStoreNewKey && canSafelyDeleteStoredKeyOnFailure) {
+          try {
+            const deleteKey = (keyStore as any)?.delete;
+            if (typeof deleteKey === "function") {
+              await deleteKey.call(keyStore, docId, storedKeyId);
+            }
+          } catch {
+            // Best-effort; ignore delete failures.
+          }
+        }
         const message = err instanceof Error ? err.message : String(err);
         showToast(`Failed to encrypt range: ${message}`, "error");
         return;
