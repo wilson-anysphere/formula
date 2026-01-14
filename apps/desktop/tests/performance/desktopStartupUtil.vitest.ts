@@ -1,9 +1,11 @@
-import { resolve } from 'node:path';
+import { parse, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   buildDesktopStartupProfileRoot,
+  formatPerfPath,
   parseStartupLine,
+  repoRoot,
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
@@ -210,5 +212,18 @@ describe('desktopStartupUtil buildDesktopStartupProfileRoot', () => {
     expect(
       buildDesktopStartupProfileRoot({ perfHome, benchKind: 'shell', mode: 'cold', now: 123, pid: 456 }),
     ).toBe(resolve(perfHome, 'desktop-startup-shell-cold-123-456'));
+  });
+});
+
+describe('desktopStartupUtil formatPerfPath', () => {
+  it('formats paths within the repo as repo-relative', () => {
+    const abs = resolve(repoRoot, 'target', 'perf-home');
+    expect(formatPerfPath(abs)).toBe(relative(repoRoot, abs));
+  });
+
+  it('formats paths outside the repo as absolute', () => {
+    const root = parse(repoRoot).root;
+    const outside = resolve(root, 'tmp', `formula-perf-home-test-${Date.now()}`);
+    expect(formatPerfPath(outside)).toBe(outside);
   });
 });
