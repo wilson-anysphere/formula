@@ -30,6 +30,11 @@ fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
         stream
             .write_all(&0u64.to_le_bytes())
             .expect("write plaintext length prefix");
+        // Ensure the stream is not trivially short so the password-aware open path reaches the
+        // EncryptionInfo parsing logic (instead of failing early on a missing ciphertext payload).
+        stream
+            .write_all(&[0u8; 16])
+            .expect("write dummy ciphertext bytes");
     }
 
     let bytes = ole.into_inner().into_inner();
@@ -57,4 +62,3 @@ fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
         "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
     );
 }
-

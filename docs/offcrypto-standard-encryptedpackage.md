@@ -51,7 +51,7 @@ See also:
 - **`formula-io` `EncryptedPackage` decryptors**:
   - `crates/formula-io/src/offcrypto/encrypted_package.rs`
     - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV)
-    - `decrypt_standard_encrypted_package_stream` (buffered; also attempts a non-standard segmented fallback when a salt is available)
+    - `decrypt_standard_encrypted_package_stream` (buffered Standard AES-ECB; no IV; truncates to `orig_size`)
 - **`formula-offcrypto` Standard AES-ECB helper**:
   - `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
 - **More permissive Standard decryptor (handles additional variants)**:
@@ -116,7 +116,7 @@ aesBlock    = 16
 For the **AES-ECB baseline**, segment boundaries are not cryptographically meaningful: ECB has no IV
 and no chaining, so you may decrypt in any chunk sizes as long as they are multiples of 16 bytes.
 
-### Non-standard segmented fallback (seen in some producers)
+### Non-standard segmented variant (seen in some producers)
 
 Some non-Excel producers encrypt `EncryptedPackage` as **0x1000-byte segments** using **AES-CBC**
 with a per-segment IV derived from the verifier salt and segment index:
@@ -125,9 +125,9 @@ with a per-segment IV derived from the verifier salt and segment index:
 iv_i = SHA1(salt || LE32(i))[0..16]
 ```
 
-This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB), but it is common enough
-that `formula-io`’s `decrypt_standard_encrypted_package_stream` attempts it as a fallback when a
-salt is available.
+This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB). `formula-io`
+intentionally implements the baseline AES-ECB behavior only; if you need to handle additional
+producer variants, see `crates/formula-office-crypto/src/standard.rs`.
 
 ## Padding + truncation (do not trust PKCS#7)
 

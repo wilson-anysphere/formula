@@ -45,7 +45,7 @@ If you’re changing or debugging the code, start here:
   * `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
   * `crates/formula-io/src/offcrypto/encrypted_package.rs`:
     * `decrypt_encrypted_package_standard_aes_to_writer` (streaming AES-ECB)
-    * `decrypt_standard_encrypted_package_stream` (buffered; includes a non-standard segmented fallback)
+    * `decrypt_standard_encrypted_package_stream` (buffered AES-ECB)
 * More permissive Standard decryptor (supports more variants than `formula-offcrypto`):
   * `crates/formula-office-crypto/src/standard.rs`
 * Related docs:

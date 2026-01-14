@@ -461,6 +461,47 @@ mod tests {
         out
     }
 
+    fn decrypt_standard_cryptoapi_stream(key: &[u8], salt: &[u8], encrypted_stream: &[u8]) -> Vec<u8> {
+        assert!(
+            encrypted_stream.len() >= 8,
+            "EncryptedPackage stream must include 8-byte size prefix"
+        );
+        let orig_size = u64::from_le_bytes(
+            encrypted_stream[..8]
+                .try_into()
+                .expect("EncryptedPackage size prefix"),
+        ) as usize;
+        if orig_size == 0 {
+            return Vec::new();
+        }
+
+        let ciphertext = &encrypted_stream[8..];
+        let mut out = Vec::with_capacity(orig_size);
+
+        let mut segment_index: u32 = 0;
+        let mut offset = 0usize;
+        while offset < orig_size {
+            let seg_plain_len = (orig_size - offset).min(SEGMENT_SIZE);
+            let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK_SIZE);
+
+            let seg_cipher_start = offset;
+            let seg_cipher_end = seg_cipher_start + seg_cipher_len;
+            let seg_cipher = ciphertext
+                .get(seg_cipher_start..seg_cipher_end)
+                .expect("ciphertext segment must be present");
+            let mut seg = seg_cipher.to_vec();
+
+            let iv = derive_standard_segment_iv(salt, segment_index);
+            decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut seg).expect("decrypt AES-CBC");
+
+            out.extend_from_slice(&seg[..seg_plain_len]);
+            offset += seg_plain_len;
+            segment_index += 1;
+        }
+
+        out
+    }
+
     fn encrypt_standard_aes_ecb_stream(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
         let orig_size = plaintext.len() as u64;
         let mut out = Vec::new();
@@ -561,12 +602,7 @@ mod tests {
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
 
         // Cross-check against full-stream CBC-segmented decrypt helper.
-        let decrypted = crate::offcrypto::decrypt_encrypted_package_standard_aes_sha1(
-            &encrypted_stream,
-            &key,
-            &salt,
-        )
-        .expect("full decrypt");
+        let decrypted = decrypt_standard_cryptoapi_stream(&key, &salt, &encrypted_stream);
         assert_eq!(decrypted, plaintext);
     }
 

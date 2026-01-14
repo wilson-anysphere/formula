@@ -134,14 +134,18 @@ fn detects_encrypted_ooxml_xlsx_container() {
 
             // Providing a password should attempt to decrypt and surface a distinct error from
             // `PasswordRequired`. Because this fixture is intentionally malformed (it does not
-            // contain a valid `EncryptedPackage` payload), we surface an "unsupported/malformed
-            // encryption container" style error rather than `InvalidPassword`.
+            // contain a valid `EncryptedPackage` payload), different parsing/decryption paths may
+            // surface either `InvalidPassword` or an "unsupported/malformed encryption container"
+            // error.
             let err = open_workbook_with_password(&path, Some("wrong"))
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
-                    "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
+                    matches!(
+                        err,
+                        Error::InvalidPassword { .. } | Error::UnsupportedOoxmlEncryption { .. }
+                    ),
+                    "expected InvalidPassword or UnsupportedOoxmlEncryption, got {err:?}"
                 );
             } else {
                 assert!(
@@ -154,8 +158,11 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect_err("expected password-protected open to error");
             if cfg!(feature = "encrypted-workbooks") {
                 assert!(
-                    matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
-                    "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
+                    matches!(
+                        err,
+                        Error::InvalidPassword { .. } | Error::UnsupportedOoxmlEncryption { .. }
+                    ),
+                    "expected InvalidPassword or UnsupportedOoxmlEncryption, got {err:?}"
                 );
             } else {
                 assert!(

@@ -388,18 +388,20 @@ fn errors_on_u64_max_orig_size_without_panicking() {
 }
 
 #[test]
-fn errors_on_truncated_final_ciphertext_segment() {
+fn errors_when_orig_size_requires_a_missing_final_ciphertext_segment() {
     let key = [0x11u8; 16];
     let salt = [0x22u8; 16];
     let plaintext = make_plaintext(SEGMENT_LEN + 1); // 2 segments
     let mut encrypted = make_encrypted_package(&plaintext, &key, &salt);
 
-    // Drop the entire final ciphertext segment. The reader should treat the stream as truncated
-    // because the declared `orig_size` cannot fit in the available ciphertext.
+    // Drop the entire final ciphertext segment.
+    //
+    // The `orig_size` prefix is attacker-controlled; the reader should reject inputs where the
+    // declared plaintext length is implausible for the available ciphertext bytes.
     encrypted.truncate(8 + SEGMENT_LEN);
 
     let cursor = Cursor::new(encrypted);
     let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
-        .expect_err("expected truncated final ciphertext segment to error");
+        .expect_err("expected missing final ciphertext segment to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
