@@ -1259,7 +1259,9 @@ export class FormulaBarView {
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
   #lastHintIsFormulaEditing: boolean | null = null;
-  #lastHintSyntaxError: ReturnType<FormulaBarModel["syntaxError"]> | null = null;
+  #lastHintSyntaxErrorMessage: string | null = null;
+  #lastHintSyntaxErrorStart: number | null = null;
+  #lastHintSyntaxErrorEnd: number | null = null;
   #lastHint: ReturnType<FormulaBarModel["functionHint"]> | null = null;
   #lastHintArgPreviewKey: string | null = null;
   #lastHintArgPreviewRhs: string | null = null;
@@ -3531,6 +3533,13 @@ export class FormulaBarView {
       this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", hasSyntaxError);
     }
     const hint = isFormulaEditing ? this.model.functionHint() : null;
+    const nextSyntaxMessage = syntaxError?.message ?? null;
+    const nextSyntaxStart = syntaxError?.span?.start ?? null;
+    const nextSyntaxEnd = syntaxError?.span?.end ?? null;
+    const syntaxErrorChanged =
+      nextSyntaxMessage !== this.#lastHintSyntaxErrorMessage ||
+      nextSyntaxStart !== this.#lastHintSyntaxErrorStart ||
+      nextSyntaxEnd !== this.#lastHintSyntaxErrorEnd;
 
     // Keep argument preview state up to date, but avoid re-rendering the entire hint panel unless
     // the visible hint content actually changed (cursor moves within the same argument are common
@@ -3580,7 +3589,6 @@ export class FormulaBarView {
     }
 
     const nextHintIsFormulaEditing = isFormulaEditing;
-    const nextHintSyntaxError = syntaxError;
     const nextHint = hint;
     const nextArgPreviewKey = wantsArgPreview ? argPreviewKey : null;
     const nextArgPreviewRhs = wantsArgPreview
@@ -3591,14 +3599,16 @@ export class FormulaBarView {
 
     const hintChanged =
       nextHintIsFormulaEditing !== this.#lastHintIsFormulaEditing ||
-      nextHintSyntaxError !== this.#lastHintSyntaxError ||
+      syntaxErrorChanged ||
       nextHint !== this.#lastHint ||
       nextArgPreviewKey !== this.#lastHintArgPreviewKey ||
       nextArgPreviewRhs !== this.#lastHintArgPreviewRhs;
 
     if (hintChanged) {
       this.#lastHintIsFormulaEditing = nextHintIsFormulaEditing;
-      this.#lastHintSyntaxError = nextHintSyntaxError;
+      this.#lastHintSyntaxErrorMessage = nextSyntaxMessage;
+      this.#lastHintSyntaxErrorStart = nextSyntaxStart;
+      this.#lastHintSyntaxErrorEnd = nextSyntaxEnd;
       this.#lastHint = nextHint;
       this.#lastHintArgPreviewKey = nextArgPreviewKey;
       this.#lastHintArgPreviewRhs = nextArgPreviewRhs;
