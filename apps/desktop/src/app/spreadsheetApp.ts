@@ -1387,6 +1387,7 @@ export class SpreadsheetApp {
 
   private outlineLayer: HTMLDivElement;
   private readonly outlineButtons = new Map<string, HTMLButtonElement>();
+  private readonly outlineButtonsKeepScratch = new Set<string>();
   private lastSyncedHiddenColsKey: string | null = null;
   private lastSyncedHiddenColsEngine: EngineClient | null = null;
   private lastSyncedHiddenCols: number[] | null = null;
@@ -19457,7 +19458,8 @@ export class SpreadsheetApp {
       return;
     }
 
-    const keep = new Set<string>();
+    const keep = this.outlineButtonsKeepScratch;
+    keep.clear();
     const size = 14;
     const padding = 4;
     const originX = this.rowHeaderWidth;
