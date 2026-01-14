@@ -117,12 +117,12 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
     );
     assert.doesNotMatch(
       router,
-      new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
+      new RegExp(`\\btoggleOverrides\\s*[:=]\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
       `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via toggleOverrides (should dispatch via CommandRegistry)`,
     );
     assert.doesNotMatch(
       router,
-      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
+      new RegExp(`\\bcommandOverrides\\s*[:=]\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
       `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via commandOverrides (should dispatch via CommandRegistry)`,
     );
   }
