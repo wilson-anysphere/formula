@@ -572,6 +572,48 @@ test("validate-linux-rpm fails when Parquet shared-mime-info definition is missi
   assert.match(proc.stderr, /shared-mime-info definition file is missing expected content/i);
 });
 
+test("validate-linux-rpm fails when shared-mime-info is missing from RPM Requires", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir);
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinary}`,
+      "/usr/share/applications/formula.desktop",
+      expectedMimeDefinitionPath,
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const requiresFile = join(tmp, "rpm-requires-missing-shared-mime-info.txt");
+  writeFileSync(
+    requiresFile,
+    [
+      // Deliberately omit `shared-mime-info`.
+      "(webkit2gtk4.1 or libwebkit2gtk-4_1-0)",
+      "(gtk3 or libgtk-3-0)",
+      "((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))",
+      "(librsvg2 or librsvg-2-2)",
+      "(openssl-libs or libopenssl3)",
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing required dependency/i);
+  assert.match(proc.stderr, /shared-mime-info/i);
+});
+
 test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
   const binDir = join(tmp, "bin");
