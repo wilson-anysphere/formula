@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
@@ -27,6 +28,22 @@ fn read_ole_stream(bytes: &[u8], name: &str) -> Vec<u8> {
         .read_to_end(&mut out)
         .unwrap_or_else(|err| panic!("read OLE stream {name}: {err}"));
     out
+}
+
+fn zip_parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).expect("open zip archive");
+    let mut parts = BTreeMap::new();
+    for idx in 0..archive.len() {
+        let mut file = archive.by_index(idx).expect("open zip entry");
+        let name = file.name().to_string();
+        if name.ends_with('/') {
+            continue;
+        }
+        let mut content = Vec::new();
+        file.read_to_end(&mut content).expect("read zip entry bytes");
+        parts.insert(name, content);
+    }
+    parts
 }
 
 #[test]
@@ -118,6 +135,27 @@ fn decrypts_agile_basic_xlsm_fixture_matches_plaintext() {
     let decrypted = decrypt_encrypted_package_ole(&agile, "password").expect("decrypt agile xlsm");
     assert_eq!(decrypted, plaintext);
     assert!(decrypted.starts_with(b"PK"));
+}
+
+#[test]
+fn decrypts_excel_agile_xlsm_fixture_matches_plaintext_parts() {
+    // This fixture was produced by Microsoft Excel, so the ZIP container bytes may not match the
+    // repo's plaintext fixture exactly (compression levels, file ordering, etc.). Compare the
+    // extracted OPC part bytes instead.
+    let plaintext = read_fixture("plaintext-basic.xlsm");
+    let excel = read_fixture("basic-password.xlsm");
+
+    let decrypted = decrypt_encrypted_package_ole(&excel, "password").expect("decrypt excel xlsm");
+    assert!(decrypted.starts_with(b"PK"));
+    assert_eq!(
+        zip_parts(&decrypted),
+        zip_parts(&plaintext),
+        "decrypted xlsm parts must match plaintext-basic.xlsm"
+    );
+
+    let err =
+        decrypt_encrypted_package_ole(&excel, "wrong").expect_err("wrong password should fail");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
 }
 
 #[test]
