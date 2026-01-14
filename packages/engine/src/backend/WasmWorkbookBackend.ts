@@ -43,6 +43,7 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
 }
 
 type EngineWorkbookJson = {
+  sheetOrder?: unknown;
   sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
 };
 
@@ -151,7 +152,35 @@ export class WasmWorkbookBackend implements WorkbookBackend {
       parsed = null;
     }
 
-    const sheetIds = parsed?.sheets && typeof parsed.sheets === "object" ? Object.keys(parsed.sheets) : [];
+    const sheetIds = (() => {
+      const sheetsObj = parsed?.sheets && typeof parsed.sheets === "object" ? parsed.sheets : null;
+      if (!sheetsObj) return [];
+
+      const keys = Object.keys(sheetsObj);
+      const explicitOrderRaw = Array.isArray(parsed?.sheetOrder) ? (parsed?.sheetOrder as unknown[]) : [];
+      if (explicitOrderRaw.length === 0) return keys;
+
+      const keySet = new Set(keys);
+      const ordered: string[] = [];
+      const seen = new Set<string>();
+
+      for (const candidate of explicitOrderRaw) {
+        if (typeof candidate !== "string") continue;
+        if (!candidate) continue;
+        if (!keySet.has(candidate)) continue;
+        if (seen.has(candidate)) continue;
+        ordered.push(candidate);
+        seen.add(candidate);
+      }
+
+      // Preserve any sheets that aren't listed in `sheetOrder` (for backwards compatibility).
+      for (const key of keys) {
+        if (seen.has(key)) continue;
+        ordered.push(key);
+      }
+
+      return ordered;
+    })();
     for (const sheetId of sheetIds) {
       const cells = parsed?.sheets?.[sheetId]?.cells;
       if (!cells || typeof cells !== "object") continue;

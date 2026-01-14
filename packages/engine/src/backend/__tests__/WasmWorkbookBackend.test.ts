@@ -541,4 +541,71 @@ describe("WasmWorkbookBackend", () => {
 
     expect(await backend.getSheetUsedRange("Empty")).toBeNull();
   });
+
+  it("prefers sheetOrder from toJson() when deriving sheet tab order in the legacy metadata path", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const workbookJson = JSON.stringify({
+      sheetOrder: ["Sheet2", "Sheet1", "Empty"],
+      // Deliberately encode sheets in a different order to ensure we don't rely on Object.keys().
+      sheets: {
+        Empty: { cells: {} },
+        Sheet1: { cells: { A1: 1 } },
+        Sheet2: { cells: { B2: 2 } },
+      },
+    });
+
+    const engine: EngineClient = {
+      init: vi.fn(async () => {}),
+      newWorkbook: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
+      getWorkbookInfo: vi.fn(async () => {
+        throw new Error("getWorkbookInfo: not supported");
+      }),
+      toJson: vi.fn(async () => workbookJson),
+      getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
+      getRange: vi.fn(async () => []),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      setRange: vi.fn(async () => {}),
+      setWorkbookFileMetadata: vi.fn(async () => {}),
+      setCellStyleId: vi.fn(async () => {}),
+      setColWidth: vi.fn(async () => {}),
+      setColHidden: vi.fn(async () => {}),
+      internStyle: vi.fn(async () => 0),
+      setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
+      setCalcSettings: vi.fn(async () => {}),
+      setEngineInfo: vi.fn(async () => {}),
+      setInfoOrigin: vi.fn(async () => {}),
+      setInfoOriginForSheet: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
+      renameSheet: vi.fn(async () => true),
+      setColWidthChars: vi.fn(async () => {}),
+      setRowStyleId: vi.fn(async () => {}),
+      setColStyleId: vi.fn(async () => {}),
+      setSheetDefaultStyleId: vi.fn(async () => {}),
+      applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
+      rewriteFormulasForCopyDelta: vi.fn(async () => []),
+      lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
+      terminate: vi.fn(),
+    };
+
+    const backend = new WasmWorkbookBackend(engine);
+    const info = await backend.openWorkbookFromBytes(bytes);
+
+    expect(info).toEqual({
+      path: null,
+      origin_path: null,
+      sheets: [
+        { id: "Sheet2", name: "Sheet2" },
+        { id: "Sheet1", name: "Sheet1" },
+        { id: "Empty", name: "Empty" },
+      ],
+    });
+  });
 });
