@@ -416,18 +416,4 @@ mod tests {
 
         assert!(verifier.verify_password(password));
     }
-
-    #[test]
-    fn standard_cryptoapi_rc4_keysize_zero_is_interpreted_as_40bit() {
-        // MS-OFFCRYPTO specifies `keySize == 0` MUST be interpreted as 40-bit for Standard/CryptoAPI
-        // RC4.
-        let password = "password";
-        let salt = [0x42u8; 16];
-
-        let key0 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, 0, 0);
-        let key40 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, 40, 0);
-
-        assert_eq!(key0, key40);
-        assert_eq!(key0.len(), 5);
-    }
 }

@@ -2,7 +2,7 @@ use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use formula_model::{Cell, CellRef, CellValue, DataValidation, DataValidationKind, Range, Workbook};
-use formula_xlsx::{load_from_path, XlsxDocument};
+use formula_xlsx::{load_from_bytes, load_from_path, XlsxDocument};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use zip::{ZipArchive, ZipWriter};
@@ -29,6 +29,50 @@ fn extract_data_validations_subtree(xml: &str) -> Option<String> {
     }
 
     None
+}
+
+fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+
+    // Minimal styles part: only a default xf.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cellXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+</styleSheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/styles.xml", options).unwrap();
+    zip.write_all(styles_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
 }
 
 #[test]
@@ -293,3 +337,33 @@ fn no_op_roundtrip_preserves_data_validations_subtree() -> Result<(), Box<dyn st
     Ok(())
 }
 
+#[test]
+fn no_op_roundtrip_preserves_data_validations_with_xlfn_formulas(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Ensure our semantic-change detector treats `_xlfn.`-prefixed formulas as equivalent to the
+    // normalized model representation (which strips `_xlfn.` on read). If it doesn't, we would
+    // spuriously rewrite `<dataValidations>` on no-op saves.
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <dataValidations count="1">
+    <dataValidation sqref="A1" type="custom" allowBlank="1" showInputMessage="0" showErrorMessage="0">
+      <formula1>=_xlfn.SEQUENCE(1)</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml);
+    let original_sheet_xml = read_part(&bytes, "xl/worksheets/sheet1.xml")?;
+    let original_dv = extract_data_validations_subtree(&original_sheet_xml)
+        .expect("fixture should contain a <dataValidations> block");
+
+    let doc = load_from_bytes(&bytes)?;
+    let out_bytes = doc.save_to_vec()?;
+    let out_sheet_xml = read_part(&out_bytes, "xl/worksheets/sheet1.xml")?;
+    let out_dv = extract_data_validations_subtree(&out_sheet_xml)
+        .expect("output should contain a <dataValidations> block");
+
+    assert_eq!(out_dv, original_dv);
+    Ok(())
+}

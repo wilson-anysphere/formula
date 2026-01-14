@@ -90,8 +90,9 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut kind: Option<DataValidationKind> = None;
                 let mut operator: Option<DataValidationOperator> = None;
                 let mut allow_blank = false;
-                let mut show_input_message = true;
-                let mut show_error_message = true;
+                // Mirror the streaming worksheet reader defaults for round-trip fidelity.
+                let mut show_input_message = false;
+                let mut show_error_message = false;
                 // Model semantics: `show_drop_down=true` means show the in-cell dropdown arrow.
                 let mut show_drop_down = true;
                 let mut ranges: Vec<Range> = Vec::new();
@@ -176,8 +177,8 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut kind: Option<DataValidationKind> = None;
                 let mut operator: Option<DataValidationOperator> = None;
                 let mut allow_blank = false;
-                let mut show_input_message = true;
-                let mut show_error_message = true;
+                let mut show_input_message = false;
+                let mut show_error_message = false;
                 let mut show_drop_down = true;
                 let mut ranges: Vec<Range> = Vec::new();
 

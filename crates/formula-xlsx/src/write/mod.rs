@@ -1725,7 +1725,10 @@ struct DataValidationKey {
 
 fn normalize_dv_formula(formula: &str) -> String {
     let trimmed = formula.trim();
-    trimmed.strip_prefix('=').unwrap_or(trimmed).to_string()
+    // Match `read` normalization for data validation formulas:
+    // - strip a single leading '='
+    // - strip `_xlfn.` prefixes at function-call boundaries
+    crate::formula_text::strip_xlfn_prefixes(trimmed.strip_prefix('=').unwrap_or(trimmed))
 }
 
 fn normalize_dv_ranges(ranges: &[Range]) -> Vec<(u32, u32, u32, u32)> {
@@ -1777,6 +1780,14 @@ fn normalize_data_validation(
     let ranges = normalize_dv_ranges(ranges);
     let formula1 = normalize_dv_formula(&validation.formula1);
     let formula2 = validation.formula2.as_deref().map(normalize_dv_formula);
+    let show_drop_down = if validation.kind == DataValidationKind::List {
+        validation.show_drop_down
+    } else {
+        // `showDropDown` is only meaningful for list validations. Our reader canonicalizes
+        // non-list rules to `show_drop_down=false`; mirror that here so no-op saves do not
+        // spuriously rewrite `<dataValidations>` when round-tripping.
+        false
+    };
 
     let (prompt_title, prompt) = match &validation.input_message {
         Some(msg) => {
@@ -1829,7 +1840,7 @@ fn normalize_data_validation(
         allow_blank: validation.allow_blank,
         show_input_message: validation.show_input_message,
         show_error_message: validation.show_error_message,
-        show_drop_down: validation.show_drop_down,
+        show_drop_down,
         prompt_title,
         prompt,
         error_style,
