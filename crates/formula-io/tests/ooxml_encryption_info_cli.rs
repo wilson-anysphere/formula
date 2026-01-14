@@ -519,19 +519,4 @@ fn cli_reports_expected_versions_for_repo_fixtures() {
         "Standard (3.2) flags=0x00000024 hdr_flags=0x00000024 fCryptoAPI=1 fAES=1 algId=0x0000660e algIdHash=0x00008004 keySize=128",
         "unexpected stdout for standard fixture: {stdout}"
     );
-    // When the CLI successfully parses the Standard EncryptionHeader, it will include additional
-    // parameters (hdr_flags, algId, keySize, ...). Keep the assertion tolerant so we don't lock
-    // tests to exact formatting beyond the version/flags prefix.
-    if stdout.contains("hdr_flags=") {
-        assert!(
-            stdout.contains("hdr_flags=0x00000024"),
-            "unexpected header flags for standard fixture: {stdout}"
-        );
-    }
-    if stdout.contains("algId=") {
-        assert!(
-            stdout.contains("algId=0x0000660e"),
-            "unexpected algId for standard fixture: {stdout}"
-        );
-    }
 }
