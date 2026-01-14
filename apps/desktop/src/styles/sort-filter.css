@@ -40,8 +40,8 @@
 }
 
 .formula-sort-filter__checkbox:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .formula-sort-filter__button {
@@ -115,8 +115,8 @@
 }
 
 .formula-sort-filter__row:focus-within {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 /* Prefer focus-visible row styling when supported, but keep `:focus-within` as a fallback. */
@@ -126,8 +126,8 @@
   }
 
   .formula-sort-filter__row:has(:focus-visible) {
-    outline: 2px solid var(--selection-border);
-    outline-offset: 2px;
+    outline: var(--space-1) solid var(--selection-border);
+    outline-offset: var(--space-1);
   }
 }
 
@@ -256,7 +256,7 @@
 }
 
 .formula-table-filter-dropdown .formula-sort-filter__row:focus-within {
-  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
 }
 
 .formula-table-filter-dropdown .formula-sort-filter__checkbox {
@@ -264,7 +264,7 @@
 }
 
 .formula-table-filter-dropdown .formula-sort-filter__checkbox:focus-visible {
-  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
 }
 
 .formula-table-filter-dropdown .formula-sort-filter__button:not(.formula-sort-filter__button--primary) {
@@ -292,6 +292,6 @@
   }
 
   .formula-table-filter-dropdown .formula-sort-filter__row:has(:focus-visible) {
-    outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+    outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
   }
 }

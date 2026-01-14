@@ -75,8 +75,8 @@
 }
 
 .ai-chat-tab-button:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .ai-chat-agent {
@@ -333,8 +333,8 @@
 }
 
 .ai-chat-panel__attachment-chip-remove:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 .ai-chat-panel__composer {

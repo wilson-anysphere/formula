@@ -34,8 +34,8 @@ a:visited {
 }
 
 .formula-bar:focus-within {
-  outline: 2px solid var(--selection-border);
-  outline-offset: -2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: calc(var(--space-1) * -1);
 }
 
 .formula-bar__label {
@@ -900,8 +900,8 @@ a:visited {
 .grid__cell--selected {
   background: var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
   color: var(--formula-grid-cell-text, var(--text-primary));
-  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
-  outline-offset: -2px;
+  outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
+  outline-offset: calc(var(--space-1) * -1);
 }
 
 .formula-table-header-cell {
@@ -1074,8 +1074,8 @@ a:visited {
 }
 
 .command-palette__list:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
   border-radius: var(--radius);
 }
 
@@ -1247,8 +1247,8 @@ a:visited {
 }
 
 #sheet-tabs.sheet-bar:focus-within {
-  outline: 2px solid var(--selection-border);
-  outline-offset: -2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: calc(var(--space-1) * -1);
 }
 
 #sheet-tabs.sheet-bar .sheet-nav {
@@ -1284,8 +1284,8 @@ a:visited {
 #sheet-tabs.sheet-bar .sheet-nav-btn:focus-visible,
 #sheet-tabs.sheet-bar .sheet-add:focus-visible,
 #sheet-tabs.sheet-bar .sheet-overflow:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 #sheet-tabs.sheet-bar .sheet-nav-btn:disabled {
@@ -1401,8 +1401,8 @@ html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
 }
 
 #sheet-tabs.sheet-bar .sheet-tab:focus-visible .sheet-tab__pill {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: var(--space-1) solid var(--selection-border);
+  outline-offset: var(--space-1);
 }
 
 #sheet-tabs.sheet-bar .sheet-tab__name {

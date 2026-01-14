@@ -265,8 +265,8 @@ dialog.format-cells-dialog::backdrop {
 
   .format-cells-dialog__swatch[data-selected="true"] {
     box-shadow: none;
-    outline: 2px solid Highlight;
-    outline-offset: 1px;
+    outline: var(--space-1) solid Highlight;
+    outline-offset: calc(var(--space-1) / 2);
   }
 }
 

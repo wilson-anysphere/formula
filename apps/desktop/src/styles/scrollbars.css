@@ -33,7 +33,7 @@
 }
 
 .grid-scrollbar-thumb:focus-visible {
-  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: calc(var(--space-1) / 2);
 }
 
@@ -62,7 +62,7 @@
   .grid-scrollbar-thumb:hover,
   .grid-scrollbar-thumb:active {
     box-shadow: none;
-    outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+    outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
     outline-offset: calc(var(--space-1) / 2);
   }
 
@@ -86,7 +86,7 @@
 :root[data-theme="high-contrast"] .grid-scrollbar-thumb:hover,
 :root[data-theme="high-contrast"] .grid-scrollbar-thumb:active {
   box-shadow: none;
-  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  outline: var(--space-1) solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: calc(var(--space-1) / 2);
 }
 
