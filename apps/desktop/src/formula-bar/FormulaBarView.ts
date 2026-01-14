@@ -594,7 +594,10 @@ function findCompletionContext(input: string, cursorPosition: number, localeId: 
 }
 
 function signaturePreview(name: string, localeId: string): string {
-  const cacheKey = `${normalizeFormulaLocaleId(localeId) ?? localeId}\0${name}`;
+  // Signature previews depend on the *effective* formula locale (argument separators, localized
+  // canonicalization). Treat unsupported locales as `en-US` so cache keys match engine semantics.
+  const cacheLocaleId = normalizeFormulaLocaleId(localeId) ?? "en-US";
+  const cacheKey = `${cacheLocaleId}\0${name}`;
   const cached = SIGNATURE_PREVIEW_CACHE.get(cacheKey);
   if (cached) return cached;
 
