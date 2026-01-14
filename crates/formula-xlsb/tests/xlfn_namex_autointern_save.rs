@@ -27,6 +27,13 @@ fn read_xl_wide_string(payload: &[u8], offset: &mut usize) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
+fn first_ptg_namex_token(rgce: &[u8]) -> Option<[u8; 5]> {
+    // PtgNameX token layout (value class): [0x39][ixti:u16][name_index:u16]
+    rgce.windows(5)
+        .find(|w| w[0] == 0x39)
+        .map(|w| [w[0], w[1], w[2], w[3], w[4]])
+}
+
 #[test]
 fn save_with_cell_formula_text_edits_auto_interns_missing_xlfn_namex_function() {
     let fixture_path =
@@ -585,6 +592,15 @@ fn save_with_cell_formula_text_edits_reuses_existing_addin_supbook() {
 
     let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
 
+    let encoded_before = formula_xlsb::rgce::encode_rgce_with_context_ast(
+        "=MyAddinFunc(1,2)",
+        wb.workbook_context(),
+        CellCoord::new(0, 0),
+    )
+    .expect("encode MyAddinFunc before patch");
+    let namex_token_before = first_ptg_namex_token(&encoded_before.rgce)
+        .expect("expected MyAddinFunc to encode using a PtgNameX token");
+
     // Insert a new `_xlfn.*` future function; udf.xlsb already has an AddIn SupBook + NameX table,
     // so the patcher should *reuse* it.
     let row = 10;
@@ -605,21 +621,19 @@ fn save_with_cell_formula_text_edits_reuses_existing_addin_supbook() {
 
     let wb2 = XlsbWorkbook::open(&output_path).expect("open saved workbook");
 
-    // Existing NameX functions should still encode using the same token sequence (stable indices).
-    let encoded = formula_xlsb::rgce::encode_rgce_with_context_ast(
+    // Existing NameX functions should still encode with the same NameX token payload (stable
+    // indices), regardless of how constants are tokenized.
+    let encoded_after = formula_xlsb::rgce::encode_rgce_with_context_ast(
         "=MyAddinFunc(1,2)",
         wb2.workbook_context(),
         CellCoord::new(0, 0),
     )
     .expect("encode MyAddinFunc after patch");
+    let namex_token_after = first_ptg_namex_token(&encoded_after.rgce)
+        .expect("expected MyAddinFunc to encode using a PtgNameX token");
     assert_eq!(
-        encoded.rgce,
-        vec![
-            0x1E, 0x01, 0x00, // 1
-            0x1E, 0x02, 0x00, // 2
-            0x39, 0x00, 0x00, 0x01, 0x00, // PtgNameX(ixti=0, nameIndex=1)
-            0x22, 0x03, 0xFF, 0x00, // PtgFuncVar(argc=3, iftab=0x00FF)
-        ]
+        namex_token_after, namex_token_before,
+        "expected MyAddinFunc NameX reference to remain stable after patch"
     );
 
     // New future function should be encodable using the updated workbook context.
