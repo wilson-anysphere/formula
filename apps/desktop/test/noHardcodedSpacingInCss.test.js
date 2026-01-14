@@ -45,6 +45,8 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
 
   /** @type {string[]} */
   const violations = [];
+  /** @type {Set<string>} */
+  const globalSpacingVarRefs = new Set();
 
   const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
   const spacingProp = /^(?:gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)$/i;
@@ -72,6 +74,7 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
       let varMatch;
       while ((varMatch = cssVarRef.exec(value))) {
         spacingVarRefs.add(varMatch[1]);
+        globalSpacingVarRefs.add(varMatch[1]);
       }
       cssVarRef.lastIndex = 0;
 
@@ -114,6 +117,44 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
         // `padding: 8px 10px` report both 8px and 10px distinctly.
         const rawUnit = unitMatch[0] ?? `${numeric}px`;
         violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()} (found ${rawUnit})`);
+      }
+
+      pxUnit.lastIndex = 0;
+    }
+
+    cssDeclaration.lastIndex = 0;
+  }
+
+  // Finally, ensure that any spacing variables sourced from design tokens do not hide hardcoded px
+  // values (except the canonical `--space-*` scale itself).
+  const tokensCssPath = path.join(srcRoot, "styles", "tokens.css");
+  if (fs.existsSync(tokensCssPath)) {
+    const css = fs.readFileSync(tokensCssPath, "utf8");
+    const stripped = stripCssNonSemanticText(css);
+
+    let decl;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = decl?.groups?.prop ?? "";
+      if (!prop.startsWith("--")) continue;
+      if (!globalSpacingVarRefs.has(prop)) continue;
+      if (prop.startsWith("--space-")) continue;
+
+      const value = decl?.groups?.value ?? "";
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+      let unitMatch;
+      while ((unitMatch = pxUnit.exec(value))) {
+        const numeric = unitMatch[1] ?? "";
+        const n = Number(numeric);
+        if (!Number.isFinite(n)) continue;
+        if (n === 0) continue;
+
+        const absIndex = valueStart + (unitMatch.index ?? 0);
+        const line = getLineNumber(stripped, absIndex);
+        const rawUnit = unitMatch[0] ?? `${numeric}px`;
+        violations.push(
+          `${path.relative(desktopRoot, tokensCssPath).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()} (found ${rawUnit})`,
+        );
       }
 
       pxUnit.lastIndex = 0;
