@@ -5,12 +5,17 @@ import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
+  extractFormulaReferencesFromTokens,
   type ColoredFormulaReference,
   type ExtractFormulaReferencesOptions,
   type FormulaReference,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
-import { tokenizeFormula, type FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
+import {
+  tokenizeFormula,
+  type FormulaToken,
+  type FormulaTokenType,
+} from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 import type {
   FormulaParseError,
   FormulaPartialLexResult,
@@ -67,6 +72,7 @@ export class FormulaBarModel {
   #isEditing = false;
   #cursorStart = 0;
   #cursorEnd = 0;
+  #tokenCache: { draft: string; tokens: FormulaToken[] } | null = null;
   #activeArgumentSpanCache:
     | { draft: string; cursor: number; result: ReturnType<typeof getActiveArgumentSpan> }
     | null = null;
@@ -116,6 +122,7 @@ export class FormulaBarModel {
     this.#isEditing = false;
     this.#cursorStart = this.#draft.length;
     this.#cursorEnd = this.#draft.length;
+    this.#tokenCache = null;
     this.#clearActiveArgumentSpanCache();
     this.#rangeInsertion = null;
     this.#hoveredReference = null;
@@ -242,6 +249,7 @@ export class FormulaBarModel {
     if (draftChanged) {
       // Draft text changed; any cached engine tokens/spans are now stale.
       this.#clearEditorTooling();
+      this.#tokenCache = null;
       this.#clearActiveArgumentSpanCache();
     } else if (cursorChanged) {
       // Cursor moved within the same draft; keep lex-based highlights/syntax errors but
@@ -259,6 +267,7 @@ export class FormulaBarModel {
     this.#activeCell = { ...this.#activeCell, input: this.#draft };
     this.#rangeInsertion = null;
     this.#clearEditorTooling();
+    this.#tokenCache = null;
     this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
@@ -277,6 +286,7 @@ export class FormulaBarModel {
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
     this.#clearEditorTooling();
+    this.#tokenCache = null;
     this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
@@ -294,10 +304,24 @@ export class FormulaBarModel {
     if (this.#highlightedSpansCache && this.#highlightedSpansCacheDraft === this.#draft) {
       return this.#highlightedSpansCache;
     }
-    const spans = highlightFormula(this.#draft);
+    const tokens = this.#tokensForDraft();
+    const spans = tokens.map((token) => ({
+      kind: token.type,
+      text: token.text,
+      start: token.start,
+      end: token.end,
+    }));
     this.#highlightedSpansCache = spans;
     this.#highlightedSpansCacheDraft = this.#draft;
     return spans;
+  }
+
+  #tokensForDraft(): FormulaToken[] {
+    const cache = this.#tokenCache;
+    if (cache && cache.draft === this.#draft) return cache.tokens;
+    const tokens = tokenizeFormula(this.#draft);
+    this.#tokenCache = { draft: this.#draft, tokens };
+    return tokens;
   }
 
   functionHint(): FunctionHint | null {
@@ -623,12 +647,8 @@ export class FormulaBarModel {
     if (cacheHit) {
       references = cache.references;
     } else {
-      references = extractFormulaReferences(
-        this.#draft,
-        undefined,
-        undefined,
-        this.#extractFormulaReferencesOptions ?? undefined
-      ).references;
+      const tokens = this.#tokensForDraft();
+      references = extractFormulaReferencesFromTokens(tokens, this.#draft, this.#extractFormulaReferencesOptions ?? undefined);
       this.#referenceExtractionCache = {
         draft: this.#draft,
         optionsVersion: this.#extractFormulaReferencesOptionsVersion,

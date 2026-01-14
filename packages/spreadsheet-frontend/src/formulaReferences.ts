@@ -1,4 +1,4 @@
-import { tokenizeFormula } from "./formula/tokenizeFormula.ts";
+import { tokenizeFormula, type FormulaToken } from "./formula/tokenizeFormula.ts";
 import { parseStructuredReferenceText } from "./formula/structuredReferences.ts";
 
 export type FormulaReferenceRange = {
@@ -97,10 +97,25 @@ export function extractFormulaReferences(
   opts?: ExtractFormulaReferencesOptions
 ): ExtractedFormulaReferences {
   const tokens = tokenizeFormula(input);
+  const references = extractFormulaReferencesFromTokens(tokens, input, opts);
+
+  const activeIndex =
+    cursorStart === undefined || cursorEnd === undefined ? null : findActiveReferenceIndex(references, cursorStart, cursorEnd);
+
+  return { references, activeIndex };
+}
+
+export function extractFormulaReferencesFromTokens(
+  tokens: readonly FormulaToken[],
+  input: string,
+  opts?: ExtractFormulaReferencesOptions
+): FormulaReference[] {
   const references: FormulaReference[] = [];
   let refIndex = 0;
 
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+
     if (token.type === "reference") {
       const parsed = parseA1RangeWithSheet(token.text) ?? resolveStructuredReference(token.text, opts);
       if (!parsed) continue;
@@ -117,14 +132,16 @@ export function extractFormulaReferences(
     if (token.type === "identifier" && opts?.resolveName) {
       const lower = token.text.toLowerCase();
       if (lower === "true" || lower === "false") continue;
-      // Treat `IDENT (` as a function call even when there is whitespace between the name
-      // and the opening paren (Excel permits this). Named-range extraction should avoid
-      // highlighting function names.
-      let scan = token.end;
-      while (scan < input.length && (input[scan] === " " || input[scan] === "\t" || input[scan] === "\n" || input[scan] === "\r")) {
-        scan += 1;
+
+      // Treat `IDENT (` as a function call even when there is whitespace between the name and "(".
+      // Use the token stream rather than scanning the source string to avoid re-walking long inputs.
+      let j = i + 1;
+      while (j < tokens.length && tokens[j]!.type === "whitespace") j += 1;
+      if (j < tokens.length) {
+        const next = tokens[j]!;
+        if (next.type === "punctuation" && next.text === "(") continue;
       }
-      if (input[scan] === "(") continue;
+
       const resolved = opts.resolveName(token.text);
       if (!resolved) continue;
       references.push({
@@ -138,10 +155,7 @@ export function extractFormulaReferences(
     }
   }
 
-  const activeIndex =
-    cursorStart === undefined || cursorEnd === undefined ? null : findActiveReferenceIndex(references, cursorStart, cursorEnd);
-
-  return { references, activeIndex };
+  return references;
 }
 
 export function assignFormulaReferenceColors(

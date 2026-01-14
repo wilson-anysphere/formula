@@ -18,7 +18,12 @@ export type {
   FormulaReferenceRange,
   StructuredTableInfo
 } from "./formulaReferences.ts";
-export { assignFormulaReferenceColors, extractFormulaReferences, FORMULA_REFERENCE_PALETTE } from "./formulaReferences.ts";
+export {
+  assignFormulaReferenceColors,
+  extractFormulaReferences,
+  extractFormulaReferencesFromTokens,
+  FORMULA_REFERENCE_PALETTE
+} from "./formulaReferences.ts";
 
 export type { FormulaToken, FormulaTokenType } from "./formula/tokenizeFormula.ts";
 export { tokenizeFormula } from "./formula/tokenizeFormula.ts";
