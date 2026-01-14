@@ -678,17 +678,25 @@ fn build_parts(
         parts.insert(shared_strings_part_name.clone(), shared_strings_xml);
     }
 
-    // Conditional formatting uses a single workbook-global `<dxfs>` table inside `styles.xml`, but
-    // the in-memory model stores differential formats per-sheet. Aggregate and deduplicate
-    // deterministically, and (for new documents) emit the resulting global table.
-    let cf_dxfs = ConditionalFormattingDxfAggregation::from_worksheets(&doc.workbook.sheets);
-
     // Parse/update styles.xml (cellXfs) so cell `s` attributes refer to real xf indices.
     let mut style_table = doc.workbook.styles.clone();
     let mut styles_editor = XlsxStylesEditor::parse_or_default(
         parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut style_table,
     )?;
+
+    // Conditional formatting uses a single workbook-global `<dxfs>` table inside `styles.xml`, but
+    // the in-memory model stores differential formats per-sheet.
+    //
+    // For round-trip writers, treat the existing `styles.xml` `<dxfs>` table as the canonical base
+    // (so existing `cfRule/@dxfId` indices remain valid), and only append additional dxfs when new
+    // sheets/rules introduce them.
+    let existing_cf_dxfs = styles_editor.styles_part().conditional_formatting_dxfs();
+    let cf_dxfs = ConditionalFormattingDxfAggregation::from_worksheets_with_base_global_dxfs(
+        &doc.workbook.sheets,
+        &existing_cf_dxfs,
+    );
+
     // Collect all style ids referenced by the workbook so `styles.xml` includes corresponding
     // `<xf>` entries and we can map model `style_id` -> SpreadsheetML `cellXf` index.
     //
@@ -708,21 +716,27 @@ fn build_parts(
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
     let has_existing_styles_part = parts.contains_key(&styles_part_name);
-    let rewrote_conditional_formatting_dxfs =
-        !cf_dxfs.global_dxfs.is_empty() && (is_new || !has_existing_styles_part);
     let should_write_styles_part = is_new
         || !style_to_xf.is_empty()
         || has_existing_styles_part
         || synthesize_styles_for_missing_relationship
         || !cf_dxfs.global_dxfs.is_empty();
     if should_write_styles_part {
-        // Only rewrite the `<dxfs>` table when we control the entire styles.xml payload (new
-        // documents, or when synthesizing a missing styles part). This avoids dropping unknown dxf
-        // content from existing workbooks (we only model a subset of differential formatting).
-        if rewrote_conditional_formatting_dxfs {
-            styles_editor
-                .styles_part_mut()
-                .set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
+        if !cf_dxfs.global_dxfs.is_empty() {
+            if is_new || !has_existing_styles_part {
+                // For new/synthesized styles.xml, we control the full payload and can write the
+                // global `<dxfs>` table from scratch.
+                styles_editor
+                    .styles_part_mut()
+                    .set_conditional_formatting_dxfs(&cf_dxfs.global_dxfs);
+            } else if cf_dxfs.global_dxfs.len() > existing_cf_dxfs.len() {
+                // For existing workbooks, preserve existing `<dxf>` entries (which may contain
+                // unknown/unmodeled XML) and only append newly introduced dxfs.
+                let new_dxfs = &cf_dxfs.global_dxfs[existing_cf_dxfs.len()..];
+                styles_editor
+                    .styles_part_mut()
+                    .append_conditional_formatting_dxfs(new_dxfs);
+            }
         }
         parts.insert(styles_part_name.clone(), styles_editor.to_styles_xml_bytes());
     }
@@ -1092,11 +1106,15 @@ fn build_parts(
         // synthesizing new sheet XML. Only run the streaming rewriter when the current XML still
         // lacks conditional formatting blocks.
         if conditional_formatting_changed && !sheet_xml.contains("conditionalFormatting") {
-            let rules: Cow<'_, [CfRule]> = if rewrote_conditional_formatting_dxfs {
+            let rules: Cow<'_, [CfRule]> = if sheet
+                .conditional_formatting_rules
+                .iter()
+                .any(|rule| rule.dxf_id.is_some())
+            {
                 // `CfRule.dxf_id` indexes into the per-worksheet `conditional_formatting_dxfs`
                 // vector. In SpreadsheetML, `cfRule/@dxfId` indexes into the *workbook-global*
-                // `<dxfs>` table in `xl/styles.xml`. When we control the global dxfs table, remap
-                // the per-sheet indices accordingly.
+                // `<dxfs>` table in `xl/styles.xml`, so remap local indices to the aggregated
+                // workbook table.
                 let mut owned = sheet.conditional_formatting_rules.clone();
                 for rule in &mut owned {
                     rule.dxf_id = rule.dxf_id.and_then(|local| {

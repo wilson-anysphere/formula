@@ -246,6 +246,27 @@ impl StylesPart {
         dxfs_el.set_attr("count", dxfs.len().to_string());
     }
 
+    /// Append additional differential formats (`<dxf>`) to the existing `styles.xml` `<dxfs>` table.
+    ///
+    /// This is intended for round-trip flows where we want to preserve existing `<dxf>` entries
+    /// (including any unknown/unmodeled XML) while still allowing new conditional formatting rules
+    /// to reference additional DXFs.
+    ///
+    /// `dxfs` entries are appended in order. The `<dxfs @count>` attribute is updated to match the
+    /// final number of `<dxf>` children.
+    pub fn append_conditional_formatting_dxfs(&mut self, dxfs: &[CfStyleOverride]) {
+        if dxfs.is_empty() {
+            return;
+        }
+
+        let dxfs_el = ensure_styles_child(&mut self.root, "dxfs");
+        dxfs_el
+            .children
+            .extend(dxfs.iter().map(|dxf| XmlNode::Element(build_conditional_formatting_dxf(dxf))));
+        let count = dxfs_el.children_by_local("dxf").count();
+        dxfs_el.set_attr("count", count.to_string());
+    }
+
     /// Ensure every `style_id` in `style_ids` has a corresponding `xf` index.
     ///
     /// The returned map can be used to set worksheet `c/@s` attributes.

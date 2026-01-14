@@ -54,6 +54,53 @@ impl ConditionalFormattingDxfAggregation {
         }
     }
 
+    /// Build a global `<dxfs>` table with a pre-existing base table.
+    ///
+    /// This is primarily intended for round-trip writers (e.g. `XlsxDocument`) that are editing an
+    /// existing workbook package:
+    /// - The workbook already has a `styles.xml` `<dxfs>` table with stable indices referenced by
+    ///   existing worksheet `<cfRule dxfId="...">` attributes.
+    /// - We want to preserve those existing indices/entries, and only append new dxfs when the
+    ///   in-memory model introduces additional differential formats.
+    ///
+    /// The returned `global_dxfs` starts with `base_global_dxfs` (in the provided order), followed
+    /// by any new dxfs encountered while iterating worksheets (deduped by exact equality).
+    pub fn from_worksheets_with_base_global_dxfs<'a>(
+        worksheets: impl IntoIterator<Item = &'a Worksheet>,
+        base_global_dxfs: &[CfStyleOverride],
+    ) -> Self {
+        let mut global_dxfs: Vec<CfStyleOverride> = base_global_dxfs.to_vec();
+        let mut local_to_global_by_sheet: HashMap<WorksheetId, Vec<u32>> = HashMap::new();
+
+        for sheet in worksheets {
+            let mut mapping: Vec<u32> = Vec::with_capacity(sheet.conditional_formatting_dxfs.len());
+
+            for (local_idx, local) in sheet.conditional_formatting_dxfs.iter().enumerate() {
+                // Fast-path: if the worksheet-local dxfs vector is aligned with the current global
+                // table, preserve the index. This is common when a workbook was loaded from an
+                // existing `styles.xml` and each sheet stores the global dxfs vector as-is.
+                let global_idx = if local_idx < global_dxfs.len() && global_dxfs[local_idx] == *local
+                {
+                    local_idx as u32
+                } else if let Some(idx) = global_dxfs.iter().position(|g| g == local) {
+                    idx as u32
+                } else {
+                    let idx = global_dxfs.len() as u32;
+                    global_dxfs.push(local.clone());
+                    idx
+                };
+                mapping.push(global_idx);
+            }
+
+            local_to_global_by_sheet.insert(sheet.id, mapping);
+        }
+
+        Self {
+            global_dxfs,
+            local_to_global_by_sheet,
+        }
+    }
+
     /// Map a worksheet-local `dxf_id` to the global `dxf_id`.
     ///
     /// Returns `None` when:
@@ -68,4 +115,3 @@ impl ConditionalFormattingDxfAggregation {
         mapping.get(local as usize).copied()
     }
 }
-
