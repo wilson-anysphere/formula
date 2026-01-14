@@ -17272,11 +17272,22 @@ export class SpreadsheetApp {
 
       const viewport = this.getDrawingInteractionViewport();
       const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
-      const scroll = effectiveScrollForAnchor(gesture.startAnchor, viewport);
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-      const sheetX = x - headerOffsetX + scroll.scrollX;
-      const sheetY = y - headerOffsetY + scroll.scrollY;
+      const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
+      const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx)
+        ? Math.max(headerOffsetY, viewport.frozenHeightPx!)
+        : headerOffsetY;
+      const clampedX = Math.max(x, headerOffsetX);
+      const clampedY = Math.max(y, headerOffsetY);
+      const pointInFrozenCols = clampedX < frozenBoundaryX;
+      const pointInFrozenRows = clampedY < frozenBoundaryY;
+      // Absolute anchors always scroll; oneCell/twoCell anchors use the frozen pane under the pointer.
+      const alwaysScroll = gesture.startAnchor.type === "absolute";
+      const scrollX = alwaysScroll ? viewport.scrollX : pointInFrozenCols ? 0 : viewport.scrollX;
+      const scrollY = alwaysScroll ? viewport.scrollY : pointInFrozenRows ? 0 : viewport.scrollY;
+      const sheetX = clampedX - headerOffsetX + scrollX;
+      const sheetY = clampedY - headerOffsetY + scrollY;
 
       let dxPx = sheetX - gesture.startSheetX;
       let dyPx = sheetY - gesture.startSheetY;
@@ -17287,10 +17298,7 @@ export class SpreadsheetApp {
         }
 
         const transform = gesture.transform;
-        const hasNonIdentityTransform = !!(
-          transform &&
-          (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
-        );
+        const hasNonIdentityTransform = !!(transform && (transform.rotationDeg !== 0 || transform.flipH || transform.flipV));
 
         if (e.shiftKey && gesture.aspectRatio != null) {
           if (hasNonIdentityTransform) {
