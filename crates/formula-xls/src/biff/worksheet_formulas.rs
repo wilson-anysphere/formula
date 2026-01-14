@@ -372,6 +372,54 @@ fn parse_ref_any_best_effort(data: &[u8]) -> Option<(CellRef, CellRef)> {
     Some((start, end))
 }
 
+fn parse_array_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(CellRef, CellRef)> {
+    // ARRAY records begin with a range header (`RefU` or `Ref8`) followed by 2 or 4 bytes of
+    // flags/reserved fields, then:
+    //   [cce:u16][rgce:cce bytes][rgcb...]
+    //
+    // Like SHRFMLA, some producers use a `Ref8` range header even when the columns are within the
+    // classic `.xls` 0..=255 bounds. However, naively parsing the header as `Ref8` can misread the
+    // following flags/reserved bytes as the `colLast` field when the record actually uses `RefU`,
+    // spuriously expanding the array range.
+    //
+    // Disambiguate by matching the `cce` field against the parsed `rgce` length (`expected_cce`).
+    // If we cannot match a plausible header, fall back to the earlier `parse_ref_any_best_effort`
+    // behaviour.
+    let expected_cce_u16 = u16::try_from(expected_cce).ok()?;
+
+    let header_refu = parse_refu(data);
+    let header_ref8 = parse_ref8(data);
+
+    // Layout candidates, ordered to match `parse_biff8_array_record`'s compatibility parsing.
+    // - RefU + reserved(2) + cce
+    // - RefU + reserved(4) + cce
+    // - Ref8 + reserved(2) + cce
+    // - Ref8 + reserved(4) + cce
+    let candidates: &[(Option<(u16, u16, u16, u16)>, usize)] = &[
+        (header_refu, 6 + 2),
+        (header_refu, 6 + 4),
+        (header_ref8, 8 + 2),
+        (header_ref8, 8 + 4),
+    ];
+
+    for (header, cce_offset) in candidates {
+        let Some((rw_first, rw_last, col_first, col_last)) = *header else {
+            continue;
+        };
+        let cce_bytes = data.get(*cce_offset..*cce_offset + 2)?;
+        let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]);
+        if cce != expected_cce_u16 {
+            continue;
+        }
+
+        let start = parse_cell_ref_u16(rw_first, col_first)?;
+        let end = parse_cell_ref_u16(rw_last, col_last)?;
+        return Some((start, end));
+    }
+
+    parse_ref_any_best_effort(data)
+}
+
 fn parse_shrfmla_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(CellRef, CellRef)> {
     // SHRFMLA stores the shared formula range using either:
     // - RefU: [rwFirst:u16][rwLast:u16][colFirst:u8][colLast:u8]
@@ -621,20 +669,22 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                 };
             }
             RECORD_ARRAY => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    warn(
-                        &mut out.warnings,
-                        format!(
-                            "failed to parse ARRAY range at offset {} (len={})",
-                            record.offset,
-                            record.data.len()
-                        ),
-                    );
-                    continue;
-                };
-                let anchor = range.0;
                 match parse_biff8_array_record(&record) {
                     Ok(parsed) => {
+                        let Some(range) =
+                            parse_array_range_best_effort(record.data.as_ref(), parsed.rgce.len())
+                        else {
+                            warn(
+                                &mut out.warnings,
+                                format!(
+                                    "failed to parse ARRAY range at offset {} (len={})",
+                                    record.offset,
+                                    record.data.len()
+                                ),
+                            );
+                            continue;
+                        };
+                        let anchor = range.0;
                         out.array.insert(
                             anchor,
                             Biff8ArrayRecord {
@@ -1799,20 +1849,22 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 };
             }
             RECORD_ARRAY => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
-                    warn_string(
-                        &mut out.warnings,
-                        format!(
-                            "failed to parse ARRAY range at offset {} (len={})",
-                            record.offset,
-                            record.data.len()
-                        ),
-                    );
-                    continue;
-                };
-                let anchor = range.0;
                 match parse_biff8_array_record(&record) {
                     Ok(parsed) => {
+                        let Some(range) =
+                            parse_array_range_best_effort(record.data.as_ref(), parsed.rgce.len())
+                        else {
+                            warn_string(
+                                &mut out.warnings,
+                                format!(
+                                    "failed to parse ARRAY range at offset {} (len={})",
+                                    record.offset,
+                                    record.data.len()
+                                ),
+                            );
+                            continue;
+                        };
+                        let anchor = range.0;
                         array.insert(
                             anchor,
                             Biff8ArrayRecord {

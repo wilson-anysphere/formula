@@ -887,6 +887,34 @@ pub fn build_array_formula_ptgarray_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that exercises ambiguity in ARRAY range-header parsing when a
+/// `RefU` header is followed by a small non-zero flags/reserved value.
+///
+/// Some decoders (including older versions of this crate) would mistakenly treat the first 8 bytes
+/// of `RefU + flags` as a `Ref8` range header when the array range is `A..A`, causing the decoded
+/// range to spuriously include additional columns.
+///
+/// This fixture constructs two ARRAY records:
+/// - `A1:A2` (RefU + `flags=2`), array rgce is `"LEFT"`
+/// - `B1:B10`, array rgce is `C1+1` (via `PtgRefN` decoded relative to base `B1`)
+///
+/// Cell `B2` stores `PtgExp(B2)` (self-reference), forcing array-formula resolution to rely on
+/// range containment rather than an exact base-cell key match. Correct behaviour is to resolve
+/// `B2` against the `B1:B10` ARRAY record (producing `C1+1`), not the `A1:A2` record.
+pub fn build_array_formula_range_flags_ambiguity_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_array_formula_range_flags_ambiguity_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a malformed array-formula pattern:
 /// - Base cell contains a full `FORMULA.rgce` token stream (no `PtgExp`).
 /// - Follower cell contains only `PtgExp` pointing at the base cell and sets `FORMULA.grbit.fArray`.
@@ -9424,6 +9452,14 @@ fn build_array_formula_ptgarray_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("ArrayConst", &sheet_stream, 1252)
 }
 
+fn build_array_formula_range_flags_ambiguity_workbook_stream() -> Vec<u8> {
+    // Minimal single-sheet workbook containing multiple ARRAY records whose range headers can be
+    // ambiguous when parsed as Ref8.
+    let xf_cell = 16u16;
+    let sheet_stream = build_array_formula_range_flags_ambiguity_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ArrayRangeAmbiguity", &sheet_stream, 1252)
+}
+
 fn build_array_formula_ptgname_workbook_stream() -> Vec<u8> {
     // Minimal single-sheet workbook containing an array formula whose ARRAY.rgce includes PtgName.
     //
@@ -13988,6 +14024,76 @@ fn build_array_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell_with_grbit(1, base_col, xf_cell, 0.0, grbit_array, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_array_formula_range_flags_ambiguity_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 10) cols [0, 3) => A1:C10.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide a value cell so calamine reports a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 2, xf_cell, 1.0)); // C1
+
+    // Set FORMULA.grbit.fArray (0x0010) to mark the cell as part of an array formula group.
+    let grbit_array: u16 = 0x0010;
+
+    // -- ARRAY #1 --------------------------------------------------------------
+    // Range A1:A2 encoded as RefU + flags + cce, where flags is a small non-zero value.
+    let rgce_left: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x17); // PtgStr
+        v.push(4); // cch
+        v.push(0); // flags (compressed)
+        v.extend_from_slice(b"LEFT");
+        v
+    };
+    let mut array_left = Vec::<u8>::new();
+    array_left.extend_from_slice(&0u16.to_le_bytes()); // rwFirst = 0
+    array_left.extend_from_slice(&1u16.to_le_bytes()); // rwLast = 1
+    array_left.push(0); // colFirst = A
+    array_left.push(0); // colLast = A
+    array_left.extend_from_slice(&2u16.to_le_bytes()); // flags/reserved (non-zero)
+    array_left.extend_from_slice(&(rgce_left.len() as u16).to_le_bytes()); // cce
+    array_left.extend_from_slice(&rgce_left);
+    push_record(&mut sheet, RECORD_ARRAY, &array_left);
+
+    // -- ARRAY #2 --------------------------------------------------------------
+    // Array formula range B1:B10 whose body is `C1+1` (decoded relative to base cell B1).
+    // PtgRefN(row_off=0,col_off=+1) + PtgInt(1) + PtgAdd
+    let rgce_right: Vec<u8> = vec![
+        0x2C, // PtgRefN
+        0x00, 0x00, // row_off = 0
+        0x01, 0xC0, // col_off = +1 with row+col relative flags
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_ARRAY,
+        &array_record_refu(0, 9, 1, 1, &rgce_right),
+    );
+
+    // B2 FORMULA record: PtgExp(B2) (self-reference).
+    let ptgexp_b2 = ptg_exp(1, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, 1, xf_cell, 0.0, grbit_array, &ptgexp_b2),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);

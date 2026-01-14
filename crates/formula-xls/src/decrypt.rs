@@ -2384,7 +2384,6 @@ fn verify_password_legacy(
     }
 
     let key_material = derive_key_material_legacy(hash_alg, password, &info.verifier.salt)?;
-
     if password_matches_verifier(
         hash_alg,
         key_material.as_slice(),
