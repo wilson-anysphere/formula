@@ -813,7 +813,8 @@ same Windows user account (or install it system-wide).
 The desktop app is configured to use **GitHub Releases** as the updater source.
 
 `apps/desktop/src-tauri/tauri.conf.json` points at the `latest.json` manifest generated and uploaded
-by `tauri-apps/tauri-action@v0.6.1`:
+by `tauri-apps/tauri-action` (pinned to an immutable commit SHA in `.github/workflows/release.yml`;
+currently v0.6.1):
 
 ```
 https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json

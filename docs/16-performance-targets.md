@@ -312,6 +312,10 @@ async function runBenchmark(
 
 ### Continuous Performance Monitoring
 
+Note: This repository pins all third-party GitHub Actions to immutable commit SHAs (supply-chain
+hardening). CI enforces this via `scripts/ci/check-gha-action-sha-pins.sh`. The example workflow
+below uses action version tags for readability.
+
 ```yaml
 # .github/workflows/perf.yml
 name: Performance
