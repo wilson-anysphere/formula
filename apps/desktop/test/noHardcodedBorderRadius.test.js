@@ -49,7 +49,7 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
     // Avoid false positives in comments while keeping line numbers stable for error messages.
     const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
 
-    const declRegex = /\bborder-radius\s*:\s*([^;}]*)/gi;
+    const declRegex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*([^;}]*)/gi;
     let declMatch;
     while ((declMatch = declRegex.exec(stripped))) {
       const value = declMatch[1] ?? "";
