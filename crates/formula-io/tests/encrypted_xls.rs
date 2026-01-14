@@ -101,6 +101,20 @@ fn opens_encrypted_xls_with_options_password() {
     let path = tmp.path().join("encrypted.xls");
     std::fs::write(&path, &bytes).expect("write encrypted xls fixture");
 
+    // No password: options-based open APIs should surface PasswordRequired for encrypted legacy `.xls`.
+    let err = open_workbook_model_with_options(&path, OpenOptions { password: None })
+        .expect_err("expected password required");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+    let err = open_workbook_with_options(&path, OpenOptions { password: None })
+        .expect_err("expected password required");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
     // Correct password: both model and package loaders succeed.
     let model = open_workbook_model_with_options(
         &path,
