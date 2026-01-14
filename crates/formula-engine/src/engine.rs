@@ -17354,6 +17354,72 @@ mod tests {
     }
 
     #[test]
+    fn reorder_sheet_updates_tab_order_for_forward_and_backward_moves() {
+        let mut engine = Engine::new();
+        for sheet in ["Sheet1", "Sheet2", "Sheet3", "Sheet4"] {
+            engine.ensure_sheet(sheet);
+        }
+
+        assert_eq!(
+            engine.sheet_names_in_order(),
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                "Sheet3".to_string(),
+                "Sheet4".to_string()
+            ]
+        );
+
+        // Move forward (lower -> higher index).
+        assert!(engine.reorder_sheet("Sheet1", 2));
+        assert_eq!(
+            engine.sheet_names_in_order(),
+            vec![
+                "Sheet2".to_string(),
+                "Sheet3".to_string(),
+                "Sheet1".to_string(),
+                "Sheet4".to_string()
+            ]
+        );
+
+        // Move backward (higher -> lower index).
+        assert!(engine.reorder_sheet("Sheet4", 1));
+        assert_eq!(
+            engine.sheet_names_in_order(),
+            vec![
+                "Sheet2".to_string(),
+                "Sheet4".to_string(),
+                "Sheet3".to_string(),
+                "Sheet1".to_string()
+            ]
+        );
+
+        // No-op reorder should succeed and keep order unchanged.
+        assert!(engine.reorder_sheet("Sheet4", 1));
+        assert_eq!(
+            engine.sheet_names_in_order(),
+            vec![
+                "Sheet2".to_string(),
+                "Sheet4".to_string(),
+                "Sheet3".to_string(),
+                "Sheet1".to_string()
+            ]
+        );
+
+        // Out-of-range index should fail and keep order unchanged.
+        assert!(!engine.reorder_sheet("Sheet4", 4));
+        assert_eq!(
+            engine.sheet_names_in_order(),
+            vec![
+                "Sheet2".to_string(),
+                "Sheet4".to_string(),
+                "Sheet3".to_string(),
+                "Sheet1".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn bytecode_concat_over_sheet_span_uses_tab_order_after_reorder() {
         fn setup(engine: &mut Engine) {
             for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
