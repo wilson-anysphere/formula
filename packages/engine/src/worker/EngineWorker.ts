@@ -306,8 +306,16 @@ export class EngineWorker {
       pending.reject(new Error(`worker terminated (request ${id})`));
     }
     this.pending.clear();
-    this.worker.terminate();
-    this.port.close?.();
+    try {
+      this.worker.terminate();
+    } catch {
+      // ignore
+    }
+    try {
+      this.port.close?.();
+    } catch {
+      // ignore
+    }
   }
 
   /**

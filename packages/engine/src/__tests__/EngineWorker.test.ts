@@ -1144,4 +1144,31 @@ describe("EngineWorker RPC", () => {
     expect((channel.port1 as unknown as MockMessagePort).closed).toBe(true);
     expect((channel.port2 as unknown as MockMessagePort).closed).toBe(true);
   });
+
+  it("does not throw if terminate() races with already-torn-down worker/ports", async () => {
+    const worker = new MockWorker();
+    const channel = createMockChannel();
+    const port1 = channel.port1 as unknown as MockMessagePort;
+
+    // Simulate buggy/hostile teardown implementations that throw even after performing cleanup.
+    const originalClose = port1.close.bind(port1);
+    (port1 as any).close = () => {
+      originalClose();
+      throw new Error("port close boom");
+    };
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: () => channel,
+    });
+
+    const originalTerminate = worker.terminate.bind(worker);
+    (worker as any).terminate = () => {
+      originalTerminate();
+      throw new Error("worker terminate boom");
+    };
+
+    expect(() => engine.terminate()).not.toThrow();
+  });
 });
