@@ -476,6 +476,7 @@ fn verify_password_standard_rc4_key_style(
     }
 }
 
+#[allow(dead_code)]
 fn verify_password_standard_with_key(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
