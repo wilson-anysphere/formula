@@ -396,6 +396,7 @@ export class DrawingOverlay {
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    const prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
 
     const selectedId = this.selectedId;
     let selectedScreenRect: Rect | null = null;
@@ -404,6 +405,37 @@ export class DrawingOverlay {
     let selectedTransform: DrawingTransform | undefined = undefined;
 
     if (drawObjects) {
+      // First pass: kick off image decodes for all visible images without awaiting so
+      // multiple images can decode concurrently on cold render.
+      for (const obj of ordered) {
+        if (obj.kind.type !== "image") continue;
+        if (seq !== this.renderSeq || signal?.aborted) return;
+
+        const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
+        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+        const screenRect = {
+          x: rect.x - scrollX + paneLayout.headerOffsetX,
+          y: rect.y - scrollY + paneLayout.headerOffsetY,
+          width: rect.width,
+          height: rect.height,
+        };
+        const clipRect = paneLayout.quadrants[pane.quadrant];
+        const aabb = getAabbForObject(screenRect, obj.transform);
+
+        if (clipRect.width <= 0 || clipRect.height <= 0) continue;
+        if (!intersects(aabb, clipRect)) continue;
+        if (!intersects(clipRect, viewportRect)) continue;
+        if (!intersects(aabb, viewportRect)) continue;
+
+        const imageId = obj.kind.imageId;
+        if (prefetchedImageBitmaps.has(imageId)) continue;
+        const entry = this.images.get(imageId);
+        if (!entry) continue;
+        prefetchedImageBitmaps.set(imageId, this.bitmapCache.get(entry, signal ? { signal } : undefined));
+      }
+
       for (const obj of ordered) {
         if (seq !== this.renderSeq || signal?.aborted) return;
         const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
@@ -476,7 +508,10 @@ export class DrawingOverlay {
           }
 
           try {
-            const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
+            const bitmapPromise =
+              prefetchedImageBitmaps.get(obj.kind.imageId) ??
+              this.bitmapCache.get(entry, signal ? { signal } : undefined);
+            const bitmap = await bitmapPromise;
             if (signal?.aborted) return;
             if (seq !== this.renderSeq) return;
             withClip(() => {
