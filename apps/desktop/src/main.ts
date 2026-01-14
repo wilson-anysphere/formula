@@ -2395,7 +2395,23 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     const zoomDisabled = !app.supportsZoom();
     const outlineDisabled = app.getGridMode() === "shared";
-    const canComment = app.getCollabSession()?.canComment() ?? true;
+    const canComment = (() => {
+      // Fail closed for collab sessions: if permissions are unset/unknown or the
+      // capability check throws, treat the user as unable to comment so we don't
+      // surface comment write actions pre-permissions.
+      let session: any = null;
+      try {
+        session = app.getCollabSession?.() ?? null;
+      } catch {
+        session = null;
+      }
+      if (!session) return true;
+      try {
+        return typeof session.canComment === "function" ? Boolean(session.canComment()) : false;
+      } catch {
+        return false;
+      }
+    })();
     const shouldDisableFormattingCommands = isEditing || (isReadOnly && !allowReadOnlyFormattingDefaults);
 
     const dynamicDisabledById = {
@@ -4709,10 +4725,17 @@ if (
       // Expose a dedicated key so shortcuts (Shift+F2) can be gated without relying on
       // `spreadsheet.isReadOnly`.
       "spreadsheet.canComment": (() => {
+        let session: any = null;
         try {
-          return app.getCollabSession()?.canComment() ?? true;
+          session = app.getCollabSession?.() ?? null;
         } catch {
-          return true;
+          session = null;
+        }
+        if (!session) return true;
+        try {
+          return typeof session.canComment === "function" ? Boolean(session.canComment()) : false;
+        } catch {
+          return false;
         }
       })(),
       gridArea: currentGridArea,
@@ -5721,7 +5744,20 @@ if (
       return decision.allRangesBand;
     })();
     const allowFormattingCommands = allowEditCommands && (!isReadOnly || allowReadOnlyFormattingDefaults);
-    const canComment = app.getCollabSession()?.canComment() ?? true;
+    const canComment = (() => {
+      let session: any = null;
+      try {
+        session = app.getCollabSession?.() ?? null;
+      } catch {
+        session = null;
+      }
+      if (!session) return true;
+      try {
+        return typeof session.canComment === "function" ? Boolean(session.canComment()) : false;
+      } catch {
+        return false;
+      }
+    })();
 
     let menuItems: ContextMenuItem[] = [];
     if (currentGridArea === "rowHeader") {
