@@ -440,6 +440,23 @@ async function main() {
     console.log(`publish-updater-manifest: notes/pub_date sourced from ${baseManifestPath}`);
   }
 
+  // Preserve any additional top-level fields from the base manifest for forward compatibility
+  // with future Tauri manifest schema changes. (We still override version/platforms and pick
+  // notes/pub_date deterministically.)
+  /** @type {Record<string, unknown>} */
+  const extraRootFields = {};
+  if (isPlainObject(baseManifest)) {
+    for (const [key, value] of Object.entries(baseManifest)) {
+      if (key === "version" || key === "notes" || key === "pub_date" || key === "platforms") continue;
+      extraRootFields[key] = sortObjectKeysDeep(value);
+    }
+  }
+  const extraRootFieldsSorted = Object.fromEntries(
+    Object.keys(extraRootFields)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => [key, extraRootFields[key]]),
+  );
+
   // Deterministic output: sort platform keys so the merged `latest.json` is stable even when
   // the input manifests contain multiple targets or are discovered in different orders.
   const sortedPlatforms = Object.fromEntries(
@@ -453,6 +470,7 @@ async function main() {
     notes,
     pub_date: pubDate,
     platforms: sortedPlatforms,
+    ...extraRootFieldsSorted,
   };
 
   const latestJsonText = `${JSON.stringify(combined, null, 2)}\n`;
