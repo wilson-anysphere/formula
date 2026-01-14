@@ -119,6 +119,8 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   kind: "dropdown",
                   menuItems: [
                     { id: "home.cells.format.formatCells", label: "Format Cells…", ariaLabel: "Format Cells" },
+                    { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
+                    { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
@@ -172,10 +174,16 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     });
 
     const formatCells = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.formatCells"]');
+    const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
+    const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
     const organizeSheets = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
     expect(formatCells).toBeInstanceOf(HTMLButtonElement);
+    expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
+    expect(colWidth).toBeInstanceOf(HTMLButtonElement);
     expect(organizeSheets).toBeInstanceOf(HTMLButtonElement);
     expect(formatCells?.disabled).toBe(false);
+    expect(rowHeight?.disabled).toBe(false);
+    expect(colWidth?.disabled).toBe(false);
     expect(organizeSheets?.disabled).toBe(false);
 
     act(() => root.unmount());
