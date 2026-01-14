@@ -259,8 +259,7 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
 fn quote_dax_identifier(raw: &str) -> String {
     // DAX uses single quotes for quoting table identifiers. Single quotes inside the identifier
     // are escaped by doubling them (`''`).
-    let escaped = raw.replace('\'', "''");
-    format!("'{escaped}'")
+    format!("'{}'", raw.replace('\'', "''"))
 }
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let raw = raw.trim();
