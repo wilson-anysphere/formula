@@ -2628,16 +2628,20 @@ export class FormulaBarView {
         cached.localeId === pending.localeId &&
         cached.referenceStyle === pending.referenceStyle;
 
-      const lexPromise = cacheHit
-        ? Promise.resolve(cached.lexResult)
-        : engine.lexFormulaPartial(pending.draft, options, rpcOptions);
+      let lexResult: Awaited<ReturnType<EngineClient["lexFormulaPartial"]>>;
+      let parseResult: Awaited<ReturnType<EngineClient["parseFormulaPartial"]>>;
 
-      const [lexResult, parseResult] = await Promise.all([
-        lexPromise,
-        engine.parseFormulaPartial(pending.draft, pending.cursor, options, rpcOptions),
-      ]);
+      if (cacheHit) {
+        // When only the caret moves, reuse the cached lexer result and avoid the extra Promise.all/array
+        // allocations in this hot path.
+        lexResult = cached.lexResult;
+        parseResult = await engine.parseFormulaPartial(pending.draft, pending.cursor, options, rpcOptions);
+      } else {
+        [lexResult, parseResult] = await Promise.all([
+          engine.lexFormulaPartial(pending.draft, options, rpcOptions),
+          engine.parseFormulaPartial(pending.draft, pending.cursor, options, rpcOptions),
+        ]);
 
-      if (!cacheHit) {
         this.#toolingLexCache = {
           draft: pending.draft,
           localeId: pending.localeId,
@@ -2650,7 +2654,6 @@ export class FormulaBarView {
       if (pending.requestId !== this.#toolingRequestId) return;
       if (!this.model.isEditing) return;
       if (this.model.draft !== pending.draft) return;
-    if (!isFormulaText(this.model.draft)) return;
 
       this.model.applyEngineToolingResult({ formula: pending.draft, localeId: pending.localeId, lexResult, parseResult });
       this.#requestRender({ preserveTextareaValue: true });
