@@ -206,7 +206,7 @@ dialog.custom-sort-dialog::backdrop {
 
 .organize-sheets-dialog__close {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 6px 10px;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -225,7 +225,7 @@ dialog.custom-sort-dialog::backdrop {
   overflow: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
 }
 
@@ -235,7 +235,7 @@ dialog.custom-sort-dialog::backdrop {
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-secondary);
 }
 
@@ -250,7 +250,7 @@ dialog.custom-sort-dialog::backdrop {
   font-size: 12px;
   color: var(--text-secondary);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 2px 8px;
   background: var(--bg-primary);
 }
@@ -269,7 +269,7 @@ dialog.custom-sort-dialog::backdrop {
 
 .organize-sheets-dialog__actions button {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 6px 10px;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -288,7 +288,7 @@ dialog.custom-sort-dialog::backdrop {
 .organize-sheets-dialog__rename-input {
   min-width: min(360px, 100%);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   background: var(--bg-primary);
   color: var(--text-primary);
