@@ -93,10 +93,13 @@ fn blank_fk_does_not_match_physical_blank_dim_row_for_columnar_fact() {
         cache: PageCacheConfig { max_entries: 2 },
     };
     let mut fact = ColumnarTableBuilder::new(schema, options);
-    // One BLANK FK row.
+    // Two BLANK FK rows. This ensures the allowed fact row set is "dense" relative to the
+    // `row_count/64` heuristic in `propagate_filter(Direction::ToOne)` so we exercise the
+    // BitVec-scanning code path (no large `Vec<usize>` allocation).
     fact.append_row(&[formula_columnar::Value::Null, formula_columnar::Value::Number(10.0)]);
+    fact.append_row(&[formula_columnar::Value::Null, formula_columnar::Value::Number(11.0)]);
     // Many non-BLANK rows so filtering to BLANK actually restricts the fact table.
-    for _ in 0..63 {
+    for _ in 0..62 {
         fact.append_row(&[
             formula_columnar::Value::Number(1.0),
             formula_columnar::Value::Number(20.0),
