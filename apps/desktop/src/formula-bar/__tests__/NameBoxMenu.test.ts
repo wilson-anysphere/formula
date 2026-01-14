@@ -20,6 +20,9 @@ describe("FormulaBarView name box dropdown menu", () => {
       ],
     });
 
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeInstanceOf(HTMLInputElement);
+
     const dropdown = host.querySelector<HTMLButtonElement>(".formula-bar-name-box-dropdown");
     expect(dropdown).toBeInstanceOf(HTMLButtonElement);
     expect(dropdown?.getAttribute("aria-haspopup")).toBe("menu");
@@ -30,6 +33,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     expect(overlay).toBeInstanceOf(HTMLDivElement);
     expect(overlay?.hidden).toBe(false);
     expect(dropdown?.getAttribute("aria-expanded")).toBe("true");
+    expect(address?.getAttribute("aria-expanded")).toBe("true");
 
     const labels = Array.from(overlay!.querySelectorAll<HTMLElement>(".context-menu__label")).map((el) => el.textContent);
     expect(labels).toContain("MyRange");
@@ -38,6 +42,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     // Close so subsequent tests don't inherit global window listeners.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     expect(overlay?.hidden).toBe(true);
+    expect(address?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("opens via Alt+ArrowDown when the name box input is focused and selects via Enter", () => {
@@ -244,6 +249,7 @@ describe("FormulaBarView name box dropdown menu", () => {
 
     expect(overlay?.hidden).toBe(true);
     expect(dropdown?.getAttribute("aria-expanded")).toBe("false");
+    expect(address?.getAttribute("aria-expanded")).toBe("false");
     // Outside clicks should not force focus back to the name box (they should interact with the grid).
     expect(document.activeElement).not.toBe(address);
   });
