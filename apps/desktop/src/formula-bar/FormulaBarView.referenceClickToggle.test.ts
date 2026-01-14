@@ -20,6 +20,7 @@ describe("FormulaBarView reference token click selection toggle", () => {
     // Place caret inside "A1" (between A and 1), then click: Excel UX should expand
     // selection to the full reference token.
     view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("input"));
     view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
@@ -125,6 +126,7 @@ describe("FormulaBarView reference token click selection toggle", () => {
     const caret = refStart + 3;
 
     view.textarea.setSelectionRange(caret, caret);
+    view.textarea.dispatchEvent(new Event("input"));
     view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
