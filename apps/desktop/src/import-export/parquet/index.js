@@ -12,11 +12,41 @@ import {
   parseA1,
   parseRangeA1,
 } from "../../document/coords.js";
+import { parseImageCellValue } from "../../shared/imageCellValue.js";
 
 // Exporting a rectangular range requires materializing a full columnar representation
 // (`Record<string, any[]>`) in JS memory. Keep this bounded so Excel-scale selections
 // can't accidentally allocate millions of values.
 export const DEFAULT_MAX_PARQUET_EXPORT_CELLS = 200_000;
+
+const PARQUET_IMAGE_MARKER = Symbol("parquetImageValue");
+
+function wrapImageValueForParquet(image) {
+  return {
+    [PARQUET_IMAGE_MARKER]: true,
+    altText: image?.altText ?? null,
+  };
+}
+
+function isWrappedImageValue(value) {
+  return Boolean(value) && typeof value === "object" && value[PARQUET_IMAGE_MARKER] === true;
+}
+
+function cellValueToHeaderText(value) {
+  if (value == null) return "";
+  if (typeof value === "object" && typeof value.text === "string") return value.text;
+  const image = parseImageCellValue(value);
+  if (image) return image.altText ?? "";
+  return String(value);
+}
+
+function coerceCellValueForParquet(value) {
+  if (value == null) return null;
+  if (typeof value === "object" && typeof value.text === "string") return value.text;
+  const image = parseImageCellValue(value);
+  if (image) return wrapImageValueForParquet(image);
+  return value;
+}
 
 /**
  * Import a Parquet file into a columnar sheet backing store.
@@ -160,7 +190,8 @@ export async function exportDocumentRangeToParquet(doc, sheetId, range, options 
     if (headerRow) {
       const cell = doc.getCell(sheetId, { row: r.start.row, col });
       const value = cell?.value;
-      const name = value == null || String(value).trim() === "" ? columnIndexToName(col) : String(value);
+      const raw = cellValueToHeaderText(value);
+      const name = raw.trim() === "" ? columnIndexToName(col) : raw;
       columnNames.push(name);
     } else {
       columnNames.push(columnIndexToName(col));
@@ -181,7 +212,42 @@ export async function exportDocumentRangeToParquet(doc, sheetId, range, options 
   for (let row = dataStartRow; row <= r.end.row; row++) {
     for (let col = r.start.col; col <= r.end.col; col++) {
       const cell = doc.getCell(sheetId, { row, col });
-      columns[uniqueNames[col - r.start.col]][row - dataStartRow] = cell?.value ?? null;
+      columns[uniqueNames[col - r.start.col]][row - dataStartRow] = coerceCellValueForParquet(cell?.value);
+    }
+  }
+
+  // Arrow cannot infer a type from arbitrary objects. In-cell image values are stored as JSON-ish
+  // objects (from XLSX RichData extraction); normalize them into a scalar value so Parquet export
+  // doesn't crash or produce "[object Object]".
+  for (const name of uniqueNames) {
+    const values = columns[name];
+    if (!Array.isArray(values) || values.length === 0) continue;
+
+    let kind = null;
+    for (const v of values) {
+      if (v == null) continue;
+      if (isWrappedImageValue(v)) continue;
+      if (typeof v === "number") {
+        kind = "number";
+        break;
+      }
+      if (typeof v === "boolean") {
+        kind = "boolean";
+        break;
+      }
+      if (v instanceof Date) {
+        kind = "date";
+        break;
+      }
+      kind = "string";
+      break;
+    }
+
+    const imageAsString = kind == null || kind === "string";
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!isWrappedImageValue(v)) continue;
+      values[i] = imageAsString ? v.altText ?? "[Image]" : null;
     }
   }
 

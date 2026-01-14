@@ -1,4 +1,5 @@
 import { normalizeName } from "../../../../packages/search/index.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 function parseCellKey(key) {
   const [r, c] = String(key).split(",");
@@ -8,6 +9,21 @@ function parseCellKey(key) {
     return null;
   }
   return { row, col };
+}
+
+function formatValueForDisplay(value) {
+  if (value == null) return "";
+
+  // DocumentController stores rich text as `{ text, runs }`. Search UI should treat this as
+  // plain text instead of rendering `[object Object]`.
+  if (typeof value === "object" && typeof value.text === "string") {
+    return value.text;
+  }
+
+  const image = parseImageCellValue(value);
+  if (image) return image.altText ?? "[Image]";
+
+  return String(value);
 }
 
 function normalizeFormula(formula) {
@@ -255,7 +271,7 @@ class DocumentSheetAdapter {
 
     if (value == null && formula == null) return null;
 
-    const display = value != null ? String(value) : formula ?? "";
+    const display = value != null ? formatValueForDisplay(value) : formula ?? "";
     return { value, formula, display };
   }
 
@@ -296,7 +312,7 @@ class DocumentSheetAdapter {
         if (row < startRow || row > endRow || col < startCol || col > endCol) return;
         const formula = normalizeFormula(cell.formula);
         const value = cell.value ?? null;
-        const display = value != null ? String(value) : formula ?? "";
+        const display = value != null ? formatValueForDisplay(value) : formula ?? "";
         results.push({ row, col, cell: { value, formula, display } });
       });
     } else {
@@ -311,7 +327,7 @@ class DocumentSheetAdapter {
 
         const formula = normalizeFormula(cell.formula);
         const value = cell.value ?? null;
-        const display = value != null ? String(value) : formula ?? "";
+        const display = value != null ? formatValueForDisplay(value) : formula ?? "";
         results.push({ row: parsed.row, col: parsed.col, cell: { value, formula, display } });
       }
     }

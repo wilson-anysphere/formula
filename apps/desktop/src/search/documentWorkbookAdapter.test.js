@@ -253,3 +253,31 @@ test("DocumentWorkbookAdapter exposes merged-cell metadata for search semantics"
   assert.deepEqual(sheet.getMergedMasterCell(0, 1), { row: 0, col: 0 });
   assert.equal(sheet.getMergedMasterCell(5, 5), null);
 });
+
+test("DocumentWorkbookAdapter formats rich text + image payloads for search display", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", { text: "Hello", runs: [{ start: 0, end: 5, style: { bold: true } }] });
+  doc.setCellValue("Sheet1", "A2", { type: "image", value: { imageId: "img-1", altText: "Logo" } });
+  doc.setCellValue("Sheet1", "A3", { type: "image", value: { imageId: "img-2" } });
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getCell(0, 0).display, "Hello");
+  assert.equal(sheet.getCell(1, 0).display, "Logo");
+  assert.equal(sheet.getCell(2, 0).display, "[Image]");
+});
+
+test("DocumentWorkbookAdapter iterateCells exposes rich text + image display strings", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img-1", altText: "Logo" } });
+  doc.setCellValue("Sheet1", "B2", { text: "Bold", runs: [{ start: 0, end: 4, style: { bold: true } }] });
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+  const sheet = workbook.getSheet("Sheet1");
+
+  const entries = Array.from(sheet.iterateCells({ startRow: 0, endRow: 10, startCol: 0, endCol: 10 }));
+  const byCoord = new Map(entries.map((e) => [`${e.row},${e.col}`, e.cell.display]));
+  assert.equal(byCoord.get("0,0"), "Logo");
+  assert.equal(byCoord.get("1,1"), "Bold");
+});

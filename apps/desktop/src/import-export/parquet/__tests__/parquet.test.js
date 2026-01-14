@@ -76,6 +76,28 @@ test("Parquet export from document range produces a readable parquet file", { sk
   assert.equal(roundTrip.getChildAt(3).get(1), 2.25);
 });
 
+test("Parquet export handles rich text + in-cell image values", { skip: !parquetAvailable }, async () => {
+  const doc = new DocumentController({ engine: new MockEngine() });
+  doc.setRangeValues("Sheet1", "A1:B2", [
+    [
+      { text: "Name", runs: [{ start: 0, end: 4, style: { bold: true } }] },
+      { type: "image", value: { imageId: "img-header", altText: "Logo" } },
+    ],
+    ["Alice", { type: "image", value: { imageId: "img-row" } }],
+  ]);
+
+  const exported = await exportDocumentRangeToParquet(doc, "Sheet1", "A1:B2", {
+    headerRow: true,
+    compression: "UNCOMPRESSED",
+  });
+
+  const roundTrip = await parquetToArrowTable(exported, { batchSize: 2 });
+  assert.deepEqual(roundTrip.schema.fields.map((f) => f.name), ["Name", "Logo"]);
+  assert.equal(roundTrip.numRows, 1);
+  assert.equal(roundTrip.getChildAt(0).get(0), "Alice");
+  assert.equal(roundTrip.getChildAt(1).get(0), "[Image]");
+});
+
 test("Parquet export rejects huge ranges before scanning cells", async () => {
   let scanned = 0;
   const doc = {

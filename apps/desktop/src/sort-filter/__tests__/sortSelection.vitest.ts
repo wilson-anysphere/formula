@@ -72,6 +72,35 @@ describe("sortRangeRowsInDocument", () => {
     expect(doc.getCell(sheetId, { row: 3, col: 0 }).value).toBe("");
   });
 
+  it("treats in-cell image payloads without alt text as blank sort keys", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    // A1:A3
+    doc.setRangeValues(sheetId, { row: 0, col: 0 }, [
+      [{ value: { type: "image", value: { imageId: "img-1" } }, styleId: 1 }],
+      [{ value: "b", styleId: 2 }],
+      [{ value: "a", styleId: 3 }],
+    ]);
+
+    const result = sortRangeRowsInDocument(
+      doc,
+      sheetId,
+      { startRow: 0, endRow: 2, startCol: 0, endCol: 0 },
+      { row: 0, col: 0 },
+      { order: "ascending" },
+    );
+    expect(result.applied).toBe(true);
+
+    // The image row should sort as blank (last), rather than being compared as "[object Object]".
+    expect(doc.getCell(sheetId, { row: 0, col: 0 })).toMatchObject({ value: "a", styleId: 3 });
+    expect(doc.getCell(sheetId, { row: 1, col: 0 })).toMatchObject({ value: "b", styleId: 2 });
+    expect(doc.getCell(sheetId, { row: 2, col: 0 })).toMatchObject({
+      value: { type: "image", value: { imageId: "img-1" } },
+      styleId: 1,
+    });
+  });
+
   it("rejects selections larger than the safety threshold", () => {
     const doc = new DocumentController();
 

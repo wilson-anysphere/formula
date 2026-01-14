@@ -4,6 +4,7 @@ import { showToast } from "../extensions/ui.js";
 import { normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
 import type { CellCoord, Range } from "../selection/types";
 import type { SpreadsheetValue } from "../spreadsheet/evaluateFormula";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 import type { SortKey, SortOrder, SortSpec } from "./types";
 
@@ -37,6 +38,14 @@ function valueForCompare(raw: unknown): { kind: "blank" | "number" | "string"; v
   }
 
   if (raw && typeof raw === "object") {
+    const image = parseImageCellValue(raw);
+    if (image) {
+      // In-cell images do not have a meaningful numeric sort key. When alt text is present
+      // treat it as a string; otherwise treat the image as blank so it sorts last.
+      if (image.altText != null) return { kind: "string", value: image.altText };
+      return { kind: "blank", value: "" };
+    }
+
     const maybeText = (raw as any)?.text;
     if (typeof maybeText === "string") {
       return { kind: "string", value: maybeText };
