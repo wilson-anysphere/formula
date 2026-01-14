@@ -982,10 +982,13 @@ impl Engine {
 
         let after = sheet.col_properties.get(&col_0based).and_then(|p| p.width);
 
-        // `CELL("width")` consults column metadata; ensure any compiled formulas that depend on
-        // metadata are re-evaluated on the next recalc.
+        // Column width metadata can affect worksheet information functions like `CELL("width")`.
+        //
+        // Those functions are volatile and are included in the dependency graph's "volatile
+        // closure", so we do **not** need to mark all compiled formulas dirty here (which would
+        // trigger a full workbook recalc). Instead, just trigger a recalc in automatic modes so
+        // volatile formulas refresh.
         if before != after {
-            self.mark_all_compiled_cells_dirty();
             if self.calc_settings.calculation_mode != CalculationMode::Manual {
                 self.recalculate();
             }
@@ -1009,6 +1012,12 @@ impl Engine {
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
             return;
         };
+
+        let before = sheet
+            .col_properties
+            .get(&col_0based)
+            .map(|p| p.hidden)
+            .unwrap_or(false);
         sheet
             .col_properties
             .entry(col_0based)
@@ -1024,6 +1033,18 @@ impl Engine {
             if props.width.is_none() && !props.hidden && props.style_id.is_none() {
                 sheet.col_properties.remove(&col_0based);
             }
+        }
+
+        let after = sheet
+            .col_properties
+            .get(&col_0based)
+            .map(|p| p.hidden)
+            .unwrap_or(false);
+
+        // Hidden state affects `CELL("width")` (hidden columns return 0). Like `set_col_width`,
+        // rely on the volatile closure + trigger auto recalc without dirtying the full workbook.
+        if before != after && self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
         }
     }
 
