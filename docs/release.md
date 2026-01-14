@@ -1331,15 +1331,16 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
 ```
 
 1. Open the GitHub Release (draft) and confirm:
-    - Updater metadata: `latest.json` and `latest.json.sig`
-    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
-    - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
-    - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
-      - Expected (one per target): `provenance-universal-apple-darwin.intoto.jsonl`, `provenance-x86_64-pc-windows-msvc.intoto.jsonl`, `provenance-aarch64-pc-windows-msvc.intoto.jsonl`, `provenance-x86_64-unknown-linux-gnu.intoto.jsonl`, `provenance-aarch64-unknown-linux-gnu.intoto.jsonl`
-    - macOS (**universal**): `.dmg` (installer) + updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
-    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
-    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-    - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `amd64` vs `arm64` / `aarch64`)
+     - Updater metadata: `latest.json` and `latest.json.sig`
+     - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
+     - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
+     - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
+       - Expected (one per target): `provenance-universal-apple-darwin.intoto.jsonl`, `provenance-x86_64-pc-windows-msvc.intoto.jsonl`, `provenance-aarch64-pc-windows-msvc.intoto.jsonl`, `provenance-x86_64-unknown-linux-gnu.intoto.jsonl`, `provenance-aarch64-unknown-linux-gnu.intoto.jsonl`
+     - Note: GitHub also shows auto-generated “Source code (zip)” / “Source code (tar.gz)” entries; those are **not** installers or updater payloads.
+     - macOS (**universal**): `.dmg` (installer) + updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
+     - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
+     - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
+     - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `amd64` vs `arm64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
