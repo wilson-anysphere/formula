@@ -288,6 +288,392 @@ fn decode_array_constant(
     Ok(format!("{{{}}}", row_texts.join(";")))
 }
 
+/// Scan a nested BIFF12 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
+/// `rgcb` cursor for any `PtgArray` tokens encountered.
+///
+/// `PtgMem*` tokens are non-printing, but their nested streams can still contain `PtgArray`, which
+/// consumes an array-constant block from the trailing `rgcb` stream. If we skip the nested stream
+/// without consuming its referenced `rgcb` bytes, later visible `PtgArray` tokens will decode
+/// against the wrong `rgcb` block.
+fn consume_rgcb_arrays_in_subexpression(
+    rgce: &[u8],
+    rgcb: &[u8],
+    rgcb_pos: &mut usize,
+    rgce_base_offset: usize,
+) -> Result<(), DecodeRgceError> {
+    fn has_remaining(buf: &[u8], i: usize, needed: usize) -> bool {
+        buf.len().saturating_sub(i) >= needed
+    }
+
+    let mut i = 0usize;
+    while i < rgce.len() {
+        let ptg_offset = rgce_base_offset.saturating_add(i);
+        let ptg = rgce[i];
+        i += 1;
+
+        match ptg {
+            // PtgArray (any class): [unused: 7 bytes] + array constant in rgcb.
+            0x20 | 0x40 | 0x60 => {
+                if !has_remaining(rgce, i, 7) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 7,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 7;
+                let _ = decode_array_constant(rgcb, rgcb_pos, ptg_offset, ptg)?;
+            }
+
+            // Binary operators and simple operators with no payload.
+            0x03..=0x16 | 0x2F => {}
+
+            // PtgStr: [cch: u16][utf16 chars...]
+            0x17 => {
+                if !has_remaining(rgce, i, 2) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let cch = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
+                i += 2;
+                let byte_len = cch.saturating_mul(2);
+                if !has_remaining(rgce, i, byte_len) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: byte_len,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += byte_len;
+            }
+
+            // PtgExtend* (structured refs): [etpg: u8][payload...]
+            0x18 | 0x38 | 0x58 => {
+                if !has_remaining(rgce, i, 1) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 1,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let etpg = rgce[i];
+                i += 1;
+                match etpg {
+                    // etpg=0x19 is the structured reference payload (PtgList): fixed 12 bytes.
+                    0x19 => {
+                        if !has_remaining(rgce, i, 12) {
+                            return Err(DecodeRgceError::UnexpectedEof {
+                                offset: ptg_offset,
+                                ptg,
+                                needed: 12,
+                                remaining: rgce.len().saturating_sub(i),
+                            });
+                        }
+                        i += 12;
+                    }
+                    // Unknown extend subtype: stop scanning to avoid desync/false positives.
+                    _ => break,
+                }
+            }
+
+            // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+            0x19 => {
+                if !has_remaining(rgce, i, 3) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 3,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let grbit = rgce[i];
+                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]) as usize;
+                i += 3;
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = w_attr.saturating_mul(2);
+                    if !has_remaining(rgce, i, needed) {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgce.len().saturating_sub(i),
+                        });
+                    }
+                    i += needed;
+                }
+            }
+
+            // PtgErr: [code: u8]
+            0x1C => {
+                if !has_remaining(rgce, i, 1) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 1,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 1;
+            }
+            // PtgBool: [b: u8]
+            0x1D => {
+                if !has_remaining(rgce, i, 1) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 1,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 1;
+            }
+            // PtgInt: [n: u16]
+            0x1E => {
+                if !has_remaining(rgce, i, 2) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 2;
+            }
+            // PtgNum: [f64]
+            0x1F => {
+                if !has_remaining(rgce, i, 8) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 8,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 8;
+            }
+
+            // PtgFunc: [iftab: u16]
+            0x21 | 0x41 | 0x61 => {
+                if !has_remaining(rgce, i, 2) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 2;
+            }
+            // PtgFuncVar: [argc: u8][iftab: u16]
+            0x22 | 0x42 | 0x62 => {
+                if !has_remaining(rgce, i, 3) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 3,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 3;
+            }
+
+            // PtgName: [nameIndex: u32]
+            0x23 | 0x43 | 0x63 => {
+                if !has_remaining(rgce, i, 4) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 4,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 4;
+            }
+
+            // PtgRef: [row: u32][col: u16]
+            0x24 | 0x44 | 0x64 => {
+                if !has_remaining(rgce, i, 6) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 6;
+            }
+            // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x25 | 0x45 | 0x65 => {
+                if !has_remaining(rgce, i, 12) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 12;
+            }
+
+            // PtgMem* tokens: [cce: u16][subexpression...]
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if !has_remaining(rgce, i, 2) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let cce = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
+                i += 2;
+                if !has_remaining(rgce, i, cce) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: cce,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                consume_rgcb_arrays_in_subexpression(
+                    &rgce[i..i + cce],
+                    rgcb,
+                    rgcb_pos,
+                    rgce_base_offset.saturating_add(i),
+                )?;
+                i += cce;
+            }
+
+            // PtgRefErr: [row: u32][col: u16]
+            0x2A | 0x4A | 0x6A => {
+                if !has_remaining(rgce, i, 6) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 6;
+            }
+            // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x2B | 0x4B | 0x6B => {
+                if !has_remaining(rgce, i, 12) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 12;
+            }
+
+            // PtgRefN: [row_off: i32][col_off: i16]
+            0x2C | 0x4C | 0x6C => {
+                if !has_remaining(rgce, i, 6) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 6;
+            }
+            // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
+            0x2D | 0x4D | 0x6D => {
+                if !has_remaining(rgce, i, 12) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 12;
+            }
+
+            // PtgNameX: [ixti: u16][nameIndex: u16]
+            0x39 | 0x59 | 0x79 => {
+                if !has_remaining(rgce, i, 4) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 4,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 4;
+            }
+
+            // PtgRef3d: [ixti: u16][row: u32][col: u16]
+            0x3A | 0x5A | 0x7A => {
+                if !has_remaining(rgce, i, 8) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 8,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 8;
+            }
+            // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x3B | 0x5B | 0x7B => {
+                if !has_remaining(rgce, i, 14) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 14,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 14;
+            }
+            // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
+            0x3C | 0x5C | 0x7C => {
+                if !has_remaining(rgce, i, 8) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 8,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 8;
+            }
+            // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x3D | 0x5D | 0x7D => {
+                if !has_remaining(rgce, i, 14) {
+                    return Err(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 14,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 14;
+            }
+
+            // Unknown ptg: stop scanning to avoid desync/false positives.
+            _ => break,
+        }
+    }
+
+    Ok(())
+}
+
 /// Best-effort decode of a BIFF12 `rgce` token stream into formula text.
 ///
 /// The returned string does **not** include a leading `=`.
@@ -1098,6 +1484,19 @@ fn decode_rgce_impl(
                         needed: cce,
                         remaining: rgce.len().saturating_sub(i),
                     });
+                }
+
+                // `PtgMem*` embeds a nested token stream (`cce` bytes) that is not printed, but
+                // it can still contain `PtgArray` tokens that consume trailing `rgcb` bytes.
+                // Advance the `rgcb` cursor through any array-constant blocks referenced by the
+                // nested stream so later `PtgArray` tokens stay aligned.
+                if let Some(rgcb) = rgcb {
+                    consume_rgcb_arrays_in_subexpression(
+                        &rgce[i..i + cce],
+                        rgcb,
+                        &mut rgcb_pos,
+                        i,
+                    )?;
                 }
                 i += cce;
             }

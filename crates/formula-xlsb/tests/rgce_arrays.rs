@@ -121,3 +121,34 @@ fn encode_decode_roundtrip_multiple_array_constants_in_one_formula() {
     let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
     assert_eq!(text, "SUM({1,2},{3,4})");
 }
+
+#[test]
+fn decode_ptgarray_inside_memfunc_advances_rgcb_cursor() {
+    // `PtgMemFunc` contains a nested token stream that is not printed, but it can still contain
+    // `PtgArray` tokens that consume `rgcb` blocks. Ensure we advance the rgcb cursor through the
+    // mem payload so later visible `PtgArray` tokens decode correctly.
+    let ptg_array = [0x20u8, 0, 0, 0, 0, 0, 0, 0]; // PtgArray + 7 unused bytes
+
+    // rgce = [PtgMemFunc][cce][PtgArray (nested)][PtgArray (visible)]
+    let mut rgce = vec![0x29];
+    rgce.extend_from_slice(&u16::try_from(ptg_array.len()).unwrap().to_le_bytes());
+    rgce.extend_from_slice(&ptg_array);
+    rgce.extend_from_slice(&ptg_array);
+
+    // rgcb contains two array constant blocks: first for the nested PtgArray, second for the
+    // visible one.
+    let mut rgcb = Vec::new();
+    // {111}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&111f64.to_le_bytes());
+    // {222}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&222f64.to_le_bytes());
+
+    let text = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
+    assert_eq!(text, "{222}");
+}

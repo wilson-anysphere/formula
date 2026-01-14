@@ -6,6 +6,22 @@ fn rgce_ptg_array() -> Vec<u8> {
     vec![0x20, 0, 0, 0, 0, 0, 0, 0]
 }
 
+fn rgce_memfunc_with_array_subexpr() -> Vec<u8> {
+    // PtgMemFunc: [ptg=0x29][cce: u16][subexpression bytes...]
+    //
+    // The subexpression is not printed, but it can contain PtgArray tokens that still consume
+    // `rgcb` blocks. Ensure we advance the rgcb cursor through the mem payload.
+    let subexpr = rgce_ptg_array();
+    let cce: u16 = subexpr.len().try_into().expect("subexpression length fits u16");
+
+    let mut rgce = vec![0x29];
+    rgce.extend_from_slice(&cce.to_le_bytes());
+    rgce.extend_from_slice(&subexpr);
+    // Visible PtgArray follows.
+    rgce.extend_from_slice(&rgce_ptg_array());
+    rgce
+}
+
 #[test]
 fn decode_ptg_array_single_row_numbers() {
     let rgce = rgce_ptg_array();
@@ -63,6 +79,27 @@ fn decode_ptg_array_unknown_error_code_is_best_effort() {
 
     let decoded = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
     assert_eq!(decoded, "{#UNKNOWN!}");
+}
+
+#[test]
+fn decode_ptg_array_inside_memfunc_advances_rgcb_cursor() {
+    // First PtgArray is inside the PtgMemFunc payload (non-printing), second is visible.
+    let rgce = rgce_memfunc_with_array_subexpr();
+
+    let mut rgcb = Vec::new();
+    // First array constant: {111}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&111f64.to_le_bytes());
+    // Second array constant: {222}
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // cols_minus1
+    rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1
+    rgcb.push(0x01);
+    rgcb.extend_from_slice(&222f64.to_le_bytes());
+
+    let decoded = decode_rgce_with_rgcb(&rgce, &rgcb).expect("decode");
+    assert_eq!(decoded, "{222}");
 }
 
 #[test]
