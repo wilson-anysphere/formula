@@ -753,15 +753,15 @@ mod tests {
         assert_eq!(col.as_cache_field_name(), None);
         // `display_string` is intended for UI and uses a minimal DAX-like shape.
         assert_eq!(col.display_string(), "Dim Product[Category]");
-        // `Display` renders a DAX-like identifier form.
-        assert_eq!(col.to_string(), "Dim Product[Category]");
+        // `Display` renders a DAX-like identifier form (quoting table names when required).
+        assert_eq!(col.to_string(), "'Dim Product'[Category]");
         assert!(col != "Dim Product");
 
         let col_with_quote = PivotFieldRef::DataModelColumn {
             table: "O'Reilly".to_string(),
             column: "Name".to_string(),
         };
-        assert_eq!(col_with_quote.to_string(), "O'Reilly[Name]");
+        assert_eq!(col_with_quote.to_string(), "'O''Reilly'[Name]");
 
         // `]` is escaped as `]]` inside bracketed identifiers.
         let col_with_bracket = PivotFieldRef::DataModelColumn {
