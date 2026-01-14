@@ -157,7 +157,8 @@ export class InMemoryVectorStore {
     const signal = options.signal;
     throwIfAborted(signal);
     const count = this.items.size;
-    // Mirror `Array.prototype.slice`'s ToInteger behavior for common cases.
+    // Mirror `Array.prototype.slice`'s ToInteger behavior for finite values.
+    // For non-finite values (NaN/Infinity/undefined), treat as "all results".
     const k = Number.isFinite(topK) ? Math.trunc(topK) : count;
     if (k <= 0) return [];
   
