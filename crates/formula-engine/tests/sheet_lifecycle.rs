@@ -90,6 +90,66 @@ fn delete_sheet_rewrites_refs_when_display_name_differs_from_stable_key() {
 }
 
 #[test]
+fn delete_sheet_matches_sheet_names_case_insensitively_across_unicode() {
+    // Engine sheet lookups + delete rewrite logic should match Excel: sheet names compare using
+    // NFKC + Unicode uppercasing (e.g. `ß` -> `SS`).
+    let mut engine = Engine::new();
+
+    engine.ensure_sheet("Straße");
+    engine.ensure_sheet("Other");
+
+    engine
+        .set_cell_formula("Other", "A1", "='Straße'!A1")
+        .unwrap();
+
+    // Delete using a Unicode-case-equivalent spelling of the sheet name.
+    engine.delete_sheet("STRASSE").unwrap();
+
+    assert_eq!(engine.get_cell_formula("Other", "A1"), Some("=#REF!"));
+}
+
+#[test]
+fn delete_sheet_matches_sheet_names_nfkc_case_insensitively_and_adjusts_3d_spans() {
+    // U+212A KELVIN SIGN (K) is NFKC-equivalent to ASCII 'K'.
+    // When deleting a 3D span boundary, Excel shifts it one sheet inward based on tab order.
+    let mut engine = Engine::new();
+
+    engine.ensure_sheet("Kelvin");
+    engine.ensure_sheet("Middle");
+    engine.ensure_sheet("Sheet3");
+    engine.ensure_sheet("Summary");
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(KELVIN:Sheet3!A1)")
+        .unwrap();
+
+    engine.delete_sheet("KELVIN").unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Summary", "A1"),
+        Some("=SUM(Middle:Sheet3!A1)")
+    );
+}
+
+#[test]
+fn rename_sheet_matches_old_name_case_insensitively_across_unicode() {
+    // Renames should accept sheet names in a Unicode-case-insensitive form (Excel-like).
+    let mut engine = Engine::new();
+
+    engine.ensure_sheet("Straße");
+    engine.ensure_sheet("Other");
+
+    // Reference the sheet using a different spelling that should still resolve (`ß` -> `SS`).
+    engine
+        .set_cell_formula("Other", "A1", "=STRASSE!A1")
+        .unwrap();
+
+    assert!(engine.rename_sheet("STRASSE", "Renamed"));
+
+    assert_eq!(engine.get_cell_formula("Other", "A1"), Some("=Renamed!A1"));
+}
+
+#[test]
 fn delete_sheet_adjusts_3d_boundaries_when_display_name_differs_from_stable_key() {
     let mut engine = Engine::new();
 
