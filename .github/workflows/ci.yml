@@ -18,7 +18,11 @@ env:
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    # Pin runner image versions for reproducibility. GitHub's `ubuntu-latest` alias
+    # moves over time, which can introduce unexpected breakages even in lightweight
+    # guard jobs. Update deliberately after validating newer runner images:
+    # https://github.com/actions/runner-images
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
