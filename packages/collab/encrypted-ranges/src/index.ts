@@ -691,8 +691,10 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
   function resolveSheetName(sheetId: string): string | null {
     try {
-      const entries = typeof (sheetsRoot as any)?.toArray === "function" ? (sheetsRoot as any).toArray() : [];
-      for (const entry of entries) {
+      const sheets = sheetsRoot as any;
+      const length = typeof sheets?.length === "number" ? sheets.length : 0;
+      for (let i = 0; i < length; i += 1) {
+        const entry = sheets.get(i);
         const map = getYMap(entry);
         const obj = map ? null : entry && typeof entry === "object" ? (entry as any) : null;
         const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
