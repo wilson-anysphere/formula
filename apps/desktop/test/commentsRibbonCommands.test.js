@@ -59,15 +59,15 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   assert.match(router, /\bcreateRibbonActionsFromCommands\(/);
   assert.doesNotMatch(
     router,
-    /\btoggleOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
+    /\btoggleOverrides\s*(?:(?::\s*(?:[^=]|=>)+\s*)?=|:)\s*(?:Object\.freeze\s*\(\s*)?\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
   );
   assert.doesNotMatch(
     router,
-    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
+    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=>)+\s*)?=|:)\s*(?:Object\.freeze\s*\(\s*)?\{[\s\S]*?["']comments\.togglePanel["']\s*:/m,
   );
   assert.doesNotMatch(
     router,
-    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=(?!\s*\{))+\s*)?=|:)\s*\{[\s\S]*?["']comments\.addComment["']\s*:/m,
+    /\bcommandOverrides\s*(?:(?::\s*(?:[^=]|=>)+\s*)?=|:)\s*(?:Object\.freeze\s*\(\s*)?\{[\s\S]*?["']comments\.addComment["']\s*:/m,
   );
   assert.doesNotMatch(
     router,

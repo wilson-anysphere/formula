@@ -60,7 +60,7 @@ test("Desktop main.ts routes Find/Replace ribbon commands through the CommandReg
     assert.doesNotMatch(
       router,
       new RegExp(
-        `\\bcommandOverrides\\s*(?:(?::\\s*(?:[^=]|=(?!\\s*\\{))+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`,
+        `\\bcommandOverrides\\s*(?:(?::\\s*(?:[^=]|=>)+\\s*)?=|:)\\s*(?:Object\\.freeze\\s*\\(\\s*)?\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`,
       ),
       `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
     );

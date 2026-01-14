@@ -118,7 +118,7 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
     assert.doesNotMatch(
       router,
       new RegExp(
-        `\\btoggleOverrides\\s*(?:(?::\\s*(?:[^=]|=(?!\\s*\\{))+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`,
+        `\\btoggleOverrides\\s*(?:(?::\\s*(?:[^=]|=>)+\\s*)?=|:)\\s*(?:Object\\.freeze\\s*\\(\\s*)?\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`,
         "m",
       ),
       `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via toggleOverrides (should dispatch via CommandRegistry)`,
@@ -126,7 +126,7 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
     assert.doesNotMatch(
       router,
       new RegExp(
-        `\\bcommandOverrides\\s*(?:(?::\\s*(?:[^=]|=(?!\\s*\\{))+\\s*)?=|:)\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`,
+        `\\bcommandOverrides\\s*(?:(?::\\s*(?:[^=]|=>)+\\s*)?=|:)\\s*(?:Object\\.freeze\\s*\\(\\s*)?\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`,
         "m",
       ),
       `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via commandOverrides (should dispatch via CommandRegistry)`,
