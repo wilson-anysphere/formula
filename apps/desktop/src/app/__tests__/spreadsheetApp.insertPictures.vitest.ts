@@ -221,4 +221,31 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not persist image bytes when inserting pictures fails", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const docAny = app.getDocument() as any;
+
+    // Force the document mutation to fail so we can assert we don't persist image bytes.
+    docAny.setSheetDrawings = vi.fn(() => {
+      throw new Error("setSheetDrawings failed");
+    });
+
+    const setSpy = vi.spyOn(app.getDrawingImages(), "set");
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    await expect(app.insertPicturesFromFiles([file])).rejects.toThrow(/setSheetDrawings failed/);
+
+    expect(setSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });
