@@ -5506,6 +5506,42 @@ test("BASE min_length suggests a left-cell reference (value-like arg)", async ()
   );
 });
 
+test("LEFT num_chars suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LEFT(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=LEFT(A1, B1"),
+    `Expected LEFT to suggest B1 for num_chars, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("MID num_chars suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=MID(A1, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MID(A1, 1, B1"),
+    `Expected MID to suggest B1 for num_chars, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

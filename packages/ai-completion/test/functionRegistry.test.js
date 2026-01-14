@@ -149,14 +149,24 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Common text helpers often take ranges/arrays, so we mark their text arguments as range-like.
   assert.ok(registry.isRangeArg("LEFT", 0), "Expected LEFT text to be a range");
   assert.ok(registry.getFunction("LEFT")?.args?.[1]?.optional, "Expected LEFT num_chars to be optional");
+  assert.equal(registry.getArgType("LEFT", 1), "value", "Expected LEFT num_chars to be value-like");
   assert.ok(registry.isRangeArg("LEFTB", 0), "Expected LEFTB text to be a range");
+  assert.equal(registry.getArgType("LEFTB", 1), "value", "Expected LEFTB num_bytes to be value-like");
+  assert.ok(registry.isRangeArg("RIGHT", 0), "Expected RIGHT text to be a range");
+  assert.equal(registry.getArgType("RIGHT", 1), "value", "Expected RIGHT num_chars to be value-like");
+  assert.ok(registry.isRangeArg("RIGHTB", 0), "Expected RIGHTB text to be a range");
+  assert.equal(registry.getArgType("RIGHTB", 1), "value", "Expected RIGHTB num_bytes to be value-like");
   assert.ok(registry.isRangeArg("MID", 0), "Expected MID text to be a range");
+  assert.equal(registry.getArgType("MID", 2), "value", "Expected MID num_chars to be value-like");
+  assert.equal(registry.getArgType("MIDB", 2), "value", "Expected MIDB num_bytes to be value-like");
   assert.ok(registry.isRangeArg("LEN", 0), "Expected LEN text to be a range");
   assert.ok(registry.isRangeArg("LENB", 0), "Expected LENB text to be a range");
   assert.ok(registry.isRangeArg("TRIM", 0), "Expected TRIM text to be a range");
   assert.ok(registry.isRangeArg("SUBSTITUTE", 0), "Expected SUBSTITUTE text to be a range");
   assert.ok(registry.isRangeArg("FIND", 1), "Expected FIND within_text to be a range");
   assert.ok(registry.isRangeArg("FINDB", 1), "Expected FINDB within_text to be a range");
+  assert.equal(registry.getArgType("REPLACE", 2), "value", "Expected REPLACE num_chars to be value-like");
+  assert.equal(registry.getArgType("REPLACEB", 2), "value", "Expected REPLACEB num_bytes to be value-like");
   assert.ok(registry.isRangeArg("EXACT", 0), "Expected EXACT text1 to be a range");
   assert.ok(registry.isRangeArg("CODE", 0), "Expected CODE text to be a range");
   assert.ok(registry.isRangeArg("UNICODE", 0), "Expected UNICODE text to be a range");

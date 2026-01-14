@@ -3196,7 +3196,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the leftmost characters from a text value.",
     args: [
       { name: "text", type: "range" },
-      { name: "num_chars", type: "number", optional: true },
+      { name: "num_chars", type: "value", optional: true },
     ],
   },
   {
@@ -3204,7 +3204,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the leftmost bytes from a text value.",
     args: [
       { name: "text", type: "range" },
-      { name: "num_bytes", type: "number", optional: true },
+      { name: "num_bytes", type: "value", optional: true },
     ],
   },
   {
@@ -3212,7 +3212,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the rightmost characters from a text value.",
     args: [
       { name: "text", type: "range" },
-      { name: "num_chars", type: "number", optional: true },
+      { name: "num_chars", type: "value", optional: true },
     ],
   },
   {
@@ -3220,7 +3220,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the rightmost bytes from a text value.",
     args: [
       { name: "text", type: "range" },
-      { name: "num_bytes", type: "number", optional: true },
+      { name: "num_bytes", type: "value", optional: true },
     ],
   },
   {
@@ -3229,7 +3229,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "text", type: "range" },
       { name: "start_num", type: "number" },
-      { name: "num_chars", type: "number" },
+      { name: "num_chars", type: "value" },
     ],
   },
   {
@@ -3238,7 +3238,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "text", type: "range" },
       { name: "start_num", type: "number" },
-      { name: "num_bytes", type: "number" },
+      { name: "num_bytes", type: "value" },
     ],
   },
   {
@@ -3306,7 +3306,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "old_text", type: "range" },
       { name: "start_num", type: "number" },
-      { name: "num_chars", type: "number" },
+      { name: "num_chars", type: "value" },
       { name: "new_text", type: "value" },
     ],
   },
@@ -3316,7 +3316,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "old_text", type: "range" },
       { name: "start_num", type: "number" },
-      { name: "num_bytes", type: "number" },
+      { name: "num_bytes", type: "value" },
       { name: "new_text", type: "value" },
     ],
   },
