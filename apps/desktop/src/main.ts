@@ -2307,6 +2307,22 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const labelById: Record<string, string> = {
       "home.number.numberFormat": numberFormatLabel,
       "view.appearance.theme": themeLabel,
+      // Localize dropdown menu item labels (schema labels are currently English-only).
+      "format.numberFormat.general": t("command.format.numberFormat.general"),
+      "format.numberFormat.number": t("command.format.numberFormat.number"),
+      "format.numberFormat.currency": t("command.format.numberFormat.currency"),
+      "format.numberFormat.accounting": t("command.format.numberFormat.accounting"),
+      "format.numberFormat.shortDate": t("command.format.numberFormat.shortDate"),
+      "format.numberFormat.longDate": t("command.format.numberFormat.longDate"),
+      "format.numberFormat.time": t("command.format.numberFormat.time"),
+      "format.numberFormat.percent": t("command.format.numberFormat.percent"),
+      "format.numberFormat.fraction": t("command.format.numberFormat.fraction"),
+      "format.numberFormat.scientific": t("command.format.numberFormat.scientific"),
+      "format.numberFormat.text": t("command.format.numberFormat.text"),
+      "view.appearance.theme.system": t("ribbon.theme.system"),
+      "view.appearance.theme.light": t("ribbon.theme.light"),
+      "view.appearance.theme.dark": t("ribbon.theme.dark"),
+      "view.appearance.theme.highContrast": t("ribbon.theme.highContrast"),
     };
 
     // Font dropdown labels should reflect the current selection (Excel-style).

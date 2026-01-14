@@ -67,6 +67,26 @@ test("number format quick-pick strings are localizable", () => {
   assert.equal(t("command.home.number.moreFormats.custom"), "تنسيق أرقام مخصص…");
 });
 
+test("ribbon theme option strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("ribbon.theme.system"), "System");
+  assert.equal(t("ribbon.theme.light"), "Light");
+  assert.equal(t("ribbon.theme.dark"), "Dark");
+  assert.equal(t("ribbon.theme.highContrast"), "High Contrast");
+
+  setLocale("de-DE");
+  assert.equal(t("ribbon.theme.system"), "System");
+  assert.equal(t("ribbon.theme.light"), "Hell");
+  assert.equal(t("ribbon.theme.dark"), "Dunkel");
+  assert.equal(t("ribbon.theme.highContrast"), "Hoher Kontrast");
+
+  setLocale("ar");
+  assert.equal(t("ribbon.theme.system"), "النظام");
+  assert.equal(t("ribbon.theme.light"), "فاتح");
+  assert.equal(t("ribbon.theme.dark"), "داكن");
+  assert.equal(t("ribbon.theme.highContrast"), "تباين عالٍ");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");
