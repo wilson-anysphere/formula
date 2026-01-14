@@ -420,7 +420,7 @@ function getSheetIdFromSheetMap(sheet: any): string | null {
 }
 
 function readSheetViewFromSheetMap(sheet: any): SheetViewState {
-  const viewRaw = sheet?.get?.("view");
+  const viewRaw = sheet?.get?.("view") ?? sheet?.view;
 
   let frozenRowsRaw: unknown = undefined;
   if (viewRaw !== undefined) frozenRowsRaw = readYMapOrObject(viewRaw, "frozenRows");
@@ -458,7 +458,13 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
       sheet?.get?.("mergedRegions") ??
       sheet?.get?.("merged_regions") ??
       sheet?.get?.("mergedCells") ??
-      sheet?.get?.("merged_cells");
+      sheet?.get?.("merged_cells") ??
+      sheet?.mergedRanges ??
+      sheet?.merged_ranges ??
+      sheet?.mergedRegions ??
+      sheet?.merged_regions ??
+      sheet?.mergedCells ??
+      sheet?.merged_cells;
   }
   const mergedRanges = readMergedRanges(mergedRangesRaw);
 
@@ -475,7 +481,11 @@ function readSheetViewFromSheetMap(sheet: any): SheetViewState {
       sheet?.get?.("backgroundImageId") ??
       sheet?.get?.("background_image_id") ??
       sheet?.get?.("backgroundImage") ??
-      sheet?.get?.("background_image");
+      sheet?.get?.("background_image") ??
+      sheet?.backgroundImageId ??
+      (sheet as any)?.background_image_id ??
+      sheet?.backgroundImage ??
+      (sheet as any)?.background_image;
   }
   const backgroundImageId = normalizeOptionalId(backgroundRaw) ?? undefined;
 
@@ -774,13 +784,18 @@ export function bindSheetViewToCollabSession(options: {
           const prevMergedRanges =
             Array.isArray(before?.mergedRanges) && before.mergedRanges.length > 0 ? before.mergedRanges : undefined;
 
-          const drawingsBefore = Array.isArray(before?.drawings) && before.drawings.length > 0 ? before.drawings : null;
-          const drawingsAfter = Array.isArray(after.drawings) && after.drawings.length > 0 ? after.drawings : null;
+           const drawingsBefore = Array.isArray(before?.drawings) && before.drawings.length > 0 ? before.drawings : null;
+           const drawingsAfter = Array.isArray(after.drawings) && after.drawings.length > 0 ? after.drawings : null;
 
-          for (const sheet of sheetsToUpdate) {
-            // Mirror top-level frozen rows/cols for backwards compatibility.
-            if (sheet.get("frozenRows") !== after.frozenRows) sheet.set("frozenRows", after.frozenRows);
-            if (sheet.get("frozenCols") !== after.frozenCols) sheet.set("frozenCols", after.frozenCols);
+           for (const sheet of sheetsToUpdate) {
+             // Some historical docs/tests may store sheet entries as plain objects in the Y.Array
+             // rather than Y.Maps. Hydration can still read from those, but we cannot write back.
+             if (!sheet || typeof sheet.get !== "function" || typeof sheet.set !== "function" || typeof sheet.delete !== "function") {
+               continue;
+             }
+             // Mirror top-level frozen rows/cols for backwards compatibility.
+             if (sheet.get("frozenRows") !== after.frozenRows) sheet.set("frozenRows", after.frozenRows);
+             if (sheet.get("frozenCols") !== after.frozenCols) sheet.set("frozenCols", after.frozenCols);
 
             const viewMap = ensureNestedYMap(sheet, "view");
 
