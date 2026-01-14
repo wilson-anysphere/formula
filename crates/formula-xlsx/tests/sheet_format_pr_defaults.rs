@@ -65,7 +65,7 @@ fn reads_sheet_format_pr_defaults_into_model() {
     let sheet_xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14ac="{X14AC_NS}">
-  <sheetFormatPr defaultRowHeight="20" defaultColWidth="9.5" baseColWidth="8" x14ac:dyDescent="0.25"/>
+  <sheetFormatPr defaultRowHeight=" 20 " defaultColWidth=" 9.5 " baseColWidth=" 8 " x14ac:dyDescent="0.25"/>
   <sheetData/>
 </worksheet>"#
     );
@@ -75,11 +75,13 @@ fn reads_sheet_format_pr_defaults_into_model() {
     assert_eq!(workbook.sheets.len(), 1);
     assert_eq!(workbook.sheets[0].default_row_height, Some(20.0));
     assert_eq!(workbook.sheets[0].default_col_width, Some(9.5));
+    assert_eq!(workbook.sheets[0].base_col_width, Some(8));
 
     let doc = load_from_bytes(&bytes).expect("load_from_bytes");
     assert_eq!(doc.workbook.sheets.len(), 1);
     assert_eq!(doc.workbook.sheets[0].default_row_height, Some(20.0));
     assert_eq!(doc.workbook.sheets[0].default_col_width, Some(9.5));
+    assert_eq!(doc.workbook.sheets[0].base_col_width, Some(8));
 }
 
 #[test]

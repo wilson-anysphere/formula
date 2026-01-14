@@ -2679,15 +2679,15 @@ fn parse_worksheet_into_model(
                     match attr.key.as_ref() {
                         b"defaultRowHeight" => {
                             worksheet.default_row_height =
-                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                                attr.unescape_value()?.trim().parse::<f32>().ok();
                         }
                         b"defaultColWidth" => {
                             worksheet.default_col_width =
-                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                                attr.unescape_value()?.trim().parse::<f32>().ok();
                         }
                         b"baseColWidth" => {
                             worksheet.base_col_width =
-                                attr.unescape_value()?.into_owned().parse::<u16>().ok();
+                                attr.unescape_value()?.trim().parse::<u16>().ok();
                         }
                         _ => {}
                     }
