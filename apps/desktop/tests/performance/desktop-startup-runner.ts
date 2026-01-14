@@ -56,7 +56,8 @@ function usage(): string {
     "  -h, --help                       Show this help and exit",
     "",
     "Notes:",
-    "  - Uses an isolated HOME under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "  - Uses isolated profile directories under target/perf-home by default (override via FORMULA_PERF_HOME).",
+    "    Each invocation picks a unique profile root to avoid cache pollution across runs.",
     "  - Sets FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1 for stability.",
     "",
   ].join("\n");
@@ -224,6 +225,9 @@ async function main(): Promise<void> {
 
   const argv = benchKind === "shell" ? ["--startup-bench"] : [];
 
+  const perfHome = resolvePerfHome();
+  const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
+
   // eslint-disable-next-line no-console
   console.log(
     "[desktop-startup] measuring desktop startup timings (window-visible + first-render + TTI).\n" +
@@ -237,16 +241,14 @@ async function main(): Promise<void> {
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
       "- targets env (full): FORMULA_DESKTOP_{COLD,WARM}_{WINDOW_VISIBLE,FIRST_RENDER,TTI}_TARGET_MS + FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS\n" +
       "- targets env (shell overrides): FORMULA_DESKTOP_SHELL_{COLD,WARM}_{WINDOW_VISIBLE,TTI}_TARGET_MS + FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS\n" +
-      `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME)\n` +
+      `- perf-home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
+      `- profile-root: ${profileRoot}\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
   );
 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" };
-
-  const perfHome = resolvePerfHome();
-  const profileRoot = resolve(perfHome, `desktop-startup-${benchKind}-${mode}-${Date.now()}-${process.pid}`);
 
   const results: StartupMetrics[] = await runDesktopStartupIterations({
     mode,
@@ -351,6 +353,8 @@ async function main(): Promise<void> {
           generatedAt: new Date().toISOString(),
           platform: process.platform,
           binPath,
+          perfHome,
+          profileRoot,
           mode,
           benchKind,
           runs: results.length,
