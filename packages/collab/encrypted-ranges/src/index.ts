@@ -296,6 +296,12 @@ export class EncryptedRangeManager {
     // transaction so collaborative undo only captures the user's change.
     this.normalizeEncryptedRangesForUndoScope();
     const canonical = canonicalizeAddInput(range);
+    // Best-effort: accept sheet display names by resolving them to stable sheet ids.
+    // (The canonical API expects `sheetId`, but legacy codepaths may pass a name.)
+    const resolveSheetId = createSheetIdResolverFromWorkbook(this.doc);
+    const canonicalSheetId = resolveSheetId(canonical.sheetId) ?? canonical.sheetId;
+    const canonicalResolved =
+      canonicalSheetId === canonical.sheetId ? canonical : { ...canonical, sheetId: canonicalSheetId };
 
     let outId: string | null = null;
     this.transact(() => {
@@ -305,7 +311,7 @@ export class EncryptedRangeManager {
       for (let i = 0; i < arr.length; i += 1) {
         const parsed = yRangeToEncryptedRange(arr.get(i));
         if (!parsed) continue;
-        if (isSameRange(parsed, canonical)) {
+        if (isSameRange(parsed, canonicalResolved)) {
           outId = parsed.id;
           return;
         }
@@ -314,14 +320,14 @@ export class EncryptedRangeManager {
       const id = createId();
       const yRange = new Y.Map<unknown>();
       yRange.set("id", id);
-      yRange.set("sheetId", canonical.sheetId);
-      yRange.set("startRow", canonical.startRow);
-      yRange.set("startCol", canonical.startCol);
-      yRange.set("endRow", canonical.endRow);
-      yRange.set("endCol", canonical.endCol);
-      yRange.set("keyId", canonical.keyId);
-      if (canonical.createdAt != null) yRange.set("createdAt", canonical.createdAt);
-      if (canonical.createdBy != null) yRange.set("createdBy", canonical.createdBy);
+      yRange.set("sheetId", canonicalResolved.sheetId);
+      yRange.set("startRow", canonicalResolved.startRow);
+      yRange.set("startCol", canonicalResolved.startCol);
+      yRange.set("endRow", canonicalResolved.endRow);
+      yRange.set("endCol", canonicalResolved.endCol);
+      yRange.set("keyId", canonicalResolved.keyId);
+      if (canonicalResolved.createdAt != null) yRange.set("createdAt", canonicalResolved.createdAt);
+      if (canonicalResolved.createdBy != null) yRange.set("createdBy", canonicalResolved.createdBy);
 
       arr.push([yRange]);
       outId = id;
@@ -355,6 +361,9 @@ export class EncryptedRangeManager {
   update(id: string, patch: EncryptedRangeUpdatePatch): void {
     const normalizedId = normalizeId(id);
     const patchSheetId = patch.sheetId == null ? undefined : normalizeSheetId(patch.sheetId);
+    const resolveSheetId = createSheetIdResolverFromWorkbook(this.doc);
+    const patchSheetIdResolved =
+      patchSheetId == null ? undefined : resolveSheetId(patchSheetId) ?? patchSheetId;
     const patchKeyId = patch.keyId == null ? undefined : normalizeKeyId(patch.keyId);
 
     const patchStartRow = patch.startRow == null ? undefined : parseNonNegativeInt(patch.startRow, "startRow");
@@ -406,7 +415,7 @@ export class EncryptedRangeManager {
         }
 
         const next: EncryptedRangeAddInput = {
-          sheetId: patchSheetId ?? existing.sheetId,
+          sheetId: patchSheetIdResolved ?? existing.sheetId,
           startRow: patchStartRow ?? existing.startRow,
           startCol: patchStartCol ?? existing.startCol,
           endRow: patchEndRow ?? existing.endRow,
@@ -418,7 +427,7 @@ export class EncryptedRangeManager {
         // Throws if invalid.
         const canonical = canonicalizeAddInput(next);
 
-        if (patchSheetId != null) yMap.set("sheetId", canonical.sheetId);
+        if (patchSheetIdResolved != null) yMap.set("sheetId", canonical.sheetId);
         if (patchStartRow != null) yMap.set("startRow", canonical.startRow);
         if (patchStartCol != null) yMap.set("startCol", canonical.startCol);
         if (patchEndRow != null) yMap.set("endRow", canonical.endRow);
