@@ -27,8 +27,6 @@ aes = "0.8"
 base64 = "0.22"
 cfb = "0.10"
 encoding_rs = "0.8"
-# MS-OFFCRYPTO Standard (CryptoAPI) uses MD5 in its password verifier/KDF.
-md-5 = "0.10"
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
