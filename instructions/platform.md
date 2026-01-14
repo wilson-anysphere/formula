@@ -68,9 +68,10 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 3. **Clipboard:** Rich clipboard support (HTML, RTF, images)
    - Frontend entry point: `apps/desktop/src/clipboard/platform/provider.js`
    - Desktop prefers custom Rust IPC commands `clipboard_read` / `clipboard_write` (multi-format),
-      with fallbacks to:
-      - legacy IPC command names: `read_clipboard` / `write_clipboard` (older builds / main-thread bridging on macOS)
-      - `navigator.clipboard` (Web Clipboard API)
+     with a plain-text-only fallback for oversized text: `clipboard_write_text`,
+       with fallbacks to:
+       - legacy IPC command names: `read_clipboard` / `write_clipboard` (older builds / main-thread bridging on macOS)
+       - `navigator.clipboard` (Web Clipboard API)
       - Note: the legacy Tauri clipboard-manager plugin API (`globalThis.__TAURI__.clipboard.readText` / `writeText`)
         is intentionally not enabled in hardened builds to avoid unbounded IPC payloads.
    - Supported formats: `text/plain`, `text/html`, `text/rtf`, `image/png`.
@@ -168,8 +169,8 @@ and restricted to the main window + trusted app-local origins) rather than grant
 shell plugin (`shell:allow-open`).
 
 Note: the desktop app intentionally does **not** grant the clipboard-manager plugin permission surface.
-Clipboard reads/writes go through custom Rust commands (`clipboard_read` / `clipboard_write`) which enforce
-trusted-origin + window checks and apply resource limits during deserialization.
+Clipboard reads/writes go through custom Rust commands (`clipboard_read` / `clipboard_write` / `clipboard_write_text`)
+which enforce trusted-origin + window checks and apply resource limits during deserialization.
 
 ### Validating permission identifiers against the installed Tauri toolchain
 

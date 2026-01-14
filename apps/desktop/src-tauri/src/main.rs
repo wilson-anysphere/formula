@@ -1864,6 +1864,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
+            clipboard::clipboard_write_text,
             ed25519_verifier::verify_ed25519_signature,
             commands::open_workbook,
             commands::inspect_workbook_encryption,

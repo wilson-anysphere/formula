@@ -198,7 +198,7 @@ fn clipboard_mod_privileged_commands_enforce_origin_guards() {
     let clipboard_mod = read_repo_file("src/clipboard/mod.rs");
     let file = "src/clipboard/mod.rs";
 
-    for cmd in ["clipboard_read", "clipboard_write"] {
+    for cmd in ["clipboard_read", "clipboard_write", "clipboard_write_text"] {
         assert_ipc_origin_checks(&clipboard_mod, file, cmd);
     }
 }

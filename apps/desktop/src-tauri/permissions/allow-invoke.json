@@ -12,6 +12,7 @@
           "check_for_updates",
           "clipboard_read",
           "clipboard_write",
+          "clipboard_write_text",
           "collab_encryption_key_delete",
           "collab_encryption_key_get",
           "collab_encryption_key_list",

@@ -1099,7 +1099,8 @@ Size limits (defense-in-depth):
 
 - Native clipboard reads/writes may encounter extremely large payloads (notably screenshots). To keep paste responsive and avoid huge IPC/base64 transfers, the desktop app applies best-effort size caps:
   - `image/png`: **5 MiB** (raw PNG bytes; base64 over IPC is larger)
-  - `text/plain`, `text/html`, `text/rtf`: **2 MiB** (UTF-8 bytes)
+  - `text/html`, `text/rtf`, and rich `text/plain` payloads: **2 MiB** (UTF-8 bytes)
+  - Large plain text writes (`clipboard_write_text` fallback): **10 MiB** (UTF-8 bytes)
 - Oversized formats are **omitted** on read (no error).
 - Clipboard writes validate payload sizes and may omit/cap rich formats (or fail validation) depending on the code path.
 
@@ -1117,6 +1118,7 @@ Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
 - Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, image_png_base64?: string }`
 - Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, image_png_base64? } })` → `void`
+- Large plain text write (fallback): `invoke("clipboard_write_text", { text })` → `void`
 - Legacy read fallback: `invoke("read_clipboard")` → `{ text?: string, html?: string, rtf?: string, image_png_base64?: string }`
 - Legacy write fallback: `invoke("write_clipboard", { text, html?, rtf?, image_png_base64? })` → `void`
 
@@ -1143,7 +1145,7 @@ Known platform limitations:
 Security boundaries:
 
 - **IPC origin hardening (defense-in-depth):** clipboard commands (`clipboard_read`, `clipboard_write`, and legacy
-  `read_clipboard` / `write_clipboard`) enforce **main-window + trusted app origin** checks in Rust via
+  `clipboard_write_text`, and legacy `read_clipboard` / `write_clipboard`) enforce **main-window + trusted app origin** checks in Rust via
   `apps/desktop/src-tauri/src/ipc_origin.rs` (trusted: `localhost` / `*.localhost` / `127.0.0.1` / `::1`, best-effort
   `file://`; denied: remote hosts, `data:`).
 - **DLP enforcement happens before writing**: grid copy/cut paths perform DLP checks before touching the system clipboard:

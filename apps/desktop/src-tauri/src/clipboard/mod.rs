@@ -40,6 +40,14 @@ pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = MAX_PNG_BYTES;
 pub const MAX_RICH_TEXT_BYTES: usize = MAX_TEXT_BYTES;
 
+/// Maximum number of UTF-8 bytes accepted for plain-text-only clipboard writes over IPC.
+///
+/// The rich clipboard IPC path (`clipboard_write`) is capped at [`MAX_TEXT_BYTES`] (2 MiB) to keep
+/// multi-format payloads small. Some operations can legitimately exceed that size (e.g. copying a
+/// very large worksheet range as plain text). This separate cap allows best-effort large
+/// `text/plain` writes while still bounding allocations during deserialization.
+pub const MAX_PLAINTEXT_WRITE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+
 // We support optional `data:*;base64,` prefixes for backwards compatibility, but we intentionally
 // scan only a small prefix for the comma separator so malformed inputs like `data:AAAA...` don't
 // force an O(n) search over huge payloads.
@@ -715,6 +723,46 @@ pub async fn clipboard_write(
     #[cfg(not(target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(move || write(&payload).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+/// Best-effort plain-text clipboard write for payloads larger than [`MAX_TEXT_BYTES`].
+///
+/// This is used by the frontend clipboard provider as a fallback when the text is too large to be
+/// sent over the rich multi-format clipboard IPC path. It is still bounded to avoid unbounded
+/// allocations from a compromised WebView.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn clipboard_write_text(
+    window: tauri::WebviewWindow,
+    text: LimitedString<MAX_PLAINTEXT_WRITE_BYTES>,
+) -> Result<(), String> {
+    let url = window.url().map_err(|err| err.to_string())?;
+    crate::ipc_origin::ensure_main_window(window.label(), "clipboard access", crate::ipc_origin::Verb::Is)?;
+    crate::ipc_origin::ensure_trusted_origin(&url, "clipboard access", crate::ipc_origin::Verb::Is)?;
+    crate::ipc_origin::ensure_stable_origin(&window, "clipboard access", crate::ipc_origin::Verb::Is)?;
+
+    let payload = ClipboardWritePayload {
+        text: Some(text.into_inner()),
+        ..Default::default()
+    };
+
+    // Dispatch to main thread on macOS (AppKit is not thread-safe).
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager as _;
+        return window
+            .app_handle()
+            .run_on_main_thread(move || platform::write(&payload))
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        tauri::async_runtime::spawn_blocking(move || platform::write(&payload).map_err(|e| e.to_string()))
             .await
             .map_err(|e| e.to_string())?
     }

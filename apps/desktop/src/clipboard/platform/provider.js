@@ -24,6 +24,9 @@ import { getTauriInvokeOrNull } from "../../tauri/invoke.js";
 // Keep this in sync with the Rust backend clipboard guards (`MAX_PNG_BYTES`).
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
 const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF / text)
+// Large `text/plain` payloads can legitimately exceed `MAX_RICH_TEXT_BYTES` (e.g. huge range copies).
+// Keep this in sync with the Rust backend (`MAX_PLAINTEXT_WRITE_BYTES`).
+const MAX_PLAINTEXT_WRITE_BYTES = 10 * 1024 * 1024; // 10MB (UTF-8 bytes)
 
 // Export the effective numeric clipboard caps so tests (and other JS helpers) can assert
 // they stay in sync with the Rust backend (`apps/desktop/src-tauri/src/clipboard/mod.rs`).
@@ -760,12 +763,29 @@ function createTauriClipboardProvider() {
       // Avoid sending extremely large plain-text payloads over the rich clipboard IPC path.
       // For oversized payloads, best-effort write plain text only.
       if (hasText && !textWithinLimit) {
+        const withinPlainTextLimit = utf8WithinLimit(text, MAX_PLAINTEXT_WRITE_BYTES);
+
+        // 0) Legacy plain-text Tauri clipboard API (older builds only).
         const legacyWriteText = safeGetProp(tauriClipboard, "writeText");
-        if (typeof legacyWriteText === "function") {
+        if (withinPlainTextLimit && typeof legacyWriteText === "function") {
           try {
             await legacyWriteText.call(tauriClipboard, text);
             if (path) {
               path.push("legacy-plaintext:tauriClipboard.writeText");
+              clipboardDebug(true, "write path:", path.join(" -> "));
+            }
+            return;
+          } catch {
+            // Fall through to IPC/web clipboard fallback below.
+          }
+        }
+
+        // 1) Best-effort large plain-text write via an explicit, bounded IPC command (newer builds).
+        if (withinPlainTextLimit && typeof tauriInvoke === "function") {
+          try {
+            await tauriInvoke("clipboard_write_text", { text });
+            if (path) {
+              path.push("native-ipc:clipboard_write_text");
               clipboardDebug(true, "write path:", path.join(" -> "));
             }
             return;
