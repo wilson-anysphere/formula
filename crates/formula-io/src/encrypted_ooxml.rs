@@ -970,7 +970,7 @@ fn agile_decrypt_package_key(
             .get(..password_key.hash_size)
             .ok_or_else(|| DecryptError::InvalidInfo("hash output shorter than hashSize".into()))?;
 
-        if expected_hash != verifier_hash.as_slice() {
+        if !ct_eq(expected_hash, verifier_hash.as_slice()) {
             return Err(DecryptError::InvalidPassword);
         }
 
@@ -1049,6 +1049,20 @@ fn hash_bytes(alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
         HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
         HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
     }
+}
+
+/// Compare two byte slices in constant time.
+///
+/// Use this for password verifier digests to avoid timing side channels.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 fn required_attr<'a>(node: roxmltree::Node<'a, '_>, attr: &str) -> Result<&'a str, DecryptError> {

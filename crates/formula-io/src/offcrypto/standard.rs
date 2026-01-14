@@ -493,6 +493,20 @@ fn digest_len(alg_id_hash: u32) -> Result<usize, OffcryptoError> {
     }
 }
 
+/// Compare two byte slices in constant time.
+///
+/// Use this for password verifier digests to avoid timing side channels.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Verify a password against the Standard (CryptoAPI) `EncryptionVerifier` structure.
 ///
 /// Returns `Ok(true)` when the password is correct, `Ok(false)` when the password is incorrect, and
@@ -582,7 +596,7 @@ fn verifier_hash_matches(
             verifier_hash_size: info.verifier.verifier_hash_size,
         });
     }
-    Ok(expected_full[0..verifier_hash_size] == *verifier_hash)
+    Ok(ct_eq(&expected_full[0..verifier_hash_size], verifier_hash))
 }
 
 fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
