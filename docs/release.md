@@ -7,7 +7,7 @@ macOS (Apple Silicon + Intel), Windows, and Linux and uploads them to a **draft*
 Platform/architecture expectations for a release:
 
 - **macOS:** **universal** build (Intel + Apple Silicon): `.dmg` (manual installer) + updater tarball
-  (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (auto-update payload).
+  (`*.app.tar.gz`) (auto-update payload).
 - **Windows:** **x64** + **ARM64**: `.msi` (manual installer **and** auto-update payload) + `.exe`
   (manual installer) for each architecture.
 - **Linux:** **x86_64** + **ARM64**: `.AppImage` (auto-update payload; also a portable/manual option)
@@ -932,7 +932,7 @@ Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged 
 enforced; see `docs/desktop-updater-target-mapping.md`):
 
 - **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64` → macOS updater tarball
-  (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
+  (`*.app.tar.gz`).
 - **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
 - **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
@@ -1237,7 +1237,7 @@ Note: the in-app updater downloads whatever URLs `latest.json` points at (per-pl
 auto-update artifact is not always the same file you’d choose for manual install (see
 `docs/desktop-updater-target-mapping.md`):
 
-- macOS: updater uses a tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
+- macOS: updater uses a tarball (`*.app.tar.gz`) (not the `.dmg`)
 - Linux: updater uses `*.AppImage` (not `.deb`/`.rpm`)
 - Windows: updater uses the **`.msi`** installer referenced in `latest.json` (the NSIS `.exe` is shipped for manual install/downgrade)
 
@@ -1245,8 +1245,8 @@ Quick reference (auto-update vs manual install):
 
 | Target key (`latest.json.platforms`) | Auto-update asset (`platforms[key].url`) | Manual install |
 | --- | --- | --- |
-| `darwin-x86_64` | updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) | `.dmg` |
-| `darwin-aarch64` | updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) | `.dmg` |
+| `darwin-x86_64` | updater tarball (`*.app.tar.gz`) | `.dmg` |
+| `darwin-aarch64` | updater tarball (`*.app.tar.gz`) | `.dmg` |
 | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) | `.msi` / `.exe` (NSIS) |
 | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) | `.msi` / `.exe` (NSIS) |
 | `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
@@ -1286,7 +1286,7 @@ format the updater will apply:
       - (Recommended) confirm each platform entry has a non-empty `signature` string:
         - `jq -r '.platforms | to_entries[] | select((.value.signature // "") == "") | .key' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
-   - macOS: updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** `.dmg`)
+   - macOS: updater tarball (`*.app.tar.gz`) (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
    - Multi-arch correctness:
@@ -1355,14 +1355,14 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
      - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
        - Expected (one per target): `provenance-universal-apple-darwin.intoto.jsonl`, `provenance-x86_64-pc-windows-msvc.intoto.jsonl`, `provenance-aarch64-pc-windows-msvc.intoto.jsonl`, `provenance-x86_64-unknown-linux-gnu.intoto.jsonl`, `provenance-aarch64-unknown-linux-gnu.intoto.jsonl`
      - Note: GitHub also shows auto-generated “Source code (zip)” / “Source code (tar.gz)” entries; those are **not** installers or updater payloads.
-     - macOS (**universal**): `.dmg` (installer) + updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
+     - macOS (**universal**): `.dmg` (installer) + updater tarball (`*.app.tar.gz`)
      - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
      - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
      - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `amd64` vs `arm64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
-   - macOS: `.dmg.sig` and updater tarball signature (`*.tar.gz.sig`/`*.tgz.sig`; usually `.app.tar.gz.sig`)
+   - macOS: `.dmg.sig` and updater tarball signature (`*.app.tar.gz.sig`)
    - Windows (each architecture): `.msi.sig` and `.exe.sig`
    - Linux (each architecture): `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
 
@@ -1413,8 +1413,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     Note: `gh attestation verify` still verifies against Sigstore trust roots/certificates; the
     `provenance-*.intoto.jsonl` files are the raw Sigstore bundles produced during the workflow run.
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-x86_64` (macOS Intel; points at the updater tarball)
-   - `darwin-aarch64` (macOS Apple Silicon; points at the updater tarball)
+   - `darwin-x86_64` (macOS Intel; points at the updater tarball — `*.app.tar.gz`)
+   - `darwin-aarch64` (macOS Apple Silicon; points at the updater tarball — `*.app.tar.gz`)
    - `windows-x86_64` (Windows x64)
    - `windows-aarch64` (Windows ARM64)
    - `linux-x86_64` (Linux x86_64)
@@ -1438,7 +1438,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     ```
 
    Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** `.dmg`)
+   - `darwin-*` → updater tarball (`*.app.tar.gz`) (**not** `.dmg`)
    - `windows-*` → `*.msi` (updater runs the Windows Installer; this repo requires the manifest to reference the MSI)
    - `linux-*` → `*.AppImage`
 
@@ -1449,10 +1449,9 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
    Run `lipo -info` on the bundled executable (`Formula.app/Contents/MacOS/formula-desktop`):
 
     ```bash
-     # Option A: from the updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
-     # Avoid picking Linux `.AppImage.tar.gz` if you downloaded all assets into one folder.
-     app_tgz="$(ls *.app.tar.gz *.app.tgz *.tar.gz *.tgz 2>/dev/null | grep -v -i '\\.appimage\\.' | head -n 1)"
-     test -n "$app_tgz" || { echo "No macOS updater tarball found (*.app.tar.gz/*.tar.gz/*.tgz)" >&2; exit 1; }
+    # Option A: from the updater tarball (`*.app.tar.gz`).
+    app_tgz="$(ls *.app.tar.gz 2>/dev/null | head -n 1 || true)"
+    test -n "$app_tgz" || { echo "No macOS updater tarball found (*.app.tar.gz)" >&2; exit 1; }
      tar -xzf "$app_tgz"
      lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
@@ -1470,8 +1469,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
      hdiutil detach "$mnt"
      ```
 
-    Tip: on macOS, you can run the repo helper to validate the DMG (and the updater tarball if
-    present), including a universal `lipo` check:
+    Tip: on macOS, you can run the repo helper to validate the DMG (and the updater tarball, if
+    present — `*.app.tar.gz`), including a universal `lipo` check:
 
     ```bash
     bash scripts/validate-macos-bundle.sh --dmg "$dmg"
