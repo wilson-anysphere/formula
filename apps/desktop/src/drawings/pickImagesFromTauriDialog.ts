@@ -1,7 +1,7 @@
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 import { getTauriDialogOpenOrNull } from "../tauri/api";
 
-export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"] as const;
+export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"] as const;
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 

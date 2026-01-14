@@ -32,7 +32,7 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(open).toHaveBeenCalledTimes(1);
     expect((open.mock.calls[0]?.[0] as any)?.multiple).toBe(true);
     const filters = (open.mock.calls[0]?.[0] as any)?.filters ?? [];
-    expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+    expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"]);
 
     expect(calls.map((c) => c.cmd)).toEqual(["stat_file", "read_binary_file"]);
     expect(files).toHaveLength(1);
@@ -138,13 +138,34 @@ describe("pickLocalImageFiles (Tauri)", () => {
 
     expect(open).toHaveBeenCalledTimes(1);
     const filters = (open.mock.calls[0]?.[0] as any)?.filters ?? [];
-    expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+    expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"]);
 
     expect(calls.map((c) => c.cmd)).toEqual(["stat_file", "read_binary_file"]);
     expect(files).toHaveLength(1);
     expect(files[0]!.name).toBe("c.webp");
     expect(files[0]!.type).toBe("image/webp");
     expect(files[0]!.size).toBe(2);
+  });
+
+  it("infers image/svg+xml for .svg files", async () => {
+    const open = vi.fn(async () => ["/tmp/icon.svg"]);
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "stat_file") return { sizeBytes: 4 };
+      if (cmd === "read_binary_file") {
+        // eslint-disable-next-line no-undef
+        return Buffer.from([0, 1, 2, 3]).toString("base64");
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { dialog: { open }, core: { invoke } };
+
+    const files = await pickLocalImageFiles({ multiple: true });
+    expect(files).toHaveLength(1);
+    expect(files[0]!.name).toBe("icon.svg");
+    expect(files[0]!.type).toBe("image/svg+xml");
+    expect(files[0]!.size).toBe(4);
   });
 
   it("returns an oversized placeholder File when stat_file reports an oversized image", async () => {

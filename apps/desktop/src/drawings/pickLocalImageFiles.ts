@@ -153,6 +153,8 @@ function guessImageMimeType(name: string): string {
       return "image/bmp";
     case "webp":
       return "image/webp";
+    case "svg":
+      return "image/svg+xml";
     default:
       return "application/octet-stream";
   }
