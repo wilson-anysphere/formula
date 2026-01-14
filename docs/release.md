@@ -1016,7 +1016,10 @@ wired to the correct **updater-consumed** artifacts:
    - Windows: `.msi` (preferred) or `.exe`
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
-5. (Optional) Verify downloaded updater assets against `SHA256SUMS.txt`.
+5. (Optional) Verify the manifest signature locally:
+   - `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
+   - Note: this uses the updater public key embedded in `apps/desktop/src-tauri/tauri.conf.json`.
+6. (Optional) Verify downloaded updater assets against `SHA256SUMS.txt`.
 
 ### One-liner: release smoke test
 
