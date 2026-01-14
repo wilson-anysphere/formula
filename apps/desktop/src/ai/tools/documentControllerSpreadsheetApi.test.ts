@@ -63,6 +63,23 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getStackDepths().undo).toBe(before);
   });
 
+  it("does not create a history entry when setCell is a no-op for formulas (even when computed values are available)", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "B1", 1);
+    controller.setCellFormula("Sheet1", "A1", "B1+1");
+    const before = controller.getStackDepths().undo;
+
+    const api = new DocumentControllerSpreadsheetApi(controller, {
+      getCellComputedValueForSheet: (sheetId, cell) => {
+        if (sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) return 2;
+        return null;
+      },
+    });
+    api.setCell({ sheet: "Sheet1", row: 1, col: 1 }, { value: null, formula: "=B1+1" });
+
+    expect(controller.getStackDepths().undo).toBe(before);
+  });
+
   it("roundtrips supported formatting between ai-tools CellFormat and DocumentController styles", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);

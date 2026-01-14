@@ -593,11 +593,19 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   setCell(address: CellAddress, cell: CellData): void {
     const sheetId = this.resolveSheetIdOrThrow(address.sheet);
     const coord = toControllerCoord(address);
-    const beforeCell = this.getCell(address);
+    // `getCell()` may surface a computed value for formula cells (when a computed-value
+    // provider is installed). For write no-op detection we need to compare against the
+    // stored workbook content (DocumentController semantics: formula cells typically store
+    // `value:null`). Otherwise a stable formula could be treated as changed simply because
+    // its computed value is non-null.
+    const beforeState = this.controller.getCell(sheetId, coord) as any;
+    const beforeValue = beforeState?.value ?? null;
+    const beforeFormula = normalizeFormula(beforeState?.formula);
     const desiredFormula = normalizeFormula(cell.formula);
     const desiredValue = desiredFormula ? null : (cell.value ?? null);
-    const shouldUpdateContent =
-      !cellValuesEqual(beforeCell.value, desiredValue) || (beforeCell.formula ?? undefined) !== desiredFormula;
+    const shouldUpdateContent = desiredFormula
+      ? beforeFormula !== desiredFormula
+      : !cellValuesEqual(beforeValue, desiredValue) || beforeFormula !== desiredFormula;
 
     if (!shouldUpdateContent && (!cell.format || Object.keys(cell.format).length === 0)) {
       return;
