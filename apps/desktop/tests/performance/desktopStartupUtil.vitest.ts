@@ -12,6 +12,7 @@ import {
   resolveDesktopStartupMode,
   resolveDesktopStartupRunEnv,
   resolveDesktopStartupTargets,
+  runBenchmark,
   sleep,
 } from './desktopStartupUtil.ts';
 
@@ -260,6 +261,12 @@ describe('desktopStartupUtil sleep', () => {
     const controller = new AbortController();
     controller.abort();
     await expect(sleep(1000, controller.signal)).rejects.toThrow('aborted');
+  });
+});
+
+describe('desktopStartupUtil benchmark re-exports', () => {
+  it('re-exports runBenchmark', () => {
+    expect(typeof runBenchmark).toBe('function');
   });
 });
 
