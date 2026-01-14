@@ -494,6 +494,13 @@ export SCCACHE_DIR=/shared/sccache  # Shared directory
 export SCCACHE_CACHE_SIZE="50G"     # Shared cache limit
 ```
 
+If `sccache` is unavailable or misconfigured (for example, `RUSTC_WRAPPER` is set globally but the
+binary or cache directory isn't present), you can temporarily disable it for a single command:
+
+```bash
+RUSTC_WRAPPER= bash scripts/cargo_agent.sh test -p formula-xlsx --tests --no-run --locked
+```
+
 ---
 
 ## Helper Scripts
