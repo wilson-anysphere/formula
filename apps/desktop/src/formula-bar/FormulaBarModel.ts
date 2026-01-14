@@ -1,5 +1,5 @@
 import { explainFormulaError } from "./errors.js";
-import { getFunctionCallContext } from "./highlight/functionContext.js";
+import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
@@ -302,7 +302,8 @@ export class FormulaBarModel {
       };
     }
 
-    let context = getFunctionCallContext(this.#draft, this.#cursorStart);
+    let active = getActiveArgumentSpan(this.#draft, this.#cursorStart);
+    let context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
 
     // Excel UX: keep showing the innermost function hint when the caret is just
     // after a closing paren (e.g. "=ROUND(1,2)|"). The simple tokenizer-based
@@ -314,7 +315,8 @@ export class FormulaBarModel {
       this.#cursorStart > 0 &&
       this.#draft[this.#cursorStart - 1] === ")"
     ) {
-      context = getFunctionCallContext(this.#draft, this.#cursorStart - 1);
+      active = getActiveArgumentSpan(this.#draft, this.#cursorStart - 1);
+      context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
     }
 
     if (!context) return null;
