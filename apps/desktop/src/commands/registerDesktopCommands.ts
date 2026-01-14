@@ -256,6 +256,11 @@ export function registerDesktopCommands(params: {
         app.focus();
         return;
       }
+      if (typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true) {
+        safeShowToast("Read-only: you don't have permission to fill cells.", "warning");
+        app.focus();
+        return;
+      }
 
       const selectionRanges = app.getSelectionRanges();
       if (!Array.isArray(selectionRanges) || selectionRanges.length === 0) {

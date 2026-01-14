@@ -1803,6 +1803,15 @@ export function registerBuiltinCommands(params: {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
       if (isEditingFn()) return;
+      if (isReadOnlyFn()) {
+        try {
+          showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+        } catch {
+          // Best-effort (toast root missing in tests/headless harnesses).
+        }
+        focusApp();
+        return;
+      }
       const items = getPasteSpecialMenuItems();
       const picked = await showQuickPick(
         items.map((item) => ({ label: item.label, value: item.mode })),
