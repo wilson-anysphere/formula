@@ -2,12 +2,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+import { buildBenchmarkResultFromValues } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
-  percentile,
   repoRoot,
   resolvePerfHome,
   runOnce as runDesktopOnce,
@@ -370,12 +370,12 @@ async function main(): Promise<void> {
     console.log(`[desktop-memory]   idleRssMb=${rss.toFixed(1)}MB`);
   }
 
-  const sorted = [...results].sort((a, b) => a - b);
+  const stats = buildBenchmarkResultFromValues('desktop.memory.idle_rss_mb.p95', results, targetMb, 'mb');
   const summary: Summary = {
     runs: results.length,
     rssMb: {
-      p50: percentile(sorted, 0.5),
-      p95: percentile(sorted, 0.95),
+      p50: stats.median,
+      p95: stats.p95,
       targetMb,
     },
     enforce,

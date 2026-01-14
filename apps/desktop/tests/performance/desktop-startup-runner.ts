@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { buildBenchmarkResultFromValues } from "./benchmark.ts";
 import {
   defaultDesktopBinPath,
-  percentile,
   buildDesktopStartupProfileRoot,
   parseDesktopStartupMode,
   formatPerfPath,
@@ -271,19 +271,15 @@ async function main(): Promise<void> {
     },
   });
 
-  const windowVisible = results.map((r) => r.windowVisibleMs).sort((a, b) => a - b);
   const firstRenderValues =
     benchKind === "full"
       ? results
           .map((r) => r.firstRenderMs)
           .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-          .sort((a, b) => a - b)
       : [];
   const webviewLoadedValues = results
     .map((r) => r.webviewLoadedMs)
-    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-    .sort((a, b) => a - b);
-  const tti = results.map((r) => r.ttiMs).sort((a, b) => a - b);
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 
   if (benchKind === "full" && firstRenderValues.length !== results.length) {
     throw new Error(
@@ -309,34 +305,55 @@ async function main(): Promise<void> {
     );
   }
 
+  const windowVisibleStats = buildBenchmarkResultFromValues(
+    "window_visible_ms",
+    results.map((r) => r.windowVisibleMs),
+    windowTargetMs,
+    "ms",
+  );
+  const ttiStats = buildBenchmarkResultFromValues(
+    "tti_ms",
+    results.map((r) => r.ttiMs),
+    ttiTargetMs,
+    "ms",
+  );
+  const firstRenderStats =
+    benchKind === "full" && firstRenderValues.length > 0
+      ? buildBenchmarkResultFromValues("first_render_ms", firstRenderValues, firstRenderTargetMs, "ms")
+      : null;
+  const webviewLoadedStats =
+    webviewLoadedValues.length >= minWebviewLoadedRuns
+      ? buildBenchmarkResultFromValues("webview_loaded_ms", webviewLoadedValues, webviewLoadedTargetMs, "ms")
+      : null;
+
   const summary: Summary = {
     mode,
     runs: results.length,
     windowVisible: {
-      p50: percentile(windowVisible, 0.5),
-      p95: percentile(windowVisible, 0.95),
+      p50: windowVisibleStats.median,
+      p95: windowVisibleStats.p95,
       targetMs: windowTargetMs,
     },
     firstRender:
-      benchKind === "full" && firstRenderValues.length > 0
+      firstRenderStats
         ? {
-            p50: percentile(firstRenderValues, 0.5),
-            p95: percentile(firstRenderValues, 0.95),
+            p50: firstRenderStats.median,
+            p95: firstRenderStats.p95,
             targetMs: firstRenderTargetMs,
           }
         : { p50: null, p95: null, targetMs: null },
-    ...(webviewLoadedValues.length >= minWebviewLoadedRuns
+    ...(webviewLoadedStats
       ? {
           webviewLoaded: {
-            p50: percentile(webviewLoadedValues, 0.5),
-            p95: percentile(webviewLoadedValues, 0.95),
+            p50: webviewLoadedStats.median,
+            p95: webviewLoadedStats.p95,
             targetMs: webviewLoadedTargetMs,
           },
         }
       : {}),
     tti: {
-      p50: percentile(tti, 0.5),
-      p95: percentile(tti, 0.95),
+      p50: ttiStats.median,
+      p95: ttiStats.p95,
       targetMs: ttiTargetMs,
     },
     enforce,
