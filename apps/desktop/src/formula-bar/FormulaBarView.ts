@@ -946,10 +946,15 @@ export class FormulaBarView {
               return;
             }
 
-             this.#clearNameBoxError();
-             address.blur();
-             return;
-           }
+            this.#clearNameBoxError();
+            // Blur after navigating so follow-up renders can update the value. Since navigation
+            // happens synchronously inside `onGoTo` (SpreadsheetApp immediately calls `setActiveCell`
+            // while the input is still focused), also apply the latest `#nameBoxValue` so the Name Box
+            // reflects the new selection immediately after focus leaves the input.
+            address.blur();
+            address.value = this.#nameBoxValue;
+            return;
+          }
           if (e.key === "Escape") {
             e.preventDefault();
             this.#closeNameBoxDropdown({ restoreAddress: true, reason: "escape" });
@@ -1020,6 +1025,7 @@ export class FormulaBarView {
         this.#clearNameBoxError();
         // Blur after navigating so follow-up renders can update the value.
         address.blur();
+        address.value = this.#nameBoxValue;
         return;
       }
 
@@ -3237,6 +3243,10 @@ export class FormulaBarView {
     this.#clearNameBoxError();
     // Blur after navigating so follow-up renders can update the value.
     this.#addressEl.blur();
+    // `onGoTo` implementations (e.g. SpreadsheetApp) update the Name Box value via `setActiveCell`
+    // synchronously while the input is still focused. Explicitly apply the updated `#nameBoxValue`
+    // after blurring so the rendered text reflects the new selection immediately.
+    this.#addressEl.value = this.#nameBoxValue;
   }
 
   #nameBoxDropdownOptionId(item: NameBoxDropdownItem): string {

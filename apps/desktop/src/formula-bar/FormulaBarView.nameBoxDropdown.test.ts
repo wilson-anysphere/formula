@@ -11,7 +11,14 @@ describe("FormulaBarView name box dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const onGoTo = vi.fn(() => true);
+    let view: FormulaBarView | null = null;
+    const onGoTo = vi.fn((reference: string) => {
+      if (reference === "Table1[#All]" && view) {
+        // SpreadsheetApp updates the FormulaBarView selection synchronously during navigation.
+        view.setActiveCell({ address: "A1", input: "", value: "", nameBox: "A1:D10" });
+      }
+      return true;
+    });
     const provider = {
       getItems: () => [
         {
@@ -31,7 +38,7 @@ describe("FormulaBarView name box dropdown", () => {
       ],
     };
 
-    const view = new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+    view = new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
     const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]');
@@ -62,8 +69,6 @@ describe("FormulaBarView name box dropdown", () => {
     expect(onGoTo).toHaveBeenCalledTimes(1);
     expect(onGoTo).toHaveBeenCalledWith("Table1[#All]");
 
-    // Simulate the app updating the selection after navigation.
-    view.setActiveCell({ address: "A1", input: "", value: "", nameBox: "A1:D10" });
     expect(address!.value).toBe("A1:D10");
     expect(popup!.hidden).toBe(true);
     expect(address!.getAttribute("aria-expanded")).toBe("false");
