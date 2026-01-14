@@ -333,16 +333,19 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     //
     // This is diagnostic-only; keep output small + stable by:
     // - de-duplicating
+    // - sorting
     // - capping the total output size (so diagnostics remain readable)
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
     let maybe_push = |hint: String, out: &mut Vec<String>, seen: &mut HashSet<String>| -> bool {
-        if seen.insert(hint.clone()) {
-            out.push(hint);
-            return out.len() >= MAX_HINTS;
+        if seen.contains(hint.as_str()) {
+            return false;
         }
-        false
+        // Keep both a copy in the `seen` set (for de-duping) and in the output list.
+        seen.insert(hint.clone());
+        out.push(hint);
+        out.len() >= MAX_HINTS
     };
 
     if let Some(node) = find_chart_type_node(doc) {
