@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const runLimitedPath = path.join(repoRoot, "scripts", "run_limited.sh");
 const xvfbSafePath = path.join(repoRoot, "scripts", "xvfb-run-safe.sh");
+const cargoAgentPath = path.join(repoRoot, "scripts", "cargo_agent.sh");
 
 const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
 const hasBash = !bashProbe.error && bashProbe.status === 0;
@@ -43,6 +44,42 @@ exit 0
 
   return { tmpDir, binDir };
 }
+
+test("cargo_agent clears RUSTUP_TOOLCHAIN even when run_limited is disabled", { skip: !hasBash }, () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), "formula-rustup-toolchain-cleared-cargo-agent-"));
+  const cargoHome = path.join(tmpDir, "cargo-home");
+  const binDir = path.join(cargoHome, "bin");
+  mkdirSync(binDir, { recursive: true });
+
+  writeExecutable(
+    binDir,
+    "cargo",
+    `#!/usr/bin/env bash
+echo "RUSTUP_TOOLCHAIN=\${RUSTUP_TOOLCHAIN-}"
+`,
+  );
+
+  try {
+    const proc = spawnSync("bash", [cargoAgentPath, "check", "--quiet"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        RUSTUP_TOOLCHAIN: "stable",
+        // Ensure cargo_agent invokes cargo directly (no run_limited wrapper), so the clearing happens
+        // in cargo_agent itself.
+        FORMULA_CARGO_LIMIT_AS: "off",
+        // Force our fake cargo to be the one executed.
+        CARGO_HOME: cargoHome,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+      },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.equal(proc.stdout.trim(), "RUSTUP_TOOLCHAIN=");
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 test("run_limited clears RUSTUP_TOOLCHAIN for rustc invocations", { skip: !hasBash }, () => {
   const { tmpDir, binDir } = makeFakeTools();
