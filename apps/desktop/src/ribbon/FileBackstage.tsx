@@ -3,6 +3,7 @@ import React from "react";
 import type { RibbonFileActions } from "./ribbonSchema.js";
 import { RibbonIcon, type RibbonIconId } from "./icons/index.js";
 import { getRibbonUiStateSnapshot, subscribeRibbonUiState } from "./ribbonUiState.js";
+import { t } from "../i18n/index.js";
 
 export interface FileBackstageProps {
   open: boolean;
@@ -127,21 +128,21 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       {
         commandId: "view.togglePanel.versionHistory",
         iconId: "clock",
-        label: "Version History",
+        label: t("panels.versionHistory.title"),
         hint: "",
         ariaKeyShortcuts: "",
         testId: "file-version-history",
-        ariaLabel: "Version history",
+        ariaLabel: t("panels.versionHistory.title"),
         onInvoke: actions?.versionHistory,
       },
       {
         commandId: "view.togglePanel.branchManager",
         iconId: "shuffle",
-        label: "Branches",
+        label: t("branchManager.title"),
         hint: "",
         ariaKeyShortcuts: "",
         testId: "file-branch-manager",
-        ariaLabel: "Branch manager",
+        ariaLabel: t("branchManager.title"),
         onInvoke: actions?.branchManager,
       },
       {
