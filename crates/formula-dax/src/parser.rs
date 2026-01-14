@@ -8,6 +8,10 @@ pub enum Expr {
     TableLiteral {
         rows: Vec<Vec<Expr>>,
     },
+    /// A DAX row constructor / tuple expression like `(1, 2)` (or `(1; 2)` depending on locale).
+    ///
+    /// This is primarily useful as the left-hand side of `IN` for multi-column membership tests.
+    Tuple(Vec<Expr>),
     TableName(String),
     Measure(String),
     Let {
@@ -443,9 +447,23 @@ impl<'a> Parser<'a> {
             }
             Token::LParen => {
                 self.bump()?;
-                let expr = self.parse_expr(0)?;
-                self.expect(Token::RParen)?;
-                Ok(expr)
+                let first = self.parse_expr(0)?;
+                match self.lookahead {
+                    Token::Comma | Token::Semicolon => {
+                        // Row constructor / tuple: `(expr1, expr2, ...)`
+                        let mut values = vec![first];
+                        while matches!(self.lookahead, Token::Comma | Token::Semicolon) {
+                            self.bump()?;
+                            values.push(self.parse_expr(0)?);
+                        }
+                        self.expect(Token::RParen)?;
+                        Ok(Expr::Tuple(values))
+                    }
+                    _ => {
+                        self.expect(Token::RParen)?;
+                        Ok(first)
+                    }
+                }
             }
             Token::LBrace => self.parse_table_literal(),
             other => Err(DaxError::Parse(format!(

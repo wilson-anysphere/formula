@@ -180,10 +180,8 @@ impl FilterContext {
     pub fn set_column_equals(&mut self, table: &str, column: &str, value: Value) {
         let table = normalize_ident(table);
         let column = normalize_ident(column);
-        self.column_filters.insert(
-            (table, column),
-            HashSet::from([value]),
-        );
+        self.column_filters
+            .insert((table, column), HashSet::from([value]));
     }
 
     pub fn set_column_in(
@@ -486,6 +484,9 @@ impl DaxEngine {
             Expr::TableLiteral { .. } => Err(DaxError::Type(
                 "table constructor used in scalar context".into(),
             )),
+            Expr::Tuple(_) => Err(DaxError::Type(
+                "row constructor used in scalar context".into(),
+            )),
             Expr::Measure(name) => {
                 let ident = DataModel::normalize_measure_name(name);
                 let measure_key = normalize_ident(ident);
@@ -601,7 +602,7 @@ impl DaxEngine {
                 })();
                 env.pop_scope();
                 result
-             }
+            }
             Expr::ColumnRef { table, column } => {
                 if let Some(value) = row_ctx.virtual_binding(table, column) {
                     return Ok(value.clone());
@@ -645,33 +646,78 @@ impl DaxEngine {
                 left,
                 right,
             } => {
+                let lhs_values: Vec<Value> = match left.as_ref() {
+                    Expr::Tuple(values) => values
+                        .iter()
+                        .map(|expr| self.eval_scalar(model, expr, filter, row_ctx, env))
+                        .collect::<DaxResult<_>>()?,
+                    _ => vec![self.eval_scalar(model, left, filter, row_ctx, env)?],
+                };
+                let expected_cols = lhs_values.len();
+
+                let col_count_error = |actual: usize| {
+                    if expected_cols == 1 {
+                        DaxError::Eval("IN currently only supports one-column tables".into())
+                    } else {
+                        DaxError::Eval(format!(
+                            "IN row constructor expected {expected_cols} columns, got {actual}"
+                        ))
+                    }
+                };
+
                 match self.eval_table(model, right, filter, row_ctx, env) {
                     Ok(table_result) => match table_result {
                         TableResult::Physical {
                             table,
                             rows,
                             visible_cols,
-                                 } => {
-                                     let table_ref = model
-                                         .table(&table)
-                                         .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                            let (col_count, col_idx) = match visible_cols.as_deref() {
-                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
-                                None => (table_ref.columns().len(), 0),
-                            };
-                            if col_count != 1 {
-                                return Err(DaxError::Eval(
-                                    "IN currently only supports one-column tables".into(),
-                                ));
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(col_count_error(col_count));
                             }
-                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
-                            for row in rows {
-                                let value =
-                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
-                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
-                                    return Ok(Value::Boolean(true));
+
+                            if let Some(cols) = visible_cols {
+                                for row in rows {
+                                    let mut matches = true;
+                                    for (&col_idx, needle) in cols.iter().zip(&lhs_values) {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
+                                }
+                            } else {
+                                for row in rows {
+                                    let mut matches = true;
+                                    for (col_idx, needle) in lhs_values.iter().enumerate() {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
                                 }
                             }
+
                             Ok(Value::Boolean(false))
                         }
                         TableResult::PhysicalAll {
@@ -682,23 +728,49 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(&table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                            let (col_count, col_idx) = match visible_cols.as_deref() {
-                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
-                                None => (table_ref.columns().len(), 0),
-                            };
-                            if col_count != 1 {
-                                return Err(DaxError::Eval(
-                                    "IN currently only supports one-column tables".into(),
-                                ));
+
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(col_count_error(col_count));
                             }
-                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
-                            for row in 0..row_count {
-                                let value =
-                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
-                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
-                                    return Ok(Value::Boolean(true));
+
+                            if let Some(cols) = visible_cols {
+                                for row in 0..row_count {
+                                    let mut matches = true;
+                                    for (&col_idx, needle) in cols.iter().zip(&lhs_values) {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
+                                }
+                            } else {
+                                for row in 0..row_count {
+                                    let mut matches = true;
+                                    for (col_idx, needle) in lhs_values.iter().enumerate() {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
                                 }
                             }
+
                             Ok(Value::Boolean(false))
                         }
                         TableResult::PhysicalMask {
@@ -709,35 +781,68 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(&table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                            let (col_count, col_idx) = match visible_cols.as_deref() {
-                                Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
-                                None => (table_ref.columns().len(), 0),
-                            };
-                            if col_count != 1 {
-                                return Err(DaxError::Eval(
-                                    "IN currently only supports one-column tables".into(),
-                                ));
+
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(col_count_error(col_count));
                             }
-                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
-                            for row in mask.iter_ones() {
-                                let value =
-                                    table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
-                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
-                                    return Ok(Value::Boolean(true));
+
+                            if let Some(cols) = visible_cols {
+                                for row in mask.iter_ones() {
+                                    let mut matches = true;
+                                    for (&col_idx, needle) in cols.iter().zip(&lhs_values) {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
+                                }
+                            } else {
+                                for row in mask.iter_ones() {
+                                    let mut matches = true;
+                                    for (col_idx, needle) in lhs_values.iter().enumerate() {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if !compare_values(&BinaryOp::Equals, needle, &value)? {
+                                            matches = false;
+                                            break;
+                                        }
+                                    }
+                                    if matches {
+                                        return Ok(Value::Boolean(true));
+                                    }
                                 }
                             }
+
                             Ok(Value::Boolean(false))
                         }
                         TableResult::Virtual { columns, rows } => {
-                            if columns.len() != 1 {
-                                return Err(DaxError::Eval(
-                                    "IN currently only supports one-column tables".into(),
-                                ));
+                            let col_count = columns.len();
+                            if col_count != expected_cols {
+                                return Err(col_count_error(col_count));
                             }
-                            let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
+
+                            let blank = Value::Blank;
                             for row_values in rows {
-                                let value = row_values.get(0).cloned().unwrap_or(Value::Blank);
-                                if compare_values(&BinaryOp::Equals, &lhs, &value)? {
+                                let mut matches = true;
+                                for (i, needle) in lhs_values.iter().enumerate() {
+                                    let value = row_values.get(i).unwrap_or(&blank);
+                                    if !compare_values(&BinaryOp::Equals, needle, value)? {
+                                        matches = false;
+                                        break;
+                                    }
+                                }
+                                if matches {
                                     return Ok(Value::Boolean(true));
                                 }
                             }
@@ -745,6 +850,10 @@ impl DaxEngine {
                         }
                     },
                     Err(table_err) => {
+                        if expected_cols != 1 {
+                            return Err(table_err);
+                        }
+
                         // Backward-compatible fallback for MVP: allow table constructors on the RHS.
                         let rhs_values =
                             self.eval_one_column_table_literal(model, right, filter, row_ctx, env);
@@ -752,7 +861,7 @@ impl DaxEngine {
                             Ok(values) => values,
                             Err(_) => return Err(table_err),
                         };
-                        let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                        let lhs = lhs_values.into_iter().next().expect("expected_cols == 1");
                         for candidate in rhs_values {
                             if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
                                 return Ok(Value::Boolean(true));
@@ -1322,8 +1431,7 @@ impl DaxEngine {
                         .ok_or_else(|| DaxError::UnknownTable(result_table.clone()))?;
                     for row in allowed.iter_ones() {
                         let mut matches = true;
-                        for (col_idx, search_value) in
-                            search_cols.iter().zip(search_values.iter())
+                        for (col_idx, search_value) in search_cols.iter().zip(search_values.iter())
                         {
                             let cell_value = table_ref
                                 .value_by_idx(row, *col_idx)
@@ -1340,8 +1448,7 @@ impl DaxEngine {
                 } else {
                     for row in 0..table_ref.row_count() {
                         let mut matches = true;
-                        for (col_idx, search_value) in
-                            search_cols.iter().zip(search_values.iter())
+                        for (col_idx, search_value) in search_cols.iter().zip(search_values.iter())
                         {
                             let cell_value = table_ref
                                 .value_by_idx(row, *col_idx)
@@ -1820,10 +1927,12 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = table_ref
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 if let Some(visible_cols) = visible_cols {
                     if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
@@ -1855,10 +1964,12 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
+                let idx = table_ref
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
                 if let Some(visible_cols) = visible_cols {
                     if !visible_cols.contains(&idx) {
                         return Err(DaxError::Eval(format!(
@@ -2650,8 +2761,9 @@ impl DaxEngine {
                                     "row context refers to out-of-bounds column index {col_idx} for table {table}"
                                 )));
                             };
-                            let value =
-                                table_ref.value_by_idx(*row, col_idx).unwrap_or(Value::Blank);
+                            let value = table_ref
+                                .value_by_idx(*row, col_idx)
+                                .unwrap_or(Value::Blank);
                             let key = (table.clone(), normalize_ident(column));
                             match new_filter.column_filters.get_mut(&key) {
                                 Some(existing) => existing.retain(|v| v == &value),
@@ -2664,8 +2776,9 @@ impl DaxEngine {
                         }
                     } else {
                         for (col_idx, column) in table_ref.columns().iter().enumerate() {
-                            let value =
-                                table_ref.value_by_idx(*row, col_idx).unwrap_or(Value::Blank);
+                            let value = table_ref
+                                .value_by_idx(*row, col_idx)
+                                .unwrap_or(Value::Blank);
                             let key = (table.clone(), normalize_ident(column));
                             match new_filter.column_filters.get_mut(&key) {
                                 Some(existing) => existing.retain(|v| v == &value),
@@ -2769,6 +2882,11 @@ impl DaxEngine {
                         for cell in row {
                             collect_column_refs(cell, tables, columns);
                         }
+                    }
+                }
+                Expr::Tuple(values) => {
+                    for value in values {
+                        collect_column_refs(value, tables, columns);
                     }
                 }
                 Expr::ColumnRef { table, column } => {
@@ -3030,41 +3148,358 @@ impl DaxEngine {
                 //   Orders[Amount] > 10 && Orders[Amount] < 20
                 //   NOT(Orders[Amount] > 10)
                 // These are treated like table filters against the one referenced table.
-                 Expr::BinaryOp {
-                     op: BinaryOp::And | BinaryOp::Or,
-                     ..
-                 } => apply_boolean_filter_expr(
-                     engine,
-                     model,
-                     arg,
-                     eval_filter,
-                     row_ctx,
-                     env,
-                     keep_filters,
-                     clear_columns,
-                     row_filters,
-                 ),
-                 Expr::Call { name, .. }
-                     if name.eq_ignore_ascii_case("NOT")
-                         || name.eq_ignore_ascii_case("AND")
-                         || name.eq_ignore_ascii_case("OR") =>
-                 {
-                     apply_boolean_filter_expr(
-                         engine,
-                         model,
-                         arg,
-                         eval_filter,
-                         row_ctx,
-                         env,
-                         keep_filters,
-                         clear_columns,
-                         row_filters,
-                     )
-                 }
-                 Expr::BinaryOp { op, left, right } => {
-                     let Expr::ColumnRef { table, column } = left.as_ref() else {
-                         return Err(DaxError::Eval(
-                             "CALCULATE filter must be a column comparison".into(),
+                Expr::BinaryOp {
+                    op: BinaryOp::And | BinaryOp::Or,
+                    ..
+                } => apply_boolean_filter_expr(
+                    engine,
+                    model,
+                    arg,
+                    eval_filter,
+                    row_ctx,
+                    env,
+                    keep_filters,
+                    clear_columns,
+                    row_filters,
+                ),
+                Expr::Call { name, .. }
+                    if name.eq_ignore_ascii_case("NOT")
+                        || name.eq_ignore_ascii_case("AND")
+                        || name.eq_ignore_ascii_case("OR") =>
+                {
+                    apply_boolean_filter_expr(
+                        engine,
+                        model,
+                        arg,
+                        eval_filter,
+                        row_ctx,
+                        env,
+                        keep_filters,
+                        clear_columns,
+                        row_filters,
+                    )
+                }
+                Expr::BinaryOp {
+                    op: BinaryOp::In,
+                    left,
+                    right,
+                } if matches!(left.as_ref(), Expr::Tuple(_)) => {
+                    // Multi-column `IN` filters in CALCULATE use a row constructor on the LHS:
+                    //   (T[Col1], T[Col2]) IN {(1,2), (3,4)}
+                    //
+                    // These filters cannot be expressed as independent per-column value filters
+                    // because they preserve correlation across columns, so we evaluate them as a
+                    // row filter against the referenced table.
+                    let Expr::Tuple(tuple_exprs) = left.as_ref() else {
+                        unreachable!("guarded by matches! above")
+                    };
+
+                    if tuple_exprs.is_empty() {
+                        return Err(DaxError::Eval(
+                            "IN row constructor cannot be empty".to_string(),
+                        ));
+                    }
+
+                    let mut target_table_key: Option<String> = None;
+                    let mut target_table_display: Option<String> = None;
+                    let mut target_columns: Vec<(String, String)> =
+                        Vec::with_capacity(tuple_exprs.len());
+                    for expr in tuple_exprs {
+                        let Expr::ColumnRef { table, column } = expr else {
+                            return Err(DaxError::Eval(
+                                 "CALCULATE row constructor IN filter must contain only column references"
+                                     .into(),
+                             ));
+                        };
+                        let table_key = normalize_ident(table);
+                        match target_table_key.as_deref() {
+                            Some(existing) if existing != table_key => {
+                                return Err(DaxError::Eval(
+                                     "CALCULATE row constructor IN filter must reference exactly one table"
+                                         .into(),
+                                 ));
+                            }
+                            Some(_) => {}
+                            None => {
+                                target_table_key = Some(table_key.to_string());
+                                target_table_display = Some(table.clone());
+                            }
+                        }
+                        target_columns.push((column.clone(), normalize_ident(column)));
+                    }
+
+                    let target_table_key = target_table_key.expect("set above");
+                    let target_table_display =
+                        target_table_display.unwrap_or_else(|| target_table_key.clone());
+                    let target_table_ref = model
+                        .table(&target_table_key)
+                        .ok_or_else(|| DaxError::UnknownTable(target_table_display.clone()))?;
+
+                    let mut target_col_indices: Vec<usize> =
+                        Vec::with_capacity(target_columns.len());
+                    let mut referenced_column_keys: Vec<(String, String)> =
+                        Vec::with_capacity(target_columns.len());
+                    for (column_display, column_key) in &target_columns {
+                        let idx = target_table_ref.column_idx(column_display).ok_or_else(|| {
+                            DaxError::UnknownColumn {
+                                table: target_table_display.clone(),
+                                column: column_display.clone(),
+                            }
+                        })?;
+                        target_col_indices.push(idx);
+                        referenced_column_keys.push((target_table_key.clone(), column_key.clone()));
+                    }
+
+                    // Evaluate the RHS in a context where existing filters on the referenced
+                    // columns are removed (replacement semantics).
+                    let mut base_filter = eval_filter.clone();
+                    for key in &referenced_column_keys {
+                        base_filter.column_filters.remove(key);
+                        if !keep_filters {
+                            clear_columns.insert(key.clone());
+                        }
+                    }
+
+                    let expected_cols = target_col_indices.len();
+
+                    // Materialize RHS row tuples so we can test membership efficiently across
+                    // target rows.
+                    let rhs_table = engine.eval_table(model, right, &base_filter, row_ctx, env)?;
+                    let rhs_rows: Vec<Vec<Value>> = match rhs_table {
+                        TableResult::Physical {
+                            table,
+                            rows,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(DaxError::Eval(format!(
+                                     "IN row constructor expected {expected_cols} columns, got {col_count}"
+                                 )));
+                            }
+                            let mut out = Vec::with_capacity(rows.len());
+                            if let Some(cols) = visible_cols {
+                                for row in rows {
+                                    out.push(
+                                        cols.iter()
+                                            .map(|&col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            } else {
+                                for row in rows {
+                                    out.push(
+                                        (0..expected_cols)
+                                            .map(|col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            }
+                            out
+                        }
+                        TableResult::PhysicalAll {
+                            table,
+                            row_count,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(DaxError::Eval(format!(
+                                     "IN row constructor expected {expected_cols} columns, got {col_count}"
+                                 )));
+                            }
+                            let mut out = Vec::with_capacity(row_count);
+                            if let Some(cols) = visible_cols {
+                                for row in 0..row_count {
+                                    out.push(
+                                        cols.iter()
+                                            .map(|&col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            } else {
+                                for row in 0..row_count {
+                                    out.push(
+                                        (0..expected_cols)
+                                            .map(|col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            }
+                            out
+                        }
+                        TableResult::PhysicalMask {
+                            table,
+                            mask,
+                            visible_cols,
+                        } => {
+                            let table_ref = model
+                                .table(&table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let visible_cols = visible_cols.as_deref();
+                            let col_count = visible_cols
+                                .map(|cols| cols.len())
+                                .unwrap_or_else(|| table_ref.columns().len());
+                            if col_count != expected_cols {
+                                return Err(DaxError::Eval(format!(
+                                     "IN row constructor expected {expected_cols} columns, got {col_count}"
+                                 )));
+                            }
+                            let mut out = Vec::with_capacity(mask.count_ones());
+                            if let Some(cols) = visible_cols {
+                                for row in mask.iter_ones() {
+                                    out.push(
+                                        cols.iter()
+                                            .map(|&col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            } else {
+                                for row in mask.iter_ones() {
+                                    out.push(
+                                        (0..expected_cols)
+                                            .map(|col_idx| {
+                                                table_ref
+                                                    .value_by_idx(row, col_idx)
+                                                    .unwrap_or(Value::Blank)
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            }
+                            out
+                        }
+                        TableResult::Virtual { columns, rows } => {
+                            if columns.len() != expected_cols {
+                                return Err(DaxError::Eval(format!(
+                                    "IN row constructor expected {expected_cols} columns, got {}",
+                                    columns.len()
+                                )));
+                            }
+                            rows
+                        }
+                    };
+
+                    // Test membership across candidate rows in the target table, respecting any
+                    // other active filters (but ignoring existing filters on the referenced
+                    // columns, unless KEEPFILTERS is used).
+                    let row_sets = (!base_filter.is_empty())
+                        .then(|| resolve_row_sets(model, &base_filter))
+                        .transpose()?;
+
+                    let mut allowed_rows = HashSet::new();
+                    let candidate_count: usize;
+                    if let Some(sets) = row_sets.as_ref() {
+                        let allowed = sets
+                            .get(&target_table_key)
+                            .ok_or_else(|| DaxError::UnknownTable(target_table_display.clone()))?;
+                        candidate_count = allowed.count_ones();
+                        for row in allowed.iter_ones() {
+                            let mut row_values = Vec::with_capacity(expected_cols);
+                            for &col_idx in &target_col_indices {
+                                row_values.push(
+                                    target_table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank),
+                                );
+                            }
+
+                            let mut matched = false;
+                            for rhs in &rhs_rows {
+                                let mut all_equal = true;
+                                for (lhs_value, rhs_value) in row_values.iter().zip(rhs.iter()) {
+                                    if !compare_values(&BinaryOp::Equals, lhs_value, rhs_value)? {
+                                        all_equal = false;
+                                        break;
+                                    }
+                                }
+                                if all_equal {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+
+                            if matched {
+                                allowed_rows.insert(row);
+                            }
+                        }
+                    } else {
+                        candidate_count = target_table_ref.row_count();
+                        for row in 0..target_table_ref.row_count() {
+                            let mut row_values = Vec::with_capacity(expected_cols);
+                            for &col_idx in &target_col_indices {
+                                row_values.push(
+                                    target_table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank),
+                                );
+                            }
+
+                            let mut matched = false;
+                            for rhs in &rhs_rows {
+                                let mut all_equal = true;
+                                for (lhs_value, rhs_value) in row_values.iter().zip(rhs.iter()) {
+                                    if !compare_values(&BinaryOp::Equals, lhs_value, rhs_value)? {
+                                        all_equal = false;
+                                        break;
+                                    }
+                                }
+                                if all_equal {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+
+                            if matched {
+                                allowed_rows.insert(row);
+                            }
+                        }
+                    }
+
+                    if allowed_rows.len() == candidate_count {
+                        row_filters.push((target_table_key, RowFilter::All));
+                    } else {
+                        row_filters.push((target_table_key, RowFilter::Rows(allowed_rows)));
+                    }
+
+                    Ok(())
+                }
+                Expr::BinaryOp { op, left, right } => {
+                    let Expr::ColumnRef { table, column } = left.as_ref() else {
+                        return Err(DaxError::Eval(
+                            "CALCULATE filter must be a column comparison".into(),
                         ));
                     };
 
@@ -3087,7 +3522,9 @@ impl DaxEngine {
                                         .table(&table)
                                         .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
                                     let (col_count, col_idx) = match visible_cols.as_deref() {
-                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        Some(cols) => {
+                                            (cols.len(), cols.get(0).copied().unwrap_or(0))
+                                        }
                                         None => (table_ref.columns().len(), 0),
                                     };
                                     if col_count != 1 {
@@ -3101,9 +3538,9 @@ impl DaxEngine {
                                             .value_by_idx(row, col_idx)
                                             .unwrap_or(Value::Blank);
                                         out.insert(value);
-                                     }
-                                     out
-                                 }
+                                    }
+                                    out
+                                }
                                 TableResult::PhysicalMask {
                                     table,
                                     mask,
@@ -3113,7 +3550,9 @@ impl DaxEngine {
                                         .table(&table)
                                         .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
                                     let (col_count, col_idx) = match visible_cols.as_deref() {
-                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        Some(cols) => {
+                                            (cols.len(), cols.get(0).copied().unwrap_or(0))
+                                        }
                                         None => (table_ref.columns().len(), 0),
                                     };
                                     if col_count != 1 {
@@ -3130,16 +3569,18 @@ impl DaxEngine {
                                     }
                                     out
                                 }
-                                 TableResult::PhysicalAll {
-                                     table,
-                                     row_count,
-                                     visible_cols,
-                                 } => {
+                                TableResult::PhysicalAll {
+                                    table,
+                                    row_count,
+                                    visible_cols,
+                                } => {
                                     let table_ref = model
                                         .table(&table)
                                         .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
                                     let (col_count, col_idx) = match visible_cols.as_deref() {
-                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        Some(cols) => {
+                                            (cols.len(), cols.get(0).copied().unwrap_or(0))
+                                        }
                                         None => (table_ref.columns().len(), 0),
                                     };
                                     if col_count != 1 {
@@ -3149,30 +3590,30 @@ impl DaxEngine {
                                     }
                                     let mut out = HashSet::new();
                                     for row in 0..row_count {
-                                     let value = table_ref
-                                         .value_by_idx(row, col_idx)
-                                         .unwrap_or(Value::Blank);
-                                     out.insert(value);
-                                     }
-                                     out
-                                 }
-                                 TableResult::Virtual { columns, rows } => {
-                                     if columns.len() != 1 {
-                                         return Err(DaxError::Eval(
-                                             "IN currently only supports one-column tables".into(),
-                                         ));
-                                     }
-                                     rows.into_iter()
-                                         .map(|row_values| {
-                                             row_values.get(0).cloned().unwrap_or(Value::Blank)
-                                         })
-                                         .collect()
-                                 }
-                             };
- 
-                             column_filters.push((key, values));
-                             Ok(())
-                         }
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        out.insert(value);
+                                    }
+                                    out
+                                }
+                                TableResult::Virtual { columns, rows } => {
+                                    if columns.len() != 1 {
+                                        return Err(DaxError::Eval(
+                                            "IN currently only supports one-column tables".into(),
+                                        ));
+                                    }
+                                    rows.into_iter()
+                                        .map(|row_values| {
+                                            row_values.get(0).cloned().unwrap_or(Value::Blank)
+                                        })
+                                        .collect()
+                                }
+                            };
+
+                            column_filters.push((key, values));
+                            Ok(())
+                        }
                         BinaryOp::Equals => {
                             let rhs =
                                 engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
@@ -3211,15 +3652,15 @@ impl DaxEngine {
                                 for row in allowed_rows.iter_ones() {
                                     let lhs =
                                         table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                    let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())?
-                                    {
-                                        Value::Boolean(b) => b,
-                                        other => {
-                                            return Err(DaxError::Type(format!(
+                                    let keep =
+                                        match engine.eval_binary(op, lhs.clone(), rhs.clone())? {
+                                            Value::Boolean(b) => b,
+                                            other => {
+                                                return Err(DaxError::Type(format!(
                                                 "expected comparison to return boolean, got {other}"
                                             )))
-                                        }
-                                    };
+                                            }
+                                        };
 
                                     if keep {
                                         allowed.insert(lhs);
@@ -3229,15 +3670,15 @@ impl DaxEngine {
                                 for row in 0..table_ref.row_count() {
                                     let lhs =
                                         table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                    let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())?
-                                    {
-                                        Value::Boolean(b) => b,
-                                        other => {
-                                            return Err(DaxError::Type(format!(
+                                    let keep =
+                                        match engine.eval_binary(op, lhs.clone(), rhs.clone())? {
+                                            Value::Boolean(b) => b,
+                                            other => {
+                                                return Err(DaxError::Type(format!(
                                                 "expected comparison to return boolean, got {other}"
                                             )))
-                                        }
-                                    };
+                                            }
+                                        };
 
                                     if keep {
                                         allowed.insert(lhs);
@@ -3287,7 +3728,10 @@ impl DaxEngine {
                         ));
                     };
 
-                    let key = (normalize_ident(target_table), normalize_ident(target_column));
+                    let key = (
+                        normalize_ident(target_table),
+                        normalize_ident(target_column),
+                    );
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
@@ -3356,7 +3800,9 @@ impl DaxEngine {
 
                                 let mut values = HashSet::new();
                                 for row in rows {
-                                    let v = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                                    let v = table_ref
+                                        .value_by_idx(row, col_idx)
+                                        .unwrap_or(Value::Blank);
                                     values.insert(v);
                                 }
 
@@ -3370,7 +3816,8 @@ impl DaxEngine {
                                 if !keep_filters {
                                     clear_tables.insert(table_key.clone());
                                 }
-                                row_filters.push((table_key, RowFilter::Rows(rows.into_iter().collect())));
+                                row_filters
+                                    .push((table_key, RowFilter::Rows(rows.into_iter().collect())));
                                 Ok(())
                             }
                         }
@@ -3841,7 +4288,9 @@ impl DaxEngine {
                         .unwrap_or_else(|| {
                             let mut out = Vec::new();
                             for row in 0..to_table.row_count() {
-                                let v = to_table.value_by_idx(row, rel_info.to_idx).unwrap_or(Value::Blank);
+                                let v = to_table
+                                    .value_by_idx(row, rel_info.to_idx)
+                                    .unwrap_or(Value::Blank);
                                 if v == key {
                                     out.push(row);
                                 }
@@ -3975,12 +4424,7 @@ impl DaxEngine {
                     // Multi-column table constructors expose synthetic columns `Value1`, `Value2`,
                     // ... in order.
                     (1..=col_count)
-                        .map(|idx| {
-                            (
-                                "__TABLE_LITERAL__".to_string(),
-                                format!("Value{idx}"),
-                            )
-                        })
+                        .map(|idx| ("__TABLE_LITERAL__".to_string(), format!("Value{idx}")))
                         .collect()
                 };
 
@@ -4070,9 +4514,8 @@ impl DaxEngine {
                                 for row in rows.iter().copied() {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, visible_cols.clone());
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         out_rows.push(row);
                                     }
@@ -4100,7 +4543,9 @@ impl DaxEngine {
                                         let pred = self.eval_scalar(
                                             model, predicate, filter, &inner_ctx, env,
                                         )?;
-                                        if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))?
+                                        if pred
+                                            .truthy()
+                                            .map_err(|e| DaxError::Type(e.to_string()))?
                                         {
                                             out_rows.push(row);
                                         }
@@ -4116,9 +4561,8 @@ impl DaxEngine {
                                 for row in rows.iter().copied() {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, None);
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         builder.push(row);
                                     }
@@ -4136,9 +4580,8 @@ impl DaxEngine {
                                 for row in 0..row_count {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, visible_cols.clone());
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         out_rows.push(row);
                                     }
@@ -4153,9 +4596,8 @@ impl DaxEngine {
                                 for row in 0..row_count {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, None);
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         builder.push(row);
                                     }
@@ -4173,9 +4615,8 @@ impl DaxEngine {
                                 for row in mask.iter_ones() {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, visible_cols.clone());
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         out_rows.push(row);
                                     }
@@ -4191,9 +4632,8 @@ impl DaxEngine {
                                 for row in mask.iter_ones() {
                                     let mut inner_ctx = row_ctx.clone();
                                     inner_ctx.push_physical(&table, row, None);
-                                    let pred = self.eval_scalar(
-                                        model, predicate, filter, &inner_ctx, env,
-                                    )?;
+                                    let pred = self
+                                        .eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                                     if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                                         builder.push(row);
                                     }
@@ -4760,9 +5200,10 @@ impl DaxEngine {
                                     return Ok(Vec::new());
                                 }
 
-                                let to_table_ref = model
-                                    .table(rel_info.rel.to_table.as_str())
-                                    .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+                                let to_table_ref =
+                                    model.table(rel_info.rel.to_table.as_str()).ok_or_else(
+                                        || DaxError::UnknownTable(rel_info.rel.to_table.clone()),
+                                    )?;
 
                                 if let Some(matches) = to_table_ref.filter_eq(rel_info.to_idx, &key)
                                 {
@@ -5221,9 +5662,10 @@ impl DaxEngine {
                                     return Ok(Vec::new());
                                 }
 
-                                let to_table_ref = model
-                                    .table(rel_info.rel.to_table.as_str())
-                                    .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
+                                let to_table_ref =
+                                    model.table(rel_info.rel.to_table.as_str()).ok_or_else(
+                                        || DaxError::UnknownTable(rel_info.rel.to_table.clone()),
+                                    )?;
 
                                 if let Some(matches) = to_table_ref.filter_eq(rel_info.to_idx, &key)
                                 {
@@ -5821,7 +6263,9 @@ impl TableResult {
             }
             (
                 TableResult::PhysicalAll {
-                    table, visible_cols, ..
+                    table,
+                    visible_cols,
+                    ..
                 },
                 RowHandle::Physical(row),
             ) => {
@@ -5829,7 +6273,9 @@ impl TableResult {
             }
             (
                 TableResult::PhysicalMask {
-                    table, visible_cols, ..
+                    table,
+                    visible_cols,
+                    ..
                 },
                 RowHandle::Physical(row),
             ) => {
@@ -6053,8 +6499,13 @@ pub(crate) fn resolve_row_sets(
                     if trace_enabled {
                         propagate_calls += 1;
                     }
-                    let changed_to_one =
-                        propagate_filter(model, &mut sets, relationship, Direction::ToOne, &blank_allowed)?;
+                    let changed_to_one = propagate_filter(
+                        model,
+                        &mut sets,
+                        relationship,
+                        Direction::ToOne,
+                        &blank_allowed,
+                    )?;
                     if trace_enabled && changed_to_one {
                         propagate_changes += 1;
                     }
@@ -6230,11 +6681,9 @@ fn propagate_filter(
             let mut allowed_keys: Vec<Value> = match &relationship.to_index {
                 // If all physical rows on the `to_table` side are visible, we can reuse the
                 // relationship's precomputed distinct key set rather than scanning the table.
-                ToIndex::RowSets { map, .. } if to_set.all_true() => map
-                    .keys()
-                    .filter(|key| !key.is_blank())
-                    .cloned()
-                    .collect(),
+                ToIndex::RowSets { map, .. } if to_set.all_true() => {
+                    map.keys().filter(|key| !key.is_blank()).cloned().collect()
+                }
                 ToIndex::KeySet { keys, .. } if to_set.all_true() => keys.iter().cloned().collect(),
                 _ => match (&relationship.to_index, relationship.from_index.as_ref()) {
                     (ToIndex::RowSets { map, .. }, Some(_)) => map
@@ -6354,8 +6803,7 @@ fn propagate_filter(
                                 if visible_count > sparse_to_dense_threshold {
                                     let mut seen = HashSet::new();
                                     let mut out = Vec::new();
-                                    for row in
-                                        to_set.iter_ones().filter(|&idx| idx < physical_rows)
+                                    for row in to_set.iter_ones().filter(|&idx| idx < physical_rows)
                                     {
                                         let v = to_table
                                             .value_by_idx(row, to_idx)
@@ -6530,8 +6978,8 @@ fn propagate_filter(
                 let visible_count = from_set.count_ones();
                 if visible_count == 0 {
                     Vec::new()
-                } else if let Some(keys) = from_table
-                    .distinct_values_filtered_mask(relationship.from_idx, Some(from_set))
+                } else if let Some(keys) =
+                    from_table.distinct_values_filtered_mask(relationship.from_idx, Some(from_set))
                 {
                     keys.into_iter().filter(|k| !k.is_blank()).collect()
                 } else {
@@ -6998,11 +7446,8 @@ fn virtual_blank_row_exists(
     // repeatedly propagate blank-member existence from `from_table -> to_table` along active
     // relationships, treating the from-table's virtual blank row as a BLANK foreign key to the
     // related to-table.
-    let mut exists: HashMap<String, bool> = model
-        .tables
-        .keys()
-        .map(|t| (t.clone(), false))
-        .collect();
+    let mut exists: HashMap<String, bool> =
+        model.tables.keys().map(|t| (t.clone(), false)).collect();
 
     // 1) Seed from direct unmatched physical rows.
     for (idx, rel) in model.relationships().iter().enumerate() {
@@ -7025,9 +7470,9 @@ fn virtual_blank_row_exists(
             )
         } else {
             let sets = sets.expect("row sets are computed when filter is not empty");
-            let from_set = sets.get(rel.from_table_key.as_str()).ok_or_else(|| {
-                DaxError::UnknownTable(rel.rel.from_table.clone())
-            })?;
+            let from_set = sets
+                .get(rel.from_table_key.as_str())
+                .ok_or_else(|| DaxError::UnknownTable(rel.rel.from_table.clone()))?;
             matches!(
                 rel.unmatched_fact_rows.as_ref(),
                 Some(unmatched) if unmatched.any_row_allowed(from_set)
@@ -7064,8 +7509,14 @@ fn virtual_blank_row_exists(
                 continue;
             }
 
-            if exists.get(rel.from_table_key.as_str()).copied().unwrap_or(false)
-                && !exists.get(rel.to_table_key.as_str()).copied().unwrap_or(false)
+            if exists
+                .get(rel.from_table_key.as_str())
+                .copied()
+                .unwrap_or(false)
+                && !exists
+                    .get(rel.to_table_key.as_str())
+                    .copied()
+                    .unwrap_or(false)
             {
                 exists.insert(rel.to_table_key.clone(), true);
                 changed = true;

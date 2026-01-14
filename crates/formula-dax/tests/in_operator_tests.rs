@@ -223,3 +223,73 @@ fn in_operator_scalar_rhs_physical_mask() {
         Value::from(false)
     );
 }
+
+#[test]
+fn in_operator_row_constructor_table_literal() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "(1,2) IN {(1,2), (3,4)}",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "(1,2) IN {(1,3), (3,4)}",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(false));
+}
+
+#[test]
+fn in_operator_row_constructor_table_expression_rhs() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty();
+    let row_ctx = RowContext::default();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "(100,1) IN SUMMARIZE(Orders, Orders[OrderId], Orders[CustomerId])",
+            &filter,
+            &row_ctx,
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(true));
+
+    let value = engine
+        .evaluate(
+            &model,
+            "(100,2) IN SUMMARIZE(Orders, Orders[OrderId], Orders[CustomerId])",
+            &filter,
+            &row_ctx,
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(false));
+}
+
+#[test]
+fn in_operator_calculate_row_constructor_filter() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Orders), (Orders[OrderId], Orders[CustomerId]) IN {(100,1), (102,2)})",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(2i64));
+}

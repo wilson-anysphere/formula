@@ -1398,16 +1398,16 @@ impl DataModel {
                 let distinct_values = to_table
                     .distinct_values_filtered(to_idx, None)
                     .unwrap_or_else(|| {
-                    let mut seen = HashSet::<Value>::new();
-                    let mut out = Vec::new();
-                    for row in 0..to_table.row_count() {
-                        let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-                        if seen.insert(value.clone()) {
-                            out.push(value);
+                        let mut seen = HashSet::<Value>::new();
+                        let mut out = Vec::new();
+                        for row in 0..to_table.row_count() {
+                            let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
+                            if seen.insert(value.clone()) {
+                                out.push(value);
+                            }
                         }
-                    }
-                    out
-                });
+                        out
+                    });
 
                 let mut keys = HashSet::<Value>::with_capacity(distinct_values.len());
                 for v in distinct_values {
@@ -1465,7 +1465,10 @@ impl DataModel {
                         }
                     }
                 }
-                ToIndex::RowSets { map, has_duplicates }
+                ToIndex::RowSets {
+                    map,
+                    has_duplicates,
+                }
             }
         };
 
@@ -2408,6 +2411,11 @@ impl DataModel {
                     );
                 }
                 self.collect_same_table_column_dependencies_inner(body, current_table, out);
+            }
+            Expr::Tuple(values) => {
+                for value in values {
+                    self.collect_same_table_column_dependencies_inner(value, current_table, out);
+                }
             }
             Expr::ColumnRef { table, column } => {
                 if normalize_ident(table) == current_table {
