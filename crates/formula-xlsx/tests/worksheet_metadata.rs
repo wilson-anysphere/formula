@@ -30,6 +30,18 @@ fn imports_row_and_col_properties_into_model() {
 }
 
 #[test]
+fn imports_sheet_format_pr_defaults_into_model() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/metadata/default-col-width.xlsx");
+    let doc = load_from_path(&fixture).expect("load fixture");
+    let sheet = doc.workbook.sheet_by_name("Sheet1").expect("sheet exists");
+
+    assert_eq!(sheet.default_col_width, Some(20.0));
+    assert_eq!(sheet.base_col_width, Some(8));
+    assert_eq!(sheet.default_row_height, None);
+}
+
+#[test]
 fn imports_merge_cells_into_model() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merged-cells.xlsx");
     let bytes = std::fs::read(&fixture).expect("read fixture");
@@ -91,8 +103,12 @@ fn new_sheet_emits_metadata() {
 
     {
         let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
-        sheet.set_value(CellRef::from_a1("A1").unwrap(), CellValue::String("Merged".to_string()));
-        sheet.merge_range(Range::from_a1("A1:B2").unwrap())
+        sheet.set_value(
+            CellRef::from_a1("A1").unwrap(),
+            CellValue::String("Merged".to_string()),
+        );
+        sheet
+            .merge_range(Range::from_a1("A1:B2").unwrap())
             .expect("merge");
 
         sheet.set_col_width(1, Some(25.0));
@@ -135,7 +151,10 @@ fn new_sheet_emits_metadata() {
     );
     assert!(sheet_xml.contains("<sheetViews"), "missing <sheetViews>");
     assert!(sheet_xml.contains("zoomScale=\"125\""), "missing zoomScale");
-    assert!(sheet_xml.contains("state=\"frozen\""), "missing frozen pane");
+    assert!(
+        sheet_xml.contains("state=\"frozen\""),
+        "missing frozen pane"
+    );
     assert!(sheet_xml.contains("<cols"), "missing <cols>");
     assert!(
         sheet_xml.contains("width=\"25\"") && sheet_xml.contains("customWidth=\"1\""),
@@ -158,4 +177,36 @@ fn new_sheet_emits_metadata() {
     assert!(rels_xml.contains("relationships/hyperlink"));
     assert!(rels_xml.contains("https://example.com"));
     assert!(rels_xml.contains("Id=\"rId1\""));
+}
+
+#[test]
+fn new_sheet_emits_sheet_format_pr_defaults() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+
+    {
+        let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+        sheet.default_col_width = Some(20.0);
+        sheet.base_col_width = Some(8);
+    }
+
+    let doc = XlsxDocument::new(workbook);
+    let bytes = doc.save_to_vec().expect("save");
+
+    let cursor = std::io::Cursor::new(&bytes);
+    let mut archive = ZipArchive::new(cursor).expect("zip open");
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet xml")
+        .read_to_string(&mut sheet_xml)
+        .expect("read sheet xml");
+
+    assert!(
+        sheet_xml.contains("<sheetFormatPr")
+            && sheet_xml.contains("defaultColWidth=\"20\"")
+            && sheet_xml.contains("baseColWidth=\"8\""),
+        "missing sheetFormatPr defaults: {sheet_xml}"
+    );
 }

@@ -2397,6 +2397,26 @@ fn parse_worksheet_into_model(
 
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"sheetFormatPr" => {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"defaultColWidth" => {
+                            worksheet.default_col_width =
+                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                        }
+                        b"defaultRowHeight" => {
+                            worksheet.default_row_height =
+                                attr.unescape_value()?.into_owned().parse::<f32>().ok();
+                        }
+                        b"baseColWidth" => {
+                            worksheet.base_col_width =
+                                attr.unescape_value()?.into_owned().parse::<u16>().ok();
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
             Event::End(e) if e.local_name().as_ref() == b"cols" => in_cols = false,
             Event::Empty(e) if e.local_name().as_ref() == b"cols" => {

@@ -223,12 +223,12 @@ fn cell_width_reflects_column_width_metadata() {
         .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.43);
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
 
     // Update the column width metadata and ensure the formula result updates on recalc.
     engine.set_col_width("Sheet1", 0, Some(16.42578125));
     engine.recalculate_single_threaded();
-    assert_number(&engine.get_cell_value("Sheet1", "B1"), 16.42578125);
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 16.1);
 }
 
 #[test]
@@ -271,6 +271,29 @@ fn cell_sheet_default_style_affects_format_prefix_and_protect() {
     );
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Text("'".to_string()));
     assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
+}
+
+#[test]
+fn cell_width_defaults_to_excel_standard_width() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=CELL(\"width\",A1)"), 8.0);
+}
+
+#[test]
+fn cell_width_uses_sheet_default_width_when_present() {
+    let mut sheet = TestSheet::new();
+    sheet.set_default_col_width(Some(20.0));
+    assert_number(&sheet.eval("=CELL(\"width\",A1)"), 20.0);
+}
+
+#[test]
+fn cell_width_prefers_per_column_override_and_sets_custom_flag() {
+    let mut sheet = TestSheet::new();
+    sheet.set_default_col_width(Some(20.0));
+    sheet.set_col_width(0, Some(25.0));
+
+    assert_number(&sheet.eval("=CELL(\"width\",A1)"), 25.1);
+    assert_number(&sheet.eval("=CELL(\"width\",B1)"), 20.0);
 }
 
 #[test]

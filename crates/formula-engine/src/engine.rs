@@ -263,6 +263,8 @@ struct Sheet {
     /// This is the lowest-precedence style layer in Excel's formatting chain:
     /// sheet < col < row < (range-run) < cell.
     default_style_id: Option<u32>,
+    /// Sheet default column width in Excel "character" units.
+    default_col_width: Option<f32>,
     /// Logical row count for the worksheet grid.
     ///
     /// Defaults to Excel's row limit, but can grow beyond Excel to support very large sheets. The
@@ -285,6 +287,7 @@ impl Default for Sheet {
             tables: Vec::new(),
             names: HashMap::new(),
             default_style_id: None,
+            default_col_width: None,
             // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
@@ -1438,6 +1441,17 @@ impl Engine {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let sheet = self.workbook.sheets.get(sheet_id)?;
         Some((sheet.row_count, sheet.col_count))
+    }
+
+    /// Set (or clear) the sheet's default column width in Excel "character" units.
+    ///
+    /// This is surfaced to worksheet information functions like `CELL("width")` and corresponds to
+    /// the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">` attribute.
+    pub fn set_sheet_default_col_width(&mut self, sheet: &str, width: Option<f32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        if let Some(s) = self.workbook.sheets.get_mut(sheet_id) {
+            s.default_col_width = width;
+        }
     }
 
     /// Configure the logical worksheet grid size for `sheet`.
@@ -8959,6 +8973,7 @@ struct Snapshot {
     sheet_order: Vec<SheetId>,
     sheet_dimensions: Vec<(u32, u32)>,
     sheet_default_style_ids: Vec<Option<u32>>,
+    sheet_default_col_width: Vec<Option<f32>>,
     values: HashMap<CellKey, Value>,
     phonetics: HashMap<CellKey, String>,
     style_ids: HashMap<CellKey, u32>,
@@ -9019,6 +9034,18 @@ impl Snapshot {
             .map(|(sheet_id, s)| {
                 if workbook.sheet_exists(sheet_id) {
                     s.default_style_id
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let sheet_default_col_width = workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.default_col_width
                 } else {
                     None
                 }
@@ -9150,6 +9177,7 @@ impl Snapshot {
             workbook_filename,
             sheet_dimensions,
             sheet_default_style_ids,
+            sheet_default_col_width,
             values,
             phonetics,
             style_ids,
@@ -9252,6 +9280,13 @@ impl crate::eval::ValueResolver for Snapshot {
             .get(sheet_id)
             .copied()
             .unwrap_or((0, 0))
+    }
+
+    fn sheet_default_col_width(&self, sheet_id: usize) -> Option<f32> {
+        self.sheet_default_col_width
+            .get(sheet_id)
+            .copied()
+            .flatten()
     }
 
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {

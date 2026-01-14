@@ -367,17 +367,27 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
 
-            // Excel's default column width is 8.43 "character" units.
-            const DEFAULT_WIDTH: f64 = 8.43;
+            // Excel returns a number whose integer part is the column width (in characters) and
+            // whose first decimal digit is `0` when the column uses the sheet default width or `1`
+            // when it uses an explicit per-column width.
+            const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
-            let Some(props) = ctx.col_properties(&cell_ref.sheet_id, addr.col) else {
-                return Value::Number(DEFAULT_WIDTH);
-            };
-            if props.hidden {
+            let props = ctx.col_properties(&cell_ref.sheet_id, addr.col);
+            if props.as_ref().is_some_and(|p| p.hidden) {
                 return Value::Number(0.0);
             }
 
-            Value::Number(props.width.map(|w| w as f64).unwrap_or(DEFAULT_WIDTH))
+            let (width, is_custom) = match props.and_then(|p| p.width) {
+                Some(w) => (w as f64, true),
+                None => match ctx.sheet_default_col_width(&cell_ref.sheet_id) {
+                    Some(w) => (w as f64, false),
+                    None => (EXCEL_STANDARD_COL_WIDTH, false),
+                },
+            };
+
+            let chars = width.floor();
+            let flag = if is_custom { 0.1 } else { 0.0 };
+            Value::Number(chars + flag)
         }
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an

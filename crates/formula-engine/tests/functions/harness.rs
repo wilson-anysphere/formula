@@ -65,6 +65,14 @@ impl TestSheet {
             .expect("register pivot table");
     }
 
+    pub fn set_default_col_width(&mut self, width: Option<f32>) {
+        self.engine.set_sheet_default_col_width(self.sheet, width);
+    }
+
+    pub fn set_col_width(&mut self, col: u32, width: Option<f32>) {
+        self.engine.set_col_width(self.sheet, col, width);
+    }
+
     pub fn recalc(&mut self) {
         // Use the single-threaded recalc path in tests to avoid initializing a global Rayon pool
         // (which can fail on shared CI/agent hosts due to OS thread limits).

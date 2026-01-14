@@ -281,6 +281,13 @@ pub trait FunctionContext {
     fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
         (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
     }
+
+    /// Returns the sheet default column width in Excel "character" units.
+    ///
+    /// This corresponds to the worksheet's `<sheetFormatPr defaultColWidth="...">` metadata.
+    fn sheet_default_col_width(&self, _sheet_id: &SheetId) -> Option<f32> {
+        None
+    }
     /// Returns the stored formula text for a cell (including the leading `=`), if available.
     ///
     /// This is used by worksheet information functions like `CELL("contents")`.

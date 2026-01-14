@@ -199,6 +199,24 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub col_properties: BTreeMap<u32, ColProperties>,
 
+    /// Sheet default column width in Excel "character" units.
+    ///
+    /// This corresponds to OOXML `<sheetFormatPr defaultColWidth="...">`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_col_width: Option<f32>,
+
+    /// Sheet default row height in points.
+    ///
+    /// This corresponds to OOXML `<sheetFormatPr defaultRowHeight="...">`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_row_height: Option<f32>,
+
+    /// Base column width in characters.
+    ///
+    /// This corresponds to OOXML `<sheetFormatPr baseColWidth="...">`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_col_width: Option<u16>,
+
     /// Excel-style row/column outline (grouping) metadata.
     ///
     /// Indexes within the outline are 1-based (matching Excel / OOXML), whereas the sheet's
@@ -231,7 +249,11 @@ pub struct Worksheet {
     pub auto_filter: Option<SheetAutoFilter>,
 
     /// Conditional formatting rules for this worksheet.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "conditional_formatting")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        alias = "conditional_formatting"
+    )]
     pub conditional_formatting_rules: Vec<CfRule>,
 
     /// Differential formats referenced by conditional formatting rules.
@@ -295,6 +317,9 @@ impl Worksheet {
             col_count: default_col_count(),
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
+            default_col_width: None,
+            default_row_height: None,
+            base_col_width: None,
             outline: Outline::default(),
             frozen_rows,
             frozen_cols,
@@ -352,7 +377,9 @@ impl Worksheet {
 
     /// Clear all cached conditional formatting evaluations.
     pub fn clear_conditional_formatting_cache(&self) {
-        self.conditional_formatting_engine.borrow_mut().clear_cache();
+        self.conditional_formatting_engine
+            .borrow_mut()
+            .clear_cache();
     }
 
     /// Evaluate conditional formatting rules for a visible viewport range.
@@ -460,8 +487,11 @@ impl Worksheet {
     ) -> DataValidationId {
         let id = self.next_data_validation_id;
         self.next_data_validation_id = self.next_data_validation_id.wrapping_add(1);
-        self.data_validations
-            .push(DataValidationAssignment { id, ranges, validation });
+        self.data_validations.push(DataValidationAssignment {
+            id,
+            ranges,
+            validation,
+        });
         id
     }
 
@@ -515,12 +545,10 @@ impl Worksheet {
 
     /// Find a table by its workbook-scoped name (case-insensitive, like Excel).
     pub fn table_by_name_case_insensitive(&self, table_name: &str) -> Option<&Table> {
-        self.tables
-            .iter()
-            .find(|t| {
-                t.name.eq_ignore_ascii_case(table_name)
-                    || t.display_name.eq_ignore_ascii_case(table_name)
-            })
+        self.tables.iter().find(|t| {
+            t.name.eq_ignore_ascii_case(table_name)
+                || t.display_name.eq_ignore_ascii_case(table_name)
+        })
     }
 
     /// Find a table by id.
@@ -530,23 +558,18 @@ impl Worksheet {
 
     /// Find a mutable table by its workbook-scoped name (case-insensitive, like Excel).
     pub fn table_mut_by_name_case_insensitive(&mut self, table_name: &str) -> Option<&mut Table> {
-        self.tables
-            .iter_mut()
-            .find(|t| {
-                t.name.eq_ignore_ascii_case(table_name)
-                    || t.display_name.eq_ignore_ascii_case(table_name)
-            })
+        self.tables.iter_mut().find(|t| {
+            t.name.eq_ignore_ascii_case(table_name)
+                || t.display_name.eq_ignore_ascii_case(table_name)
+        })
     }
 
     /// Remove a table by name (case-insensitive).
     pub fn remove_table_by_name(&mut self, table_name: &str) -> Option<Table> {
-        let idx = self
-            .tables
-            .iter()
-            .position(|t| {
-                t.name.eq_ignore_ascii_case(table_name)
-                    || t.display_name.eq_ignore_ascii_case(table_name)
-            })?;
+        let idx = self.tables.iter().position(|t| {
+            t.name.eq_ignore_ascii_case(table_name)
+                || t.display_name.eq_ignore_ascii_case(table_name)
+        })?;
         Some(self.tables.remove(idx))
     }
 
@@ -635,8 +658,8 @@ impl Worksheet {
         }
 
         let max_rows = (self.row_count - origin.row) as usize;
-        let max_cols = (self.col_count - origin.col)
-            .min(crate::cell::EXCEL_MAX_COLS - origin.col) as usize;
+        let max_cols =
+            (self.col_count - origin.col).min(crate::cell::EXCEL_MAX_COLS - origin.col) as usize;
         let rows = backend.table.row_count().min(max_rows);
         let cols = backend.table.column_count().min(max_cols);
         if rows == 0 || cols == 0 {
@@ -672,7 +695,10 @@ impl Worksheet {
     /// Note: `RowProperties.hidden` is treated as the persisted "user hidden" bit and is
     /// kept in sync with `OutlineEntry.hidden.user` when using [`Worksheet::set_row_hidden`].
     pub fn row_outline_entry(&self, row_1based: u32) -> OutlineEntry {
-        assert!(row_1based >= 1, "row_1based must be >= 1 (got {row_1based})");
+        assert!(
+            row_1based >= 1,
+            "row_1based must be >= 1 (got {row_1based})"
+        );
         let mut entry = self.outline.rows.entry(row_1based);
         let row_0based = row_1based - 1;
         if self
@@ -691,7 +717,10 @@ impl Worksheet {
     /// Note: `ColProperties.hidden` is treated as the persisted "user hidden" bit and is
     /// kept in sync with `OutlineEntry.hidden.user` when using [`Worksheet::set_col_hidden`].
     pub fn col_outline_entry(&self, col_1based: u32) -> OutlineEntry {
-        assert!(col_1based >= 1, "col_1based must be >= 1 (got {col_1based})");
+        assert!(
+            col_1based >= 1,
+            "col_1based must be >= 1 (got {col_1based})"
+        );
         let mut entry = self.outline.cols.entry(col_1based);
         let col_0based = col_1based - 1;
         if self
@@ -798,7 +827,10 @@ impl Worksheet {
 
     /// Sets whether the row at `row_1based` is hidden by an AutoFilter.
     pub fn set_filter_hidden_row(&mut self, row_1based: u32, hidden: bool) {
-        assert!(row_1based >= 1, "row_1based must be >= 1 (got {row_1based})");
+        assert!(
+            row_1based >= 1,
+            "row_1based must be >= 1 (got {row_1based})"
+        );
         self.row_count = self.row_count.max(row_1based);
         self.outline.rows.set_filter_hidden(row_1based, hidden);
     }
@@ -849,7 +881,9 @@ impl Worksheet {
     /// is removed from the map.
     pub fn set_row_hidden(&mut self, row: u32, hidden: bool) {
         self.row_count = self.row_count.max(row.saturating_add(1));
-        self.outline.rows.set_user_hidden(row.saturating_add(1), hidden);
+        self.outline
+            .rows
+            .set_user_hidden(row.saturating_add(1), hidden);
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.hidden = hidden;
@@ -941,7 +975,9 @@ impl Worksheet {
             "col out of Excel bounds: {col}"
         );
         self.col_count = self.col_count.max(col.saturating_add(1));
-        self.outline.cols.set_user_hidden(col.saturating_add(1), hidden);
+        self.outline
+            .cols
+            .set_user_hidden(col.saturating_add(1), hidden);
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.hidden = hidden;
@@ -1448,10 +1484,7 @@ impl Worksheet {
     pub fn comments_for_cell(&self, cell_ref: CellRef) -> &[Comment] {
         let anchor = self.normalize_comment_anchor(cell_ref);
         let key = CellKey::from(anchor);
-        self.comments
-            .get(&key)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.comments.get(&key).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Iterate over all comments in this worksheet, in deterministic order.
@@ -1502,7 +1535,9 @@ impl Worksheet {
                     if reply.id.is_empty() {
                         reply.id = crate::new_uuid().to_string();
                     }
-                    if !local_reply_ids.insert(reply.id.clone()) || !reply_ids.insert(reply.id.clone()) {
+                    if !local_reply_ids.insert(reply.id.clone())
+                        || !reply_ids.insert(reply.id.clone())
+                    {
                         return Err(CommentError::DuplicateReplyId(reply.id.clone()));
                     }
                 }
@@ -1604,10 +1639,7 @@ impl Worksheet {
             return Err(CommentError::CommentNotFound(comment_id.to_string()));
         };
 
-        let comments = self
-            .comments
-            .get_mut(&key)
-            .expect("comment key must exist");
+        let comments = self.comments.get_mut(&key).expect("comment key must exist");
         let removed = comments.remove(idx);
         if comments.is_empty() {
             self.comments.remove(&key);
@@ -1884,6 +1916,12 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             col_properties: BTreeMap<u32, ColProperties>,
             #[serde(default)]
+            default_col_width: Option<f32>,
+            #[serde(default)]
+            default_row_height: Option<f32>,
+            #[serde(default)]
+            base_col_width: Option<u16>,
+            #[serde(default)]
             outline: Outline,
             #[serde(default)]
             frozen_rows: u32,
@@ -1979,10 +2017,7 @@ impl<'de> Deserialize<'de> for Worksheet {
         }
 
         if zoom <= 0.0 {
-            return Err(D::Error::custom(format!(
-                "zoom must be > 0 (got {})",
-                zoom
-            )));
+            return Err(D::Error::custom(format!("zoom must be > 0 (got {})", zoom)));
         }
 
         let next_data_validation_id = helper
@@ -2012,6 +2047,9 @@ impl<'de> Deserialize<'de> for Worksheet {
             col_count,
             row_properties: helper.row_properties,
             col_properties: helper.col_properties,
+            default_col_width: helper.default_col_width,
+            default_row_height: helper.default_row_height,
+            base_col_width: helper.base_col_width,
             outline,
             frozen_rows,
             frozen_cols,
@@ -2030,7 +2068,9 @@ impl<'de> Deserialize<'de> for Worksheet {
             sheet_protection: helper.sheet_protection,
         };
 
-        sheet.normalize_comment_storage().map_err(D::Error::custom)?;
+        sheet
+            .normalize_comment_storage()
+            .map_err(D::Error::custom)?;
         sheet.sync_user_hidden_bits();
         Ok(sheet)
     }
@@ -2042,12 +2082,16 @@ impl Worksheet {
         // outline's user-hidden state in sync for Excel visibility semantics.
         for (&row, props) in &self.row_properties {
             if props.hidden {
-                self.outline.rows.set_user_hidden(row.saturating_add(1), true);
+                self.outline
+                    .rows
+                    .set_user_hidden(row.saturating_add(1), true);
             }
         }
         for (&col, props) in &self.col_properties {
             if props.hidden {
-                self.outline.cols.set_user_hidden(col.saturating_add(1), true);
+                self.outline
+                    .cols
+                    .set_user_hidden(col.saturating_add(1), true);
             }
         }
 

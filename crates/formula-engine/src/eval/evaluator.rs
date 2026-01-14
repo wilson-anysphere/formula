@@ -212,6 +212,13 @@ pub trait ValueResolver {
     fn sheet_dimensions(&self, _sheet_id: usize) -> (u32, u32) {
         (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
     }
+
+    /// Returns the sheet default column width in Excel "character" units.
+    ///
+    /// This corresponds to the worksheet's `<sheetFormatPr defaultColWidth="...">` metadata.
+    fn sheet_default_col_width(&self, _sheet_id: usize) -> Option<f32> {
+        None
+    }
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
     /// Resolve a sheet id back to its display name.
     ///
@@ -1728,6 +1735,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             FnSheetId::External(_) => {
                 (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
             }
+        }
+    }
+
+    fn sheet_default_col_width(&self, sheet_id: &FnSheetId) -> Option<f32> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.sheet_default_col_width(*id),
+            FnSheetId::External(_) => None,
         }
     }
 
