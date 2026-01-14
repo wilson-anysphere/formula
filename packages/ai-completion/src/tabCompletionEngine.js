@@ -1141,6 +1141,69 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
     ],
   },
+  PV: {
+    // type
+    4: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  FV: {
+    // type
+    4: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  PMT: {
+    // type
+    4: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  NPER: {
+    // type
+    4: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  RATE: {
+    // type
+    4: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  IPMT: {
+    // type
+    5: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  PPMT: {
+    // type
+    5: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  CUMIPMT: {
+    // type
+    5: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
+  CUMPRINC: {
+    // type
+    5: [
+      { replacement: "0", displayText: "0 (end of period)", confidence: 0.66 },
+      { replacement: "1", displayText: "1 (beginning of period)", confidence: 0.65 },
+    ],
+  },
   ROMAN: {
     // form
     1: [

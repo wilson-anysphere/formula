@@ -2849,6 +2849,48 @@ test("WEIBULL cumulative suggests TRUE/FALSE", async () => {
   );
 });
 
+test("PMT type suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PMT(0.05/12, 60, 10000, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=PMT(0.05/12, 60, 10000, , 0"),
+    `Expected PMT to suggest type=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=PMT(0.05/12, 60, 10000, , 1"),
+    `Expected PMT to suggest type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("CUMIPMT type suggests 0 and 1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CUMIPMT(0.05/12, 60, 10000, 1, 12, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CUMIPMT(0.05/12, 60, 10000, 1, 12, 0"),
+    `Expected CUMIPMT to suggest type=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CUMIPMT(0.05/12, 60, 10000, 1, 12, 1"),
+    `Expected CUMIPMT to suggest type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
