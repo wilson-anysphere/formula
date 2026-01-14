@@ -27,8 +27,7 @@ pub enum PivotFieldRef {
 }
 
 impl PivotFieldRef {
-    /// Returns the underlying cache/header field name when this ref points at a worksheet/pivot
-    /// cache field.
+    /// Returns the underlying worksheet/pivot-cache field name, if this is a cache-backed field.
     pub fn as_cache_field_name(&self) -> Option<&str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Some(name),
@@ -61,6 +60,24 @@ impl fmt::Display for PivotFieldRef {
             }
             PivotFieldRef::DataModelMeasure(name) => write!(f, "[{name}]"),
         }
+    }
+}
+
+impl From<String> for PivotFieldRef {
+    fn from(value: String) -> Self {
+        PivotFieldRef::CacheFieldName(value)
+    }
+}
+
+impl From<&str> for PivotFieldRef {
+    fn from(value: &str) -> Self {
+        PivotFieldRef::CacheFieldName(value.to_string())
+    }
+}
+
+impl PartialEq<&str> for PivotFieldRef {
+    fn eq(&self, other: &&str) -> bool {
+        matches!(self, PivotFieldRef::CacheFieldName(name) if name == other)
     }
 }
 

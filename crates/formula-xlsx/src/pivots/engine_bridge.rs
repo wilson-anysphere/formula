@@ -428,7 +428,7 @@ pub fn pivot_table_to_engine_config(
                 aggregation,
                 number_format: None,
                 show_as,
-                base_field,
+                base_field: base_field.map(Into::into),
                 base_item,
             })
         })

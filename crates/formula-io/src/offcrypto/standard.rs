@@ -691,6 +691,21 @@ fn rc4_apply_keystream(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
         return Err(OffcryptoError::crypto("invalid RC4 key length (empty)"));
     }
 
+    // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the high 88 bits
+    // zero. Concretely, when `keySize == 40` (`key_len == 5`), the RC4 key bytes passed into the
+    // RC4 KSA are:
+    //
+    //   key = key[0..5] || 0x00 * 11   // 16 bytes total
+    //
+    // See `docs/offcrypto-standard-cryptoapi.md` and `docs/offcrypto-standard-cryptoapi-rc4.md`.
+    let mut padded_key = [0u8; 16];
+    let key = if key.len() == 5 {
+        padded_key[..5].copy_from_slice(key);
+        padded_key.as_slice()
+    } else {
+        key
+    };
+
     let mut s = [0u8; 256];
     for (i, b) in s.iter_mut().enumerate() {
         *b = i as u8;
@@ -722,7 +737,7 @@ fn rc4_apply_keystream(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
 mod tests {
     use super::*;
 
-    use aes::Aes128;
+    use aes::{Aes128, Aes256};
     use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
 
     fn build_standard_encryption_info_bytes(
@@ -966,5 +981,246 @@ mod tests {
             err,
             OffcryptoError::InvalidFlags { flags: _, alg_id: _ }
         ));
+    }
+
+    #[test]
+    fn verify_password_standard_rc4_keysize_hash_matrix() {
+        // Synthetic fixture: fixed (password, salt, verifier) across the parameter matrix.
+        let password = "correct horse battery staple";
+        let wrong_password = "not the password";
+        let salt: [u8; 16] = [
+            0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB,
+            0xCD, 0xEF,
+        ];
+        let verifier: [u8; 16] = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ];
+
+        for (alg_id_hash, expected_hash_len) in [(CALG_SHA1, 20usize), (CALG_MD5, 16usize)] {
+            let verifier_hash = hash(alg_id_hash, &[&verifier]).expect("hash verifier");
+            assert_eq!(verifier_hash.len(), expected_hash_len);
+
+            for key_size in [40u32, 56u32, 128u32] {
+                let key_len = (key_size / 8) as usize;
+
+                let header = EncryptionHeader {
+                    flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
+                    size_extra: 0,
+                    alg_id: CALG_RC4,
+                    alg_id_hash,
+                    key_size,
+                    provider_type: 0,
+                    reserved1: 0,
+                    reserved2: 0,
+                    csp_name: "Microsoft Base Cryptographic Provider".to_string(),
+                };
+
+                // Derive the Standard file key (block=0) and validate length/truncation.
+                let password_utf16le = utf16le_bytes(password);
+                let h = hash_password_fixed_spin(&password_utf16le, &salt, alg_id_hash).unwrap();
+                let block = 0u32.to_le_bytes();
+                let h_final = hash(alg_id_hash, &[&h, &block]).unwrap();
+                // Standard RC4 key derivation truncates `H_final` directly (unlike AES, which uses
+                // `CryptDeriveKey`). CryptoAPI/Office represent a 40-bit key as a padded 16-byte
+                // key (high 88 bits zero).
+                let mut key = h_final[..key_len].to_vec();
+                if key_len == 5 {
+                    key.resize(16, 0);
+                }
+
+                assert_eq!(
+                    key.len(),
+                    if key_len == 5 { 16 } else { key_len },
+                    "key_size={key_size} bits"
+                );
+                assert!(
+                    key.len() <= expected_hash_len,
+                    "RC4 key material should be a truncation of the digest (keyLen <= hashLen)"
+                );
+
+                // Encrypt verifier || verifier_hash using RC4.
+                let mut ciphertext = Vec::new();
+                ciphertext.extend_from_slice(&verifier);
+                ciphertext.extend_from_slice(&verifier_hash);
+                rc4_apply_keystream(&key, &mut ciphertext).unwrap();
+
+                let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
+                let encrypted_verifier_hash = ciphertext[16..].to_vec();
+
+                let verifier_struct = EncryptionVerifier {
+                    salt: salt.to_vec(),
+                    encrypted_verifier,
+                    verifier_hash_size: verifier_hash.len() as u32,
+                    encrypted_verifier_hash,
+                };
+
+                let bytes = build_standard_encryption_info_bytes(&header, &verifier_struct);
+                let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+
+                assert!(
+                    verify_password_standard(&parsed, password).unwrap(),
+                    "expected correct password to verify (hash=0x{alg_id_hash:08x} keySize={key_size})"
+                );
+                assert!(
+                    !verify_password_standard(&parsed, wrong_password).unwrap(),
+                    "expected wrong password to fail (hash=0x{alg_id_hash:08x} keySize={key_size})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn verify_password_standard_aes256_sha1_exercises_cryptderivekey_expansion() {
+        let password = "Password123";
+        let wrong_password = "Password124";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+            0x0D, 0x0E, 0x0F,
+        ];
+
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(
+                EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES,
+            ),
+            size_extra: 0,
+            alg_id: CALG_AES_256,
+            alg_id_hash: CALG_SHA1,
+            key_size: 256,
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: "Microsoft Enhanced RSA and AES Cryptographic Provider".to_string(),
+        };
+
+        let verifier: [u8; 16] = [
+            0x1F, 0xA2, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F, 0x80, 0x91, 0xA0, 0xB1, 0xC2, 0xD3,
+            0xE4, 0xF5, 0x06,
+        ];
+        let verifier_hash = hash(CALG_SHA1, &[&verifier]).expect("sha1 hash");
+        assert_eq!(verifier_hash.len(), 20);
+
+        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding.
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&verifier);
+        plaintext.extend_from_slice(&verifier_hash);
+
+        // Derive key and IV.
+        let password_utf16le = utf16le_bytes(password);
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
+        let block = 0u32.to_le_bytes();
+        let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
+        let key = crypt_derive_key(&h_final, 32, CALG_SHA1).unwrap();
+        assert_eq!(key.len(), 32);
+        assert!(
+            32 > h_final.len(),
+            "AES-256+SHA1 should exercise CryptDeriveKey expansion (keyLen > hashLen)"
+        );
+
+        let iv_full = hash(CALG_SHA1, &[&salt, &block]).unwrap();
+        let iv = &iv_full[..16];
+
+        let mut buf = plaintext.clone();
+        let pos = buf.len();
+        buf.resize(pos + 16, 0);
+        let ct = cbc::Encryptor::<Aes256>::new_from_slices(&key, iv)
+            .unwrap()
+            .encrypt_padded_mut::<Pkcs7>(&mut buf, pos)
+            .unwrap();
+        let ciphertext = ct.to_vec();
+        assert!(ciphertext.len().is_multiple_of(16));
+
+        let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
+        let encrypted_verifier_hash = ciphertext[16..].to_vec();
+
+        let verifier_struct = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        let bytes = build_standard_encryption_info_bytes(&header, &verifier_struct);
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+
+        assert!(verify_password_standard(&parsed, password).unwrap());
+        assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
+    }
+
+    #[test]
+    fn verify_password_standard_aes256_md5_exercises_cryptderivekey_expansion() {
+        let password = "Password123";
+        let wrong_password = "Password124";
+        let salt: [u8; 16] = [
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F,
+        ];
+
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(
+                EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES,
+            ),
+            size_extra: 0,
+            alg_id: CALG_AES_256,
+            alg_id_hash: CALG_MD5,
+            key_size: 256,
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: "Microsoft Enhanced RSA and AES Cryptographic Provider".to_string(),
+        };
+
+        let verifier: [u8; 16] = [
+            0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0x10, 0x32, 0x54, 0x76, 0x98,
+            0xBA, 0xDC, 0xFE,
+        ];
+        let verifier_hash = hash(CALG_MD5, &[&verifier]).expect("md5 hash");
+        assert_eq!(verifier_hash.len(), 16);
+
+        // Encrypt verifier || verifier_hash as a single AES-CBC stream, with PKCS7 padding.
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&verifier);
+        plaintext.extend_from_slice(&verifier_hash);
+
+        // Derive key and IV.
+        let password_utf16le = utf16le_bytes(password);
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_MD5).unwrap();
+        let block = 0u32.to_le_bytes();
+        let h_final = hash(CALG_MD5, &[&h, &block]).unwrap();
+        let key = crypt_derive_key(&h_final, 32, CALG_MD5).unwrap();
+        assert_eq!(key.len(), 32);
+        assert!(
+            32 > h_final.len(),
+            "AES-256+MD5 should exercise CryptDeriveKey expansion (keyLen > hashLen)"
+        );
+
+        let iv_full = hash(CALG_MD5, &[&salt, &block]).unwrap();
+        assert_eq!(iv_full.len(), 16);
+
+        let mut buf = plaintext.clone();
+        let pos = buf.len();
+        buf.resize(pos + 16, 0);
+        let ct = cbc::Encryptor::<Aes256>::new_from_slices(&key, &iv_full)
+            .unwrap()
+            .encrypt_padded_mut::<Pkcs7>(&mut buf, pos)
+            .unwrap();
+        let ciphertext = ct.to_vec();
+        assert!(ciphertext.len().is_multiple_of(16));
+
+        let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
+        let encrypted_verifier_hash = ciphertext[16..].to_vec();
+
+        let verifier_struct = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        let bytes = build_standard_encryption_info_bytes(&header, &verifier_struct);
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+
+        assert!(verify_password_standard(&parsed, password).unwrap());
+        assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
     }
 }
