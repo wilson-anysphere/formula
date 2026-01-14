@@ -225,12 +225,10 @@ fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
     std::fs::write(&path, bytes).expect("write encrypted file");
 
     // --- Decrypt + open ------------------------------------------------------------------------
+    let wrong = open_workbook_model_with_password(&path, Some("wrong-password"));
     assert!(
-        matches!(
-            open_workbook_model_with_password(&path, Some("wrong-password")),
-            Err(Error::InvalidPassword { .. })
-        ),
-        "wrong password should return InvalidPassword"
+        matches!(wrong, Err(Error::InvalidPassword { .. })),
+        "wrong password should return InvalidPassword, got {wrong:?}"
     );
 
     let workbook =
