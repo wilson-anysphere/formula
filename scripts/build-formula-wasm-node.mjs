@@ -6,6 +6,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
+
+// `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+// globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift.
+if (process.env.RUSTUP_TOOLCHAIN && existsSync(path.join(repoRoot, "rust-toolchain.toml"))) {
+  delete process.env.RUSTUP_TOOLCHAIN;
+}
 const defaultGlobalCargoHome = path.resolve(os.homedir(), ".cargo");
 const envCargoHome = process.env.CARGO_HOME;
 const normalizedEnvCargoHome = envCargoHome ? path.resolve(envCargoHome) : null;
@@ -118,7 +124,12 @@ ${pinnedHint}
 `);
 
   // wasm-pack ultimately needs this rust target.
-  const rustup = spawnSync("rustup", ["target", "list", "--installed"], { encoding: "utf8" });
+  const rustup = spawnSync("rustup", ["target", "list", "--installed"], {
+    encoding: "utf8",
+    // Run from the repo root so rustup can reliably pick up `rust-toolchain.toml` even if callers
+    // execute this script from another working directory.
+    cwd: repoRoot,
+  });
   if (rustup.error && rustup.error.code === "ENOENT") {
     throw new Error(`Missing \`rustup\` (required to validate/install the wasm32 target).
 
