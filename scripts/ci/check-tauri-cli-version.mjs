@@ -75,7 +75,7 @@ function extractPinnedCliVersionsFromWorkflow(workflowText) {
   return versions;
 }
 
-function findTauriActionScriptIssues(workflowText) {
+export function findTauriActionScriptIssues(workflowText) {
   // Enforce that any workflow using tauri-apps/tauri-action runs it through the
   // Cargo-installed Tauri CLI (`cargo tauri`) so we don't drift to a floating
   // `@tauri-apps/cli@v2` toolchain.
@@ -179,180 +179,196 @@ function extractTauriVersionFromCargoLock(lockText) {
   return match ? match[1].trim() : null;
 }
 
-let cargoTomlText = "";
-try {
-  cargoTomlText = await readFile(cargoTomlPath, "utf8");
-} catch (err) {
-  console.error(`Failed to read ${cargoTomlRelativePath}.`);
-  console.error(err);
-  process.exit(1);
-}
-
-const tauriVersion = extractTauriVersionFromCargoToml(cargoTomlText);
-if (!tauriVersion) {
-  console.error(
-    `Failed to locate a tauri dependency version in ${cargoTomlRelativePath} (expected e.g. tauri = "2.9").`,
-  );
-  process.exit(1);
-}
-
-const tauriMajorMinor = parseMajorMinor(tauriVersion);
-
-const cliVersionFromEnv = process.env.TAURI_CLI_VERSION;
-const cliVersionFromArg = process.argv[2];
-
-const pinnedSource = cliVersionFromEnv ? "env" : cliVersionFromArg ? "arg" : "workflow";
-
-let pinnedCliVersion = cliVersionFromEnv || cliVersionFromArg || null;
-let releaseWorkflowPinnedCliVersion = null;
-try {
-  const workflowText = await readFile(releaseWorkflowPath, "utf8");
-  releaseWorkflowPinnedCliVersion = extractPinnedCliVersionFromWorkflow(workflowText);
-} catch {
-  // Best-effort: this script is sometimes run in ad-hoc contexts where the
-  // release workflow file isn't present. In CI we expect it to exist.
-  releaseWorkflowPinnedCliVersion = null;
-}
-if (!pinnedCliVersion) {
-  pinnedCliVersion = releaseWorkflowPinnedCliVersion;
-}
-
-if (!pinnedCliVersion) {
-  console.error(
-    "Missing TAURI_CLI_VERSION. Provide it via env/CLI arg, or define it in .github/workflows/release.yml.",
-  );
-  process.exit(1);
-}
-
-if (
-  pinnedSource !== "workflow" &&
-  releaseWorkflowPinnedCliVersion &&
-  releaseWorkflowPinnedCliVersion !== pinnedCliVersion
-) {
-  console.error("TAURI_CLI_VERSION mismatch detected.");
-  console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
-  console.error(`- provided via ${pinnedSource}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
-  console.error("");
-  console.error("Fix:");
-  console.error(`- Update the caller's TAURI_CLI_VERSION to match ${releaseWorkflowRelativePath}.`);
-  process.exit(1);
-}
-
-if (releaseWorkflowPinnedCliVersion) {
+async function main() {
+  let cargoTomlText = "";
   try {
-    const entries = fs.readdirSync(workflowsDirPath, { withFileTypes: true });
-    const mismatchLines = [];
-    const tauriActionIssues = [];
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!entry.name.endsWith(".yml") && !entry.name.endsWith(".yaml")) continue;
-      const rel = `${workflowsDirRelativePath}/${entry.name}`;
-      const fullPath = path.join(workflowsDirPath, entry.name);
-      const text = await readFile(fullPath, "utf8");
-      const versions = extractPinnedCliVersionsFromWorkflow(text);
-      for (const v of versions) {
-        if (v !== releaseWorkflowPinnedCliVersion) {
-          mismatchLines.push(`- ${rel}: TAURI_CLI_VERSION="${v}"`);
+    cargoTomlText = await readFile(cargoTomlPath, "utf8");
+  } catch (err) {
+    console.error(`Failed to read ${cargoTomlRelativePath}.`);
+    console.error(err);
+    process.exit(1);
+  }
+
+  const tauriVersion = extractTauriVersionFromCargoToml(cargoTomlText);
+  if (!tauriVersion) {
+    console.error(
+      `Failed to locate a tauri dependency version in ${cargoTomlRelativePath} (expected e.g. tauri = "2.9").`,
+    );
+    process.exit(1);
+  }
+
+  const tauriMajorMinor = parseMajorMinor(tauriVersion);
+
+  const cliVersionFromEnv = process.env.TAURI_CLI_VERSION;
+  const cliVersionFromArg = process.argv[2];
+
+  const pinnedSource = cliVersionFromEnv ? "env" : cliVersionFromArg ? "arg" : "workflow";
+
+  let pinnedCliVersion = cliVersionFromEnv || cliVersionFromArg || null;
+  let releaseWorkflowPinnedCliVersion = null;
+  try {
+    const workflowText = await readFile(releaseWorkflowPath, "utf8");
+    releaseWorkflowPinnedCliVersion = extractPinnedCliVersionFromWorkflow(workflowText);
+  } catch {
+    // Best-effort: this script is sometimes run in ad-hoc contexts where the
+    // release workflow file isn't present. In CI we expect it to exist.
+    releaseWorkflowPinnedCliVersion = null;
+  }
+  if (!pinnedCliVersion) {
+    pinnedCliVersion = releaseWorkflowPinnedCliVersion;
+  }
+
+  if (!pinnedCliVersion) {
+    console.error(
+      "Missing TAURI_CLI_VERSION. Provide it via env/CLI arg, or define it in .github/workflows/release.yml.",
+    );
+    process.exit(1);
+  }
+
+  if (
+    pinnedSource !== "workflow" &&
+    releaseWorkflowPinnedCliVersion &&
+    releaseWorkflowPinnedCliVersion !== pinnedCliVersion
+  ) {
+    console.error("TAURI_CLI_VERSION mismatch detected.");
+    console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
+    console.error(`- provided via ${pinnedSource}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
+    console.error("");
+    console.error("Fix:");
+    console.error(`- Update the caller's TAURI_CLI_VERSION to match ${releaseWorkflowRelativePath}.`);
+    process.exit(1);
+  }
+
+  if (releaseWorkflowPinnedCliVersion) {
+    try {
+      const entries = fs.readdirSync(workflowsDirPath, { withFileTypes: true });
+      const mismatchLines = [];
+      const tauriActionIssues = [];
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        if (!entry.name.endsWith(".yml") && !entry.name.endsWith(".yaml")) continue;
+        const rel = `${workflowsDirRelativePath}/${entry.name}`;
+        const fullPath = path.join(workflowsDirPath, entry.name);
+        const text = await readFile(fullPath, "utf8");
+        const versions = extractPinnedCliVersionsFromWorkflow(text);
+        for (const v of versions) {
+          if (v !== releaseWorkflowPinnedCliVersion) {
+            mismatchLines.push(`- ${rel}: TAURI_CLI_VERSION="${v}"`);
+          }
+        }
+
+        const issues = findTauriActionScriptIssues(text);
+        for (const issue of issues) {
+          tauriActionIssues.push(`- ${rel}:${issue.line}: ${issue.message}`);
         }
       }
-
-      const issues = findTauriActionScriptIssues(text);
-      for (const issue of issues) {
-        tauriActionIssues.push(`- ${rel}:${issue.line}: ${issue.message}`);
+      if (mismatchLines.length > 0) {
+        console.error("TAURI_CLI_VERSION mismatch across workflow files detected.");
+        console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
+        mismatchLines.sort();
+        for (const line of mismatchLines) console.error(line);
+        console.error("");
+        console.error("Fix:");
+        console.error(
+          `- Update all workflow TAURI_CLI_VERSION values to match ${releaseWorkflowRelativePath} (${releaseWorkflowPinnedCliVersion}).`,
+        );
+        process.exit(1);
       }
+
+      if (tauriActionIssues.length > 0) {
+        console.error("tauri-apps/tauri-action must use the pinned Cargo-installed Tauri CLI.");
+        console.error("Set: tauriScript: cargo tauri");
+        console.error("");
+        tauriActionIssues.sort();
+        for (const line of tauriActionIssues) console.error(line);
+        process.exit(1);
+      }
+    } catch {
+      // Ignore: best-effort scan. CI contexts should include these files.
     }
-    if (mismatchLines.length > 0) {
-      console.error("TAURI_CLI_VERSION mismatch across workflow files detected.");
-      console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${releaseWorkflowPinnedCliVersion}"`);
-      mismatchLines.sort();
-      for (const line of mismatchLines) console.error(line);
+  }
+
+  const cliMajorMinor = parseMajorMinor(pinnedCliVersion);
+  try {
+    // Fail fast if someone accidentally loosens the pin (e.g. "2.9") and
+    // reintroduces toolchain drift.
+    parsePinnedCliVersion(pinnedCliVersion);
+  } catch (err) {
+    console.error(String(err instanceof Error ? err.message : err));
+    process.exit(1);
+  }
+
+  // Keep the pinned CLI patch version aligned with the resolved Tauri crate version in Cargo.lock.
+  // This prevents "tauri crates upgraded but CLI not upgraded" drift.
+  try {
+    const lockText = await readFile(cargoLockPath, "utf8");
+    const tauriLockVersion = extractTauriVersionFromCargoLock(lockText);
+    if (!tauriLockVersion) {
+      console.error(`Failed to locate tauri version in ${cargoLockRelativePath}.`);
+      process.exit(1);
+    }
+    const normalizedPinned = String(pinnedCliVersion).trim().replace(/^v/, "");
+    if (normalizedPinned !== tauriLockVersion) {
+      console.error("Pinned TAURI_CLI_VERSION does not match the resolved tauri crate version in Cargo.lock.");
+      console.error(`- ${cargoLockRelativePath}: tauri version "${tauriLockVersion}"`);
+      console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${normalizedPinned}"`);
+      console.error("");
+      console.error("Fix:");
+      console.error(`- Update TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to "${tauriLockVersion}".`);
+      console.error(`- Update TAURI_CLI_VERSION in any other workflow/docs snippets to match.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`Failed to read/parse ${cargoLockRelativePath}.`);
+    console.error(err);
+    process.exit(1);
+  }
+
+  if (cliMajorMinor !== tauriMajorMinor) {
+    console.error("Pinned Tauri CLI version does not match the repo's Tauri major/minor version.");
+    console.error(`- ${cargoTomlRelativePath}: tauri = "${tauriVersion}" (major/minor ${tauriMajorMinor})`);
+    console.error(`- pinned TAURI_CLI_VERSION: "${pinnedCliVersion}" (major/minor ${cliMajorMinor})`);
+    console.error("");
+    console.error("Fix:");
+    console.error(`- Bump TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to ${tauriMajorMinor}.x`);
+    console.error("- Update docs/release.md to match (local release instructions).");
+    process.exit(1);
+  }
+
+  // Best-effort docs check: if the release docs pin a TAURI_CLI_VERSION, keep it in sync with the
+  // canonical release workflow version so bumping is an explicit PR.
+  try {
+    const docsText = await readFile(docsReleasePath, "utf8");
+    const docsVersions = extractPinnedCliVersionsFromDocs(docsText);
+    const mismatches = [...new Set(docsVersions)].filter((v) => v !== pinnedCliVersion);
+    if (mismatches.length > 0) {
+      console.error("docs/release.md TAURI_CLI_VERSION mismatch detected.");
+      console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
+      console.error(
+        `- ${docsReleaseRelativePath}: found ${mismatches.length} mismatching value(s): ${mismatches.join(", ")}`,
+      );
       console.error("");
       console.error("Fix:");
       console.error(
-        `- Update all workflow TAURI_CLI_VERSION values to match ${releaseWorkflowRelativePath} (${releaseWorkflowPinnedCliVersion}).`,
+        `- Update the TAURI_CLI_VERSION assignment(s) in ${docsReleaseRelativePath} to ${pinnedCliVersion}.`,
       );
       process.exit(1);
     }
-
-    if (tauriActionIssues.length > 0) {
-      console.error("tauri-apps/tauri-action must use the pinned Cargo-installed Tauri CLI.");
-      console.error("Set: tauriScript: cargo tauri");
-      console.error("");
-      tauriActionIssues.sort();
-      for (const line of tauriActionIssues) console.error(line);
-      process.exit(1);
-    }
   } catch {
-    // Ignore: best-effort scan. CI contexts should include these files.
+    // Ignore: the docs file may not be present in some ad-hoc contexts.
   }
+
+  console.log(
+    `Pinned Tauri CLI version check passed: tauri=${tauriVersion} (major/minor ${tauriMajorMinor}) matches TAURI_CLI_VERSION=${pinnedCliVersion}.`,
+  );
 }
 
-const cliMajorMinor = parseMajorMinor(pinnedCliVersion);
-try {
-  // Fail fast if someone accidentally loosens the pin (e.g. "2.9") and
-  // reintroduces toolchain drift.
-  parsePinnedCliVersion(pinnedCliVersion);
-} catch (err) {
-  console.error(String(err instanceof Error ? err.message : err));
-  process.exit(1);
-}
-
-// Keep the pinned CLI patch version aligned with the resolved Tauri crate version in Cargo.lock.
-// This prevents "tauri crates upgraded but CLI not upgraded" drift.
-try {
-  const lockText = await readFile(cargoLockPath, "utf8");
-  const tauriLockVersion = extractTauriVersionFromCargoLock(lockText);
-  if (!tauriLockVersion) {
-    console.error(`Failed to locate tauri version in ${cargoLockRelativePath}.`);
+const invokedAsScript = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedAsScript) {
+  try {
+    await main();
+  } catch (err) {
+    console.error(err);
     process.exit(1);
   }
-  const normalizedPinned = String(pinnedCliVersion).trim().replace(/^v/, "");
-  if (normalizedPinned !== tauriLockVersion) {
-    console.error("Pinned TAURI_CLI_VERSION does not match the resolved tauri crate version in Cargo.lock.");
-    console.error(`- ${cargoLockRelativePath}: tauri version "${tauriLockVersion}"`);
-    console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${normalizedPinned}"`);
-    console.error("");
-    console.error("Fix:");
-    console.error(`- Update TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to "${tauriLockVersion}".`);
-    console.error(`- Update TAURI_CLI_VERSION in any other workflow/docs snippets to match.`);
-    process.exit(1);
-  }
-} catch (err) {
-  console.error(`Failed to read/parse ${cargoLockRelativePath}.`);
-  console.error(err);
-  process.exit(1);
 }
-
-if (cliMajorMinor !== tauriMajorMinor) {
-  console.error("Pinned Tauri CLI version does not match the repo's Tauri major/minor version.");
-  console.error(`- ${cargoTomlRelativePath}: tauri = "${tauriVersion}" (major/minor ${tauriMajorMinor})`);
-  console.error(`- pinned TAURI_CLI_VERSION: "${pinnedCliVersion}" (major/minor ${cliMajorMinor})`);
-  console.error("");
-  console.error("Fix:");
-  console.error(`- Bump TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to ${tauriMajorMinor}.x`);
-  console.error("- Update docs/release.md to match (local release instructions).");
-  process.exit(1);
-}
-
-// Best-effort docs check: if the release docs pin a TAURI_CLI_VERSION, keep it in sync with the
-// canonical release workflow version so bumping is an explicit PR.
-try {
-  const docsText = await readFile(docsReleasePath, "utf8");
-  const docsVersions = extractPinnedCliVersionsFromDocs(docsText);
-  const mismatches = [...new Set(docsVersions)].filter((v) => v !== pinnedCliVersion);
-  if (mismatches.length > 0) {
-    console.error("docs/release.md TAURI_CLI_VERSION mismatch detected.");
-    console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${pinnedCliVersion}"`);
-    console.error(`- ${docsReleaseRelativePath}: found ${mismatches.length} mismatching value(s): ${mismatches.join(", ")}`);
-    console.error("");
-    console.error("Fix:");
-    console.error(`- Update the TAURI_CLI_VERSION assignment(s) in ${docsReleaseRelativePath} to ${pinnedCliVersion}.`);
-    process.exit(1);
-  }
-} catch {
-  // Ignore: the docs file may not be present in some ad-hoc contexts.
-}
-
-console.log(
-  `Pinned Tauri CLI version check passed: tauri=${tauriVersion} (major/minor ${tauriMajorMinor}) matches TAURI_CLI_VERSION=${pinnedCliVersion}.`,
-);
