@@ -560,22 +560,41 @@ fn parse_series_data_id(series_node: Node<'_, '_>) -> Option<String> {
         })
 }
 
+fn parse_series_u32_child(
+    series_node: Node<'_, '_>,
+    child_name: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> Option<u32> {
+    let raw = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child_name)
+        .and_then(|n| n.attribute("val").or_else(|| n.text()))
+        // Fallback: some producers may encode idx/order as attributes on the series element.
+        .or_else(|| attribute_case_insensitive(series_node, child_name));
+
+    let Some(raw) = raw else {
+        return None;
+    };
+
+    match raw.parse::<u32>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            diagnostics.push(ChartDiagnostic {
+                level: ChartDiagnosticLevel::Warning,
+                message: format!("ChartEx series {child_name} is not a valid u32: {raw:?}"),
+            });
+            None
+        }
+    }
+}
+
 fn parse_series(
     series_node: Node<'_, '_>,
     chart_data: &HashMap<String, ChartExDataDefinition>,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> SeriesModel {
-    let idx = series_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "idx")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<u32>().ok());
-
-    let order = series_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "order")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<u32>().ok());
+    let idx = parse_series_u32_child(series_node, "idx", diagnostics);
+    let order = parse_series_u32_child(series_node, "order", diagnostics);
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")

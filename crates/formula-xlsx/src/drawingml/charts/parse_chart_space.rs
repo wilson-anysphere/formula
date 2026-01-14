@@ -428,17 +428,8 @@ fn parse_series(
     diagnostics: &mut Vec<ChartDiagnostic>,
     plot_index: Option<usize>,
 ) -> SeriesModel {
-    let idx = series_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "idx")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<u32>().ok());
-
-    let order = series_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "order")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<u32>().ok());
+    let idx = parse_series_u32_child(series_node, "idx", diagnostics);
+    let order = parse_series_u32_child(series_node, "order", diagnostics);
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
@@ -521,6 +512,31 @@ fn parse_series(
     }
 }
 
+fn parse_series_u32_child(
+    series_node: Node<'_, '_>,
+    child_name: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> Option<u32> {
+    let Some(raw) = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child_name)
+        .and_then(|n| n.attribute("val"))
+    else {
+        return None;
+    };
+
+    match raw.parse::<u32>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("series {child_name} is not a valid u32: {raw:?}"),
+            );
+            None
+        }
+    }
+}
+
 fn parse_data_labels(
     data_labels_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
@@ -563,7 +579,6 @@ fn parse_series_categories(
 
     (parse_series_text_data(cat_node, diagnostics, context), None)
 }
-
 fn parse_series_point_style(dpt_node: Node<'_, '_>) -> Option<SeriesPointStyle> {
     let idx = dpt_node
         .children()
