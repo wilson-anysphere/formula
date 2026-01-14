@@ -24,11 +24,9 @@
  *   then reused for the measured runs so persisted caches are reflected in the results.
  *
  * Benchmark kind (what we measure):
- * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default locally; requires built frontend assets): launch the normal app.
+ * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default; requires built frontend assets): launch the normal app.
  * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell`: launch `--startup-bench` (measures shell/webview startup without
  *   requiring `apps/desktop/dist`).
- *
- * If the env var is unset, this benchmark defaults to `shell` on CI and `full` locally.
  *
  * Optional idle RSS metric:
  * - Metric: `desktop.memory.<mode>.rss_mb.p95` (and `desktop.memory.rss_mb.p95` alias for cold mode)
@@ -112,10 +110,10 @@ function parseStartupMode(): StartupMode {
 function parseBenchKind(): StartupBenchKind {
   const kindRaw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
   if (!kindRaw) {
-    // Prefer the lightweight shell benchmark in CI so we can measure startup without requiring
-    // a Vite/wasm build of `apps/desktop/dist`. For full end-to-end measurements, set
-    // `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (or run the dedicated desktop perf workflows).
-    return process.env.CI ? 'shell' : 'full';
+    // Default to the full end-to-end app startup measurement (requires the desktop frontend assets
+    // embedded in the built binary). For a lightweight CI mode that does not require `apps/desktop/dist`,
+    // set `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell` (runs `--startup-bench`).
+    return 'full';
   }
   if (kindRaw !== 'full' && kindRaw !== 'shell') {
     throw new Error(
