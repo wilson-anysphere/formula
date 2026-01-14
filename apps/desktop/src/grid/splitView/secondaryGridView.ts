@@ -1000,6 +1000,11 @@ export class SecondaryGridView {
     if (!payload || typeof payload !== "object") return false;
 
     const source = typeof payload?.source === "string" ? payload.source : "";
+    // Axis resize events originating from this secondary pane are already handled by the
+    // `onAxisSizeChange` callback (which invalidates drawing geometry and triggers a render).
+    // Skip the redundant render work that would otherwise be triggered by the resulting
+    // `sheetViewDeltas` change event.
+    if (source === "secondaryGridAxis") return false;
     // Applying a new document snapshot can replace the drawing layer entirely.
     if (source === "applyState") return true;
     // Some integrations may publish drawings/images updates with a dedicated source tag.
