@@ -13,6 +13,7 @@ import {
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
   resolveDesktopStartupRunEnv,
+  resolveDesktopStartupRssEnv,
   resolveDesktopStartupTargets,
   runBenchmark,
   sleep,
@@ -231,6 +232,23 @@ describe('desktopStartupUtil resolveDesktopStartupRunEnv', () => {
       timeoutMs: 123,
       binPath: resolve(repoRoot, 'target/release/formula-desktop'),
     });
+  });
+});
+
+describe('desktopStartupUtil resolveDesktopStartupRssEnv', () => {
+  it('uses defaults when env is empty', () => {
+    expect(resolveDesktopStartupRssEnv({ env: {} })).toEqual({ idleDelayMs: 1000, targetMb: 100 });
+  });
+
+  it('clamps idle delay to >= 0 and ignores invalid target values', () => {
+    expect(
+      resolveDesktopStartupRssEnv({
+        env: {
+          FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '-5',
+          FORMULA_DESKTOP_RSS_TARGET_MB: 'wat',
+        },
+      }),
+    ).toEqual({ idleDelayMs: 0, targetMb: 100 });
   });
 });
 

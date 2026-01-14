@@ -43,6 +43,11 @@ export type DesktopStartupRunEnv = {
   binPath: string | null;
 };
 
+export type DesktopStartupRssEnv = {
+  idleDelayMs: number;
+  targetMb: number;
+};
+
 export function resolveDesktopStartupArgv(benchKind: DesktopStartupBenchKind): string[] {
   return benchKind === 'shell' ? ['--startup-bench'] : [];
 }
@@ -176,6 +181,23 @@ export function resolveDesktopStartupRunEnv(options: { env?: NodeJS.ProcessEnv }
   const rawBin = env.FORMULA_DESKTOP_BIN;
   const binPath = rawBin && rawBin.trim() !== '' ? resolve(repoRoot, rawBin) : null;
   return { runs, timeoutMs, binPath };
+}
+
+/**
+ * Resolve env vars for the optional idle-RSS metric in the desktop startup benchmark.
+ */
+export function resolveDesktopStartupRssEnv(options: { env?: NodeJS.ProcessEnv } = {}): DesktopStartupRssEnv {
+  const env = options.env ?? process.env;
+
+  // Allow explicitly setting `FORMULA_DESKTOP_RSS_IDLE_DELAY_MS=0` to sample immediately (useful
+  // for unit tests / debugging). Treat unset/blank/invalid values as the default.
+  const idleDelayRaw = env.FORMULA_DESKTOP_RSS_IDLE_DELAY_MS;
+  const idleDelayParsed = idleDelayRaw && idleDelayRaw.trim() !== '' ? Number(idleDelayRaw) : 1000;
+  const idleDelayMs = Number.isFinite(idleDelayParsed) ? Math.max(0, idleDelayParsed) : 1000;
+
+  const targetMb = parsePositiveNumber(env.FORMULA_DESKTOP_RSS_TARGET_MB) ?? 100;
+
+  return { idleDelayMs, targetMb };
 }
 
 /**
