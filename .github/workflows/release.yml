@@ -2636,6 +2636,25 @@ jobs:
               missing=1
             fi
 
+            linux_archless_count="$(echo "$json" | jq -r --arg x64 "$linux_x64_re" --arg arm64 "$linux_arm64_re" '[.[].name
+              | select(test("\\.(AppImage|deb|rpm)$"; "i"))
+              | select((test($x64; "i") or test($arm64; "i")) | not)
+            ] | length')"
+            if [[ "$linux_archless_count" -ne 0 ]]; then
+              echo "missing: found ${linux_archless_count} Linux package/bundle asset(s) without an arch token" >&2
+              missing=1
+            fi
+
+            linux_ambiguous_count="$(echo "$json" | jq -r --arg x64 "$linux_x64_re" --arg arm64 "$linux_arm64_re" '[.[].name
+              | select(test("\\.(AppImage|deb|rpm)$"; "i"))
+              | select(test($x64; "i"))
+              | select(test($arm64; "i"))
+            ] | length')"
+            if [[ "$linux_ambiguous_count" -ne 0 ]]; then
+              echo "missing: found ${linux_ambiguous_count} Linux package/bundle asset(s) matching BOTH x86_64 and arm64 patterns (ambiguous naming)" >&2
+              missing=1
+            fi
+
             windows_archless_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
               | select(test("microsoftedgewebview2"; "i") | not)
