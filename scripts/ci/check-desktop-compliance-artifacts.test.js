@@ -72,6 +72,123 @@ test("passes when LICENSE/NOTICE resources + Linux doc files are configured", ()
   assert.match(proc.stdout, /desktop-compliance: OK/i);
 });
 
+test("fails when tauri.conf.json (in repo) points LICENSE at a non-root LICENSE file via bundle.linux.*.files", () => {
+  const tmpRoot = path.join(repoRoot, "target");
+  mkdirSync(tmpRoot, { recursive: true });
+  const tmpdir = mkdtempSync(path.join(tmpRoot, "desktop-compliance-inrepo-"));
+  const confPath = path.join(tmpdir, "tauri.conf.json");
+
+  // Use absolute paths so the config can live anywhere under repoRoot.
+  const repoLicense = path.join(repoRoot, "LICENSE");
+  const repoNotice = path.join(repoRoot, "NOTICE");
+  const otherLicense = path.join(repoRoot, "crates", "formula-wasm", "LICENSE");
+
+  writeFileSync(
+    confPath,
+    `${JSON.stringify(
+      {
+        mainBinaryName: "formula-desktop",
+        bundle: {
+          resources: [repoLicense, repoNotice],
+          linux: {
+            deb: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": otherLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+            rpm: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": otherLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+            appimage: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": otherLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const proc = spawnSync(process.execPath, [scriptPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, FORMULA_TAURI_CONF_PATH: confPath },
+  });
+
+  rmSync(tmpdir, { recursive: true, force: true });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /bundle\.linux\.deb\.files/i);
+  assert.match(proc.stderr, /repo root LICENSE/i);
+});
+
+test("fails when tauri.conf.json (in repo) points LICENSE at a non-root LICENSE file via bundle.resources", () => {
+  const tmpRoot = path.join(repoRoot, "target");
+  mkdirSync(tmpRoot, { recursive: true });
+  const tmpdir = mkdtempSync(path.join(tmpRoot, "desktop-compliance-inrepo-"));
+  const confPath = path.join(tmpdir, "tauri.conf.json");
+
+  const repoLicense = path.join(repoRoot, "LICENSE");
+  const repoNotice = path.join(repoRoot, "NOTICE");
+  const otherLicense = path.join(repoRoot, "crates", "formula-wasm", "LICENSE");
+
+  writeFileSync(
+    confPath,
+    `${JSON.stringify(
+      {
+        mainBinaryName: "formula-desktop",
+        bundle: {
+          resources: [otherLicense, repoNotice],
+          linux: {
+            deb: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+            rpm: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+            appimage: {
+              files: {
+                "usr/share/doc/formula-desktop/LICENSE": repoLicense,
+                "usr/share/doc/formula-desktop/NOTICE": repoNotice,
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const proc = spawnSync(process.execPath, [scriptPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, FORMULA_TAURI_CONF_PATH: confPath },
+  });
+
+  rmSync(tmpdir, { recursive: true, force: true });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /bundle\.resources/i);
+  assert.match(proc.stderr, /repo root LICENSE/i);
+});
+
 test("fails when bundle.resources is missing NOTICE", () => {
   const proc = run({
     mainBinaryName: "formula-desktop",

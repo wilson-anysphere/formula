@@ -4,10 +4,29 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const repoRootReal = fs.realpathSync(repoRoot);
 const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
 const configPath = process.env.FORMULA_TAURI_CONF_PATH
   ? path.resolve(process.env.FORMULA_TAURI_CONF_PATH)
   : defaultConfigPath;
+
+function safeRealpath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+function isPathWithinDir(p, dir) {
+  const rel = path.relative(dir, p);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+const configPathReal = safeRealpath(configPath);
+const configIsInRepo = isPathWithinDir(configPathReal, repoRootReal);
+const expectedRepoLicenseReal = configIsInRepo ? safeRealpath(path.join(repoRootReal, "LICENSE")) : "";
+const expectedRepoNoticeReal = configIsInRepo ? safeRealpath(path.join(repoRootReal, "NOTICE")) : "";
 
 function die(message) {
   console.error(`desktop-compliance: ERROR ${message}`);
@@ -58,6 +77,24 @@ function resolveAndAssertFileExists(src, filename) {
   return resolved;
 }
 
+function assertRepoRootComplianceFile(resolvedPath, filename, context) {
+  if (!configIsInRepo) return;
+  const resolvedReal = safeRealpath(resolvedPath);
+  const expected =
+    filename === "LICENSE"
+      ? expectedRepoLicenseReal
+      : filename === "NOTICE"
+        ? expectedRepoNoticeReal
+        : "";
+  if (!expected) return;
+  if (resolvedReal !== expected) {
+    die(
+      `${context} must reference the repo root ${filename} (${expected}). Found: ${resolvedReal}. ` +
+        `This check ensures the distributed bundles ship the top-level LICENSE/NOTICE.`
+    );
+  }
+}
+
 /**
  * @param {unknown} files
  * @param {string} mainBinaryName
@@ -87,7 +124,8 @@ function validateLinuxFiles(files, mainBinaryName, kind) {
         `bundle.linux.${kind}.files[${JSON.stringify(destPath)}] must be a string source path (got ${typeof src})`,
       );
     }
-    resolveAndAssertFileExists(src, filename);
+    const resolved = resolveAndAssertFileExists(src, filename);
+    assertRepoRootComplianceFile(resolved, filename, `bundle.linux.${kind}.files[${JSON.stringify(destPath)}]`);
   }
 }
 
@@ -214,7 +252,9 @@ if (typeof licenseEntry !== "string") {
 if (typeof noticeEntry !== "string") {
   die("bundle.resources must contain an entry for NOTICE");
 }
-resolveAndAssertFileExists(licenseEntry, "LICENSE");
-resolveAndAssertFileExists(noticeEntry, "NOTICE");
+const resolvedLicense = resolveAndAssertFileExists(licenseEntry, "LICENSE");
+const resolvedNotice = resolveAndAssertFileExists(noticeEntry, "NOTICE");
+assertRepoRootComplianceFile(resolvedLicense, "LICENSE", "bundle.resources entry for LICENSE");
+assertRepoRootComplianceFile(resolvedNotice, "NOTICE", "bundle.resources entry for NOTICE");
 
 console.log(`desktop-compliance: OK (LICENSE/NOTICE bundling configured for ${mainBinaryName})`);
