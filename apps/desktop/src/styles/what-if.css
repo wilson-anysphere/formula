@@ -130,6 +130,10 @@
     box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
+.what-if__input::placeholder {
+  color: var(--text-secondary);
+}
+
 .what-if__input:focus,
 .what-if__select:focus {
   outline: none;
