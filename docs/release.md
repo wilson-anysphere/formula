@@ -1324,6 +1324,12 @@ To also check that the draft release includes the supply-chain metadata assets (
 GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run --check-supply-chain
 ```
 
+To **fail** the smoke test if supply-chain metadata assets are missing, use:
+
+```bash
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run --require-supply-chain
+```
+
 If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
 
 ```bash
