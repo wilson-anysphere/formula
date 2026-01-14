@@ -80,7 +80,9 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     let mut oauth_redirect_ready_calls = 0;
     for (idx, _) in main_rs.match_indices("state::<SharedOauthRedirectState>") {
         let window = main_rs
-            .get(idx..idx.saturating_add(300))
+            // Keep the scan bounded but allow some room for origin checks / logging between the
+            // state lookup and the eventual flush call.
+            .get(idx..idx.saturating_add(800))
             .unwrap_or(&main_rs[idx..]);
         oauth_redirect_ready_calls += window.matches(".mark_ready_and_drain(").count();
     }
