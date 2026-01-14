@@ -34,10 +34,14 @@ type WasmWorkbookInstance = {
   ) => unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
   setCellRich?: (address: string, value: unknown, sheet?: string) => void;
+  setCellPhonetic?: (address: string, phonetic: string | null | undefined, sheet?: string) => void;
+  getCellPhonetic?: (address: string, sheet?: string) => string | undefined;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
   internStyle?: (style: unknown) => number;
   setColFormatRuns?: (sheet: string, col: number, runs: unknown) => void;
   setLocale?: (localeId: string) => boolean;
+  getTextCodepage?: () => number;
+  setTextCodepage?: (codepage: number) => void;
   getCalcSettings?: () => unknown;
   setCalcSettings?: (settings: unknown) => void;
   getRange(range: string, sheet?: string): unknown;
@@ -79,6 +83,7 @@ type UsedRangeState = SheetUsedRangeDto;
 
 type EngineWorkbookJson = {
   sheetOrder?: unknown;
+  textCodepage?: unknown;
   sheets?: Record<
     string,
     {

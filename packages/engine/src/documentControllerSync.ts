@@ -40,6 +40,13 @@ export type EngineWorkbookJson = {
    */
   localeId?: string;
   /**
+   * Optional workbook legacy Windows text codepage (e.g. `932` for Shift-JIS).
+   *
+   * This is used by Excel's DBCS (`*B`) text functions (e.g. `LENB`) and by `ASC`/`DBCS`.
+   * When omitted, the WASM engine defaults to `1252` (en-US).
+   */
+  textCodepage?: number;
+  /**
    * Optional sheet tab order (array of sheet identifiers).
    *
    * When present, `crates/formula-wasm` should create sheets in this order so sheet-indexed
