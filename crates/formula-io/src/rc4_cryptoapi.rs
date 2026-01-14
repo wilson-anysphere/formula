@@ -88,6 +88,11 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 ///   RC4, `keySize == 0` MUST be interpreted as 40-bit.
 /// - For 40-bit RC4 (`key_len == 5`), use the 5-byte key directly (do not pad to 16 bytes).
 ///
+/// Some other Office encryption formats (notably legacy BIFF8 `FILEPASS` CryptoAPI RC4) treat 40-bit
+/// keys as a 16-byte RC4 key blob with the high 88 bits set to zero. That changes the RC4 KSA
+/// because RC4 depends on both key bytes *and* key length, and it is incorrect for
+/// Standard/CryptoAPI `EncryptedPackage`.
+///
 /// Seeking is supported by re-deriving the block key and discarding `o = pos % 0x200` bytes of
 /// RC4 keystream.
 pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
