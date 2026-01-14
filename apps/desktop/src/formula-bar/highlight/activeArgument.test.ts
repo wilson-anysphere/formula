@@ -180,6 +180,23 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("supports non-ASCII letters in function names (e.g. de-DE ZÄHLENWENN)", () => {
+    const formula = '=ZÄHLENWENN(A1:A3; ">0")';
+    const insideRange = formula.indexOf("A1") + 1;
+    expect(getActiveArgumentSpan(formula, insideRange, { argSeparators: ";" })).toMatchObject({
+      fnName: "ZÄHLENWENN",
+      argIndex: 0,
+      argText: "A1:A3",
+    });
+
+    const insideCriteria = formula.indexOf('">0"') + 2;
+    expect(getActiveArgumentSpan(formula, insideCriteria, { argSeparators: ";" })).toMatchObject({
+      fnName: "ZÄHLENWENN",
+      argIndex: 1,
+      argText: '">0"',
+    });
+  });
+
   it("ignores semicolons inside curly braces (array literals)", () => {
     const formula = "=SUM({1;2;3}; 4)";
     const insideSecondArg = formula.indexOf("4") + 1;

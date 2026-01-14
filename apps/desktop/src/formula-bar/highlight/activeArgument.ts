@@ -22,12 +22,38 @@ type StackFrame =
   | { kind: "group" }
   | { kind: "brace" };
 
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z");
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isUnicodeAlphabetic(ch) || (ch >= "0" && ch <= "9");
+}
+
 function isIdentifierStart(ch: string): boolean {
-  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z") || ch === "_";
+  return ch === "_" || isUnicodeAlphabetic(ch);
 }
 
 function isIdentifierPart(ch: string): boolean {
-  return isIdentifierStart(ch) || (ch >= "0" && ch <= "9") || ch === ".";
+  return isIdentifierStart(ch) || ch === "." || isUnicodeAlphanumeric(ch);
 }
 
 function isWhitespace(ch: string): boolean {
