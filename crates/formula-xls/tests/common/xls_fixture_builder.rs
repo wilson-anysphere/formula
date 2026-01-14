@@ -13642,6 +13642,13 @@ fn build_shared_formula_sheet_scoped_name_a1_sheet_workbook_stream() -> Vec<u8> 
     build_shared_formula_sheet_scoped_name_simple_workbook_stream("A1")
 }
 
+fn build_shared_formula_sheet_scoped_name_unicode_sheet_workbook_stream() -> Vec<u8> {
+    // Use a name that exercises non-ASCII handling while still being representable in BIFF8's
+    // "compressed" string form (all UTF-16 code units <= 0x00FF) so it is robust across BIFF8
+    // decoders.
+    build_shared_formula_sheet_scoped_name_simple_workbook_stream("Résumé")
+}
+
 fn build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream() -> Vec<u8> {
     // This workbook contains:
     // - Sheet 0: `Bad:Name` (invalid; will be sanitized on import)
@@ -16151,6 +16158,23 @@ pub fn build_shared_formula_sheet_scoped_name_true_sheet_fixture_xls() -> Vec<u8
 /// cell reference.
 pub fn build_shared_formula_sheet_scoped_name_a1_sheet_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_sheet_scoped_name_a1_sheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where the sheet containing the sheet-scoped `PtgName` has a
+/// non-ASCII (Unicode) name and therefore must be quoted in formulas for `formula-engine` to parse
+/// it.
+pub fn build_shared_formula_sheet_scoped_name_unicode_sheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_scoped_name_unicode_sheet_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");

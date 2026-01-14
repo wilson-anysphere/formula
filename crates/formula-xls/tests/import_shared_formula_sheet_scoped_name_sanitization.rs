@@ -106,3 +106,23 @@ fn decodes_sheet_scoped_ptgname_when_sheet_name_looks_like_cell_reference() {
     assert_eq!(formula, "'A1'!LocalName");
     assert_parseable_formula(formula);
 }
+
+#[test]
+fn decodes_sheet_scoped_ptgname_when_sheet_name_is_unicode() {
+    let bytes =
+        xls_fixture_builder::build_shared_formula_sheet_scoped_name_unicode_sheet_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result.workbook.sheet_by_name("Résumé").is_some(),
+        "expected unicode sheet to be present"
+    );
+
+    let sheet = result.workbook.sheet_by_name("Ref").expect("Ref missing");
+    let formula = sheet
+        .formula(CellRef::from_a1("A2").unwrap())
+        .expect("expected formula in Ref!A2");
+
+    assert_eq!(formula, "'Résumé'!LocalName");
+    assert_parseable_formula(formula);
+}
