@@ -197,25 +197,37 @@ export class EngineWorker {
       throw new Error("EngineWorker.connect aborted");
     }
 
-    const ready = new Promise<void>((resolve, reject) => {
-      // Use `let` so the `onReady` handler can safely reference it even in the (unlikely)
-      // event that a mock Worker posts "ready" synchronously.
-      let onAbort: (() => void) | null = null;
+    let settled = false;
+    // Use `let` so the `onReady` handler can safely reference it even in the (unlikely)
+    // event that a mock Worker posts "ready" synchronously.
+    let onAbort: (() => void) | null = null;
+    let onReady: ((event: MessageEvent<unknown>) => void) | null = null;
 
-      const onReady = (event: MessageEvent<unknown>) => {
+    const removeListeners = () => {
+      if (onReady) {
+        port.removeEventListener("message", onReady);
+      }
+      if (options.signal && onAbort) {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+    };
+
+    const ready = new Promise<void>((resolve, reject) => {
+      onReady = (event: MessageEvent<unknown>) => {
         const msg = event.data as WorkerOutboundMessage;
         if (msg && typeof msg === "object" && (msg as any).type === "ready") {
-          port.removeEventListener("message", onReady);
-          if (options.signal && onAbort) {
-            options.signal.removeEventListener("abort", onAbort);
-          }
+          if (settled) return;
+          settled = true;
+          removeListeners();
           resolve();
         }
       };
       port.addEventListener("message", onReady);
 
       onAbort = () => {
-        port.removeEventListener("message", onReady);
+        if (settled) return;
+        settled = true;
+        removeListeners();
         cleanup();
         reject(new Error("EngineWorker.connect aborted"));
       };
@@ -239,9 +251,20 @@ export class EngineWorker {
     // If the signal was aborted after we installed the abort listener but before the init message
     // is posted, bail out without transferring the port.
     if (options.signal?.aborted) {
-      await ready;
+      removeListeners();
+      cleanup();
+      throw new Error("EngineWorker.connect aborted");
     }
-    worker.postMessage(initMessage, [channel.port2]);
+    try {
+      worker.postMessage(initMessage, [channel.port2]);
+    } catch (err) {
+      // If the init message fails to post (e.g. the Worker was already terminated), do not leave
+      // an `abort` listener registered on the caller's signal (it would keep the MessagePort +
+      // closures alive).
+      removeListeners();
+      cleanup();
+      throw err;
+    }
 
     await ready;
     // EngineWorker constructor installs the general message handler and calls `port.start()` again

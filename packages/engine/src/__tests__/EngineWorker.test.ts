@@ -12,6 +12,7 @@ import type {
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
   public readonly sent: Array<{ message: unknown; transfer?: Transferable[] }> = [];
+  public closed = false;
   private listeners = new Set<(event: MessageEvent<unknown>) => void>();
   private other: MockMessagePort | null = null;
 
@@ -29,6 +30,7 @@ class MockMessagePort {
   start(): void {}
 
   close(): void {
+    this.closed = true;
     this.listeners.clear();
     this.onmessage = null;
     this.other = null;
@@ -1078,5 +1080,50 @@ describe("EngineWorker RPC", () => {
     await expect(promise).rejects.toThrow(/aborted/i);
     expect(worker.terminated).toBe(true);
     expect(worker.serverPort).toBeNull();
+  });
+
+  it("cleans up ports + abort listener when Worker.postMessage throws", async () => {
+    class ThrowingWorker implements WorkerLike {
+      terminated = false;
+      postMessageCalls = 0;
+      postMessage(): void {
+        this.postMessageCalls += 1;
+        throw new Error("boom");
+      }
+      terminate(): void {
+        this.terminated = true;
+      }
+    }
+
+    class TrackingAbortSignal {
+      aborted = false;
+      listeners = new Set<() => void>();
+      addEventListener(_type: string, listener: () => void): void {
+        this.listeners.add(listener);
+      }
+      removeEventListener(_type: string, listener: () => void): void {
+        this.listeners.delete(listener);
+      }
+    }
+
+    const worker = new ThrowingWorker();
+    const channel = createMockChannel();
+    const signal = new TrackingAbortSignal();
+
+    await expect(
+      EngineWorker.connect({
+        worker,
+        wasmModuleUrl: "mock://wasm",
+        channelFactory: () => channel,
+        signal: signal as any
+      })
+    ).rejects.toThrow(/boom/);
+
+    expect(worker.postMessageCalls).toBe(1);
+    expect(worker.terminated).toBe(true);
+    expect(signal.listeners.size).toBe(0);
+
+    expect((channel.port1 as unknown as MockMessagePort).closed).toBe(true);
+    expect((channel.port2 as unknown as MockMessagePort).closed).toBe(true);
   });
 });
