@@ -291,29 +291,7 @@ export function shouldUseXvfb(): boolean {
   return false;
 }
 
-export function mean(values: number[]): number {
-  return values.reduce((a, b) => a + b, 0) / values.length;
-}
-
-/**
- * Percentile over a sorted array.
- *
- * Matches the implementation used by `apps/desktop/tests/performance/benchmark.ts`.
- */
-export function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const idx = Math.floor(sorted.length * p);
-  return sorted[Math.min(idx, sorted.length - 1)]!;
-}
-
-export function median(sorted: number[]): number {
-  return sorted[Math.floor(sorted.length / 2)]!;
-}
-
-export function stdDev(values: number[], avg: number): number {
-  const variance = values.reduce((sum, x) => sum + Math.pow(x - avg, 2), 0) / values.length;
-  return Math.sqrt(variance);
-}
+export { mean, median, percentile, stdDev } from './benchmark.ts';
 
 export function parseStartupLine(line: string): StartupMetrics | null {
   // Example:
