@@ -277,10 +277,10 @@ export class SheetManager {
     const cells = getMapRoot<unknown>(opts.doc, "cells");
     this.sheets = getArrayRoot<Y.Map<unknown>>(opts.doc, "sheets") as Y.Array<Y.Map<unknown>>;
     this.transact = opts.transact ?? defaultTransact(opts.doc);
-    const ctors = getDocTypeConstructors(opts.doc as any);
-    this.YMapCtor = (ctors.Map ?? (cells as any).constructor) as unknown as { new (): Y.Map<unknown> };
-    this.YArrayCtor = (ctors.Array ?? (this.sheets as any).constructor) as unknown as { new (): Y.Array<any> };
-    this.YTextCtor = (ctors.Text ?? Y.Text) as unknown as { new (): Y.Text };
+    const { Text } = getDocTypeConstructors(opts.doc as any);
+    this.YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
+    this.YArrayCtor = this.sheets.constructor as unknown as { new (): Y.Array<any> };
+    this.YTextCtor = Text as unknown as { new (): Y.Text };
   }
 
   list(): Array<{ id: string; name: string | null; visibility?: SheetVisibility; tabColor?: string | null }> {
