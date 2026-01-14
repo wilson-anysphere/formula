@@ -1,6 +1,7 @@
 use formula_model::charts::{
     ChartDiagnostic, ChartDiagnosticLevel, ChartKind, ChartModel, LegendModel, LegendPosition,
-    PlotAreaModel, SeriesData, SeriesModel, SeriesNumberData, SeriesTextData, TextModel,
+    ManualLayoutModel, PlotAreaModel, SeriesData, SeriesModel, SeriesNumberData, SeriesTextData,
+    TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -198,12 +199,14 @@ fn parse_legend(
         .map(parse_ooxml_bool)
         .unwrap_or(false);
 
+    let layout = parse_layout_manual(legend_node);
+
     Some(LegendModel {
         position,
         overlay,
         text_style: None,
         style: None,
-        layout: None,
+        layout,
     })
 }
 
@@ -950,6 +953,38 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
     node.descendants()
         .find(|n| n.is_element() && n.tag_name().name() == name)
         .and_then(|n| n.text())
+}
+
+fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str> {
+    node.children()
+        .find(|n| n.is_element() && n.tag_name().name() == child)
+        .and_then(|n| n.attribute(attr))
+}
+
+fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
+    let layout_node = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "layout")?;
+    let manual_node = layout_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
+
+    let model = ManualLayoutModel {
+        x: child_attr(manual_node, "x", "val").and_then(|v| v.parse::<f64>().ok()),
+        y: child_attr(manual_node, "y", "val").and_then(|v| v.parse::<f64>().ok()),
+        w: child_attr(manual_node, "w", "val").and_then(|v| v.parse::<f64>().ok()),
+        h: child_attr(manual_node, "h", "val").and_then(|v| v.parse::<f64>().ok()),
+        x_mode: child_attr(manual_node, "xMode", "val").map(str::to_string),
+        y_mode: child_attr(manual_node, "yMode", "val").map(str::to_string),
+        w_mode: child_attr(manual_node, "wMode", "val").map(str::to_string),
+        h_mode: child_attr(manual_node, "hMode", "val").map(str::to_string),
+    };
+
+    if model == ManualLayoutModel::default() {
+        None
+    } else {
+        Some(model)
+    }
 }
 
 fn collect_rich_text(rich_node: Node<'_, '_>) -> String {

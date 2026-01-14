@@ -43,7 +43,6 @@ zip = { version = "2.1", default-features = false }
 [dev-dependencies]
 aes = "0.8"
 cbc = "0.1"
-md-5 = "0.10"
 xlsx-diff = { path = "../xlsx-diff" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
