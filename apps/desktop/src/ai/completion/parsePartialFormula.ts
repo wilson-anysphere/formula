@@ -236,6 +236,52 @@ function localizeStarter(starter: string, localeId: string): string {
   return `${localizedName}${suffix}`;
 }
 
+const UNICODE_ALNUM_RE = (() => {
+  try {
+    // Match the Rust backend's `char::is_alphanumeric` (Alphabetic || Number).
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    // Older JS engines may not support Unicode property escapes.
+    return null;
+  }
+})();
+
+/**
+ * True when `ch` is a valid identifier character for function names / name prefixes.
+ *
+ * This intentionally matches `packages/ai-completion/src/formulaPartialParser.js` so the desktop
+ * tab-completion behavior stays aligned with the JS fallback parser.
+ */
+function isIdentChar(ch: string): boolean {
+  if (!ch) return false;
+  // Fast path for ASCII.
+  const code = ch.charCodeAt(0);
+  if (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 46 || // .
+    code === 95 // _
+  ) {
+    return true;
+  }
+  // Best-effort Unicode support for localized function names (e.g. ZÄHLENWENN).
+  return Boolean(UNICODE_ALNUM_RE && UNICODE_ALNUM_RE.test(ch));
+}
+
+function findFunctionNameBeforeParen(prefix: string, openParenIndex: number): string | null {
+  let i = openParenIndex - 1;
+  while (i >= 0 && /\s/.test(prefix[i]!)) i--;
+  const end = i + 1;
+  while (i >= 0 && isIdentChar(prefix[i]!)) i--;
+  const start = i + 1;
+  const token = prefix.slice(start, end);
+  if (!token) return null;
+  // Avoid returning something that is obviously a cell ref like "A1".
+  if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;
+  return casefoldIdent(token);
+}
+
 /**
  * Returns a starter-function list that matches the current UI locale when translation tables are available.
  *
@@ -259,8 +305,8 @@ export function createLocaleAwareStarterFunctions(): () => string[] {
 
 function findOpenParenIndex(prefix: string): number | null {
   // Port of `packages/ai-completion/src/formulaPartialParser.js` open-paren scan.
-  /** @type {number[]} */
-  const openParens: number[] = [];
+  /** @type {{ index: number; functionName: string | null }[]} */
+  const openParens: Array<{ index: number; functionName: string | null }> = [];
   let inString = false;
   let inSheetQuote = false;
   let bracketDepth = 0;
@@ -315,14 +361,17 @@ function findOpenParenIndex(prefix: string): number | null {
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      openParens.push(i);
+      openParens.push({ index: i, functionName: findFunctionNameBeforeParen(prefix, i) });
     } else if (ch === ")") {
       openParens.pop();
     }
   }
 
-  if (openParens.length === 0) return null;
-  return openParens[openParens.length - 1] ?? null;
+  for (let i = openParens.length - 1; i >= 0; i--) {
+    const fnName = openParens[i]?.functionName;
+    if (typeof fnName === "string" && fnName.length > 0) return openParens[i]!.index;
+  }
+  return null;
 }
 
 function getArgContextWithSeparator(

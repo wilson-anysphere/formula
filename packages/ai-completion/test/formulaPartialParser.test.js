@@ -140,3 +140,39 @@ test("parsePartialFormula does not treat identifiers inside unterminated strings
   assert.equal(parsed.inFunctionCall, false);
   assert.equal(parsed.functionNamePrefix, undefined);
 });
+
+test("parsePartialFormula stays in the outer function call when grouping parens are open inside an argument", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM((A1";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "SUM");
+  assert.equal(parsed.argIndex, 0);
+  assert.equal(parsed.currentArg?.text, "(A1");
+  assert.equal(parsed.expectingRange, true);
+});
+
+test("parsePartialFormula tracks argIndex when the current arg starts with a grouping paren", () => {
+  const registry = new FunctionRegistry();
+  const input = "=IF(A1>0,(B1";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "IF");
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "(B1");
+  assert.equal(parsed.expectingRange, false);
+});
+
+test("parsePartialFormula can suggest function-name prefixes inside grouping parentheses", () => {
+  const registry = new FunctionRegistry();
+  const input = "=(VLO";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 2, end: 5 });
+});

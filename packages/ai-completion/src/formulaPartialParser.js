@@ -37,7 +37,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
 
   // Scan for unbalanced parentheses in the prefix to determine whether the
   // cursor is currently inside a (...) argument list.
-  /** @type {number[]} */
+  /** @type {{ index: number, functionName: string | null }[]} */
   const openParens = [];
   let inString = false;
   let inSheetQuote = false;
@@ -93,13 +93,17 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      openParens.push(i);
+      // Determine whether this paren starts a function call. Excel also allows grouping parens:
+      // `=SUM((A1+B1))`. For tab completion we care about the innermost *function call* paren, not
+      // the innermost paren overall.
+      openParens.push({ index: i, functionName: findFunctionNameBeforeParen(prefix, i) });
     } else if (ch === ")") {
       openParens.pop();
     }
   }
 
-  if (openParens.length === 0) {
+  const openFunctionCall = findInnermostFunctionCall(openParens);
+  if (!openFunctionCall) {
     // When the cursor is inside a string literal / quoted sheet name / structured reference,
     // do not attempt function-name completion. Tab completion should not suggest functions while
     // the user is typing plain text or table column names.
@@ -118,18 +122,39 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
     return { isFormula: true, inFunctionCall: false };
   }
 
-  const openParenIndex = openParens[openParens.length - 1];
-  const fnName = findFunctionNameBeforeParen(prefix, openParenIndex);
+  const openParenIndex = openFunctionCall.index;
+  const fnName = openFunctionCall.functionName;
   const argContext = getArgContext(prefix, openParenIndex, safeCursor);
 
   return {
     isFormula: true,
-    inFunctionCall: Boolean(fnName),
-    functionName: fnName ?? undefined,
+    inFunctionCall: true,
+    functionName: fnName,
     argIndex: argContext.argIndex,
     currentArg: argContext.currentArg,
     expectingRange: Boolean(fnName && functionRegistry?.isRangeArg?.(fnName, argContext.argIndex)),
   };
+}
+
+/**
+ * Returns the innermost open paren that looks like a function call (has an identifier before it).
+ *
+ * Grouping parentheses (e.g. `=SUM((A1+B1))`) should not shadow the outer function call. We
+ * still track them for arg-separator scanning via `getArgContext`, but for completion context
+ * we need the *function* paren.
+ *
+ * @param {{ index: number, functionName: string | null }[]} openParens
+ * @returns {{ index: number, functionName: string } | null}
+ */
+function findInnermostFunctionCall(openParens) {
+  for (let i = openParens.length - 1; i >= 0; i--) {
+    const entry = openParens[i];
+    const fnName = entry?.functionName;
+    if (typeof fnName === "string" && fnName.length > 0) {
+      return { index: entry.index, functionName: fnName };
+    }
+  }
+  return null;
 }
 
 const UNICODE_ALNUM_RE = (() => {
