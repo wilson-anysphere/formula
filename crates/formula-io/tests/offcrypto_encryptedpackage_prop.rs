@@ -34,7 +34,6 @@ fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
         other => panic!("unsupported AES key length {other}"),
     }
 }
-
 fn encrypt_standard_encrypted_package_stream(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
     let orig_size = plaintext.len() as u64;
     let mut out = Vec::new();

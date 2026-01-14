@@ -403,7 +403,6 @@ impl Workbook {
         self.sheet_order.push(id);
         id
     }
-
     fn tab_index_by_sheet_id(&self) -> Vec<usize> {
         let mut tab_index = vec![usize::MAX; self.sheet_names.len()];
         for (idx, sheet_id) in self.sheet_order.iter().copied().enumerate() {

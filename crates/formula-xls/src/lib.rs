@@ -981,8 +981,10 @@ fn import_xls_path_with_biff_reader(
                             &mut warnings_suppressed,
                         );
                     } else {
-                        match biff::parse_biff_sheet_print_settings(workbook_stream, sheet_info.offset)
-                        {
+                        match biff::parse_biff_sheet_print_settings(
+                            workbook_stream,
+                            sheet_info.offset,
+                        ) {
                             Ok(mut parsed) => {
                                 for warning in parsed.warnings.drain(..) {
                                     push_import_warning(
