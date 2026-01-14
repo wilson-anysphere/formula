@@ -9,8 +9,8 @@ use crate::tauri_origin::{self, DesktopPlatform};
 /// remote content is ever loaded into a WebView.
 ///
 /// We treat app-local content as trusted:
-/// - packaged builds typically run on an internal `*.localhost` origin
-/// - dev builds run on `http://localhost:<port>`
+/// - production: `tauri://localhost` (macOS/Linux) or `http(s)://tauri.localhost` (Windows)
+/// - dev: the configured `build.devUrl` origin (typically `http://localhost:<port>`)
 ///
 /// Loopback variants (`127.0.0.1`, `::1`) are also allowed.
 ///
@@ -24,8 +24,8 @@ pub fn is_trusted_app_origin(url: &Url) -> bool {
         // `file://` is explicitly *not* trusted by default. If the WebView ever navigates to local
         // HTML, we don't want that origin to be able to invoke privileged commands.
         //
-        // Set `FORMULA_TRUST_FILE_IPC_ORIGIN=1` to opt into trusting `file://` origins (primarily
-        // for local/dev debugging).
+        // In debug builds only: set `FORMULA_TRUST_FILE_IPC_ORIGIN=1` to opt into trusting
+        // `file://` origins (primarily for local/dev debugging).
         "file" => return trust_file_ipc_origin_enabled(),
         _ => {}
     }
@@ -46,6 +46,11 @@ pub fn is_trusted_app_origin(url: &Url) -> bool {
 }
 
 fn trust_file_ipc_origin_enabled() -> bool {
+    // Never trust `file://` in release builds: local HTML should not be able to invoke privileged
+    // IPC in production.
+    if !cfg!(debug_assertions) {
+        return false;
+    }
     match std::env::var("FORMULA_TRUST_FILE_IPC_ORIGIN") {
         Ok(raw) => {
             let v = raw.trim().to_ascii_lowercase();
@@ -293,19 +298,37 @@ mod tests {
     }
 
     #[test]
-    fn stable_origin_prod_windows_maps_to_tauri_localhost() {
-        let window_url = Url::parse("tauri://localhost/index.html").unwrap();
-
+    fn stable_origin_prod_windows_accepts_tauri_localhost_http_and_https() {
+        // WebView2 reports the internal `tauri:` origin as `http(s)://tauri.localhost`.
+        let http_url = Url::parse("http://tauri.localhost/index.html").unwrap();
         assert!(matches_stable_webview_origin(
-            &window_url,
+            &http_url,
             false,
             None,
             false,
             DesktopPlatform::Windows
         ));
 
+        let https_url = Url::parse("https://tauri.localhost/index.html").unwrap();
         assert!(matches_stable_webview_origin(
-            &window_url,
+            &https_url,
+            false,
+            None,
+            true,
+            DesktopPlatform::Windows
+        ));
+
+        // Some code paths may still surface the underlying custom-scheme URL.
+        let tauri_url = Url::parse("tauri://localhost/index.html").unwrap();
+        assert!(matches_stable_webview_origin(
+            &tauri_url,
+            false,
+            None,
+            false,
+            DesktopPlatform::Windows
+        ));
+        assert!(matches_stable_webview_origin(
+            &tauri_url,
             false,
             None,
             true,

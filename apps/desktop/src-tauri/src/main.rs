@@ -411,20 +411,19 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
-        match window.url() {
-            Ok(window_url) if desktop::ipc_origin::is_trusted_app_origin(&window_url) => {
-                let _ = window.emit(OPEN_FILE_EVENT, paths);
-            }
-            Ok(window_url) => {
-                eprintln!(
-                    "[open-file] blocked event delivery to untrusted origin: {window_url}"
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[open-file] blocked event delivery because window URL could not be read: {err}"
-                );
-            }
+        if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+            &window,
+            "open-file events",
+            desktop::ipc_origin::Verb::Are,
+        ) {
+            let window_url = window
+                .url()
+                .ok()
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url} ({err})");
+        } else {
+            let _ = window.emit(OPEN_FILE_EVENT, paths);
         }
     } else {
         let _ = app.emit(OPEN_FILE_EVENT, paths);
@@ -440,20 +439,21 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
-        match window.url() {
-            Ok(window_url) if desktop::ipc_origin::is_trusted_app_origin(&window_url) => {
-                let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
-            }
-            Ok(window_url) => {
-                eprintln!(
-                    "[oauth-redirect] blocked event delivery to untrusted origin: {window_url}"
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
-                );
-            }
+        if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+            &window,
+            "oauth redirect events",
+            desktop::ipc_origin::Verb::Are,
+        ) {
+            let window_url = window
+                .url()
+                .ok()
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            eprintln!(
+                "[oauth-redirect] blocked event delivery to untrusted origin: {window_url} ({err})"
+            );
+        } else {
+            let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
         }
     } else {
         let _ = app.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
@@ -1823,18 +1823,17 @@ fn main() {
                 // delegate the close flow to the frontend (which would leak workbook-derived
                 // state via the `close-requested` payload) and do not run privileged
                 // `Workbook_BeforeClose` automation.
-                let window_url = window.url().ok();
-                let is_trusted_origin = window_url
-                    .as_ref()
-                    .is_some_and(desktop::ipc_origin::is_trusted_app_origin);
-                if !is_trusted_origin {
-                    let url_for_log = window_url
-                        .as_ref()
+                if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+                    window,
+                    "close-requested flow",
+                    desktop::ipc_origin::Verb::Is,
+                ) {
+                    let url_for_log = window
+                        .url()
+                        .ok()
                         .map(|url| url.to_string())
                         .unwrap_or_else(|| "<unknown>".to_string());
-                    eprintln!(
-                        "[close] blocked close-requested flow from untrusted origin: {url_for_log}"
-                    );
+                    eprintln!("[close] blocked close-requested flow from untrusted origin: {url_for_log} ({err})");
 
                     // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
@@ -1867,11 +1866,12 @@ fn main() {
                     // Double-check the current webview URL inside the async task so a navigation
                     // between the sync window-event handler and this task being scheduled cannot
                     // leak workbook state to an untrusted origin.
-                    if !window
-                        .url()
-                        .ok()
-                        .as_ref()
-                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    if desktop::ipc_origin::ensure_stable_origin(
+                        &window,
+                        "close-requested flow",
+                        desktop::ipc_origin::Verb::Is,
+                    )
+                    .is_err()
                     {
                         let _ = window.hide();
                         return;
@@ -1907,11 +1907,12 @@ fn main() {
 
                     // Do not run the macro if the webview navigated away from the trusted app
                     // origin while we were waiting for the close-prep handshake.
-                    if !window
-                        .url()
-                        .ok()
-                        .as_ref()
-                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    if desktop::ipc_origin::ensure_stable_origin(
+                        &window,
+                        "close-requested flow",
+                        desktop::ipc_origin::Verb::Is,
+                    )
+                    .is_err()
                     {
                         let _ = window.hide();
                         return;
@@ -1978,11 +1979,12 @@ fn main() {
                     };
 
                     // Do not emit workbook-derived updates to untrusted origins.
-                    if !window
-                        .url()
-                        .ok()
-                        .as_ref()
-                        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
+                    if desktop::ipc_origin::ensure_stable_origin(
+                        &window,
+                        "close-requested flow",
+                        desktop::ipc_origin::Verb::Is,
+                    )
+                    .is_err()
                     {
                         let _ = window.hide();
                         return;
@@ -2020,17 +2022,18 @@ fn main() {
                     // SECURITY: only allow `file-dropped` to reach trusted app origins. This
                     // prevents local filesystem path leakage if the webview navigates to a remote
                     // (untrusted) origin.
-                    let url = match window.url() {
-                        Ok(url) => url,
-                        Err(err) => {
-                            eprintln!("[file-dropped] failed to read window URL: {err}");
-                            return;
-                        }
-                    };
-
-                    if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                    if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+                        window,
+                        "file-dropped events",
+                        desktop::ipc_origin::Verb::Are,
+                    ) {
+                        let url = window
+                            .url()
+                            .ok()
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|| "<unknown>".to_string());
                         eprintln!(
-                            "[file-dropped] blocked drop event for untrusted origin: {url}"
+                            "[file-dropped] blocked drop event for untrusted origin: {url} ({err})"
                         );
                         return;
                     }
@@ -2412,20 +2415,19 @@ fn main() {
                             return;
                         };
 
-                        let url = match window.url() {
-                            Ok(url) => url,
-                            Err(err) => {
-                                eprintln!(
-                                    "[updater] failed to read main window url for updater-ui-ready guard: {err}"
-                                );
-                                return;
-                            }
-                        };
-
-                        if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                        if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+                            &window,
+                            "updater-ui-ready",
+                            desktop::ipc_origin::Verb::Is,
+                        ) {
+                            let url_for_log = window
+                                .url()
+                                .ok()
+                                .map(|u| u.to_string())
+                                .unwrap_or_else(|| "<unknown>".to_string());
                             eprintln!(
-                                "[updater] ignoring updater-ui-ready from untrusted origin: {}",
-                                url
+                                "[updater] ignoring updater-ui-ready from untrusted origin: {} ({err})",
+                                url_for_log
                             );
                             return;
                         }
@@ -2462,9 +2464,13 @@ fn main() {
                             return;
                         }
                     };
-                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                    if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+                        &window_for_listener,
+                        "open-file ready signals",
+                        desktop::ipc_origin::Verb::Are,
+                    ) {
                         eprintln!(
-                            "[open-file] ignored ready signal from untrusted origin: {window_url}"
+                            "[open-file] ignored ready signal from untrusted origin: {window_url} ({err})"
                         );
                         return;
                     }
@@ -2496,9 +2502,13 @@ fn main() {
                             return;
                         }
                     };
-                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                    if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+                        &window_for_listener,
+                        "oauth-redirect ready signals",
+                        desktop::ipc_origin::Verb::Are,
+                    ) {
                         eprintln!(
-                            "[oauth-redirect] ignored ready signal from untrusted origin: {window_url}"
+                            "[oauth-redirect] ignored ready signal from untrusted origin: {window_url} ({err})"
                         );
                         return;
                     }
