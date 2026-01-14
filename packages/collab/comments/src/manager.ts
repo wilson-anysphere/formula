@@ -491,7 +491,14 @@ export class CommentManager {
   }
 
   private assertCanComment(): void {
-    if (this.canComment()) return;
+    let allowed = false;
+    try {
+      allowed = this.canComment();
+    } catch {
+      // Fail closed. Do not leak permission/token details from guard callbacks.
+      allowed = false;
+    }
+    if (allowed) return;
     throw new Error("Permission denied: cannot comment");
   }
 }

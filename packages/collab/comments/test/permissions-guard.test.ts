@@ -38,6 +38,26 @@ describe("CommentManager permissions guard", () => {
     expect(doc.share.get("comments")).toBe(undefined);
   });
 
+  it("fails closed when canComment throws (and does not instantiate the root)", () => {
+    const doc = new Y.Doc();
+    const mgr = new CommentManager(doc, {
+      canComment: () => {
+        throw new Error("boom");
+      },
+    });
+
+    expect(() =>
+      mgr.addComment({
+        cellRef: "A1",
+        kind: "threaded",
+        content: "Hello",
+        author: { id: "u1", name: "Alice" },
+      }),
+    ).toThrowError("Permission denied: cannot comment");
+
+    expect(doc.share.get("comments")).toBe(undefined);
+  });
+
   it("rejects all mutating operations but still allows reading existing threads", () => {
     const doc = new Y.Doc();
     const writer = new CommentManager(doc);
