@@ -1202,19 +1202,22 @@ To run the repo’s release sanity checks (version check, updater config validat
 
 ```bash
 # Requires a GitHub token (or pass --token).
-GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name
+#
+# Note: --repo defaults to $GITHUB_REPOSITORY (in CI) or your git remote "origin" (if it's a GitHub URL),
+# so you can usually omit it for the upstream repo.
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z
 ```
 
 If you want a faster check that **does not** download/hash all release bundles (still validates `latest.json` + signatures + asset presence), add `--dry-run`:
 
 ```bash
-GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --dry-run
+GITHUB_TOKEN=... node scripts/release-smoke-test.mjs --tag vX.Y.Z --dry-run
 ```
 
 If you have locally-built Tauri bundles and want to run any platform-specific bundle validators too:
 
 ```bash
-node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundles
+node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
 ```
 
 1. Open the GitHub Release (draft) and confirm:
