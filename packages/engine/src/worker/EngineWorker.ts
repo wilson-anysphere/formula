@@ -149,6 +149,7 @@ export class EngineWorker {
   private readonly worker: WorkerLike;
   private readonly port: MessagePortLike;
   private portListener: ((event: MessageEvent<unknown>) => void) | null = null;
+  private portMessageErrorListener: ((event: any) => void) | null = null;
   private workerErrorListener: ((event: any) => void) | null = null;
   private shuttingDown = false;
   private readonly pending = new Map<number, PendingRequest>();
@@ -167,6 +168,22 @@ export class EngineWorker {
     this.portListener = handler;
     this.port.addEventListener("message", handler);
     this.port.start?.();
+
+    // If the underlying transport can't deserialize a message, MessagePort emits a `messageerror`
+    // event and the corresponding response is dropped. Treat this as fatal so pending RPCs don't
+    // hang forever.
+    const portAny = this.port as any;
+    if (typeof portAny?.addEventListener === "function") {
+      const onMessageError = () => {
+        this.shutdown(new Error("port messageerror"));
+      };
+      this.portMessageErrorListener = onMessageError;
+      try {
+        portAny.addEventListener("messageerror", onMessageError);
+      } catch {
+        // ignore
+      }
+    }
 
     // If the worker crashes after startup, pending RPC promises would otherwise hang forever unless
     // callers supplied timeouts or AbortSignals. Treat worker "error" as fatal and reject all
@@ -376,6 +393,17 @@ export class EngineWorker {
         // ignore
       }
       this.portListener = null;
+    }
+    if (this.portMessageErrorListener) {
+      const portAny = this.port as any;
+      if (typeof portAny?.removeEventListener === "function") {
+        try {
+          portAny.removeEventListener("messageerror", this.portMessageErrorListener);
+        } catch {
+          // ignore
+        }
+      }
+      this.portMessageErrorListener = null;
     }
     if (this.workerErrorListener && typeof this.worker.removeEventListener === "function") {
       try {
