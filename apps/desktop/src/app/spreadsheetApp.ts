@@ -4622,7 +4622,7 @@ export class SpreadsheetApp {
     }
 
     const docAny = this.document as any;
-    if (typeof docAny.setImage !== "function" || typeof docAny.insertDrawing !== "function") {
+    if (typeof docAny.insertDrawing !== "function") {
       throw new Error("Picture insertion is not supported in this build.");
     }
 
@@ -4666,16 +4666,18 @@ export class SpreadsheetApp {
         })();
         const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
 
-        docAny.setImage(imageId, { bytes, mimeType });
+        const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
+        // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
+        // bloating DocumentController snapshot payloads.
+        this.drawingImages.set(imageEntry);
         try {
-          this.imageBytesBinder?.onLocalImageInserted({ id: imageId, bytes, mimeType });
+          this.imageBytesBinder?.onLocalImageInserted(imageEntry);
         } catch {
           // Best-effort: never fail picture insertion due to collab image propagation.
         }
         // Kick off ImageBitmap decode immediately so the first overlay paint can
         // reuse an already-decoding promise (avoids blocking on decode during
         // the render pass right after insertion).
-        const imageEntry: ImageEntry = { id: imageId, bytes, mimeType };
         void this.drawingOverlay
           .preloadImage(imageEntry)
           // Insertion should succeed even if bitmap decode fails.
@@ -13736,7 +13738,7 @@ export class SpreadsheetApp {
     }
 
     const docAny = this.document as any;
-    if (typeof docAny.setImage !== "function" || typeof docAny.insertDrawing !== "function") {
+    if (typeof docAny.insertDrawing !== "function") {
       return false;
     }
 
@@ -13792,9 +13794,12 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label: "Paste Picture" });
     try {
-      docAny.setImage(imageId, { bytes, mimeType: "image/png" });
+      const imageEntry: ImageEntry = { id: imageId, bytes, mimeType: "image/png" };
+      // Persist picture bytes out-of-band (IndexedDB) so they survive reloads without
+      // bloating DocumentController snapshot payloads.
+      this.drawingImages.set(imageEntry);
       try {
-        this.imageBytesBinder?.onLocalImageInserted({ id: imageId, bytes, mimeType: "image/png" });
+        this.imageBytesBinder?.onLocalImageInserted(imageEntry);
       } catch {
         // Best-effort: never fail paste due to collab image propagation.
       }

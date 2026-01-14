@@ -175,4 +175,53 @@ describe("SpreadsheetApp + IndexedDbImageStore", () => {
     app.destroy();
     root.remove();
   });
+
+  it("persists inserted picture bytes to IndexedDB without storing them in DocumentController snapshots", async () => {
+    const workbookId = `wb_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
+    // JSDOM's `File` implementation can vary; provide a minimal `File`-like object that
+    // matches what `insertPicturesFromFiles` needs (`name`, `type`, `arrayBuffer()`).
+    const file = {
+      name: "test.png",
+      type: "image/png",
+      arrayBuffer: async () => bytes.buffer.slice(0),
+    } as unknown as File;
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { workbookId });
+    await app.insertPicturesFromFiles([file]);
+
+    const sheetId = app.getCurrentSheetId();
+    const drawings = app.getDocument().getSheetDrawings(sheetId) as any[];
+    expect(drawings.length).toBeGreaterThan(0);
+    const imageId = String(drawings[drawings.length - 1]?.kind?.imageId ?? "");
+    expect(imageId).toBeTruthy();
+
+    const snapshotBytes = app.getDocument().encodeState();
+    const snapshotText = new TextDecoder().decode(snapshotBytes);
+    const snapshot = JSON.parse(snapshotText);
+    expect(snapshot.images).toBeUndefined();
+
+    const store = new IndexedDbImageStore(workbookId);
+    let loaded: any = null;
+    // Persistence is best-effort and happens async; poll briefly for the record to appear.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      loaded = await store.getAsync(imageId);
+      if (loaded) break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(loaded).toBeTruthy();
+    expect(loaded?.mimeType).toBe("image/png");
+    expect(Array.from(loaded!.bytes)).toEqual(Array.from(bytes));
+
+    app.destroy();
+    root.remove();
+  });
 });
