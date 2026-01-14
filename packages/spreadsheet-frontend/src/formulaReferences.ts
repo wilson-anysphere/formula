@@ -290,6 +290,163 @@ function parseA1RangeWithSheet(rangeRef: string): FormulaReferenceRange | null {
   };
 }
 
+function isWhitespace(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+function unescapeStructuredRefItem(text: string): string {
+  // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
+  return text.replaceAll("]]", "]");
+}
+
+function findMatchingStructuredRefBracketEnd(src: string, start: number): number | null {
+  // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
+  // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
+  //
+  // This matches the bracket span using a small backtracking parser:
+  // - On `[` increase depth.
+  // - On `]]`, prefer treating it as an escape (consume 2 chars; depth unchanged), but remember
+  //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+  //   `]]` as a real closing bracket.
+  if (src[start] !== "[") return null;
+
+  let i = start;
+  let depth = 0;
+  const escapeChoices: Array<{ i: number; depth: number }> = [];
+
+  const backtrack = (): boolean => {
+    const choice = escapeChoices.pop();
+    if (!choice) return false;
+    i = choice.i;
+    depth = choice.depth;
+    // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+    depth -= 1;
+    i += 1;
+    return true;
+  };
+
+  while (true) {
+    if (i >= src.length) {
+      // Unclosed bracket span.
+      if (!backtrack()) return null;
+      if (depth === 0) return i;
+      continue;
+    }
+
+    const ch = src[i] ?? "";
+    if (ch === "[") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      if (src[i + 1] === "]" && depth > 0) {
+        // Prefer treating `]]` as an escaped literal `]` inside an item. Record a choice point
+        // so we can reinterpret it as a closing bracket if needed.
+        escapeChoices.push({ i, depth });
+        i += 2;
+        continue;
+      }
+
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return i;
+      if (depth < 0) {
+        // Too many closing brackets - try reinterpreting an earlier escape.
+        if (!backtrack()) return null;
+        if (depth === 0) return i;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
+}
+
+type ParsedMultiColumnStructuredReference = {
+  tableName: string;
+  selector: string | null;
+  /**
+   * Column names referenced by the structured reference.
+   *
+   * For `columnMode: "range"`, this is `[start, end]` (inclusive range by table column order).
+   */
+  columnNames: string[];
+  columnMode: "list" | "range";
+};
+
+function parseMultiColumnStructuredReference(refText: string): ParsedMultiColumnStructuredReference | null {
+  const firstBracket = refText.indexOf("[");
+  if (firstBracket < 0) return null;
+  const tableName = refText.slice(0, firstBracket);
+  const suffix = refText.slice(firstBracket);
+  if (!suffix.startsWith("[[")) return null;
+
+  // Parse the nested `[[...]]` list using bracket-aware scanning so `]]` escapes in column names
+  // don't confuse the separator detection.
+  const rawItems: string[] = [];
+  const separators: Array<"," | ":"> = [];
+
+  let pos = 1; // Start at the second `[` (beginning of the first item).
+  while (true) {
+    if (suffix[pos] !== "[") return null;
+    const end = findMatchingStructuredRefBracketEnd(suffix, pos);
+    if (!end) return null;
+    rawItems.push(suffix.slice(pos + 1, end - 1));
+    pos = end;
+
+    while (pos < suffix.length && isWhitespace(suffix[pos] ?? "")) pos += 1;
+    const next = suffix[pos] ?? "";
+    if (next === "," || next === ":") {
+      separators.push(next);
+      pos += 1;
+      while (pos < suffix.length && isWhitespace(suffix[pos] ?? "")) pos += 1;
+      continue;
+    }
+
+    if (next === "]") {
+      // Outer `[[...]]` close. Must be the final char.
+      pos += 1;
+      while (pos < suffix.length && isWhitespace(suffix[pos] ?? "")) pos += 1;
+      if (pos !== suffix.length) return null;
+      break;
+    }
+
+    return null;
+  }
+
+  if (rawItems.length === 0) return null;
+
+  const items = rawItems.map((item) => unescapeStructuredRefItem(item).trim());
+
+  let selector: string | null = null;
+  let columnItems = items;
+  let columnSeps = separators;
+
+  // Heuristic: if the first item starts with `#`, treat it as a selector (e.g. `#All`).
+  // This matches Excel's structured reference grammar.
+  if (items[0]?.startsWith("#")) {
+    if (items.length < 2) return null;
+    if (separators[0] !== ",") return null;
+    selector = items[0] ?? null;
+    columnItems = items.slice(1);
+    columnSeps = separators.slice(1);
+  }
+
+  if (columnItems.length === 0) return null;
+
+  const hasColon = columnSeps.includes(":");
+  if (hasColon) {
+    if (columnItems.length !== 2) return null;
+    if (columnSeps.length !== 1 || columnSeps[0] !== ":") return null;
+    return { tableName, selector, columnNames: columnItems, columnMode: "range" };
+  }
+
+  if (!columnSeps.every((sep) => sep === ",")) return null;
+  return { tableName, selector, columnNames: columnItems, columnMode: "list" };
+}
+
 function resolveStructuredReference(refText: string, opts: ExtractFormulaReferencesOptions | undefined): FormulaReferenceRange | null {
   if (!opts) return null;
 
@@ -301,9 +458,10 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const tables = opts.tables;
   if (!tables) return null;
   const parsed = parseStructuredReferenceText(refText);
-  if (!parsed) return null;
+  const multi = parsed ? null : parseMultiColumnStructuredReference(refText);
+  if (!parsed && !multi) return null;
 
-  const table = findTableInfo(tables, parsed.tableName);
+  const table = findTableInfo(tables, parsed ? parsed.tableName : multi!.tableName);
   if (!table) return null;
 
   const startRow = table.startRow;
@@ -318,9 +476,75 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const baseStartRow = Math.min(startRow!, endRow!);
   const baseEndRow = Math.max(startRow!, endRow!);
 
+  if (multi) {
+    const selector = multi.selector?.toLowerCase() ?? null;
+    if (!(selector === null || selector === "#data" || selector === "#headers" || selector === "#totals" || selector === "#all")) {
+      // Unsupported selector (e.g. `#This Row`) - we can't resolve it to a stable rectangular range
+      // without additional context.
+      return null;
+    }
+
+    const tableColumns = Array.isArray(table.columns) ? table.columns : [];
+    const indices: number[] = [];
+
+    if (multi.columnMode === "range") {
+      const startName = multi.columnNames[0] ?? "";
+      const endName = multi.columnNames[1] ?? "";
+      const startIdx = tableColumns.findIndex((c) => String(c).toLowerCase() === startName.toLowerCase());
+      const endIdx = tableColumns.findIndex((c) => String(c).toLowerCase() === endName.toLowerCase());
+      if (startIdx < 0 || endIdx < 0) return null;
+      indices.push(startIdx, endIdx);
+    } else {
+      for (const name of multi.columnNames) {
+        const idx = tableColumns.findIndex((c) => String(c).toLowerCase() === String(name).toLowerCase());
+        if (idx < 0) return null;
+        indices.push(idx);
+      }
+    }
+
+    const uniqSorted = Array.from(new Set(indices)).sort((a, b) => a - b);
+    if (uniqSorted.length === 0) return null;
+
+    const minIdx = uniqSorted[0]!;
+    const maxIdx = uniqSorted[uniqSorted.length - 1]!;
+
+    // For comma-separated lists (`Table1[[Col1],[Col3]]`), Excel returns a union. We only resolve
+    // the range when the selected columns are contiguous, otherwise we'd highlight a misleading
+    // rectangular range that includes columns the reference doesn't actually cover.
+    if (multi.columnMode === "list" && maxIdx - minIdx + 1 !== uniqSorted.length) return null;
+
+    const startColRef = baseStartCol + minIdx;
+    const endColRef = baseStartCol + maxIdx;
+    if (startColRef < baseStartCol || endColRef > baseEndCol) return null;
+
+    let refStartRow = baseStartRow;
+    let refEndRow = baseEndRow;
+
+    if (selector === "#headers") {
+      refEndRow = refStartRow;
+    } else if (selector === "#totals") {
+      refStartRow = baseEndRow;
+      refEndRow = baseEndRow;
+    } else if (selector === "#all") {
+      // Keep the full range, including headers.
+    } else if (selector === null || selector === "#data") {
+      if (refEndRow > refStartRow) {
+        refStartRow = refStartRow + 1;
+      }
+    }
+
+    return {
+      sheet: table.sheet ?? table.sheetName,
+      startRow: Math.min(refStartRow, refEndRow),
+      endRow: Math.max(refStartRow, refEndRow),
+      startCol: startColRef,
+      endCol: endColRef,
+    };
+  }
+
   // Handle special structured reference specifiers like `Table1[#All]`, `Table1[#Data]`, etc.
   // These reference whole-table ranges (not a specific column).
-  const maybeSpecifier = parsed.columnName.toLowerCase();
+  const maybeSpecifier = parsed!.columnName.toLowerCase();
   if (maybeSpecifier.startsWith("#")) {
     const sheet = table.sheet ?? table.sheetName;
     if (!sheet) return null;
@@ -354,7 +578,7 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
     }
   }
 
-  const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed.columnName.toLowerCase());
+  const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed!.columnName.toLowerCase());
   if (columnIndex < 0) return null;
 
   const col = baseStartCol + columnIndex;
@@ -363,7 +587,7 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   let refStartRow = baseStartRow;
   let refEndRow = baseEndRow;
 
-  const selector = parsed.selector?.toLowerCase() ?? null;
+  const selector = parsed!.selector?.toLowerCase() ?? null;
   if (selector === "#headers") {
     refEndRow = refStartRow;
   } else if (selector === "#totals") {

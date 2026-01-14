@@ -245,6 +245,96 @@ describe("extractFormulaReferences", () => {
     });
   });
 
+  it("extracts multi-column structured table references when columns are contiguous", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:D4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 3,
+          columns: ["Item", "Amount", "Tax", "Total"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount],[Tax]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[[#All],[Amount],[Tax]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 2 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#All],[Amount],[Tax]]".length
+    });
+  });
+
+  it("does not resolve non-contiguous multi-column structured refs into a misleading rectangular range", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 3,
+          columns: ["Item", "Amount", "Tax", "Total"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount],[Total]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toEqual([]);
+  });
+
+  it("extracts structured table references with multi-column ranges (:) inside nested selectors", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:D4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 3,
+          columns: ["Item", "Amount", "Tax", "Total"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#All],[Amount]:[Total]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]).toEqual({
+      text: "Table1[[#All],[Amount]:[Total]]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 1, endRow: 3, endCol: 3 },
+      index: 0,
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#All],[Amount]:[Total]]".length
+    });
+
+    const dataInput = "=SUM(Table1[[Amount]:[Total]])";
+    const { references: dataRefs } = extractFormulaReferences(dataInput, 0, 0, { tables });
+    expect(dataRefs).toHaveLength(1);
+    expect(dataRefs[0]).toEqual({
+      text: "Table1[[Amount]:[Total]]",
+      range: { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 3, endCol: 3 },
+      index: 0,
+      start: dataInput.indexOf("Table1"),
+      end: dataInput.indexOf("Table1") + "Table1[[Amount]:[Total]]".length
+    });
+  });
+
   it("extracts structured references even when they are followed by operators", () => {
     const tables = new Map([
       [
