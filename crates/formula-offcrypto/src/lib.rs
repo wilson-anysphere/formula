@@ -85,6 +85,12 @@ pub struct DecryptOptions {
     /// When enabled, corrupted/tampered ciphertext is detected before attempting to decrypt large
     /// payloads.
     ///
+    /// Compatibility: while MS-OFFCRYPTO defines `dataIntegrity` as an HMAC over the full
+    /// `EncryptedPackage` stream bytes (8-byte size prefix + ciphertext), some producers compute it
+    /// over the ciphertext bytes only, and others compute it over the decrypted plaintext bytes.
+    /// When enabled, this crate accepts these variants (plaintext-based validation requires
+    /// decrypting the payload first).
+    ///
     /// Defaults to `false` because integrity verification requires hashing the entire encrypted
     /// payload.
     pub verify_integrity: bool,
@@ -3540,6 +3546,7 @@ fn verify_agile_integrity(
     data_integrity: &AgileDataIntegrity,
     secret_key: &[u8],
     encrypted_package: &[u8],
+    decrypted_package: Option<&[u8]>,
 ) -> Result<(), OffcryptoError> {
     let hash_len = hash_output_len(info.key_data_hash_algorithm);
 
@@ -3575,50 +3582,127 @@ fn verify_agile_integrity(
                 context: "decrypted HMAC value is truncated",
             })?;
 
-    // MS-OFFCRYPTO dataIntegrity HMAC is computed over the full EncryptedPackage stream (including
-    // the 8-byte original size header and any alignment padding bytes stored in the stream).
-    let actual_hmac = match info.key_data_hash_algorithm {
-        HashAlgorithm::Md5 => {
-            let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(hmac_key)
-                .expect("HMAC key length is unrestricted");
-            mac.update(encrypted_package);
-            mac.finalize().into_bytes().to_vec()
+    fn compute_hmac(hash: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+        match hash {
+            HashAlgorithm::Md5 => {
+                let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(data);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha1 => {
+                let mut mac =
+                    <Hmac<Sha1> as Mac>::new_from_slice(key).expect("HMAC key length is unrestricted");
+                mac.update(data);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha256 => {
+                let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(data);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha384 => {
+                let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(data);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha512 => {
+                let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(data);
+                mac.finalize().into_bytes().to_vec()
+            }
         }
-        HashAlgorithm::Sha1 => {
-            let mut mac = <Hmac<Sha1> as Mac>::new_from_slice(hmac_key)
-                .expect("HMAC key length is unrestricted");
-            mac.update(encrypted_package);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha256 => {
-            let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(hmac_key)
-                .expect("HMAC key length is unrestricted");
-            mac.update(encrypted_package);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha384 => {
-            let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(hmac_key)
-                .expect("HMAC key length is unrestricted");
-            mac.update(encrypted_package);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha512 => {
-            let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(hmac_key)
-                .expect("HMAC key length is unrestricted");
-            mac.update(encrypted_package);
-            mac.finalize().into_bytes().to_vec()
-        }
-    };
-
-    let actual_hmac = actual_hmac.get(..hash_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
-        context: "hash output shorter than expected",
-    })?;
-
-    if !util::ct_eq(actual_hmac, expected_hmac) {
-        return Err(OffcryptoError::IntegrityCheckFailed);
     }
 
-    Ok(())
+    fn compute_hmac_two(hash: HashAlgorithm, key: &[u8], a: &[u8], b: &[u8]) -> Vec<u8> {
+        match hash {
+            HashAlgorithm::Md5 => {
+                let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(a);
+                mac.update(b);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha1 => {
+                let mut mac =
+                    <Hmac<Sha1> as Mac>::new_from_slice(key).expect("HMAC key length is unrestricted");
+                mac.update(a);
+                mac.update(b);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha256 => {
+                let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(a);
+                mac.update(b);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha384 => {
+                let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(a);
+                mac.update(b);
+                mac.finalize().into_bytes().to_vec()
+            }
+            HashAlgorithm::Sha512 => {
+                let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(key)
+                    .expect("HMAC key length is unrestricted");
+                mac.update(a);
+                mac.update(b);
+                mac.finalize().into_bytes().to_vec()
+            }
+        }
+    }
+
+    let matches_expected = |actual: &[u8]| -> Result<bool, OffcryptoError> {
+        let actual = actual.get(..hash_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "hash output shorter than expected",
+        })?;
+        Ok(util::ct_eq(actual, expected_hmac))
+    };
+
+    // --- Variant 1 (MS-OFFCRYPTO): HMAC over the full EncryptedPackage stream bytes ---
+    let actual_hmac_full = compute_hmac(info.key_data_hash_algorithm, hmac_key, encrypted_package);
+    if matches_expected(&actual_hmac_full)? {
+        return Ok(());
+    }
+
+    // --- Variant 2 (compat): HMAC over ciphertext only (exclude 8-byte size prefix) ---
+    let ciphertext = encrypted_package
+        .get(8..)
+        .ok_or(OffcryptoError::Truncated {
+            context: "EncryptedPackageHeader.original_size",
+        })?;
+    let actual_hmac_ciphertext = compute_hmac(info.key_data_hash_algorithm, hmac_key, ciphertext);
+    if matches_expected(&actual_hmac_ciphertext)? {
+        return Ok(());
+    }
+
+    // --- Variants requiring the decrypted plaintext (compat) ---
+    if let Some(plaintext) = decrypted_package {
+        let actual_hmac_plaintext = compute_hmac(info.key_data_hash_algorithm, hmac_key, plaintext);
+        if matches_expected(&actual_hmac_plaintext)? {
+            return Ok(());
+        }
+
+        // Some producers include the 8-byte size header, but compute the HMAC over the *plaintext*
+        // bytes rather than the ciphertext.
+        let size_prefix = encrypted_package
+            .get(..8)
+            .ok_or(OffcryptoError::Truncated {
+                context: "EncryptedPackageHeader.original_size",
+            })?;
+        let actual_hmac_size_and_plaintext =
+            compute_hmac_two(info.key_data_hash_algorithm, hmac_key, size_prefix, plaintext);
+        if matches_expected(&actual_hmac_size_and_plaintext)? {
+            return Ok(());
+        }
+    }
+
+    Err(OffcryptoError::IntegrityCheckFailed)
 }
 
 fn decrypt_agile_stream(
@@ -3646,7 +3730,23 @@ fn decrypt_agile_stream(
                 .ok_or(OffcryptoError::InvalidEncryptionInfo {
                     context: "missing <dataIntegrity> element",
                 })?;
-        verify_agile_integrity(info, data_integrity, &secret_key, encrypted_package)?;
+        match verify_agile_integrity(info, data_integrity, &secret_key, encrypted_package, None) {
+            Ok(()) => {}
+            Err(OffcryptoError::IntegrityCheckFailed) => {
+                // Compatibility: some real-world producers compute the HMAC over the *decrypted*
+                // plaintext bytes, so we may need to decrypt before we can validate integrity.
+                let decrypted = agile_decrypt_package(info, &secret_key, encrypted_package)?;
+                verify_agile_integrity(
+                    info,
+                    data_integrity,
+                    &secret_key,
+                    encrypted_package,
+                    Some(&decrypted),
+                )?;
+                return Ok(decrypted);
+            }
+            Err(other) => return Err(other),
+        }
     }
 
     agile_decrypt_package(info, &secret_key, encrypted_package)
