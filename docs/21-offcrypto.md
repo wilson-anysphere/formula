@@ -254,6 +254,21 @@ Behavior notes:
 - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface
   `Error::UnsupportedEncryption` (the password-aware entrypoints do not decrypt them end-to-end).
 
+## Saving encrypted workbooks (optional)
+
+With the `formula-io/encrypted-workbooks` feature enabled, Formula can also **write**
+password-protected OOXML workbooks (an OLE/CFB wrapper containing `EncryptionInfo` +
+`EncryptedPackage`).
+
+- To write a **new encrypted output** workbook, use `save_workbook_with_options(..)` with
+  `SaveOptions { password: Some(..), encryption_scheme: SaveEncryptionScheme::Agile | ::Standard }`.
+- To preserve **extra non-encryption OLE streams/storages** (metadata, etc) from an *encrypted input*
+  workbook, use `open_workbook_with_password_and_preserved_ole(..)` and then
+  `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)`.
+
+See [`docs/21-encrypted-workbooks.md#saving--round-trip-limitations`](./21-encrypted-workbooks.md#saving--round-trip-limitations)
+for details and limitations.
+
 ## Error mapping (debugging + user-facing messaging)
 
 When handling user reports, these error variants map cleanly to “what happened”:

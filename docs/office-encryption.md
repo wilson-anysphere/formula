@@ -464,14 +464,15 @@ To identify the scheme without full parsing:
 
 ### Defaults for *writing* encrypted OOXML (`formula-office-crypto`)
 `formula-io` does not automatically preserve Office encryption when you call `save_workbook`: it will
-write a plaintext `.xlsx`/`.xlsm` unless you explicitly opt into re-encryption.
+write a plaintext `.xlsx`/`.xlsm`/`.xlsb` unless you explicitly opt into re-encryption.
 
-With the `formula-io/encrypted-workbooks` feature enabled, callers that want to preserve Office
-encryption for an encrypted OOXML OLE/CFB container can use:
+With the `formula-io/encrypted-workbooks` feature enabled, callers can opt into re-encryption via:
 
+- `save_workbook_with_options(.., SaveOptions { password: Some(..), encryption_scheme: .. })` to write
+  a **new encrypted output** workbook, and/or
 - `formula_io::open_workbook_with_password_and_preserved_ole(..)` to capture non-encryption OLE
-  streams/storages (e.g. `\u{0005}SummaryInformation`), and
-- `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` to re-encrypt the workbook **in
+  streams/storages (e.g. `\u{0005}SummaryInformation`) from an **encrypted OOXML OLE/CFB input**, then
+  `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` to re-encrypt the workbook **in
   memory** and write a new OLE wrapper (with fresh `EncryptionInfo` + `EncryptedPackage` streams).
 
 The underlying writer lives in `crates/formula-office-crypto`
