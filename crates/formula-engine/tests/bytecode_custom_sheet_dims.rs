@@ -332,3 +332,58 @@ fn bytecode_custom_sheet_dims_3d_whole_column_returns_ref_when_out_of_bounds_for
         Value::Error(ErrorKind::Ref)
     );
 }
+
+#[test]
+fn bytecode_custom_sheet_dims_sheet_prefixed_whole_row_can_reference_taller_sheet() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 5, 10)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 7, 10)
+        .expect("set Sheet2 dimensions");
+
+    engine.set_cell_value("Sheet2", "A7", 2.0).unwrap();
+    engine
+        // Sheet1 only has 5 rows, but can still reference a taller Sheet2.
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet2!7:7)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_3d_whole_row_returns_ref_when_out_of_bounds_for_any_sheet() {
+    let mut engine = Engine::new();
+    // Sheet1 is shorter than Sheet2, so row 7 is out-of-bounds on Sheet1 but valid on Sheet2.
+    engine
+        .set_sheet_dimensions("Sheet1", 5, 10)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 7, 10)
+        .expect("set Sheet2 dimensions");
+
+    engine.set_cell_value("Sheet2", "A7", 2.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet2!7:7)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
