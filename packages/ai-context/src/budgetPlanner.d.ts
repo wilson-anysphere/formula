@@ -28,9 +28,8 @@ export function planTokenBudget(params: {
   maxContextTokens: number;
   reserveForOutputTokens: number;
   systemPrompt?: string;
-  tools?: any[];
-  messages?: any[];
+  tools?: unknown[];
+  messages?: unknown[];
   estimator?: TokenEstimator;
   sectionTargets?: Record<string, number> | SectionTarget[];
 }): TokenBudgetPlan;
-

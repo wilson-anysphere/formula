@@ -1,7 +1,7 @@
 export interface TokenEstimator {
   estimateTextTokens(text: string): number;
-  estimateMessageTokens(message: any): number;
-  estimateMessagesTokens(messages: any[]): number;
+  estimateMessageTokens(message: unknown): number;
+  estimateMessagesTokens(messages: unknown[]): number;
 }
 
 export function estimateTokens(text: string, estimator?: TokenEstimator): number;
@@ -15,9 +15,9 @@ export function createHeuristicTokenEstimator(options?: {
 
 export const DEFAULT_TOKEN_ESTIMATOR: TokenEstimator;
 
-export function estimateMessagesTokens(messages: any[], estimator?: TokenEstimator): number;
+export function estimateMessagesTokens(messages: unknown[], estimator?: TokenEstimator): number;
 
-export function estimateToolDefinitionTokens(tools: any[] | null | undefined, estimator?: TokenEstimator): number;
+export function estimateToolDefinitionTokens(tools: unknown[] | null | undefined, estimator?: TokenEstimator): number;
 
 export function trimToTokenBudget(
   text: string,
