@@ -311,19 +311,37 @@ function parseImageId(value: unknown, context: string): string {
 
 function convertModelEmuSize(model: unknown, context: string): EmuSize {
   if (!isRecord(model)) throw new Error(`${context} must be an object`);
+  const record = model as JsonRecord;
+
+  const readFirst = (keys: string[], fieldContext: string): number => {
+    for (const key of keys) {
+      const candidate = readOptionalNumber(record[key]);
+      if (candidate != null) return candidate;
+    }
+    throw new Error(`${fieldContext} must be a number`);
+  };
+
   return {
-    cx: readNumber((model as JsonRecord).cx, `${context}.cx`),
-    cy: readNumber((model as JsonRecord).cy, `${context}.cy`),
+    cx: readFirst(["cx", "cxEmu", "widthEmu", "width_emu", "wEmu"], `${context}.cx`),
+    cy: readFirst(["cy", "cyEmu", "heightEmu", "height_emu", "hEmu"], `${context}.cy`),
   };
 }
 
 function convertModelCellOffset(model: unknown, context: string): CellOffset {
   if (!isRecord(model)) throw new Error(`${context} must be an object`);
-  const x = pick(model, ["x_emu", "xEmu"]);
-  const y = pick(model, ["y_emu", "yEmu"]);
+  const record = model as JsonRecord;
+
+  const readFirst = (keys: string[], fieldContext: string): number => {
+    for (const key of keys) {
+      const candidate = readOptionalNumber(record[key]);
+      if (candidate != null) return candidate;
+    }
+    throw new Error(`${fieldContext} must be a number`);
+  };
+
   return {
-    xEmu: readNumber(x, `${context}.x_emu`),
-    yEmu: readNumber(y, `${context}.y_emu`),
+    xEmu: readFirst(["x_emu", "xEmu", "dxEmu", "offsetXEmu", "offset_x_emu"], `${context}.x_emu`),
+    yEmu: readFirst(["y_emu", "yEmu", "dyEmu", "offsetYEmu", "offset_y_emu"], `${context}.y_emu`),
   };
 }
 
@@ -350,8 +368,16 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
   switch (normalized) {
     case "onecell": {
       const from = convertModelAnchorPoint((value as JsonRecord).from, "Anchor.OneCell.from");
-      const ext = pick(value, ["ext", "size"]);
-      const size = convertModelEmuSize(ext, "Anchor.OneCell.ext");
+      const size =
+        (() => {
+          const extValue = pick(value, ["ext"]);
+          const sizeValue = pick(value, ["size"]);
+          try {
+            return convertModelEmuSize(extValue, "Anchor.OneCell.ext");
+          } catch {
+            return convertModelEmuSize(sizeValue, "Anchor.OneCell.size");
+          }
+        })();
       return { type: "oneCell", from, size };
     }
     case "twocell": {
@@ -361,8 +387,16 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
     }
     case "absolute": {
       const pos = convertModelCellOffset((value as JsonRecord).pos, "Anchor.Absolute.pos");
-      const ext = pick(value, ["ext", "size"]);
-      const size = convertModelEmuSize(ext, "Anchor.Absolute.ext");
+      const size =
+        (() => {
+          const extValue = pick(value, ["ext"]);
+          const sizeValue = pick(value, ["size"]);
+          try {
+            return convertModelEmuSize(extValue, "Anchor.Absolute.ext");
+          } catch {
+            return convertModelEmuSize(sizeValue, "Anchor.Absolute.size");
+          }
+        })();
       return { type: "absolute", pos, size };
     }
     default:
@@ -459,8 +493,14 @@ export function convertModelDrawingObjectToUiDrawingObject(
   const zOrder = zOrderValue == null ? 0 : readNumber(zOrderValue, "DrawingObject.z_order");
 
   const sizeValue = pick(modelObjJson, ["size"]);
-  const size =
-    sizeValue == null ? undefined : convertModelEmuSize(sizeValue, "DrawingObject.size");
+  const size = (() => {
+    if (sizeValue == null) return undefined;
+    try {
+      return convertModelEmuSize(sizeValue, "DrawingObject.size");
+    } catch {
+      return undefined;
+    }
+  })();
 
   const preservedValue = pick(modelObjJson, ["preserved"]);
   let preserved: Record<string, string> | undefined;

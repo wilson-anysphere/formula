@@ -41,6 +41,48 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects tolerates mixed size encodi
   assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects tolerates formula-model absolute anchors with mixed pos key variants", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        Absolute: {
+          // Some imported snapshots include both snake_case and camelCase keys, but one may be null.
+          pos: { x_emu: null, y_emu: null, xEmu: 123, yEmu: 456 },
+          ext: { cx: 789, cy: 321 },
+        },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
+});
+
+test("convertDocumentSheetDrawingsToUiDrawingObjects falls back to Anchor.size when Anchor.ext is invalid", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 123, y_emu: 456 },
+          ext: {},
+          size: { cx: 789, cy: 321 },
+        },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
+});
+
 test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchors stored with root xEmu/yEmu keys", () => {
   const drawings = [
     {
