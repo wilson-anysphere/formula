@@ -50,21 +50,14 @@ jobs:
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
-  build:
-    name: Build (${{ matrix.platform }})
+  preflight:
+    name: Preflight validations
     needs: conflict-marker-guard
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [macos-latest, ubuntu-24.04, windows-latest]
-
-    runs-on: ${{ matrix.platform }}
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 0
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Node
@@ -83,6 +76,28 @@ jobs:
 
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-24.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
