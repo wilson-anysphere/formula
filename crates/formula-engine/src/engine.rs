@@ -4400,6 +4400,7 @@ impl Engine {
 
     pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {
         let before = self.workbook.clone();
+        let pivot_registry_before = self.pivot_registry.clone();
         let op_clone = op.clone();
         let mut formula_rewrites = Vec::new();
         let mut moved_ranges = Vec::new();
@@ -4425,6 +4426,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -4448,6 +4451,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -4472,6 +4477,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -4496,6 +4503,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -4527,6 +4536,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -4558,6 +4569,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -4595,6 +4608,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -4632,6 +4647,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -4676,6 +4693,8 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                self.pivot_registry
+                    .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -4734,6 +4753,7 @@ impl Engine {
             // dependency graph after the edit succeeds. If we hit a bounds error here, roll back
             // the workbook so the engine does not end up with mismatched workbook/graph state.
             self.workbook = before;
+            self.pivot_registry = pivot_registry_before;
             return Err(err);
         }
 

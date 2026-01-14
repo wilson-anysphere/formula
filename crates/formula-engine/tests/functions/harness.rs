@@ -3,7 +3,7 @@
 use formula_engine::date::ExcelDateSystem;
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::pivot::PivotTable;
-use formula_engine::{Engine, Value};
+use formula_engine::{EditOp, EditResult, Engine, Value};
 use formula_model::{Range, Style};
 
 pub struct TestSheet {
@@ -67,6 +67,10 @@ impl TestSheet {
         self.engine
             .register_pivot_table(self.sheet, destination, pivot)
             .expect("register pivot table");
+    }
+
+    pub fn apply_operation(&mut self, op: EditOp) -> EditResult {
+        self.engine.apply_operation(op).expect("apply operation")
     }
 
     pub fn set_default_col_width(&mut self, width: Option<f32>) {

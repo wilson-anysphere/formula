@@ -1,5 +1,12 @@
 use crate::eval::CellAddr;
+use crate::editing::rewrite::{
+    rewrite_formula_for_range_map,
+    rewrite_formula_for_structural_edit,
+    RangeMapEdit,
+    StructuralEdit,
+};
 use crate::pivot::PivotTable;
+use formula_model::{CellRef, Range};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -184,7 +191,127 @@ impl PivotRegistry {
             .find(|e| e.sheet_id == sheet_id && e.destination.contains(addr))
     }
 
+    /// Rewrite any registered pivot destinations affected by a row/column insertion/deletion.
+    ///
+    /// Pivot registrations are keyed by sheet id + destination range. When structural edits shift
+    /// worksheet cells, pivot destinations must shift as well so `GETPIVOTDATA` doesn't resolve
+    /// against stale ranges.
+    pub fn apply_structural_edit(
+        &mut self,
+        edit: &StructuralEdit,
+        sheet_names: &HashMap<usize, String>,
+    ) {
+        self.entries.retain_mut(|entry| {
+            let Some(ctx_sheet) = sheet_names.get(&entry.sheet_id) else {
+                // Sheet no longer exists; drop stale entry.
+                return false;
+            };
+            let Some(new_dest) = rewrite_pivot_destination_for_structural_edit(
+                entry.destination,
+                ctx_sheet,
+                edit,
+            ) else {
+                return false;
+            };
+            entry.destination = new_dest;
+            true
+        });
+    }
+
+    /// Rewrite any registered pivot destinations affected by a range move / insert-cells /
+    /// delete-cells edit.
+    pub fn apply_range_map_edit(
+        &mut self,
+        edit: &RangeMapEdit,
+        sheet_names: &HashMap<usize, String>,
+    ) {
+        self.entries.retain_mut(|entry| {
+            let Some(ctx_sheet) = sheet_names.get(&entry.sheet_id) else {
+                return false;
+            };
+            let Some(new_dest) =
+                rewrite_pivot_destination_for_range_map_edit(entry.destination, ctx_sheet, edit)
+            else {
+                return false;
+            };
+            entry.destination = new_dest;
+            true
+        });
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
     }
+}
+
+fn rewrite_pivot_destination_for_structural_edit(
+    destination: PivotDestination,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> Option<PivotDestination> {
+    let range = Range::new(
+        CellRef::new(destination.start.row, destination.start.col),
+        CellRef::new(destination.end.row, destination.end.col),
+    );
+    let formula = format!("={range}");
+    let (out, _) = rewrite_formula_for_structural_edit(
+        &formula,
+        ctx_sheet,
+        crate::CellAddr::new(0, 0),
+        edit,
+    );
+    let new_range = parse_a1_range_from_formula(&out)?;
+    Some(PivotDestination {
+        start: CellAddr {
+            row: new_range.start.row,
+            col: new_range.start.col,
+        },
+        end: CellAddr {
+            row: new_range.end.row,
+            col: new_range.end.col,
+        },
+    })
+}
+
+fn rewrite_pivot_destination_for_range_map_edit(
+    destination: PivotDestination,
+    ctx_sheet: &str,
+    edit: &RangeMapEdit,
+) -> Option<PivotDestination> {
+    let range = Range::new(
+        CellRef::new(destination.start.row, destination.start.col),
+        CellRef::new(destination.end.row, destination.end.col),
+    );
+    let formula = format!("={range}");
+    let (out, _) = rewrite_formula_for_range_map(
+        &formula,
+        ctx_sheet,
+        crate::CellAddr::new(0, 0),
+        edit,
+    );
+    let new_range = parse_a1_range_from_formula(&out)?;
+    Some(PivotDestination {
+        start: CellAddr {
+            row: new_range.start.row,
+            col: new_range.start.col,
+        },
+        end: CellAddr {
+            row: new_range.end.row,
+            col: new_range.end.col,
+        },
+    })
+}
+
+fn parse_a1_range_from_formula(formula: &str) -> Option<Range> {
+    // Mirror pivot definition rewrite helpers: accept only a simple A1 range/cell or #REF!.
+    let trimmed = formula.trim_start();
+    let expr = trimmed.strip_prefix('=').unwrap_or(trimmed).trim();
+    if expr.eq_ignore_ascii_case("#REF!") {
+        return None;
+    }
+    // Reject anything that's not a plain A1 range/cell.
+    if expr.contains(',') || expr.contains(' ') || expr.contains('(') || expr.contains(')') {
+        return None;
+    }
+    Range::from_a1(expr).ok()
 }
