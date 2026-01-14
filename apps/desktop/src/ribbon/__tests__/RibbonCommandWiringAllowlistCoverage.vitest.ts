@@ -122,7 +122,6 @@ const implementedCommandIds: string[] = [
   "format.borders.thickBox",
   "format.borders.top",
   "format.clearAll",
-  "format.clearContents",
   "format.clearFormats",
   "format.fontSize.decrease",
   "format.decreaseIndent",

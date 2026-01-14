@@ -222,7 +222,7 @@ export const homeTab: RibbonTabDefinition = {
           size: "icon",
           menuItems: [
             { id: "format.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats", iconId: "palette" },
-            { id: "format.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents", iconId: "clear" },
+            { id: "edit.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents", iconId: "clear" },
             { id: "format.clearAll", label: "Clear All", ariaLabel: "Clear All", iconId: "clear" },
           ],
         },

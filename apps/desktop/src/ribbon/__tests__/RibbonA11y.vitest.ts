@@ -117,7 +117,7 @@ describe("Ribbon a11y + keyboard navigation", () => {
       setRibbonUiState({
         pressedById: Object.create(null),
         labelById: Object.create(null),
-        disabledById: { "format.clearContents": true },
+        disabledById: { "edit.clearContents": true },
         shortcutById: Object.create(null),
         ariaKeyShortcutsById: Object.create(null),
       });
@@ -136,7 +136,7 @@ describe("Ribbon a11y + keyboard navigation", () => {
     if (!menu) throw new Error("Missing dropdown menu");
 
     const clearFormats = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearFormats"]');
-    const clearContents = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearContents"]');
+    const clearContents = menu.querySelector<HTMLButtonElement>('[data-command-id="edit.clearContents"]');
     const clearAll = menu.querySelector<HTMLButtonElement>('[data-command-id="format.clearAll"]');
     expect(clearFormats).toBeInstanceOf(HTMLButtonElement);
     expect(clearContents).toBeInstanceOf(HTMLButtonElement);
