@@ -181,6 +181,11 @@ pub struct PasswordKeyEncryptor {
 }
 
 /// Parsed Agile `EncryptionInfo` XML (best-effort; currently focused on key encryptor selection).
+///
+/// This is intentionally distinct from the full Agile descriptor parsed by `offcrypto::agile`
+/// (`AgileKeyData`, `AgileDataIntegrity`, etc.). The goal of this lightweight type is to provide
+/// deterministic, user-friendly diagnostics about key-encryptor selection (password vs certificate)
+/// without having to fully parse the cryptographic parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgileEncryptionInfoXml {
     /// The selected password-based key encryptor.
