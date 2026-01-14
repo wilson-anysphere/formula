@@ -8604,13 +8604,62 @@ export class SpreadsheetApp {
       return [];
     })();
 
+    const normalizeEnumTag = (tag: unknown): string => {
+      if (typeof tag !== "string") return "";
+      return tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+    };
+
+    const normalizeImageId = (value: unknown): string => {
+      if (typeof value === "string") return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+      if (typeof value === "bigint") return String(value);
+      return "";
+    };
+
     const scanDrawings = (drawings: unknown) => {
       if (!Array.isArray(drawings)) return;
       for (const raw of drawings) {
         const kind = (raw as any)?.kind;
-        const type = typeof kind?.type === "string" ? kind.type : "";
-        if (type !== "image") continue;
-        const id = typeof kind?.imageId === "string" ? kind.imageId : typeof kind?.image_id === "string" ? kind.image_id : "";
+        if (!kind || typeof kind !== "object") continue;
+
+        // Drawing kinds can be encoded in multiple formats depending on their source:
+        // - UI objects: `{ type: "image", imageId }`
+        // - Legacy/model objects: `{ Image: { image_id } }` (externally tagged enum)
+        // - Tagged enum envelopes: `{ type: "Image", value: { image_id } }`
+        const kindAny = kind as any;
+        const type =
+          typeof kindAny.type === "string"
+            ? kindAny.type
+            : typeof kindAny.kind === "string"
+              ? kindAny.kind
+              : Object.keys(kindAny).length === 1
+                ? Object.keys(kindAny)[0]
+                : null;
+
+        const normalizedType = normalizeEnumTag(type);
+        const hasDirectImageId = typeof kindAny.imageId === "string" || typeof kindAny.image_id === "string";
+        const isImage = normalizedType === "image" || (normalizedType === "" && hasDirectImageId);
+        if (!isImage) continue;
+
+        const payload =
+          typeof type === "string" && kindAny[type] && typeof kindAny[type] === "object" && !Array.isArray(kindAny[type])
+            ? kindAny[type]
+            : kindAny.value && typeof kindAny.value === "object" && !Array.isArray(kindAny.value)
+              ? kindAny.value
+              : kindAny.content && typeof kindAny.content === "object" && !Array.isArray(kindAny.content)
+                ? kindAny.content
+                : kindAny;
+
+        const rawImageId =
+          kindAny.imageId ??
+          kindAny.image_id ??
+          payload?.imageId ??
+          payload?.image_id ??
+          kindAny.Image?.image_id ??
+          kindAny.Image?.imageId ??
+          kindAny.image?.image_id ??
+          kindAny.image?.imageId;
+        const id = normalizeImageId(rawImageId);
         if (id) keep.add(id);
       }
     };

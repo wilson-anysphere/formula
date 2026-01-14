@@ -159,6 +159,42 @@ describe("SpreadsheetApp.garbageCollectDrawingImages", () => {
     root.remove();
   });
 
+  it("includes image ids from externally-tagged drawing kinds", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+
+    // DocumentController can store drawing kinds as externally-tagged enums:
+    // `{ kind: { Image: { image_id } } }`.
+    app.getDocument().setSheetDrawings(sheetId, [
+      {
+        id: "drawing_doc_tagged",
+        kind: { Image: { image_id: "image_doc_tagged.png" } },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(10), cy: pxToEmu(10) } },
+        zOrder: 0,
+      },
+    ]);
+
+    const garbageCollectAsync = vi.fn(async (_keep: Iterable<string>) => {});
+    (app as any).drawingImages = { get: () => undefined, set: () => {}, garbageCollectAsync, clear: () => {} };
+
+    await app.garbageCollectDrawingImages();
+
+    expect(garbageCollectAsync).toHaveBeenCalledTimes(1);
+    const keep = garbageCollectAsync.mock.calls[0]?.[0] as Iterable<string>;
+    const keepSet = new Set(Array.from(keep));
+    expect(keepSet.has("image_doc_tagged.png")).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps image ids referenced by in-cell images", async () => {
     const root = createRoot();
     const status = {
