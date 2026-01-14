@@ -58,6 +58,34 @@ fn warns_on_unparsable_series_idx() {
 }
 
 #[test]
+fn warns_on_unparsable_series_order() {
+    let xml = br#"
+        <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart>
+            <c:plotArea>
+              <c:barChart>
+                <c:ser>
+                  <c:idx val="1"/>
+                  <c:order val="nope"/>
+                </c:ser>
+              </c:barChart>
+            </c:plotArea>
+          </c:chart>
+        </c:chartSpace>
+    "#;
+
+    let model = parse_chart_space(xml, "chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.series.len(), 1);
+    assert_eq!(model.series[0].idx, Some(1));
+    assert_eq!(model.series[0].order, None);
+    assert!(
+        model.diagnostics.iter().any(|d| d.message.contains("series order")),
+        "expected warning about series order parse failure, got {:?}",
+        model.diagnostics
+    );
+}
+
+#[test]
 fn parses_series_idx_and_order_from_chart_ex() {
     let xml = br#"
         <cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
