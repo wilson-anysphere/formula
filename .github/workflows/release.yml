@@ -334,24 +334,30 @@ jobs:
             x86_64-apple-darwin \
             aarch64-apple-darwin; do
             echo "Checking Cargo.lock for target: $target"
-          cargo metadata \
-            --locked \
-            --format-version=1 \
-            --manifest-path "$manifest" \
-            --features desktop \
-            --filter-platform "$target" \
-            >/dev/null
+            if ! cargo metadata \
+              --locked \
+              --format-version=1 \
+              --manifest-path "$manifest" \
+              --features desktop \
+              --filter-platform "$target" \
+              >/dev/null; then
+              echo "::error::Cargo.lock is out of date for desktop release target ${target}. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
+              exit 1
+            fi
           done
 
           # The desktop app also bundles a WASM engine (`crates/formula-wasm`), built via wasm-pack.
           # Validate the workspace lockfile for wasm32 as well so we fail early if `Cargo.lock` is out
           # of date for the engine dependency graph.
           echo "Checking Cargo.lock for target: wasm32-unknown-unknown"
-          cargo metadata \
+          if ! cargo metadata \
             --locked \
             --format-version=1 \
             --filter-platform wasm32-unknown-unknown \
-            >/dev/null
+            >/dev/null; then
+            echo "::error::Cargo.lock is out of date for wasm32-unknown-unknown. Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
+            exit 1
+          fi
   check-ci-status:
     name: Verify tagged commit has successful CI run
     needs: preflight
