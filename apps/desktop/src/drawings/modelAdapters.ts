@@ -727,7 +727,22 @@ function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined
 
 function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSize | undefined): Anchor | null {
   if (!isRecord(anchorJson)) return null;
-  const anchorType = normalizeEnumTag(readOptionalString(pick(anchorJson, ["type"])) ?? "");
+  const outer = anchorJson as JsonRecord;
+  // Support DocumentController anchors (simple `{ type: "absolute", ... }`) as well as
+  // formula-model/Rust enum encodings (externally tagged `{ Absolute: {...} }` and
+  // internally tagged `{ type: "Absolute", value: {...} }`).
+  let tag = readOptionalString(pick(outer, ["type"])) ?? "";
+  let payload: JsonRecord = outer;
+  try {
+    const unwrapped = unwrapPossiblyTaggedEnum(outer, "Drawing.anchor", { tagKeys: ["kind", "type"] });
+    tag = unwrapped.tag;
+    if (!isRecord(unwrapped.value)) return null;
+    payload = unwrapped.value as JsonRecord;
+  } catch {
+    // ignore; fall back to treating `anchorJson` as a plain DocumentController anchor object.
+  }
+
+  const anchorType = normalizeEnumTag(tag);
 
   const resolveOffsetEmuFrom = (record: JsonRecord, axis: "x" | "y"): number => {
     const emuKeys =
@@ -767,7 +782,8 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
 
     return undefined;
   };
-  const resolveOffsetEmu = (axis: "x" | "y"): number => resolveOffsetEmuFrom(anchorJson, axis);
+  const resolveOffsetEmu = (axis: "x" | "y"): number =>
+    resolveOffsetEmuMaybeFrom(payload, axis) ?? (payload !== outer ? resolveOffsetEmuMaybeFrom(outer, axis) : undefined) ?? 0;
 
   const resolvedSize =
     size ??
@@ -776,17 +792,18 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     //
     // Important: try both keys rather than `pick(["size","ext"])` so a present-but-invalid `size`
     // payload does not mask a valid `ext`.
-    convertDocumentDrawingSizeToEmu(pick(anchorJson, ["size"])) ??
-    convertDocumentDrawingSizeToEmu(pick(anchorJson, ["ext"])) ??
+    convertDocumentDrawingSizeToEmu(pick(payload, ["size"])) ??
+    convertDocumentDrawingSizeToEmu(pick(payload, ["ext"])) ??
     // Some older/alternate encodings store size fields directly on the anchor object itself
     // (e.g. `{ type: "absolute", xEmu, yEmu, cx, cy }`). Accept those as a last resort.
-    convertDocumentDrawingSizeToEmu(anchorJson) ??
+    convertDocumentDrawingSizeToEmu(payload) ??
+    (payload !== outer ? convertDocumentDrawingSizeToEmu(outer) : undefined) ??
     { cx: pxToEmu(100), cy: pxToEmu(100) };
 
   switch (anchorType) {
     case "cell": {
-      const row = readNumber(pick(anchorJson, ["row"]), "Drawing.anchor.row");
-      const col = readNumber(pick(anchorJson, ["col"]), "Drawing.anchor.col");
+      const row = readNumber(pick(payload, ["row"]), "Drawing.anchor.row");
+      const col = readNumber(pick(payload, ["col"]), "Drawing.anchor.col");
       return {
         type: "oneCell",
         from: { cell: { row, col }, offset: { xEmu: resolveOffsetEmu("x"), yEmu: resolveOffsetEmu("y") } },
@@ -795,7 +812,7 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     }
     // Back-compat: accept UI-like anchors persisted in a DocumentController snapshot.
     case "onecell": {
-      const fromValue = pick(anchorJson, ["from"]);
+      const fromValue = pick(payload, ["from"]);
       if (!isRecord(fromValue)) return null;
       const cellValue = pick(fromValue, ["cell"]);
       if (!isRecord(cellValue)) return null;
@@ -817,15 +834,15 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     case "absolute": {
       // Support both DocumentController-style anchors (which may store `xEmu/yEmu` on the root)
       // and UI-like anchors (which store `pos: { xEmu, yEmu }`).
-      const posValue = pick(anchorJson, ["pos"]);
+      const posValue = pick(payload, ["pos"]);
       const pos = isRecord(posValue) ? posValue : null;
       const xEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "x") : undefined) ?? resolveOffsetEmu("x");
       const yEmu = (pos ? resolveOffsetEmuMaybeFrom(pos, "y") : undefined) ?? resolveOffsetEmu("y");
       return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
     }
     case "twocell": {
-      const fromValue = pick(anchorJson, ["from"]);
-      const toValue = pick(anchorJson, ["to"]);
+      const fromValue = pick(payload, ["from"]);
+      const toValue = pick(payload, ["to"]);
       if (!isRecord(fromValue) || !isRecord(toValue)) return null;
 
       const parsePoint = (point: JsonRecord, context: string): AnchorPoint | null => {

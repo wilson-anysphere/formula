@@ -105,3 +105,29 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts Absolute anchor typ
   });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects unwraps internally-tagged anchors with content (type/value) without losing DocumentController kind labels", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "Absolute",
+        value: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 789, cy: 321 },
+        },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.kind?.type, "shape");
+  assert.equal(ui[0]?.kind?.label, "Box");
+  assert.deepEqual(ui[0]?.anchor, {
+    type: "absolute",
+    pos: { xEmu: 0, yEmu: 0 },
+    size: { cx: 789, cy: 321 },
+  });
+});
