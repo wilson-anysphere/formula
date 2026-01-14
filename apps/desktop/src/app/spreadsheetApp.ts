@@ -4174,7 +4174,18 @@ export class SpreadsheetApp {
     // Cancel any in-progress inline-edit runs promptly so a destroyed SpreadsheetApp
     // doesn't stay referenced by tool/LLM work.
     try {
-      this.inlineEditController.close();
+      const controller = this.inlineEditController as any;
+      if (typeof controller?.destroy === "function") {
+        controller.destroy();
+      } else {
+        this.inlineEditController.close();
+      }
+    } catch {
+      // ignore
+    }
+    // Ensure the in-cell editor overlay element + listeners are released promptly.
+    try {
+      (this.editor as any)?.destroy?.();
     } catch {
       // ignore
     }

@@ -27,6 +27,8 @@ export class InlineEditOverlay {
   private mode: OverlayMode = "prompt";
   private callbacks: InlineEditOverlayCallbacks | null = null;
   private approvalResolver: ((approved: boolean) => void) | null = null;
+  private destroyed = false;
+  private readonly domAbort = new AbortController();
 
   constructor(private readonly parent: HTMLElement) {
     const root = document.createElement("div");
@@ -63,7 +65,7 @@ export class InlineEditOverlay {
           }
         }
       },
-      true
+      { capture: true, signal: this.domAbort.signal }
     );
 
     const title = document.createElement("div");
@@ -87,7 +89,7 @@ export class InlineEditOverlay {
     promptInput.addEventListener("keydown", (e) => {
       // The container listener handles Enter/Escape; prevent duplicate handling here.
       if (e.key === "Enter" || e.key === "Escape") e.stopPropagation();
-    });
+    }, { signal: this.domAbort.signal });
 
     promptRow.appendChild(promptInput);
 
@@ -107,13 +109,13 @@ export class InlineEditOverlay {
     runButton.type = "button";
     runButton.textContent = "Run";
     runButton.dataset.testid = "inline-edit-run";
-    runButton.addEventListener("click", () => this.handleRun());
+    runButton.addEventListener("click", () => this.handleRun(), { signal: this.domAbort.signal });
 
     const cancelButton = document.createElement("button");
     cancelButton.type = "button";
     cancelButton.textContent = "Cancel";
     cancelButton.dataset.testid = "inline-edit-cancel";
-    cancelButton.addEventListener("click", () => this.handleCancel());
+    cancelButton.addEventListener("click", () => this.handleCancel(), { signal: this.domAbort.signal });
 
     actions.appendChild(runButton);
     actions.appendChild(cancelButton);
@@ -138,13 +140,13 @@ export class InlineEditOverlay {
     approveButton.type = "button";
     approveButton.textContent = "Apply";
     approveButton.dataset.testid = "inline-edit-approve";
-    approveButton.addEventListener("click", () => this.handleApprove());
+    approveButton.addEventListener("click", () => this.handleApprove(), { signal: this.domAbort.signal });
 
     const previewCancel = document.createElement("button");
     previewCancel.type = "button";
     previewCancel.textContent = "Cancel";
     previewCancel.dataset.testid = "inline-edit-preview-cancel";
-    previewCancel.addEventListener("click", () => this.handleCancel());
+    previewCancel.addEventListener("click", () => this.handleCancel(), { signal: this.domAbort.signal });
 
     previewActions.appendChild(approveButton);
     previewActions.appendChild(previewCancel);
@@ -178,10 +180,12 @@ export class InlineEditOverlay {
   }
 
   isOpen(): boolean {
+    if (this.destroyed) return false;
     return !this.element.hidden;
   }
 
   open(selection: string, callbacks: InlineEditOverlayCallbacks): void {
+    if (this.destroyed) return;
     this.callbacks = callbacks;
     this.selectionLabel.textContent = selection;
     this.promptInput.value = "";
@@ -222,11 +226,33 @@ export class InlineEditOverlay {
     this.previewContainer.hidden = true;
   }
 
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    try {
+      this.close();
+    } catch {
+      // ignore
+    }
+    try {
+      this.domAbort.abort();
+    } catch {
+      // ignore
+    }
+    try {
+      this.element.remove();
+    } catch {
+      // ignore
+    }
+  }
+
   getPrompt(): string {
+    if (this.destroyed) return "";
     return this.promptInput.value;
   }
 
   setRunning(message: string): void {
+    if (this.destroyed) return;
     this.mode = "running";
     this.statusLabel.textContent = message;
     this.errorLabel.hidden = true;
@@ -236,6 +262,7 @@ export class InlineEditOverlay {
   }
 
   showError(message: string): void {
+    if (this.destroyed) return;
     this.mode = "error";
     this.statusLabel.textContent = "";
     this.errorLabel.textContent = message;
@@ -251,6 +278,7 @@ export class InlineEditOverlay {
   }
 
   async requestApproval(preview: ToolPlanPreview): Promise<boolean> {
+    if (this.destroyed) return false;
     // If the overlay is not visible, we can't surface an approval UI.
     // Fail closed (deny) to avoid hanging the tool loop.
     if (!this.isOpen()) return false;

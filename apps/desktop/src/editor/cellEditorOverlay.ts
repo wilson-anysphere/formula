@@ -25,6 +25,8 @@ export class CellEditorOverlay {
   private minWidth = 0;
   private minHeight = 0;
   private isComposing = false;
+  private destroyed = false;
+  private readonly domAbort = new AbortController();
 
   constructor(
     private container: HTMLElement,
@@ -38,20 +40,40 @@ export class CellEditorOverlay {
     this.element.autocomplete = "off";
     this.element.wrap = "off";
 
-    this.element.addEventListener("input", () => this.adjustSize());
-    this.element.addEventListener("keydown", (e) => this.onKeyDown(e));
+    this.element.addEventListener("input", () => this.adjustSize(), { signal: this.domAbort.signal });
+    this.element.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     this.element.addEventListener("compositionstart", () => {
       this.isComposing = true;
-    });
+    }, { signal: this.domAbort.signal });
     this.element.addEventListener("compositionend", () => {
       this.isComposing = false;
-    });
+    }, { signal: this.domAbort.signal });
     this.element.addEventListener("blur", () => {
       // Defensive: some environments can drop `compositionend` events on blur.
       this.isComposing = false;
-    });
+    }, { signal: this.domAbort.signal });
 
     this.container.appendChild(this.element);
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    try {
+      this.close();
+    } catch {
+      // ignore
+    }
+    try {
+      this.domAbort.abort();
+    } catch {
+      // ignore
+    }
+    try {
+      this.element.remove();
+    } catch {
+      // ignore
+    }
   }
 
   isOpen(): boolean {
@@ -59,6 +81,7 @@ export class CellEditorOverlay {
   }
 
   commit(reason: EditorCommitReason = "enter", shift = false): void {
+    if (this.destroyed) return;
     if (!this.editingCell) return;
     const cell = this.editingCell;
     const value = this.element.value;
@@ -67,6 +90,7 @@ export class CellEditorOverlay {
   }
 
   cancel(): void {
+    if (this.destroyed) return;
     if (!this.editingCell) return;
     const cell = this.editingCell;
     this.close();
@@ -74,6 +98,7 @@ export class CellEditorOverlay {
   }
 
   open(cell: CellCoord, bounds: Rect, initialValue: string, opts: { cursor?: "end" | "all" } = {}): void {
+    if (this.destroyed) return;
     this.editingCell = cell;
     this.minWidth = bounds.width;
     this.minHeight = bounds.height;
@@ -106,6 +131,7 @@ export class CellEditorOverlay {
   }
 
   reposition(bounds: Rect): void {
+    if (this.destroyed) return;
     if (!this.isOpen()) return;
     this.minWidth = bounds.width;
     this.minHeight = bounds.height;

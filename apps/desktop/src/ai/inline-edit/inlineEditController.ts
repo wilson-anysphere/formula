@@ -91,6 +91,7 @@ export class InlineEditController {
   private readonly previewEngine = new PreviewEngine();
   private isRunning = false;
   private abortController: AbortController | null = null;
+  private destroyed = false;
 
   constructor(private readonly options: InlineEditControllerOptions) {
     this.overlay = new InlineEditOverlay(options.container);
@@ -101,6 +102,7 @@ export class InlineEditController {
   }
 
   open(): void {
+    if (this.destroyed) return;
     if (this.isRunning) return;
     if (this.overlay.isOpen()) return;
 
@@ -126,7 +128,40 @@ export class InlineEditController {
     this.cancel();
   }
 
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.isRunning) {
+      try {
+        this.abortController?.abort();
+      } catch {
+        // ignore
+      }
+      try {
+        this.options.document.cancelBatch?.();
+      } catch {
+        // ignore
+      }
+    }
+    this.isRunning = false;
+    this.abortController = null;
+    // Close/destroy the overlay without firing the `onClosed` callback: callers typically
+    // use `destroy()` during teardown (SpreadsheetApp.dispose), where focus/selection updates
+    // are unnecessary and can throw in partial test harnesses.
+    try {
+      this.overlay.close();
+    } catch {
+      // ignore
+    }
+    try {
+      this.overlay.destroy();
+    } catch {
+      // ignore
+    }
+  }
+
   private async runInlineEdit(params: { sheetId: string; range: Range; prompt: string }): Promise<void> {
+    if (this.destroyed) return;
     if (this.isRunning) return;
     const client = this.options.llmClient ?? getDesktopLLMClient();
     const model = this.options.model ?? (client as any)?.model ?? getDesktopModel();

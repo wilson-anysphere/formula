@@ -566,6 +566,13 @@ export class SecondaryGridView {
     this.editor.commit("command");
     this.editingCell = null;
     this.editor.close();
+    // Remove the detached textarea + event listeners so a referenced SecondaryGridView
+    // instance doesn't retain DOM subtrees after teardown (tests/hot reload/split toggling).
+    try {
+      this.editor.destroy();
+    } catch {
+      // ignore
+    }
     this.grid.destroy();
     if (this.ownsProvider) {
       try {
