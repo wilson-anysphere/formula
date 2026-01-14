@@ -471,6 +471,9 @@ Tagged builds are expected to produce:
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
 - **Linux:** installers for **x86_64** and **ARM64** (`.AppImage` + `.deb` + `.rpm`)
 
+Note: GitHub also shows auto-generated “Source code (zip)” / “Source code (tar.gz)” entries on the
+Release page; those are **not** installers or updater payloads.
+
 Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release. The
 in-app updater downloads whatever assets `latest.json.platforms[*].url` points at (not “an installer
 chosen from the Release page”):
