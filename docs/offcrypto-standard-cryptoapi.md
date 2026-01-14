@@ -305,24 +305,18 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) IV derivation (AES-CBC `EncryptedPackage` segments)
+### 5.3) `EncryptedPackage` decryption (AES-ECB)
 
 RC4 is a stream cipher and has no IV.
 
-For **AES** Standard encryption, the `EncryptedPackage` stream is decrypted in independent
-**AES-CBC segments**, each using an IV derived from the `EncryptionVerifier.Salt` and the segment
-index:
-
-```text
-IV_full = Hash( Salt || LE32(segmentIndex) )
-IV = IV_full[0:16]   // AES block size
-```
+For **AES** Standard encryption, the `EncryptedPackage` stream is decrypted with **AES-ECB** using
+the derived file key (no IV). See §7 for details.
 
 Important:
 
-* This IV derivation is for **`EncryptedPackage`** decryption (see §7.2.1).
-* The **password verifier** fields (`EncryptedVerifier` / `EncryptedVerifierHash`) are decrypted with
-  AES in a mode that does **not** use an IV (AES-ECB; see §6.2).
+* This applies to **`EncryptedPackage`** decryption.
+* The **password verifier** fields (`EncryptedVerifier` / `EncryptedVerifierHash`) are also decrypted
+  with AES-ECB (see §6.2).
 
 ---
 
@@ -424,30 +418,29 @@ u8    EncryptedBytes[...]
 
 After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes (the ciphertext is padded).
 
-### 7.2) Segment encryption model
+### 7.2) Decryption model by cipher
 
-The `EncryptedPackage` stream is encrypted in fixed-size segments. The segment size depends on the
-cipher:
+The `EncryptedPackage` stream is decrypted differently depending on the cipher:
 
-* **AES**: 0x1000 (4096) bytes of plaintext per segment.
-* **RC4**: 0x200 (512) bytes of plaintext per segment.
+* **AES**: AES-ECB over the ciphertext blocks (no IV). Chunking is optional and can be any
+  block-aligned size.
+* **RC4**: 0x200 (512) byte segments with per-segment RC4 keys.
 
 #### 7.2.1) AES (`CALG_AES_*`)
 
-In practice, AES-based Standard encryption processes the plaintext in **4096-byte** segments:
+AES-based Standard encryption decrypts the `EncryptedPackage` ciphertext with **AES-ECB** using the
+derived file key (`block = 0`) from §6.1.
 
-```text
-segmentSize = 0x1000   // 4096
-```
+Algorithm:
 
-For segment index `i = 0, 1, 2, ...`:
+1. Read `origSize = U64LE(encPkgBytes[0:8])`.
+2. Let `ciphertext = encPkgBytes[8:]` and require `len(ciphertext) % 16 == 0`.
+3. Decrypt all ciphertext blocks with AES-ECB using `fileKey` (no IV, no padding at the crypto layer).
+4. If the decrypted plaintext is shorter than `origSize`, treat as truncated/corrupt; otherwise
+   return `plaintext[0:origSize]`.
 
-1. Use the **same derived key** (`block = 0`) from §6.1 for all segments.
-2. Derive `iv_i = Hash(Salt || LE32(i))[0:16]` (see §5.3).
-3. Decrypt the segment ciphertext with AES-CBC(key, iv_i).
-4. Append the decrypted bytes and continue until you have at least `OriginalPackageSize` bytes.
-
-Finally, **truncate** the concatenated plaintext to `OriginalPackageSize` bytes.
+Note: some producers pad the ciphertext to sizes larger than `origSize` (e.g. to 4096 bytes for tiny
+packages). Truncation handles this.
 
 #### 7.2.2) RC4 (`CALG_RC4`)
 
@@ -508,9 +501,6 @@ rc4_key_block0_40bit = 6ad7dedf2d0000000000000000000000
 key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
-
-iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
-  719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
 ### 8.1) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
@@ -546,9 +536,6 @@ H_block0 = e2f8cde457e5d449eb205057c88d201d14531ff3
 
 key (AES-128, 16 bytes; CryptDeriveKey result) =
   40b13a71f90b966e375408f2d181a1aa
-
-iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
-  a1cdc25336964d314dd968da998d05b8
 ```
 
 Sanity check:
@@ -690,33 +677,15 @@ function decrypt_standard_ooxml(ole, password):
   ciphertext = encPkgBytes[8:]
 
   if algId is AES:
-    out = []
-    offset = 0
     if origSize == 0:
       return []
+    if len(ciphertext) % 16 != 0:
+      error("ciphertext not block-aligned")
 
-    // Plaintext is segmented into 0x1000-byte chunks. Ciphertext is block-aligned (16) and the
-    // final segment can be larger than 0x1000 due to a full padding block; treat the *final*
-    // segment as “the remainder of the stream”.
-    // ceil_div(x, y) = (x + y - 1) // y  (integer division)
-    nSegments = ceil_div(origSize, 0x1000)
-    for segmentIndex in 0 .. nSegments-1:
-      if segmentIndex < nSegments-1:
-        segCipherLen = 0x1000
-      else:
-        segCipherLen = len(ciphertext) - offset  // final segment: all remaining bytes
-
-      if segCipherLen <= 0 or segCipherLen % 16 != 0:
-        error("invalid ciphertext length")
-
-      iv = Hash(salt || LE32(segmentIndex))[0:16]
-      segPlain = AES_CBC_Decrypt_NoPadding(fileKey, iv, ciphertext[offset : offset+segCipherLen])
-      out += segPlain
-      offset += segCipherLen
-
-    if len(out) < origSize:
+    plain = AES_ECB_Decrypt(fileKey, ciphertext)
+    if len(plain) < origSize:
       error("truncated ciphertext")
-    return out[0:origSize]
+    return plain[0:origSize]
 
   else if algId == CALG_RC4:
     // RC4 has no padding; decrypt exactly origSize bytes.

@@ -16,7 +16,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md) — Agile (4.4) OOXML decryption details
   (HMAC target bytes, IV/salt gotchas).
 - [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md) —
-  Standard/CryptoAPI AES `EncryptedPackage` segmenting + IV derivation notes.
+  Standard/CryptoAPI AES `EncryptedPackage` decryption notes (AES-ECB framing + truncation).
 
 ## Status (current behavior vs intended behavior)
 

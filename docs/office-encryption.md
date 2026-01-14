@@ -439,7 +439,7 @@ debugging encryption:
 * **§2.3.4.12** — “Initialization Vector Generation (Agile Encryption)” (segment index → IV hashing +
   truncation).
 * **§2.3.4.15** — “Data Encryption (Agile Encryption)” (4096-byte segmenting and padding/truncation
-  behavior; in practice the same segment framing pattern is used by CryptoAPI AES `EncryptedPackage`).
+  behavior).
 
 Other useful keywords inside MS-OFFCRYPTO:
 * `spinCount` (Agile password hashing loop)
@@ -447,7 +447,7 @@ Other useful keywords inside MS-OFFCRYPTO:
   `EncryptedPackage` stream bytes, including the size prefix)
 
 Additional repo-specific references:
-- `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` segmenting/IV/padding)
+- `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` framing + AES-ECB decrypt + truncation)
 - `docs/offcrypto-standard-cryptoapi.md` (Standard key derivation + verifier validation, from-scratch)
 - `docs/offcrypto-standard-cryptoapi-rc4.md` (Standard CryptoAPI RC4 reference + test vectors)
 - `docs/21-encrypted-workbooks.md` (detection + UX/API semantics; fixture locations)
