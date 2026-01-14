@@ -312,3 +312,136 @@ esac
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test("release-smoke-test: --local-bundles skips validate-linux-appimage.sh when unsquashfs is missing", () => {
+  if (process.platform !== "linux") return;
+
+  const tag = currentDesktopTag();
+
+  const hasExistingBundleDirs = [
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target"),
+  ].some((root) => {
+    try {
+      return (
+        fs.existsSync(path.join(root, "release", "bundle")) ||
+        fs.readdirSync(root, { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .some((d) => fs.existsSync(path.join(root, d.name, "release", "bundle")))
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  if (hasExistingBundleDirs) {
+    return;
+  }
+
+  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-appimage-nosquashfs-${process.pid}`);
+  const bundleDir = path.join(tmpRoot, "release", "bundle", "appimage");
+  const binDir = path.join(tmpRoot, "bin");
+  fs.mkdirSync(bundleDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(path.join(bundleDir, "Formula.AppImage"), "not-a-real-appimage", { encoding: "utf8" });
+
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [smokeTestPath, "--tag", tag, "--repo", "owner/repo", "--local-bundles", "--", "--help"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: tmpRoot,
+          // Provide a PATH that does not include system binaries so unsquashfs is guaranteed missing,
+          // regardless of the host environment.
+          PATH: binDir,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(
+      child.status,
+      0,
+      `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.match(child.stdout, /Release smoke test PASSED/i);
+    assert.match(child.stdout, /Skipping validate-linux-appimage\.sh.*unsquashfs/i);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("release-smoke-test: --local-bundles skips validate-linux-rpm.sh when docker is unavailable and rpm2cpio/cpio are missing", () => {
+  if (process.platform !== "linux") return;
+
+  const tag = currentDesktopTag();
+
+  const hasExistingBundleDirs = [
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target"),
+  ].some((root) => {
+    try {
+      return (
+        fs.existsSync(path.join(root, "release", "bundle")) ||
+        fs.readdirSync(root, { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .some((d) => fs.existsSync(path.join(root, d.name, "release", "bundle")))
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  if (hasExistingBundleDirs) {
+    return;
+  }
+
+  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-rpm-nodocker-${process.pid}`);
+  const bundleDir = path.join(tmpRoot, "release", "bundle", "rpm");
+  const binDir = path.join(tmpRoot, "bin");
+  fs.mkdirSync(bundleDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(path.join(bundleDir, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  // Stub rpm so the smoke test believes RPM validation is possible.
+  const rpmPath = path.join(binDir, "rpm");
+  fs.writeFileSync(rpmPath, "#!/usr/bin/env bash\nexit 0\n", { encoding: "utf8" });
+  fs.chmodSync(rpmPath, 0o755);
+
+  // Stub docker so `docker info` fails, forcing the smoke test down the --no-container path.
+  const dockerPath = path.join(binDir, "docker");
+  fs.writeFileSync(dockerPath, "#!/usr/bin/env bash\nexit 1\n", { encoding: "utf8" });
+  fs.chmodSync(dockerPath, 0o755);
+
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [smokeTestPath, "--tag", tag, "--repo", "owner/repo", "--local-bundles", "--", "--help"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: tmpRoot,
+          // Provide a PATH that contains rpm+docker stubs but not rpm2cpio/cpio to force the skip.
+          PATH: binDir,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(
+      child.status,
+      0,
+      `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.match(child.stdout, /Release smoke test PASSED/i);
+    assert.match(child.stdout, /Skipping validate-linux-rpm\.sh.*rpm2cpio.*cpio/i);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});

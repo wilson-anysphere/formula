@@ -807,6 +807,16 @@ async function main() {
               "No local Windows installer bundles found under target/**/release/bundle/(msi|nsis) (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           }
 
+          // validate-linux-appimage.sh relies on `--appimage-extract`, which uses `unsquashfs`
+          // (package: squashfs-tools) on most Linux distros. If it's missing, skip with a clear
+          // message instead of failing the overall smoke test.
+          if (base === "validate-linux-appimage.sh" && skipReason === undefined) {
+            if (!commandExists("unsquashfs")) {
+              skipReason =
+                "Skipping validate-linux-appimage.sh because required command `unsquashfs` is not available on PATH. Install squashfs-tools to validate local AppImage bundles.";
+            }
+          }
+
           // validate-linux-rpm.sh can optionally run an installability check inside a Fedora container.
           // If Docker isn't available locally, still run the static checks.
           if (base === "validate-linux-rpm.sh" && skipReason === undefined) {
@@ -814,7 +824,14 @@ async function main() {
               skipReason =
                 "Skipping validate-linux-rpm.sh because required command `rpm` is not available on PATH. Install rpm (and optionally docker) to validate local RPM bundles.";
             } else if (!hasDocker()) {
-              extraArgs.push("--no-container");
+              // The RPM validator extracts payload contents when running without Docker.
+              // This requires rpm2cpio + cpio in addition to rpm itself.
+              if (!commandExists("rpm2cpio") || !commandExists("cpio")) {
+                skipReason =
+                  "Skipping validate-linux-rpm.sh because Docker is unavailable and required commands `rpm2cpio` + `cpio` are not available on PATH. Install rpm2cpio/cpio (or Docker) to validate local RPM bundles.";
+              } else {
+                extraArgs.push("--no-container");
+              }
             }
           }
 
