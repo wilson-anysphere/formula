@@ -11,7 +11,9 @@ use thiserror::Error;
 
 /// MS-OFFCRYPTO "Standard" encryption version (CryptoAPI).
 ///
-/// This is used by the `EncryptionInfo` stream in an encrypted OOXML OLE container.
+/// MS-OFFCRYPTO identifies Standard encryption via `versionMinor == 2`, but real-world files vary
+/// `versionMajor` across Office generations (2/3/4). Keep the canonical major version here for
+/// tests that construct synthetic `EncryptionInfo` streams.
 const STANDARD_VERSION_MAJOR: u16 = 3;
 const STANDARD_VERSION_MINOR: u16 = 2;
 
@@ -171,7 +173,7 @@ pub(crate) fn parse_standard_encryption_info(
     let major = read_u16_le(bytes, &mut offset)?;
     let minor = read_u16_le(bytes, &mut offset)?;
 
-    if major != STANDARD_VERSION_MAJOR || minor != STANDARD_VERSION_MINOR {
+    if minor != STANDARD_VERSION_MINOR || !(2..=4).contains(&major) {
         return Err(EncryptionInfoError::UnsupportedVersion { major, minor });
     }
 

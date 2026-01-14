@@ -7,8 +7,9 @@
 //! - `EncryptedPackage`: encrypted ZIP bytes
 //!
 //! This module implements parsing the **binary** `EncryptionInfo` payload for Standard encryption
-//! (`EncryptionVersionInfo` = 3.2) and verifying a candidate password by decrypting the
-//! `EncryptionVerifier` fields and comparing the verifier hash.
+//! (`EncryptionVersionInfo.versionMinor == 2`, commonly 3.2 but major 2/3/4 is observed) and
+//! verifying a candidate password by decrypting the `EncryptionVerifier` fields and comparing the
+//! verifier hash.
 //!
 //! Scope: password verification only (not full package decryption).
 
@@ -27,8 +28,16 @@ pub const CALG_AES_256: u32 = 0x0000_6610;
 pub const CALG_SHA1: u32 = 0x0000_8004;
 pub const CALG_MD5: u32 = 0x0000_8003;
 
+// Standard EncryptionInfo is identified by `versionMinor == 2`; `versionMajor` varies in the wild.
+//
+// Keep the canonical (commonly-observed) major version constant for tests/fixtures.
 const STANDARD_MAJOR_VERSION: u16 = 3;
 const STANDARD_MINOR_VERSION: u16 = 2;
+// MS-OFFCRYPTO identifies Standard (CryptoAPI) encryption via `versionMinor == 2`, but real-world
+// files vary `versionMajor` across Office generations.
+fn is_standard_cryptoapi_version(major: u16, minor: u16) -> bool {
+    minor == STANDARD_MINOR_VERSION && matches!(major, 2 | 3 | 4)
+}
 const ENCRYPTION_HEADER_FIXED_LEN: usize = 8 * 4;
 /// MS-OFFCRYPTO Standard uses a fixed spin count of 50,000 iterations for password hashing.
 const STANDARD_SPIN_COUNT: u32 = 50_000;
@@ -36,11 +45,12 @@ const STANDARD_SPIN_COUNT: u32 = 50_000;
 #[derive(Debug, thiserror::Error)]
 pub enum OffcryptoError {
     #[error(
-        "unsupported EncryptionInfo version {major}.{minor} (expected {expected_major}.{expected_minor} Standard CryptoAPI)"
+        "unsupported EncryptionInfo version {major}.{minor} (expected Standard CryptoAPI versionMinor=2 with major=2/3/4)"
     )]
     UnsupportedEncryptionInfoVersion {
         major: u16,
         minor: u16,
+        #[allow(dead_code)]
         expected_major: u16,
         expected_minor: u16,
     },
@@ -188,16 +198,16 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Parse a Standard (CryptoAPI) `EncryptionInfo` stream (majorVersion=3, minorVersion=2).
+/// Parse a Standard (CryptoAPI) `EncryptionInfo` stream (`versionMinor == 2`, major 2/3/4).
 pub fn parse_encryption_info_standard(bytes: &[u8]) -> Result<StandardEncryptionInfo, OffcryptoError> {
     let mut r = Reader::new(bytes);
     let major = r.read_u16_le("majorVersion")?;
     let minor = r.read_u16_le("minorVersion")?;
-    if major != STANDARD_MAJOR_VERSION || minor != STANDARD_MINOR_VERSION {
+    if !is_standard_cryptoapi_version(major, minor) {
         return Err(OffcryptoError::UnsupportedEncryptionInfoVersion {
             major,
             minor,
-            expected_major: STANDARD_MAJOR_VERSION,
+            expected_major: 3,
             expected_minor: STANDARD_MINOR_VERSION,
         });
     }
