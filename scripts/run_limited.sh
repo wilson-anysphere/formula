@@ -92,20 +92,16 @@ cmd=("$@")
 
 # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
 # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift for
-# Rust commands that use this wrapper directly.
+# Rust tooling invoked under this wrapper (even indirectly, e.g. `npm run build` spawning `cargo`).
 #
 # Clear it so Rust tooling respects the repo's pinned toolchain by default (consistent with
 # `scripts/cargo_agent.sh`).
 if [[ -n "${RUSTUP_TOOLCHAIN:-}" ]]; then
-  case "${cmd[0]}" in
-    cargo|rustc|rustup)
-      repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-      if [[ -f "${repo_root}/rust-toolchain.toml" ]]; then
-        unset RUSTUP_TOOLCHAIN
-      fi
-      unset repo_root
-      ;;
-  esac
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [[ -f "${repo_root}/rust-toolchain.toml" ]]; then
+    unset RUSTUP_TOOLCHAIN
+  fi
+  unset repo_root
 fi
 
 # macOS/Darwin: ulimit -v doesn't work reliably. Skip limits.

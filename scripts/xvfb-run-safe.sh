@@ -18,15 +18,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
 # globally (often to `stable`), which would bypass the pinned toolchain for any Rust tooling
-# invoked under this wrapper (e.g. `cargo tauri dev`).
-if [[ -n "${RUSTUP_TOOLCHAIN:-}" ]]; then
-  case "${1:-}" in
-    cargo|rustc|rustup)
-      if [[ -f "${REPO_ROOT}/rust-toolchain.toml" ]]; then
-        unset RUSTUP_TOOLCHAIN
-      fi
-      ;;
-  esac
+# invoked under this wrapper (including indirectly via a script that spawns `cargo`).
+if [[ -n "${RUSTUP_TOOLCHAIN:-}" && -f "${REPO_ROOT}/rust-toolchain.toml" ]]; then
+  unset RUSTUP_TOOLCHAIN
 fi
 
 # Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
