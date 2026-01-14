@@ -5644,8 +5644,19 @@ if (
     // View-only mutations (row/col sizing) are allowed in read-only collab roles (viewer/commenter),
     // but must remain local-only (collab binders prevent persisting these into shared Yjs state).
     const allowViewMutations = allowEditCommands;
+    const isReadOnly = app.isReadOnly?.() === true;
     // Workbook/cell mutations should remain disabled in read-only roles.
-    const allowSheetMutations = allowEditCommands && !app.isReadOnly();
+    const allowSheetMutations = allowEditCommands && !isReadOnly;
+    // In read-only collab sessions (viewer/commenter), allow formatting only when the selection is an
+    // entire row/column/sheet band (formatting defaults).
+    const allowReadOnlyFormattingDefaults = (() => {
+      if (!isReadOnly) return false;
+      const selection = app.getSelectionRanges();
+      const limits = getGridLimitsForFormatting();
+      const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+      return decision.allRangesBand;
+    })();
+    const allowFormattingCommands = allowEditCommands && (!isReadOnly || allowReadOnlyFormattingDefaults);
     const canComment = app.getCollabSession()?.canComment() ?? true;
 
     let menuItems: ContextMenuItem[] = [];
@@ -5871,7 +5882,7 @@ if (
         {
           type: "submenu",
           label: t("menu.format"),
-          enabled: allowSheetMutations,
+          enabled: allowFormattingCommands,
           items: [
             {
               type: "item",
