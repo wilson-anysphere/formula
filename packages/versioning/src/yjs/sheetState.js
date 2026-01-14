@@ -292,11 +292,12 @@ function parseVersioningCellKey(key) {
  * - `r{row}c{col}` (unit-test convenience, resolved against `defaultSheetId`)
  *
  * @param {string} key
- * @param {{ defaultSheetId?: string }} [opts]
+ * @param {{ defaultSheetId?: string } | null | undefined} [opts]
+ * @param {{ sheetId: string, row: number, col: number, isCanonical: boolean }} [out]
  * @returns {{ sheetId: string, row: number, col: number, isCanonical: boolean } | null}
  */
-export function parseSpreadsheetCellKey(key, opts = {}) {
-  const defaultSheetId = opts.defaultSheetId ?? "Sheet1";
+export function parseSpreadsheetCellKey(key, opts, out) {
+  const defaultSheetId = opts?.defaultSheetId ?? "Sheet1";
   if (typeof key !== "string" || key.length === 0) return null;
 
   // Fast path: avoid `key.split(":")` to keep workbook snapshot extraction cheap
@@ -328,6 +329,13 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
           rawSheetId.length > 0 &&
           (rowEnd - rowStart === 1 || key.charCodeAt(rowStart) !== 48) &&
           (colEnd - colStart === 1 || key.charCodeAt(colStart) !== 48);
+        if (out) {
+          out.sheetId = sheetId;
+          out.row = rowDigits;
+          out.col = colDigits;
+          out.isCanonical = isCanonical;
+          return out;
+        }
         return { sheetId, row: rowDigits, col: colDigits, isCanonical };
       }
 
@@ -339,6 +347,13 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
       const col = Number(colStr);
       if (!Number.isInteger(row) || row < 0) return null;
       if (!Number.isInteger(col) || col < 0) return null;
+      if (out) {
+        out.sheetId = sheetId;
+        out.row = row;
+        out.col = col;
+        out.isCanonical = false;
+        return out;
+      }
       return { sheetId, row, col, isCanonical: false };
     }
 
@@ -350,12 +365,28 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
     if (row == null) return null;
     const col = parseUnsignedInt(key, comma + 1, key.length);
     if (col == null) return null;
+    if (out) {
+      out.sheetId = sheetId;
+      out.row = row;
+      out.col = col;
+      out.isCanonical = false;
+      return out;
+    }
     return { sheetId, row, col, isCanonical: false };
   }
 
   // Unit-test convenience `r{row}c{col}` encoding.
   const rxc = parseVersioningCellKey(key);
-  if (rxc) return { sheetId: defaultSheetId, row: rxc.row, col: rxc.col, isCanonical: false };
+  if (rxc) {
+    if (out) {
+      out.sheetId = defaultSheetId;
+      out.row = rxc.row;
+      out.col = rxc.col;
+      out.isCanonical = false;
+      return out;
+    }
+    return { sheetId: defaultSheetId, row: rxc.row, col: rxc.col, isCanonical: false };
+  }
 
   return null;
 }
@@ -554,8 +585,10 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
 
   /** @type {Map<string, any>} */
   const cells = new Map();
+  /** @type {{ sheetId: string, row: number, col: number, isCanonical: boolean }} */
+  const parsedScratch = { sheetId: "", row: 0, col: 0, isCanonical: false };
   cellsMap.forEach((cellData, rawKey) => {
-    const parsed = parseSpreadsheetCellKey(rawKey);
+    const parsed = parseSpreadsheetCellKey(rawKey, undefined, parsedScratch);
     if (!parsed) return;
     if (targetSheetId != null && parsed.sheetId !== targetSheetId) return;
     mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);

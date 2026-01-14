@@ -269,8 +269,10 @@ export function workbookStateFromYjsDoc(doc) {
 
   /** @type {Map<string, Map<string, any>>} */
   const groupedCells = new Map();
+  /** @type {{ sheetId: string, row: number, col: number, isCanonical: boolean }} */
+  const parsedScratch = { sheetId: "", row: 0, col: 0, isCanonical: false };
   cellsMap.forEach((cellData, rawKey) => {
-    const parsed = parseSpreadsheetCellKey(rawKey);
+    const parsed = parseSpreadsheetCellKey(rawKey, undefined, parsedScratch);
     if (!parsed?.sheetId) return;
     let cells = groupedCells.get(parsed.sheetId);
     if (!cells) {
