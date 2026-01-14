@@ -1331,7 +1331,7 @@ format the updater will apply:
 
 ### One-liner: release smoke test
 
-To run the repo’s release sanity checks (version check, updater config validation, and GitHub Release asset/manifest verification) in one command:
+To run the repo’s release sanity checks (version check, updater config validation, compliance artifact config validation, and GitHub Release asset/manifest verification) in one command:
 
 ```bash
 # Requires a GitHub token (or pass --token).
