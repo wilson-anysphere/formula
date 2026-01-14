@@ -23,6 +23,18 @@ describe("DrawingObject ids", () => {
     expect(ids.size).toBe(count);
   });
 
+  it("createDrawingObjectId falls back when WebCrypto throws", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: () => {
+        throw new Error("WebCrypto unavailable");
+      },
+    } as any);
+
+    const id = createDrawingObjectId();
+    expect(Number.isSafeInteger(id)).toBe(true);
+    expect(id).toBeGreaterThan(0);
+  });
+
   it("insertImageFromFile ignores caller-provided ids and generates a safe id", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "test.png", { type: "image/png" });
 

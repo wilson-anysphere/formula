@@ -116,13 +116,17 @@ export function createDrawingObjectId(): number {
   // Even at 10k inserted objects this is ~5e-9.
   const cryptoObj = globalThis.crypto;
   if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
-    // 53 bits = 21 high bits + 32 low bits.
-    const parts = new Uint32Array(2);
-    cryptoObj.getRandomValues(parts);
-    const high21 = parts[0] & 0x1fffff;
-    const id = high21 * 2 ** 32 + parts[1];
-    // Avoid `0` (useful as a sentinel in some code paths).
-    if (id !== 0) return id;
+    try {
+      // 53 bits = 21 high bits + 32 low bits.
+      const parts = new Uint32Array(2);
+      cryptoObj.getRandomValues(parts);
+      const high21 = parts[0] & 0x1fffff;
+      const id = high21 * 2 ** 32 + parts[1];
+      // Avoid `0` (useful as a sentinel in some code paths).
+      if (id !== 0) return id;
+    } catch {
+      // Fall through to the Math.random fallback below.
+    }
   }
 
   // Fallback for environments without WebCrypto. `Math.random()` is not cryptographically secure,
