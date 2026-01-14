@@ -287,6 +287,9 @@ canonicalization would appear as:
 * **External workbook defined names:** name references cannot be qualified to an external workbook
   (e.g. `[Book.xlsx]!MyName` currently evaluates to `#REF!`). Hosts can still define *local* names
   that expand to external references via `Engine::define_name(...)`.
+* **External workbook metadata functions:** workbook/sheet metadata functions such as `SHEET(...)`,
+  `SHEETS(...)`, `CELL(...)`, and `INFO(...)` currently operate on the *current workbook* and do not
+  introspect external workbooks referenced via `[Book.xlsx]...`.
 * **Volatility / invalidation:** external workbook references are treated as **volatile** (they are
   reevaluated on every `Engine::recalculate()` pass). There is not yet a fine-grained “external link
   invalidation” mechanism—hosts should call `recalculate()` when external values may have changed.
