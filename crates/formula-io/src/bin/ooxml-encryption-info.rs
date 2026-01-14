@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 
 use formula_offcrypto::StandardEncryptionHeaderFlags;
@@ -173,8 +173,23 @@ fn main() {
         }
     }
 
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+    macro_rules! outln {
+        ($($arg:tt)*) => {{
+            if let Err(err) = writeln!(&mut out, $($arg)*) {
+                if err.kind() == std::io::ErrorKind::BrokenPipe {
+                    // Allow piping output to tools like `head` without panicking.
+                    return;
+                }
+                eprintln!("error: failed to write output: {err}");
+                std::process::exit(1);
+            }
+        }};
+    }
+
     // One-line summary; keep deterministic to help with fixture validation and corpus triage.
-    println!("{kind} ({major}.{minor}) flags=0x{flags:08x}{extra}");
+    outln!("{kind} ({major}.{minor}) flags=0x{flags:08x}{extra}");
 
     if !verbose {
         return;
@@ -182,8 +197,8 @@ fn main() {
     if kind == "Standard" {
         match parse_standard_encryption_header_verbose(&encryption_info) {
             Ok(hdr) => {
-                println!("EncryptionInfo.headerSize={}", hdr.header_size);
-                println!(
+                outln!("EncryptionInfo.headerSize={}", hdr.header_size);
+                outln!(
                     "EncryptionHeader.flags=0x{:08x} fCryptoAPI={} fDocProps={} fExternal={} fAES={}",
                     hdr.flags_raw,
                     hdr.flags.f_cryptoapi,
@@ -191,20 +206,20 @@ fn main() {
                     hdr.flags.f_external,
                     hdr.flags.f_aes
                 );
-                println!("EncryptionHeader.algId=0x{:08x} ({})", hdr.alg_id, hdr.alg_id);
-                println!(
+                outln!("EncryptionHeader.algId=0x{:08x} ({})", hdr.alg_id, hdr.alg_id);
+                outln!(
                     "EncryptionHeader.algIdHash=0x{:08x} ({})",
                     hdr.alg_id_hash, hdr.alg_id_hash
                 );
-                println!(
+                outln!(
                     "EncryptionHeader.keySize=0x{:08x} ({})",
                     hdr.key_size, hdr.key_size
                 );
-                println!(
+                outln!(
                     "EncryptionHeader.providerType=0x{:08x} ({})",
                     hdr.provider_type, hdr.provider_type
                 );
-                println!("EncryptionHeader.CSPName=\"{}\"", hdr.csp_name);
+                outln!("EncryptionHeader.CSPName=\"{}\"", hdr.csp_name);
             }
             Err(err) => {
                 eprintln!("error: {err}");

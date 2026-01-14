@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Cursor;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -781,7 +782,15 @@ fn detect_workbook_format_from_zip_payload(bytes: &[u8]) -> WorkbookFormat {
 }
 fn print_json(output: &TriageOutput) -> Result<()> {
     let json = serde_json::to_string(output).context("serialize triage output")?;
-    println!("{json}");
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+    if let Err(err) = writeln!(&mut out, "{json}") {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            // Allow piping output to tools like `head` without panicking.
+            return Ok(());
+        }
+        return Err(err.into());
+    }
     Ok(())
 }
 

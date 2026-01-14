@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write as _};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn ooxml_encryption_info_bin() -> &'static str {
     // Cargo sets `CARGO_BIN_EXE_<name>` for integration tests. Binary names may contain `-`,
@@ -519,5 +519,31 @@ fn cli_reports_expected_versions_for_repo_fixtures() {
     assert!(
         stdout.starts_with("Standard (3.2) flags=0x00000024"),
         "unexpected stdout for standard fixture: {stdout}"
+    );
+}
+
+#[test]
+fn cli_does_not_panic_on_broken_pipe() {
+    // Simulate piping the output to a downstream tool that exits early (e.g. `| head`).
+    let standard = fixture_path("standard.xlsx");
+
+    let mut child = Command::new(ooxml_encryption_info_bin())
+        .arg(&standard)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn ooxml-encryption-info");
+
+    // Closing the read end forces stdout writes to return EPIPE / BrokenPipe.
+    drop(child.stdout.take());
+
+    let output = child
+        .wait_with_output()
+        .expect("wait for ooxml-encryption-info to finish");
+
+    assert!(
+        output.status.success(),
+        "expected success even when stdout is closed\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

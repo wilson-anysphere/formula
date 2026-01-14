@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 
 use formula_engine::functions::{FunctionSpec, ValueType, Volatility};
 use serde::Serialize;
@@ -35,6 +36,24 @@ fn value_type_to_string(value_type: ValueType) -> String {
 }
 
 fn main() {
+    if let Err(err) = main_inner() {
+        // Allow piping output to tools like `head` without panicking.
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            if io_err.kind() == io::ErrorKind::BrokenPipe {
+                return;
+            }
+        }
+        if let Some(json_err) = err.downcast_ref::<serde_json::Error>() {
+            if json_err.io_error_kind() == Some(io::ErrorKind::BrokenPipe) {
+                return;
+            }
+        }
+        eprintln!("error: {err}");
+        std::process::exit(1);
+    }
+}
+
+fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
     let mut functions = BTreeMap::<String, FunctionCatalogEntry>::new();
 
     for spec in inventory::iter::<FunctionSpec> {
@@ -62,6 +81,10 @@ fn main() {
         functions: functions.into_values().collect(),
     };
 
-    let json = serde_json::to_string_pretty(&catalog).expect("serialize function catalog");
-    println!("{json}");
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    serde_json::to_writer_pretty(&mut out, &catalog)?;
+    out.write_all(b"\n")?;
+    out.flush()?;
+    Ok(())
 }
