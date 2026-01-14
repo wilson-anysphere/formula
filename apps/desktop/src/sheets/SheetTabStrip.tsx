@@ -123,6 +123,12 @@ type Props = {
    * would otherwise diverge from the authoritative shared state.
    */
   readOnly?: boolean;
+  /**
+   * When true, disable sheet-structure mutations while the user is actively editing a cell/formula.
+   *
+   * Sheet navigation remains enabled so formulas can still reference ranges across sheets (Excel-style).
+   */
+  disableMutations?: boolean;
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
   /**
@@ -186,6 +192,7 @@ export function SheetTabStrip({
   store,
   activeSheetId,
   readOnly = false,
+  disableMutations = false,
   onActivateSheet,
   onAddSheet,
   onPersistSheetDelete,
@@ -197,6 +204,17 @@ export function SheetTabStrip({
   onRenameSheet,
   onError,
 }: Props) {
+  const mutationsDisabled = readOnly || disableMutations;
+  const mutationsDisabledMessage = readOnly
+    ? READ_ONLY_SHEET_MUTATION_MESSAGE
+    : disableMutations
+      ? "Finish editing to modify sheets."
+      : null;
+  const reportMutationsDisabled = (): void => {
+    if (!mutationsDisabledMessage) return;
+    onError?.(mutationsDisabledMessage);
+  };
+
   const [sheets, setSheets] = useState<SheetMeta[]>(() => store.listAll());
   const activeSheetIdRef = useRef(activeSheetId);
 
@@ -386,8 +404,8 @@ export function SheetTabStrip({
     const promise = (async () => {
       setRenameInFlight(true);
       try {
-        if (readOnly) {
-          throw new Error(READ_ONLY_SHEET_MUTATION_MESSAGE);
+        if (mutationsDisabled) {
+          throw new Error(mutationsDisabledMessage ?? READ_ONLY_SHEET_MUTATION_MESSAGE);
         }
         // Read the current input value at commit time instead of trusting the latest
         // `draftName` state. React batches updates inside event handlers, so it's possible
@@ -419,8 +437,8 @@ export function SheetTabStrip({
     sheetId: string,
     dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"],
   ) => {
-    if (readOnly) {
-      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+    if (mutationsDisabled) {
+      reportMutationsDisabled();
       return;
     }
     const all = store.listAll();
@@ -468,8 +486,8 @@ export function SheetTabStrip({
   };
 
   const beginRenameWithGuard = async (sheet: SheetMeta) => {
-    if (readOnly) {
-      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+    if (mutationsDisabled) {
+      reportMutationsDisabled();
       return;
     }
     if (renameInFlight) return;
@@ -525,7 +543,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Rename",
-        enabled: !readOnly,
+        enabled: !mutationsDisabled,
         onSelect: () => {
           void beginRenameWithGuard(sheet);
         },
@@ -533,7 +551,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Hide",
-        enabled: canHide && !readOnly,
+        enabled: canHide && !mutationsDisabled,
         onSelect: async () => {
           const wasActive = sheet.id === activeSheetIdRef.current;
           let nextActiveId: string | null = null;
@@ -571,7 +589,7 @@ export function SheetTabStrip({
       {
         type: "submenu",
         label: "Unhide…",
-        enabled: hiddenSheets.length > 0 && !readOnly,
+        enabled: hiddenSheets.length > 0 && !mutationsDisabled,
         items: hiddenSheets.map((hidden) => ({
           type: "item" as const,
           label: hidden.name,
@@ -598,7 +616,7 @@ export function SheetTabStrip({
       {
         type: "submenu",
         label: "Tab Color",
-        enabled: !readOnly,
+        enabled: !mutationsDisabled,
         items: [
           {
             type: "item",
@@ -725,7 +743,7 @@ export function SheetTabStrip({
     items.push({
       type: "item",
       label: "Delete",
-      enabled: canDelete && !readOnly,
+      enabled: canDelete && !mutationsDisabled,
       onSelect: () => {
         void deleteSheet(sheet);
       },
@@ -742,7 +760,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Unhide…",
-        enabled: hiddenSheets.length > 0 && !readOnly,
+        enabled: hiddenSheets.length > 0 && !mutationsDisabled,
         onSelect: async () => {
           try {
             const selected = await showQuickPick(
@@ -774,8 +792,8 @@ export function SheetTabStrip({
   };
 
   const deleteSheet = async (sheet: SheetMeta): Promise<void> => {
-    if (readOnly) {
-      onError?.(READ_ONLY_SHEET_MUTATION_MESSAGE);
+    if (mutationsDisabled) {
+      reportMutationsDisabled();
       return;
     }
     if (editingSheetId && editingSheetId !== sheet.id) {
@@ -1059,7 +1077,7 @@ export function SheetTabStrip({
             sheet={sheet}
             active={sheet.id === activeSheetId}
             editing={editingSheetId === sheet.id}
-            readOnly={readOnly}
+            readOnly={mutationsDisabled}
             dragging={draggingSheetId === sheet.id}
             dropPosition={dropIndicator?.targetSheetId === sheet.id ? dropIndicator.position : null}
             draftName={draftName}
@@ -1132,7 +1150,7 @@ export function SheetTabStrip({
         type="button"
         className="sheet-add"
         data-testid="sheet-add"
-        disabled={readOnly}
+        disabled={mutationsDisabled}
         onClick={() => {
           void (async () => {
             if (editingSheetId) {

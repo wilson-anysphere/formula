@@ -2785,9 +2785,15 @@ app.subscribeSelection((selection) => {
   handleFormatPainterSelectionChange(selection);
 });
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
-app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
+app.onEditStateChange(() => {
+  scheduleRibbonSelectionFormatStateUpdate();
+  renderSheetTabs();
+});
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
-window.addEventListener("formula:read-only-changed", () => scheduleRibbonSelectionFormatStateUpdate());
+window.addEventListener("formula:read-only-changed", () => {
+  scheduleRibbonSelectionFormatStateUpdate();
+  renderSheetTabs();
+});
 scheduleRibbonSelectionFormatStateUpdate();
 
 window.addEventListener("keydown", (e) => {
@@ -3440,6 +3446,7 @@ function renderSheetTabs(): void {
       store: createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null),
       activeSheetId: app.getCurrentSheetId(),
       readOnly: app.isReadOnly?.() === true,
+      disableMutations: isSpreadsheetEditing(),
       onActivateSheet: (sheetId: string) => {
         app.activateSheet(sheetId);
         restoreFocusAfterSheetNavigation();
@@ -4825,6 +4832,7 @@ if (
         renderStatusMode();
         syncTitlebar();
         scheduleRibbonSelectionFormatStateUpdate();
+        renderSheetTabs();
         recomputeKeyboardContextKeys?.();
       }
       stopPrimarySplitPanePersistence();
@@ -4898,6 +4906,7 @@ if (
           renderStatusMode();
           syncTitlebar();
           scheduleRibbonSelectionFormatStateUpdate();
+          renderSheetTabs();
           recomputeKeyboardContextKeys?.();
         },
       });
