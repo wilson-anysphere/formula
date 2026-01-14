@@ -21248,10 +21248,13 @@ export class SpreadsheetApp {
    */
   copyToClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    const sheetId = this.sheetId;
     const promise = this.copySelectionToClipboard();
     this.idle.track(promise);
     return promise.finally(() => {
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
     });
   }
 
@@ -21264,10 +21267,13 @@ export class SpreadsheetApp {
       ]);
       return Promise.resolve();
     }
+    const sheetId = this.sheetId;
     const promise = this.cutSelectionToClipboard();
     this.idle.track(promise);
     return promise.finally(() => {
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
     });
   }
 
@@ -21280,10 +21286,13 @@ export class SpreadsheetApp {
       ]);
       return Promise.resolve();
     }
+    const sheetId = this.sheetId;
     const promise = this.pasteClipboardToSelection();
     this.idle.track(promise);
     return promise.finally(() => {
-      this.focus();
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
     });
   }
 
