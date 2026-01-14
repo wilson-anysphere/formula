@@ -2990,7 +2990,7 @@ jobs:
               else
                 echo "macos-unknown"
               fi
-            elif [[ "$base" == *.deb || "$base" == *.rpm || "$base" == *.AppImage || "$base" == *.AppImage.tar.gz ]]; then
+            elif [[ "$base" == *.deb || "$base" == *.rpm || "$base" == *.AppImage || "$base" == *.AppImage.tar.gz || "$base" == *.AppImage.tgz ]]; then
               if [[ "$base" =~ (amd64|x86[_-]64|x64) ]]; then
                 echo "linux-x64"
               elif [[ "$base" =~ (arm64|aarch64) ]]; then

@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const workflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
+
+async function readWorkflow() {
+  return await readFile(workflowPath, "utf8");
+}
+
+test("release workflow buckets Linux AppImage tarballs as linux (includes *.AppImage.tgz)", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  // The `bucket_for()` helper groups assets for a step summary. Ensure AppImage tarballs are treated
+  // as Linux (not mis-grouped as macOS tarballs).
+  const idx = lines.findIndex((line) => line.includes('elif [[ "$base" == *.deb'));
+  assert.ok(
+    idx >= 0,
+    `Expected to find linux bucket_for() branch in ${path.relative(repoRoot, workflowPath)}`,
+  );
+
+  const snippet = lines.slice(idx, idx + 6).join("\n");
+  assert.match(
+    snippet,
+    /\$base\" == \*\.AppImage\.tgz\b/,
+    `Expected linux bucket_for() branch to include *.AppImage.tgz.\nSaw snippet:\n${snippet}`,
+  );
+});
+

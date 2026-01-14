@@ -87,6 +87,7 @@ jobs:
             scripts/ci/generate-release-checksums.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive.test.js \
+            scripts/__tests__/release-workflow-asset-bucketing.test.js \
             scripts/__tests__/desktop-bundle-dry-run-windows-bundle-validation.test.js \
             scripts/__tests__/windows-arm64-smoke-windows-bundle-validation.test.js
 
