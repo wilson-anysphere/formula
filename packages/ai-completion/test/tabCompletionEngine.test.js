@@ -1878,6 +1878,23 @@ test("VLOOKUP range_lookup suggests TRUE/FALSE with higher confidence", async ()
   );
 });
 
+test("VLOOKUP range_lookup preserves typed casing for booleans (lowercase prefix)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, f";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, false"),
+    `Expected VLOOKUP to complete "f" -> "false", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("XMATCH match_mode suggests 0, -1, 1, 2", async () => {
   const engine = new TabCompletionEngine();
 

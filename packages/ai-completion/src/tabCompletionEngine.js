@@ -762,7 +762,16 @@ export class TabCompletionEngine {
 
     const spanStart = parsed.currentArg?.start ?? cursor;
     const spanEnd = parsed.currentArg?.end ?? cursor;
-    const typedPrefix = (parsed.currentArg?.text ?? "").trim();
+
+    const typedArgText = parsed.currentArg?.text ?? "";
+    // If the user typed trailing whitespace (e.g. "TRUE " or "0 "), avoid emitting
+    // completions that would need to delete it. The formula bar tab-complete UI
+    // only supports pure insertions at the caret.
+    if (typedArgText.length > 0 && /\s$/.test(typedArgText)) return [];
+
+    // Preserve the user-typed prefix exactly so suggestions are representable as
+    // pure insertions at the caret (ghost text).
+    const typedPrefix = typedArgText;
 
     /** @type {Suggestion[]} */
     const suggestions = [];
@@ -771,7 +780,15 @@ export class TabCompletionEngine {
      * @param {{ replacement: string, displayText?: string, confidence: number }} entry
      */
     const addReplacement = (entry) => {
-      const replacement = entry.replacement;
+      const rawReplacement = entry.replacement;
+
+      // Only suggest values that are a completion of what the user has already
+      // typed (pure insertion constraint).
+      if (typedPrefix && !startsWithIgnoreCase(rawReplacement, typedPrefix)) return;
+
+      // Preserve typed casing (e.g. "t" -> "true", "T" -> "TRUE") without
+      // rewriting the user's already-typed characters.
+      const replacement = completeIdentifier(rawReplacement, typedPrefix);
       const displayText = entry.displayText ?? replacement;
       suggestions.push({
         text: replaceSpan(input, spanStart, spanEnd, replacement),
