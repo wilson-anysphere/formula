@@ -1460,7 +1460,10 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     }
                     Err(err) => warn_string(
                         &mut out.warnings,
-                        format!("failed to parse ARRAY record at offset {}: {err}", record.offset),
+                        format!(
+                            "failed to parse ARRAY record at offset {}: {err}",
+                            record.offset
+                        ),
                     ),
                 }
             }
@@ -2195,6 +2198,68 @@ mod tests {
 
         let err = parse_biff8_formula_record(&record).unwrap_err();
         assert!(err.contains("PtgStr"), "err={err}");
+    }
+
+    #[test]
+    fn worksheet_formulas_warns_and_continues_on_ptgstr_mid_code_unit_split() {
+        // Ensure best-effort worksheet scan continues even if one FORMULA record contains a
+        // malformed continued unicode PtgStr.
+        //
+        // Malformed formula: cch=1, unicode, but the first fragment only has 1 byte of the UTF-16LE
+        // code unit.
+        let bad_rgce = vec![0x17, 1u8, STR_FLAG_HIGH_BYTE, b'A', 0x00];
+        let bad_first_rgce = &bad_rgce[..4];
+        let mut bad_continue_payload = Vec::new();
+        bad_continue_payload.push(STR_FLAG_HIGH_BYTE); // continued segment option flags (unicode)
+        bad_continue_payload.push(0x00); // remaining byte of UTF-16LE code unit
+
+        let bad_row = 0u16;
+        let bad_col = 0u16;
+        let bad_xf = 0u16;
+        let cached_result = 0f64;
+        let bad_cce = bad_rgce.len() as u16;
+
+        let mut bad_formula_payload_part1 = Vec::new();
+        bad_formula_payload_part1.extend_from_slice(&bad_row.to_le_bytes());
+        bad_formula_payload_part1.extend_from_slice(&bad_col.to_le_bytes());
+        bad_formula_payload_part1.extend_from_slice(&bad_xf.to_le_bytes());
+        bad_formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        bad_formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        bad_formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        bad_formula_payload_part1.extend_from_slice(&bad_cce.to_le_bytes());
+        bad_formula_payload_part1.extend_from_slice(bad_first_rgce);
+
+        // Valid formula after the malformed one.
+        let good_rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt(1)
+        let good_payload = formula_payload(0, 1, 0, &good_rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_FORMULA, &bad_formula_payload_part1),
+            record(records::RECORD_CONTINUE, &bad_continue_payload),
+            record(RECORD_FORMULA, &good_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.iter().any(|w| w
+                .message
+                .contains("string continuation split mid-character")),
+            "warnings={:?}",
+            parsed.warnings
+        );
+
+        assert!(
+            !parsed.formula_cells.contains_key(&CellRef::new(0, 0)),
+            "malformed cell should be skipped"
+        );
+        let good_cell = parsed
+            .formula_cells
+            .get(&CellRef::new(0, 1))
+            .expect("missing good formula cell");
+        assert_eq!(good_cell.rgce, good_rgce);
     }
 
     #[test]
