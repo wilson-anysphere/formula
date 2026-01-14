@@ -26,7 +26,10 @@ describe("desktop-startup-runner shell first_render_ms skip policy", () => {
         "--runs",
         "5",
         "--timeout-ms",
-        "5000",
+        // Under full Vitest runs (lots of CPU-heavy suites + child process churn),
+        // spawning the fake "desktop" binary can occasionally take several seconds.
+        // Keep the test fast while allowing enough headroom to avoid flakes.
+        "15000",
         "--allow-ci",
       ],
       {
@@ -48,4 +51,3 @@ describe("desktop-startup-runner shell first_render_ms skip policy", () => {
     expect(output).toContain("firstRender(p50=n/a,p95=n/a)");
   });
 });
-
