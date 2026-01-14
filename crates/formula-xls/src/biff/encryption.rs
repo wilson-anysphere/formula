@@ -412,7 +412,7 @@ fn decrypt_after_filepass(
     }
 }
 
-fn derive_xor_array(password: &str) -> [u8; 16] {
+fn derive_xor_array(password: &str) -> Zeroizing<[u8; 16]> {
     // Best-effort: derive a deterministic 16-byte XOR array from the password's low UTF-16 bytes.
     //
     // BIFF XOR obfuscation is legacy and not cryptographically secure; this helper exists to make
@@ -426,7 +426,7 @@ fn derive_xor_array(password: &str) -> [u8; 16] {
     for (i, ch) in password.encode_utf16().take(out.len()).enumerate() {
         out[i] ^= (ch & 0xFF) as u8;
     }
-    out
+    Zeroizing::new(out)
 }
 
 fn apply_xor_obfuscation_in_place(
@@ -509,7 +509,7 @@ fn decrypt_biff_xor_obfuscation(
         return Err(DecryptError::WrongPassword);
     }
 
-    let xor_array = Zeroizing::new(derive_xor_array(password));
+    let xor_array = derive_xor_array(password);
     apply_xor_obfuscation_in_place(workbook_stream, encrypted_start, key, &xor_array)
 }
 
