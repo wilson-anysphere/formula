@@ -6652,6 +6652,10 @@ export class SpreadsheetApp {
         this.selectedDrawingIndex = null;
         this.selectedChartId = null;
         this.drawingOverlay.setSelectedId(null);
+        // Chart selection handles are rendered on a separate overlay canvas in legacy chart mode.
+        // Clearing `selectedChartId` directly (rather than via `setSelectedChartId`) requires an
+        // explicit redraw so the stale selection chrome doesn't linger after restore.
+        this.renderChartSelectionOverlay();
         this.dispatchDrawingSelectionChanged();
       }
 
