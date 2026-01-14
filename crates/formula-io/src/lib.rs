@@ -2219,11 +2219,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     // A wrong password should still surface as `InvalidPassword` once we can actually attempt a
     // verifier/integrity check.
     if encrypted_package.len() <= 8 {
-        return Err(Error::DecryptOoxml {
+        return Err(Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
-            source: Box::new(xlsx::OffCryptoError::EncryptedPackageTooShort {
-                len: encrypted_package.len(),
-            }),
+            version_major,
+            version_minor,
         });
     }
     // Agile encryption requires an XML payload after the 8-byte version header.
@@ -2559,6 +2558,13 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                     Ok(bytes) => bytes,
                     Err(err) => return Err(err),
                 }
+            }
+            Err(formula_offcrypto::OffcryptoError::Truncated { .. }) => {
+                return Err(Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major,
+                    version_minor,
+                })
             }
             Err(formula_offcrypto::OffcryptoError::UnsupportedNonCryptoApiStandardEncryption)
             | Err(formula_offcrypto::OffcryptoError::InvalidFlags { .. })
