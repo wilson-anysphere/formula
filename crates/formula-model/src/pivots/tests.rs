@@ -281,6 +281,20 @@ fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() 
         PivotFieldRef::DataModelMeasure("My]Measure".to_string())
     );
     assert_eq!(parsed_measure.to_string(), "[My]]Measure]");
+
+    // If the table name contains `[`, `canonical_name`/`display_string` must quote it to avoid
+    // producing an ambiguous `Table[Column]` shape.
+    let bracket_table = PivotFieldRef::DataModelColumn {
+        table: "My[Table]".to_string(),
+        column: "Col".to_string(),
+    };
+    assert_eq!(bracket_table.to_string(), "'My[Table]'[Col]");
+    assert_eq!(bracket_table.canonical_name().as_ref(), "'My[Table]'[Col]");
+    assert_eq!(bracket_table.display_string(), "'My[Table]'[Col]");
+    assert_eq!(
+        PivotFieldRef::from_unstructured(bracket_table.canonical_name().as_ref()),
+        bracket_table
+    );
 }
 
 #[test]

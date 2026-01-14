@@ -40,7 +40,15 @@ impl PivotFieldRef {
             // store/display unquoted table captions.
             PivotFieldRef::DataModelColumn { table, column } => {
                 let column = escape_dax_bracket_identifier(column);
-                Cow::Owned(format!("{table}[{column}]"))
+                // If the table name itself contains `[`, emitting an unquoted `Table[Column]` shape
+                // becomes ambiguous (`My[Table][Col]` looks like a nested column ref). In that
+                // case, fall back to a quoted DAX-like identifier for the table name.
+                if table.contains('[') {
+                    let table = quote_dax_identifier(table);
+                    Cow::Owned(format!("{table}[{column}]"))
+                } else {
+                    Cow::Owned(format!("{table}[{column}]"))
+                }
             }
             PivotFieldRef::DataModelMeasure(measure) => {
                 let measure = escape_dax_bracket_identifier(measure);
@@ -73,7 +81,12 @@ impl PivotFieldRef {
             // `{table,column}` structure.
             PivotFieldRef::DataModelColumn { table, column } => {
                 let column = escape_dax_bracket_identifier(column);
-                format!("{table}[{column}]")
+                if table.contains('[') {
+                    let table = quote_dax_identifier(table);
+                    format!("{table}[{column}]")
+                } else {
+                    format!("{table}[{column}]")
+                }
             }
             PivotFieldRef::DataModelMeasure(name) => {
                 let name = escape_dax_bracket_identifier(name);
