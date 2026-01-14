@@ -211,8 +211,8 @@ fn decrypt_encrypted_package_stream(
     }
     if ciphertext.len() % AES_BLOCK_SIZE != 0 {
         return Err(OffCryptoError::CiphertextNotBlockAligned {
-            ciphertext_len: ciphertext.len(),
-            block_size: AES_BLOCK_SIZE,
+            field: "EncryptedPackage",
+            len: ciphertext.len(),
         });
     }
 
@@ -225,8 +225,8 @@ fn decrypt_encrypted_package_stream(
 
         if seg_len % AES_BLOCK_SIZE != 0 {
             return Err(OffCryptoError::CiphertextNotBlockAligned {
-                ciphertext_len: seg_len,
-                block_size: AES_BLOCK_SIZE,
+                field: "EncryptedPackage segment",
+                len: seg_len,
             });
         }
 
