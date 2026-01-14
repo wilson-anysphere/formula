@@ -91,7 +91,8 @@ describe("Selection Pane panel", () => {
     priorUseCanvasChartsEnv = process.env.USE_CANVAS_CHARTS;
     // Most Selection Pane behavior is authored/expected in legacy chart mode. In canvas charts mode,
     // ChartStore charts are rendered as drawing objects and show up in the list alongside workbook
-    // drawings; only tests that explicitly set `?canvasCharts=1` should run in that mode.
+    // drawings. These tests force legacy chart mode; suites that need canvas charts should opt in
+    // explicitly (e.g. `process.env.CANVAS_CHARTS = "1"`).
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;
     document.body.innerHTML = "";
