@@ -100,8 +100,8 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "home.editing.fill": true,
   "edit.fillDown": true,
   "edit.fillRight": true,
-  "home.editing.fill.up": true,
-  "home.editing.fill.left": true,
+  "edit.fillUp": true,
+  "edit.fillLeft": true,
   "home.editing.fill.series": true,
 
   "data.sortFilter.sortAtoZ": true,

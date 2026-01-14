@@ -457,8 +457,8 @@ export const homeTab: RibbonTabDefinition = {
           menuItems: [
             { id: "edit.fillDown", label: "Down", ariaLabel: "Fill Down", iconId: "arrowDown" },
             { id: "edit.fillRight", label: "Right", ariaLabel: "Fill Right", iconId: "arrowRight" },
-            { id: "home.editing.fill.up", label: "Up", ariaLabel: "Fill Up", iconId: "arrowUp" },
-            { id: "home.editing.fill.left", label: "Left", ariaLabel: "Fill Left", iconId: "arrowLeft" },
+            { id: "edit.fillUp", label: "Up", ariaLabel: "Fill Up", iconId: "arrowUp" },
+            { id: "edit.fillLeft", label: "Left", ariaLabel: "Fill Left", iconId: "arrowLeft" },
             { id: "home.editing.fill.series", label: "Series…", ariaLabel: "Series", iconId: "moreFormats" },
           ],
         },

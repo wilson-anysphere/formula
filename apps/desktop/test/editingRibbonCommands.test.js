@@ -22,7 +22,7 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
   const schema = readRibbonSchemaSource("homeTab.ts");
 
   // Canonical command ids.
-  const requiredIds = ["edit.autoSum", "edit.fillDown", "edit.fillRight"];
+  const requiredIds = ["edit.autoSum", "edit.fillDown", "edit.fillRight", "edit.fillUp", "edit.fillLeft"];
   for (const id of requiredIds) {
     assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected homeTab.ts to include ${id}`);
   }
@@ -34,7 +34,14 @@ test("Ribbon schema aligns Home → Editing AutoSum/Fill ids with CommandRegistr
   );
 
   // Legacy ids should not be present.
-  const legacyIds = ["home.editing.autoSum", "home.editing.autoSum.sum", "home.editing.fill.down", "home.editing.fill.right"];
+  const legacyIds = [
+    "home.editing.autoSum",
+    "home.editing.autoSum.sum",
+    "home.editing.fill.down",
+    "home.editing.fill.right",
+    "home.editing.fill.up",
+    "home.editing.fill.left",
+  ];
   for (const id of legacyIds) {
     assert.doesNotMatch(
       schema,
@@ -59,10 +66,6 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
     "edit.fillRight",
     "edit.fillUp",
     "edit.fillLeft",
-    // Ribbon schema still uses these ids; they should be registered as builtin aliases so ribbon
-    // and other surfaces share the same execution path.
-    "home.editing.fill.up",
-    "home.editing.fill.left",
     // Ribbon-specific AutoSum dropdown variants should be registered and dispatched via CommandRegistry.
     "home.editing.autoSum.average",
     "home.editing.autoSum.countNumbers",
@@ -83,7 +86,14 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
   }
 
   // Ensure the old ribbon-only ids are no longer mapped in main.ts.
-  const legacyCases = ["home.editing.autoSum", "home.editing.autoSum.sum", "home.editing.fill.down", "home.editing.fill.right"];
+  const legacyCases = [
+    "home.editing.autoSum",
+    "home.editing.autoSum.sum",
+    "home.editing.fill.down",
+    "home.editing.fill.right",
+    "home.editing.fill.up",
+    "home.editing.fill.left",
+  ];
   for (const id of legacyCases) {
     assert.doesNotMatch(
       main,
