@@ -8,6 +8,7 @@
   display: flex;
   flex-direction: column;
   position: relative;
+  --ribbon-tabstrip-height: calc(var(--space-6) + var(--space-4) + var(--space-1));
   /* Ensure the File backstage (position:fixed) can sit above the grid canvases. */
   z-index: 20;
   background: var(--bg-surface);
@@ -23,7 +24,7 @@
   display: flex;
   align-items: stretch;
   justify-content: space-between;
-  height: 26px;
+  height: var(--ribbon-tabstrip-height);
   padding: var(--space-0) var(--space-3);
   gap: var(--space-3);
   background: var(--bg-surface);
@@ -99,7 +100,7 @@
   top: calc(100% + var(--space-2));
   left: 0;
   min-width: 180px;
-  max-height: min(360px, calc(100vh - 160px));
+  max-height: min(360px, calc(100vh - (var(--space-6) * 10)));
   overflow: auto;
   padding: var(--space-2);
   border-radius: var(--radius);
@@ -174,7 +175,7 @@
   border-bottom: 2px solid transparent;
   cursor: pointer;
   flex: 0 0 auto;
-  line-height: 26px;
+  line-height: var(--ribbon-tabstrip-height);
   border-radius: var(--radius) var(--radius) 0 0;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
@@ -452,7 +453,7 @@
   top: calc(100% + var(--space-2));
   left: 0;
   min-width: 180px;
-  max-height: min(360px, calc(100vh - 160px));
+  max-height: min(360px, calc(100vh - (var(--space-6) * 10)));
   overflow: auto;
   padding: var(--space-2);
   border-radius: var(--radius);
@@ -575,7 +576,7 @@
 .ribbon[data-density="hidden"][data-flyout-open="true"] .ribbon__content {
   display: block;
   position: absolute;
-  top: 26px;
+  top: var(--ribbon-tabstrip-height);
   left: 0;
   right: 0;
   border-bottom: 1px solid var(--border);

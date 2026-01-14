@@ -79,7 +79,7 @@ a:visited {
   position: absolute;
   z-index: 200;
   /* JS computes top/left based on the fx button. Provide a stable fallback. */
-  top: 36px;
+  top: calc((var(--space-6) * 2) + var(--space-2));
   left: 0;
 }
 
@@ -797,7 +797,7 @@ a:visited {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3) calc(var(--space-4) + var(--space-1));
-  max-width: min(360px, calc(100% - 20px));
+  max-width: min(360px, calc(100% - (var(--space-5) + var(--space-4))));
   background: var(--formula-grid-bg, var(--bg-primary));
   border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: var(--radius);
