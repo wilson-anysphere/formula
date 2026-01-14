@@ -13,10 +13,10 @@ fn parses_manual_layout_for_plot_area() {
           <c:yMode val="edge"/>
           <c:wMode val="factor"/>
           <c:hMode val="factor"/>
-          <c:x val="0.25"/>
-          <c:y val="0.5"/>
-          <c:w val="0.75"/>
-          <c:h val="0.25"/>
+          <c:x val=" 0.25 "/>
+          <c:y val=" 0.5 "/>
+          <c:w val=" 0.75 "/>
+          <c:h val=" 0.25 "/>
         </c:manualLayout>
       </c:layout>
       <c:barChart/>

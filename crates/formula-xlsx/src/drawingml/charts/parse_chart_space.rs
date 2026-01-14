@@ -1550,15 +1550,19 @@ fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
 
+    fn parse_f64(value: &str) -> Option<f64> {
+        value.trim().parse::<f64>().ok()
+    }
+
     let model = ManualLayoutModel {
-        x: child_attr(manual_node, "x", "val").and_then(|v| v.parse::<f64>().ok()),
-        y: child_attr(manual_node, "y", "val").and_then(|v| v.parse::<f64>().ok()),
-        w: child_attr(manual_node, "w", "val").and_then(|v| v.parse::<f64>().ok()),
-        h: child_attr(manual_node, "h", "val").and_then(|v| v.parse::<f64>().ok()),
-        x_mode: child_attr(manual_node, "xMode", "val").map(str::to_string),
-        y_mode: child_attr(manual_node, "yMode", "val").map(str::to_string),
-        w_mode: child_attr(manual_node, "wMode", "val").map(str::to_string),
-        h_mode: child_attr(manual_node, "hMode", "val").map(str::to_string),
+        x: child_attr(manual_node, "x", "val").and_then(parse_f64),
+        y: child_attr(manual_node, "y", "val").and_then(parse_f64),
+        w: child_attr(manual_node, "w", "val").and_then(parse_f64),
+        h: child_attr(manual_node, "h", "val").and_then(parse_f64),
+        x_mode: child_attr(manual_node, "xMode", "val").map(|v| v.trim().to_string()),
+        y_mode: child_attr(manual_node, "yMode", "val").map(|v| v.trim().to_string()),
+        w_mode: child_attr(manual_node, "wMode", "val").map(|v| v.trim().to_string()),
+        h_mode: child_attr(manual_node, "hMode", "val").map(|v| v.trim().to_string()),
     };
 
     if model == ManualLayoutModel::default() {
