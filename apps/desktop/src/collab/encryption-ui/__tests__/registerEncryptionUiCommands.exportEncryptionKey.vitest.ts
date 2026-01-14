@@ -85,7 +85,7 @@ describe("registerEncryptionUiCommands", () => {
     expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/not inside an encrypted range/i), "warning");
   });
 
-  it("exportEncryptionKey falls back to the policy key when the encrypted payload key is unavailable locally", async () => {
+  it("exportEncryptionKey does not fall back to policy when the encrypted payload key is unavailable locally", async () => {
     const commandRegistry = new CommandRegistry();
 
     const docId = "doc-1";
@@ -133,18 +133,13 @@ describe("registerEncryptionUiCommands", () => {
 
     registerEncryptionUiCommands({ commandRegistry, app });
 
-    vi.mocked(showInputBox).mockResolvedValue("done");
-
     await commandRegistry.executeCommand("collab.exportEncryptionKey");
 
-    // Should probe the payload key first, then export the policy key.
+    // Should attempt to use the payload key id (k-old), and warn if it's missing.
     expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k-old");
-    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k-new");
-
-    const inputOptions = vi.mocked(showInputBox).mock.calls[0]?.[0] as any;
-    const parsed = parseEncryptionKeyExportString(String(inputOptions.value));
-    expect(parsed.keyId).toBe("k-new");
-    expect(parsed.keyBytes).toEqual(keyBytes);
+    expect(keyStore.getCachedKey).not.toHaveBeenCalledWith(docId, "k-new");
+    expect(showInputBox).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/key id: k-old/i), "warning");
   });
 
   it("exportEncryptionKey falls back to policy metadata when the active cell is not yet encrypted", async () => {

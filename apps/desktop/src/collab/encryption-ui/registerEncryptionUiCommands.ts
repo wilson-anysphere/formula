@@ -627,25 +627,21 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return keyBytes;
       };
 
-      // Match the desktop session's key resolution precedence:
-      // - If the active cell has an `enc` payload and we have that key locally, export it.
-      // - Otherwise, fall back to the policy key id (supports key rotation/overwrite flows).
-      const keyIdCandidates = [keyIdFromEnc, keyIdFromPolicy].filter((id): id is string => Boolean(id));
-
-      let keyId: string | null = null;
-      let keyBytes: Uint8Array | null = null;
-      for (const candidate of keyIdCandidates) {
-        const bytes = await loadKeyBytes(candidate);
-        if (!bytes) continue;
-        keyId = candidate;
-        keyBytes = bytes;
-        break;
+      // Export semantics:
+      // - If the active cell already has an `enc` payload, export that key id (the only key that can
+      //   decrypt the cell). Do not fall back to policy metadata; exporting a different key id would
+      //   be misleading.
+      // - Otherwise, fall back to the policy key id (for cells in an encrypted range that have not
+      //   yet been written/encrypted).
+      const keyId = keyIdFromEnc ?? keyIdFromPolicy;
+      if (!keyId) {
+        showToast("Missing encryption key for this range. Import the key first.", "warning");
+        return;
       }
 
-      if (!keyId || !keyBytes) {
-        const uniqueIds = Array.from(new Set(keyIdCandidates));
-        const hint = uniqueIds.length > 0 ? ` (key id${uniqueIds.length > 1 ? "s" : ""}: ${uniqueIds.join(", ")})` : "";
-        showToast(`Missing encryption key for this range. Import the key first.${hint}`, "warning");
+      const keyBytes = await loadKeyBytes(keyId);
+      if (!keyBytes) {
+        showToast(`Missing encryption key for this range. Import the key first. (key id: ${keyId})`, "warning");
         return;
       }
 
