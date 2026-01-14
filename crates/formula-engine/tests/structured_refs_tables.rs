@@ -1122,3 +1122,47 @@ fn delete_cols_at_table_right_edge_removes_column_and_yields_ref_error() {
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col1", "Col2", "Col3"]);
 }
+
+#[test]
+fn delete_cols_at_table_left_edge_preserves_other_named_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col3])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(600.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Delete the first table column (Col1).
+            count: 1,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    // Col3 should still resolve by name after the shift.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(600.0));
+}
+
+#[test]
+fn delete_cols_at_table_right_edge_preserves_other_named_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 3, // Delete the last table column (Col4).
+            count: 1,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    // Col2 should still resolve by name after the shrink.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+}
