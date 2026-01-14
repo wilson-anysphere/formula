@@ -613,12 +613,16 @@ export function convertModelDrawingObjectToUiDrawingObject(
 
   const preservedValue = pick(modelObjJson, ["preserved"]);
   let preserved: Record<string, string> | undefined;
-  if (isRecord(preservedValue)) {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(preservedValue)) {
-      if (typeof v === "string") out[k] = v;
+  {
+    const unwrapped = unwrapSingletonId(preservedValue);
+    if (isRecord(unwrapped)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(unwrapped)) {
+        const str = readOptionalString(v);
+        if (typeof str === "string") out[k] = str;
+      }
+      if (Object.keys(out).length > 0) preserved = out;
     }
-    if (Object.keys(out).length > 0) preserved = out;
   }
 
   const transform = (() => {
@@ -1133,12 +1137,16 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
         // (e.g. rotation interactions or XLSX compatibility XML).
         const preservedValue = pick(raw, ["preserved"]);
         let preserved: Record<string, string> | undefined;
-        if (isRecord(preservedValue)) {
-          const outPreserved: Record<string, string> = {};
-          for (const [k, v] of Object.entries(preservedValue)) {
-            if (typeof v === "string") outPreserved[k] = v;
+        {
+          const unwrapped = unwrapSingletonId(preservedValue);
+          if (isRecord(unwrapped)) {
+            const outPreserved: Record<string, string> = {};
+            for (const [k, v] of Object.entries(unwrapped)) {
+              const str = readOptionalString(v);
+              if (typeof str === "string") outPreserved[k] = str;
+            }
+            if (Object.keys(outPreserved).length > 0) preserved = outPreserved;
           }
-          if (Object.keys(outPreserved).length > 0) preserved = outPreserved;
         }
 
         const transformValue = pick(raw, ["transform"]);
