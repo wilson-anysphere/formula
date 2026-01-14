@@ -114,20 +114,13 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     // Repeated references to the same volatile cell are stable within a recalc pass.
     assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
     // Multiple RAND() calls within a single cell evaluation should produce distinct draws.
+    // We avoid asserting this is *always* non-zero because collisions are theoretically possible,
+    // but we do assert basic invariants and later require observing a non-zero result across a few
+    // recalcs.
     match single.get_cell_value("Sheet1", "A5") {
         Value::Number(n) => {
-            assert!(
-                n.is_finite(),
-                "expected RAND()-RAND() to be finite, got {n}"
-            );
-            assert!(
-                n > -1.0 && n < 1.0,
-                "expected RAND()-RAND() in (-1,1), got {n}"
-            );
-            assert!(
-                n != 0.0,
-                "expected RAND()-RAND() to be non-zero (distinct draws)"
-            );
+            assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
+            assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
         }
         other => panic!("expected RAND()-RAND() to be a number, got {other:?}"),
     }
@@ -176,6 +169,7 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     let mut changed_a2 = false;
     let mut changed_a3 = false;
     let mut changed_array = false;
+    let mut observed_distinct_draws_in_cell = false;
 
     for _ in 0..10 {
         single.recalculate_single_threaded();
@@ -183,6 +177,16 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
         // Invariants should continue to hold after every recalc.
         assert_eq!(single.get_cell_value("Sheet1", "A4"), Value::Bool(true));
         assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
+        match single.get_cell_value("Sheet1", "A5") {
+            Value::Number(n) => {
+                assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
+                assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
+                if n != 0.0 {
+                    observed_distinct_draws_in_cell = true;
+                }
+            }
+            other => panic!("expected RAND()-RAND() to be a number, got {other:?}"),
+        }
         assert_rand_unit_interval(&single.get_cell_value("Sheet1", "A1"), "RAND()");
         assert_randbetween_bounds(
             &single.get_cell_value("Sheet1", "A2"),
@@ -237,5 +241,9 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     assert!(
         changed_array,
         "expected RANDARRAY() spill values to change across recalculations"
+    );
+    assert!(
+        observed_distinct_draws_in_cell,
+        "expected to observe distinct RAND() draws within a single cell evaluation (RAND()-RAND() != 0) across a few recalcs"
     );
 }
