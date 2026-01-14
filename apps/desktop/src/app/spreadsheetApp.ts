@@ -14409,8 +14409,166 @@ export class SpreadsheetApp {
     return activeRange;
   }
 
+  private async transcodeImageEntryToPng(entry: ImageEntry): Promise<Uint8Array | null> {
+    if (entry.mimeType === "image/png") return entry.bytes;
+
+    if (typeof document === "undefined") return null;
+
+    const blob = new Blob([entry.bytes], { type: entry.mimeType || "application/octet-stream" });
+
+    type Decoded = { source: CanvasImageSource; width: number; height: number };
+
+    const decode = async (): Promise<Decoded | null> => {
+      if (typeof createImageBitmap === "function") {
+        try {
+          const bitmap = await createImageBitmap(blob);
+          return { source: bitmap, width: bitmap.width, height: bitmap.height };
+        } catch {
+          // Fall through to <img> decoding.
+        }
+      }
+
+      if (typeof Image === "undefined" || typeof URL === "undefined") return null;
+
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = new Image();
+        img.decoding = "async";
+        const loaded = new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("image decode failed"));
+        });
+        img.src = url;
+        await loaded;
+        const width = (img as any).naturalWidth ?? img.width;
+        const height = (img as any).naturalHeight ?? img.height;
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+        return { source: img, width, height };
+      } catch {
+        return null;
+      } finally {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const decoded = await decode();
+    if (!decoded) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = decoded.width;
+    canvas.height = decoded.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(decoded.source, 0, 0);
+
+    if (typeof canvas.toBlob === "function") {
+      const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!pngBlob) return null;
+      const buf = await pngBlob.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+
+    if (typeof canvas.toDataURL === "function" && typeof atob === "function") {
+      try {
+        const url = canvas.toDataURL("image/png");
+        const comma = url.indexOf(",");
+        if (comma === -1) return null;
+        const base64 = url.slice(comma + 1);
+        const binary = atob(base64);
+        const out = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          out[i] = binary.charCodeAt(i);
+        }
+        return out;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private async copySelectedDrawingToClipboard(): Promise<void> {
+    const selectedId = this.selectedDrawingId;
+    if (selectedId == null) return;
+
+    const objects = this.listDrawingObjectsForSheet(this.sheetId);
+    const selected = objects.find((obj) => obj.id === selectedId);
+    if (!selected || selected.kind.type !== "image") {
+      throw new Error("Selected drawing is not an image");
+    }
+
+    const imageId = selected.kind.imageId;
+    let entry = this.drawingImages.get(imageId);
+    const getAsync = (this.drawingImages as any)?.getAsync;
+    if (!entry && typeof getAsync === "function") {
+      try {
+        entry = await getAsync.call(this.drawingImages, imageId);
+      } catch {
+        entry = undefined;
+      }
+    }
+    if (!entry) {
+      throw new Error("Selected drawing image data not found");
+    }
+
+    const pngBytes = await this.transcodeImageEntryToPng(entry);
+    if (!pngBytes) {
+      try {
+        showToast("Copy picture not supported for this image type", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      throw new Error("Copy picture not supported for this image type");
+    }
+
+    const provider = await this.getClipboardProvider();
+    await provider.write({ text: "", imagePng: pngBytes });
+  }
+
+  private async cutSelectedDrawingToClipboard(): Promise<void> {
+    const selectedId = this.selectedDrawingId;
+    if (selectedId == null) return;
+
+    await this.copySelectedDrawingToClipboard();
+
+    const label = (() => {
+      const translated = t("clipboard.cut");
+      return translated === "clipboard.cut" ? "Cut" : translated;
+    })();
+
+    this.document.beginBatch({ label });
+    try {
+      const docAny = this.document as any;
+      if (typeof docAny.deleteDrawing === "function") {
+        docAny.deleteDrawing(this.sheetId, selectedId, { label });
+      } else if (typeof docAny.setSheetDrawings === "function" && typeof docAny.getSheetDrawings === "function") {
+        const existing = docAny.getSheetDrawings(this.sheetId);
+        const next = Array.isArray(existing)
+          ? existing.filter((d: any) => String(d?.id ?? "") !== String(selectedId))
+          : [];
+        docAny.setSheetDrawings(this.sheetId, next, { label });
+      }
+    } finally {
+      this.document.endBatch();
+    }
+
+    this.selectedDrawingId = null;
+    this.refresh();
+    this.focus();
+  }
+
   private async copySelectionToClipboard(): Promise<void> {
     try {
+      if (this.selectedDrawingId != null) {
+        await this.copySelectedDrawingToClipboard();
+        return;
+      }
+
       const range = this.getClipboardCopyRange();
       const rowCount = Math.max(0, range.endRow - range.startRow + 1);
       const colCount = Math.max(0, range.endCol - range.startCol + 1);
@@ -14983,6 +15141,11 @@ export class SpreadsheetApp {
       return;
     }
     try {
+      if (this.selectedDrawingId != null) {
+        await this.cutSelectedDrawingToClipboard();
+        return;
+      }
+
       const range = this.getClipboardCopyRange();
       const rowCount = Math.max(0, range.endRow - range.startRow + 1);
       const colCount = Math.max(0, range.endCol - range.startCol + 1);
