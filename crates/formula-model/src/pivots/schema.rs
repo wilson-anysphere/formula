@@ -276,6 +276,34 @@ fn escape_dax_bracket_identifier(raw: &str) -> String {
     raw.replace(']', "]]")
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+
+    // DAX allows unquoted identifiers in simple "C identifier" form. Be conservative: if the
+    // identifier contains anything other than ASCII alphanumerics/underscore, or starts with a
+    // non-letter/underscore, we quote it.
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return true;
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // In DAX, single quotes are escaped by doubling them.
+    let escaped = raw.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
