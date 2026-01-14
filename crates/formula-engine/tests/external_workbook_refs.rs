@@ -812,7 +812,9 @@ fn external_sheet_invalidation_updates_when_indirect_ref_text_cell_changes() {
     engine
         .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet1!A1")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INDIRECT(B1)")
+        .unwrap();
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",
@@ -834,10 +836,7 @@ fn external_sheet_invalidation_updates_when_indirect_ref_text_cell_changes() {
         .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet2!A1")
         .unwrap();
     engine.recalculate();
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Number(10.0)
-    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
     assert!(!engine.is_dirty("Sheet1", "A1"));
 
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
