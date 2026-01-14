@@ -4,8 +4,12 @@
 //! crate currently exposes multiple APIs:
 //!
 //! - [`XlsxPackage`]: low-level Open Packaging Convention (OPC) ZIP handling
-//!   that preserves unknown parts and binary payloads like `xl/vbaProject.bin`
-//!   byte-for-byte.
+//!   that inflates the full ZIP into memory (part name -> bytes). This preserves
+//!   part payloads like `xl/vbaProject.bin` byte-for-byte, but writing generally
+//!   re-packs the ZIP container.
+//! - [`XlsxLazyPackage`]: a lazy/streaming OPC package wrapper that avoids
+//!   inflating every ZIP entry into memory and writes via the streaming rewrite
+//!   pipeline (raw-copying untouched ZIP entries for performance and fidelity).
 //! - [`read_workbook`]/[`write_workbook`]: a semantic importer/exporter for
 //!   [`formula_model::Workbook`].
 //! - [`XlsxDocument`]: a higher-fidelity round-trip representation that pairs a
