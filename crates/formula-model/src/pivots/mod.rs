@@ -3,7 +3,7 @@ use formula_format::{FormatOptions, Value as FmtValue};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 mod model;
@@ -14,10 +14,7 @@ pub mod workbook;
 pub use model::{
     DefinedNameIdentifier, PivotCacheId, PivotDestination, PivotSource, PivotTableModel,
 };
-pub use schema::{
-    CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    SubtotalPosition,
-};
+pub use schema::{CalculatedField, CalculatedItem};
 pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel};
 
 pub type PivotTableId = Uuid;
@@ -308,7 +305,6 @@ pub struct ValueField {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
 }
-
 impl From<&str> for ScalarValue {
     fn from(value: &str) -> Self {
         ScalarValue::Text(value.to_string())

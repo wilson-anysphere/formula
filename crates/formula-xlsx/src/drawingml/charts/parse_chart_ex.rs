@@ -271,6 +271,7 @@ fn detect_chart_kind(
 
     "unknown".to_string()
 }
+
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     // This helper only feeds diagnostics when ChartEx kind detection fails.
     // Keep output small + stable, but include enough context to extend detection later.
@@ -303,6 +304,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
 
     out
 }
+
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     // Prefer explicit known chart-type nodes. Some ChartEx parts contain other
     // `*Chart`-suffixed elements (e.g. style/theme) that can appear before the
