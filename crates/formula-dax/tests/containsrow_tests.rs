@@ -61,3 +61,20 @@ fn containsrow_with_values_column() {
         .unwrap();
     assert_eq!(value, Value::from(true));
 }
+
+#[test]
+fn containsrow_with_table_literal_and_column_ref() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // Common membership pattern: `CONTAINSROW({"A","B"}, Table[Col])` inside a row iterator.
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(FILTER(Customers, CONTAINSROW({\"East\"}, Customers[Region])))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(2));
+}
