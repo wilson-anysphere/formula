@@ -61,8 +61,11 @@ fn noop_inline_string_flagged_layout_with_missing_rich_phonetic_blocks_is_preser
         row: 0,
         col: 0,
         new_value: CellValue::Text(text),
+        new_style: None,
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     };
 
@@ -93,8 +96,11 @@ fn noop_inline_string_simple_layout_with_trailing_bytes_is_preserved() {
         row: 0,
         col: 0,
         new_value: CellValue::Text(text),
+        new_style: None,
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     };
 
@@ -124,8 +130,11 @@ fn flagged_inline_string_text_change_is_not_treated_as_noop() {
         row: 0,
         col: 0,
         new_value: CellValue::Text(new_text.clone()),
+        new_style: None,
+        clear_formula: false,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     };
 

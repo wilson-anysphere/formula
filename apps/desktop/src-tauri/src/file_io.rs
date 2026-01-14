@@ -691,24 +691,6 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
 }
 
-fn read_xlsx_or_xlsm_from_bytes(
-    path: &Path,
-    package_bytes: Arc<[u8]>,
-) -> anyhow::Result<Workbook> {
-    let max_origin_bytes = crate::resource_limits::max_origin_xlsx_bytes();
-    let origin_xlsx_bytes = if package_bytes.len() <= max_origin_bytes {
-        Some(package_bytes.clone())
-    } else {
-        None
-    };
-
-    let open_reader = || -> anyhow::Result<Box<dyn ReadSeek>> {
-        Ok(Box::new(Cursor::new(package_bytes.clone())))
-    };
-
-    read_xlsx_or_xlsm_from_open_reader(path, origin_xlsx_bytes, open_reader)
-}
-
 fn read_xlsx_or_xlsm_from_open_reader<F>(
     path: &Path,
     origin_xlsx_bytes: Option<Arc<[u8]>>,

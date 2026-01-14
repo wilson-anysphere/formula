@@ -3,6 +3,8 @@
 //! This module is behind the `encrypted-workbooks` feature because password-based decryption is
 //! still landing.
 
+#![allow(dead_code)]
+
 use std::io;
 use std::io::{Read, Seek};
 
