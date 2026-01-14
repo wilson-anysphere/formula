@@ -1141,11 +1141,13 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
             if (rotationDeg != null) {
               const flipHRaw = pick(record, ["flipH", "flip_h"]);
               const flipVRaw = pick(record, ["flipV", "flip_v"]);
+              const flipHUnwrapped = unwrapSingletonId(flipHRaw);
+              const flipVUnwrapped = unwrapSingletonId(flipVRaw);
               // Older snapshots may have only stored rotation values before flip support
               // existed. Default missing flip keys to false so we can still hydrate a
               // complete DrawingTransform for the UI overlay model.
-              const flipH = typeof flipHRaw === "boolean" ? flipHRaw : false;
-              const flipV = typeof flipVRaw === "boolean" ? flipVRaw : false;
+              const flipH = typeof flipHUnwrapped === "boolean" ? flipHUnwrapped : false;
+              const flipV = typeof flipVUnwrapped === "boolean" ? flipVUnwrapped : false;
               const candidate = { rotationDeg, flipH, flipV };
               // Avoid synthesizing a redundant identity transform so snapshots remain stable.
               if (candidate.rotationDeg !== 0 || candidate.flipH || candidate.flipV) {

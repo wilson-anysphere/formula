@@ -1481,10 +1481,15 @@ function normalizeSheetViewState(view) {
   };
 
   const normalizeBackgroundImageId = (value) => {
-    if (value == null) return null;
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed ? trimmed : null;
+    const unwrapped = unwrapSingletonId(value);
+    if (unwrapped == null) return null;
+    if (typeof unwrapped === "string") {
+      const trimmed = unwrapped.trim();
+      return trimmed ? trimmed : null;
+    }
+    if (typeof unwrapped === "number" && Number.isFinite(unwrapped)) return String(unwrapped);
+    if (typeof unwrapped === "bigint") return String(unwrapped);
+    return null;
   };
 
   const normalizeMergedRanges = (raw) => {
