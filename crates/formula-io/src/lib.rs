@@ -3311,8 +3311,8 @@ fn decrypt_encrypted_ooxml_package(
                         }
                         buf[header_start..header_start + 4]
                             .copy_from_slice(&new_flags.to_le_bytes());
-                        patched_info = Some(buf);
-                        enc_info = patched_info.as_ref().unwrap().as_slice();
+                        let patched = patched_info.get_or_insert(buf);
+                        enc_info = patched.as_slice();
                         res = formula_office_crypto::decrypt_standard_encrypted_package(
                             enc_info,
                             &encrypted_package,
