@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-import { openExtensionsPanel } from "./helpers";
+import { gotoDesktop, openExtensionsPanel, waitForDesktopReady } from "./helpers";
 
 // CJS helpers (shared/* is CommonJS). Playwright's TS loader may not always expose
 // named exports for CJS modules, so fall back to `.default`.
@@ -26,39 +26,6 @@ const repoRoot = path.resolve(__dirname, "../../../..");
 
 function viteFsUrl(absPath: string) {
   return `/@fs${absPath}`;
-}
-
-async function gotoDesktop(page: Page, urlPath: string = "/"): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await page.goto(urlPath, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 120_000 });
-      return;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("domcontentloaded");
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-async function waitForDesktopReady(page: Page): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 120_000 });
-      return;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("domcontentloaded");
-        continue;
-      }
-      throw err;
-    }
-  }
 }
 
 test.describe("IndexedDB extension install corruption", () => {
@@ -149,7 +116,7 @@ test.describe("IndexedDB extension install corruption", () => {
       },
     );
 
-    await gotoDesktop(page);
+    await gotoDesktop(page, "/", { waitForIdle: false, appReadyTimeoutMs: 120_000 });
 
     // Install the extension into IndexedDB.
     const webExtensionManagerUrl = viteFsUrl(
@@ -200,7 +167,7 @@ test.describe("IndexedDB extension install corruption", () => {
     );
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await waitForDesktopReady(page);
+    await waitForDesktopReady(page, { waitForIdle: false, appReadyTimeoutMs: 120_000 });
 
     // Opening the extensions panel triggers extension host startup + auto-load of installed extensions.
     await openExtensionsPanel(page);

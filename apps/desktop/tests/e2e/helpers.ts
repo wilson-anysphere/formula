@@ -307,7 +307,8 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
   page.off("requestfailed", onRequestFailed);
 }
 
-export async function waitForDesktopReady(page: Page): Promise<void> {
+export async function waitForDesktopReady(page: Page, options: DesktopReadyOptions = {}): Promise<void> {
+  const { waitForIdle = true, idleTimeoutMs, appReadyTimeoutMs } = options;
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
@@ -395,7 +396,8 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
-  const appReadyTimeout = DEFAULT_APP_READY_TIMEOUT_MS;
+  const appReadyTimeout =
+    typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : DEFAULT_APP_READY_TIMEOUT_MS;
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const requestStart = requestFailures.length;
@@ -426,12 +428,20 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         }),
       ]);
 
-      await page.evaluate(async () => {
-        const app = window.__formulaApp as any;
-        if (app && typeof app.whenIdle === "function") {
-          await app.whenIdle();
-        }
-      });
+      await page.evaluate(
+        async ({ waitForIdle, idleTimeoutMs }) => {
+          const app = window.__formulaApp as any;
+          if (!waitForIdle) return;
+          if (app && typeof app.whenIdle === "function") {
+            if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
+              await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, idleTimeoutMs))]);
+            } else {
+              await app.whenIdle();
+            }
+          }
+        },
+        { waitForIdle, idleTimeoutMs },
+      );
 
       // If the desktop shell threw during startup (uncaught exception), the app can partially
       // mount while leaving other regions uninitialized. Surface those failures early so flaky
