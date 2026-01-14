@@ -16208,56 +16208,44 @@ fn walk_calc_expr(
                                 return;
                             }
 
-                            // Address-only `info_type` values (e.g. width/format/address) should not
-                            // treat a bare reference as a precedent.
+                            // Address-only `info_type` values (e.g. width/format/address) use the
+                            // reference argument only for its address/shape. Walk it in
+                            // "reference context" so we pick up dependencies used to *compute* the
+                            // reference without introducing precedents on referenced cell values
+                            // (avoids spurious circular references).
                             //
-                            // When the reference is more complex (e.g. OFFSET(...)), fall back to
-                            // the generic walker so we still pick up dependencies used to *compute*
-                            // the reference.
+                            // Spill ranges (`A1#`) are dynamic, but these address-only CELL keys
+                            // consult only the upper-left address. Treat direct spill references as
+                            // address-only too to avoid pulling in dynamic spill dependencies.
                             match &args[1] {
-                                Expr::CellRef(_)
-                                | Expr::RangeRef(_)
-                                | Expr::StructuredRef(_)
-                                | Expr::SpillRange(_) => {
-                                    for a in args.iter().skip(2) {
-                                        walk_calc_expr(
-                                            a,
-                                            current_cell,
-                                            tables_by_sheet,
-                                            workbook,
-                                            spills,
-                                            precedents,
-                                            visiting_names,
-                                            lexical_scopes,
-                                        );
-                                    }
-                                    return;
-                                }
-                                Expr::ImplicitIntersection(inner) => {
-                                    if matches!(
-                                        inner.as_ref(),
-                                        Expr::CellRef(_)
-                                            | Expr::RangeRef(_)
-                                            | Expr::StructuredRef(_)
-                                            | Expr::SpillRange(_)
-                                    ) {
-                                        for a in args.iter().skip(2) {
-                                            walk_calc_expr(
-                                                a,
-                                                current_cell,
-                                                tables_by_sheet,
-                                                workbook,
-                                                spills,
-                                                precedents,
-                                                visiting_names,
-                                                lexical_scopes,
-                                            );
-                                        }
-                                        return;
-                                    }
-                                }
-                                _ => {}
+                                Expr::SpillRange(_) => {}
+                                Expr::ImplicitIntersection(inner)
+                                    if matches!(inner.as_ref(), Expr::SpillRange(_)) => {}
+                                other => walk_calc_expr_reference_context(
+                                    other,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                ),
                             }
+
+                            for a in args.iter().skip(2) {
+                                walk_calc_expr(
+                                    a,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                            return;
                         }
                     }
                     "LET" => {

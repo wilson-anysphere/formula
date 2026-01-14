@@ -408,6 +408,18 @@ fn cell_width_self_reference_is_not_a_circular_dependency() {
 }
 
 #[test]
+fn cell_width_offset_self_reference_is_not_a_circular_dependency() {
+    // Similar to `CELL("width", A1)`, but with a reference-returning function. The width depends on
+    // the *address* of the returned reference, not the referenced cell's value, so it should not be
+    // treated as a calc-graph self-edge.
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CELL(\"width\", OFFSET(A1, 0, 0))");
+    sheet.recalculate();
+    assert_number(&sheet.get("A1"), 8.0);
+    assert_eq!(sheet.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_width_omitted_reference_uses_current_cell_and_is_not_circular() {
     // Excel allows `CELL("width")` without the optional reference argument; it should use the
     // current cell as the implicit reference without introducing a self-edge.
