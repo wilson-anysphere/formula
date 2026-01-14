@@ -419,9 +419,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // column properties, not the referenced cell's value, and recording it can introduce
             // spurious circular references (e.g. `=CELL("width", A1)` in A1).
 
-            // Excel returns a number whose integer part is the column width (in characters) and
-            // whose first decimal digit is `0` when the column uses the sheet default width or `1`
-            // when it uses an explicit per-column width.
+            // Excel returns a number where the integer part is the column width (in characters),
+            // rounded down, and the first decimal digit is `0` when the column uses the sheet
+            // default width or `1` when it uses an explicit per-column override.
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
             let props = ctx.col_properties(&reference.sheet_id, addr.col);
