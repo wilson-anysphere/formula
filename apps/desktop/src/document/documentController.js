@@ -1410,7 +1410,7 @@ function normalizeDrawings(raw) {
     cloned.id = normalizedId;
 
     // Normalize z-order: support both `zOrder` and `z_order` (formula-model).
-    const zOrderRaw = cloned.zOrder ?? cloned.z_order;
+    const zOrderRaw = unwrapSingletonId(cloned.zOrder ?? cloned.z_order);
     const zOrder = zOrderRaw == null ? out.length : Number(zOrderRaw);
     if (!Number.isFinite(zOrder)) continue;
     cloned.zOrder = zOrder;
@@ -3623,7 +3623,7 @@ export class DocumentController {
       }
       if (!("anchor" in raw)) throw new Error("Drawing.anchor is required");
       if (!("kind" in raw)) throw new Error("Drawing.kind is required");
-      const zOrder = Number(raw.zOrder ?? raw.z_order);
+      const zOrder = Number(unwrapSingletonId(raw.zOrder ?? raw.z_order));
       if (!Number.isFinite(zOrder)) throw new Error("Drawing.zOrder must be a finite number");
       const cloned = cloneJsonSerializable(raw);
       cloned.id = drawingId;

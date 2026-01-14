@@ -323,6 +323,40 @@ test("applyState accepts drawings with singleton-wrapped ids (interop)", () => {
   assert.equal(drawings[0].zOrder, 3);
 });
 
+test("applyState accepts drawings with singleton-wrapped z_order (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [
+            {
+              id: 1,
+              z_order: { 0: 3 },
+              anchor: { type: "cell", row: 0, col: 0 },
+              kind: { type: "image", imageId: "img1" },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, 1);
+  assert.equal(drawings[0].zOrder, 3);
+});
+
 test("applyState accepts images array entries with singleton-wrapped ids (interop)", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({
@@ -364,6 +398,23 @@ test("setSheetDrawings accepts singleton-wrapped numeric ids (interop)", () => {
   const drawings = doc.getSheetDrawings("Sheet1");
   assert.equal(drawings.length, 1);
   assert.equal(drawings[0].id, 7);
+});
+
+test("setSheetDrawings accepts singleton-wrapped zOrder (interop)", () => {
+  const doc = new DocumentController();
+  doc.setSheetDrawings("Sheet1", [
+    {
+      id: "d1",
+      zOrder: { 0: 0 },
+      anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+      kind: { type: "image", imageId: "img1" },
+    },
+  ]);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, "d1");
+  assert.equal(drawings[0].zOrder, 0);
 });
 
 test("applyState accepts legacy top-level drawingsBySheet snapshots", () => {
