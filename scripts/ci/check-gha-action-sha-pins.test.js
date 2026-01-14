@@ -73,6 +73,26 @@ jobs:
   assert.match(proc.stderr, /actions\/checkout@v4/);
 });
 
+test("fails when a reusable workflow uses a floating ref", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  reuse:
+    uses: some-org/some-repo/.github/workflows/reusable.yml@v1
+`);
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /must pin/i);
+  assert.match(proc.stderr, /some-org\/some-repo\/\.github\/workflows\/reusable\.yml@v1/);
+});
+
+test("allows local reusable workflow references by path", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  reuse:
+    uses: ./.github/workflows/reusable.yml
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("fails when SHA pin is missing a trailing version comment", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
