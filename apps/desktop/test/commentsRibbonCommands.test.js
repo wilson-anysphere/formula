@@ -62,6 +62,11 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   assert.doesNotMatch(router, /\bcommandOverrides:\s*\{[\s\S]*?["']comments\.addComment["']\s*:/m);
   assert.doesNotMatch(
     router,
+    /\bcommandId\.startsWith\(\s*["']comments\./,
+    "Did not expect ribbonCommandRouter.ts to add bespoke comments.* prefix routing (dispatch should go through CommandRegistry)",
+  );
+  assert.doesNotMatch(
+    router,
     /\bcase\s+["']comments\.togglePanel["']:/,
     "Expected ribbonCommandRouter.ts to not handle comments.togglePanel via switch case (should dispatch via CommandRegistry)",
   );
@@ -69,6 +74,16 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
     router,
     /\bcase\s+["']comments\.addComment["']:/,
     "Expected ribbonCommandRouter.ts to not handle comments.addComment via switch case (should dispatch via CommandRegistry)",
+  );
+  assert.doesNotMatch(
+    router,
+    /\bcommandId\s*===\s*["']comments\.togglePanel["']/,
+    "Expected ribbonCommandRouter.ts to not special-case comments.togglePanel via commandId === checks (should dispatch via CommandRegistry)",
+  );
+  assert.doesNotMatch(
+    router,
+    /\bcommandId\s*===\s*["']comments\.addComment["']/,
+    "Expected ribbonCommandRouter.ts to not special-case comments.addComment via commandId === checks (should dispatch via CommandRegistry)",
   );
 
   // Guardrail: the legacy review.comments.* ids should not be handled in main.ts anymore.

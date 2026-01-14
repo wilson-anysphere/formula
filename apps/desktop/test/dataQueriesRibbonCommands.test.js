@@ -92,6 +92,11 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
       `Expected ribbonCommandRouter.ts to not handle ${id} via switch case (should dispatch via CommandRegistry)`,
     );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(id)}["']`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandId === checks (should dispatch via CommandRegistry)`,
+    );
   }
   assert.doesNotMatch(
     router,

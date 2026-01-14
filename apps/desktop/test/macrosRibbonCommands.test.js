@@ -96,6 +96,37 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
     );
   }
 
+  // Guardrail: avoid reintroducing bespoke routing paths in the ribbon command router.
+  // These ids are registered via CommandRegistry and should dispatch through it.
+  const prefixes = ["view.macros.", "developer.code."];
+  for (const prefix of prefixes) {
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(prefix)}`),
+      `Expected ribbonCommandRouter.ts to not handle ${prefix}* ids via switch case (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(prefix)}`),
+      `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via commandId === checks (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandId\\.startsWith\\(\\s*["']${escapeRegExp(prefix)}`),
+      `Did not expect ribbonCommandRouter.ts to add bespoke ${prefix}* prefix routing (dispatch should go through CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
+      `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via toggleOverrides (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(prefix)}`, "m"),
+      `Expected ribbonCommandRouter.ts to not special-case ${prefix}* ids via commandOverrides (should dispatch via CommandRegistry)`,
+    );
+  }
+
   // Command registration should include these ids and wire them to panels/recorder behavior.
   const desktopRegistrationPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
   const desktopRegistration = stripComments(fs.readFileSync(desktopRegistrationPath, "utf8"));

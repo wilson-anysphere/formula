@@ -67,6 +67,11 @@ test("View toggle ribbon commands are registered in CommandRegistry (no exemptio
     );
     assert.doesNotMatch(
       router,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(id)}["']`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandId === checks (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
       new RegExp(`\\btoggleOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
       `Expected ribbonCommandRouter.ts to not special-case ${id} via toggleOverrides (should dispatch via CommandRegistry)`,
     );
