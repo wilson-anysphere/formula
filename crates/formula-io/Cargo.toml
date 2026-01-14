@@ -48,3 +48,6 @@ xlsx-diff = { path = "../xlsx-diff" }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 ms-offcrypto-writer = "1.0.7"
 rand = "0.9"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
