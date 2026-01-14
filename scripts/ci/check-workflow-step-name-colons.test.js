@@ -86,3 +86,20 @@ jobs:
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
+
+test("ignores name: strings inside YAML block scalars", { skip: !canRun }, () => {
+  const proc = run(`
+name: "OK"
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: "Step"
+        run: |
+          # These lines are inside a YAML block scalar and should NOT be interpreted as workflow keys.
+          name: Guard: Bad
+          echo ok
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /OK/i);
+});

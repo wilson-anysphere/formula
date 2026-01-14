@@ -22,6 +22,8 @@ cd "$repo_root"
 fail=0
 
 # Find workflow `name:` fields (workflow name, job name, step name) that contain an unquoted colon.
+# Also ignore occurrences inside YAML block scalars (e.g. within a `run: |` script body), since those
+# are non-semantic text and can contain arbitrary strings that look like YAML keys.
 #
 # Matches (BAD):
 #   name: Guard: Foo
@@ -40,20 +42,71 @@ fail=0
 # Colons that are part of a token (e.g. `node:test`) are valid YAML and should not be flagged.
 pattern='^[[:space:]]*(-[[:space:]]+)?name:[[:space:]]+[^"'"'"'].*:([[:space:]]|$)'
 
-# Use `git grep` so we don't depend on ripgrep being installed in CI images.
-# `git grep` exits:
-#   0 = matches found
-#   1 = no matches
-#   2 = error
-set +e
-matches="$(git grep -nE "$pattern" -- .github/workflows 2>/dev/null)"
-status=$?
-set -e
+workflows=()
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  case "$file" in
+    *.yml|*.yaml) workflows+=("$file") ;;
+  esac
+done < <(git ls-files -- .github/workflows 2>/dev/null || true)
 
-if [ "$status" -eq 2 ]; then
-  echo "git grep failed while scanning workflow YAML" >&2
-  exit 2
-fi
+matches=""
+for workflow in "${workflows[@]}"; do
+  out="$(
+    awk -v re="$pattern" '
+      function indent(s) {
+        match(s, /^[ ]*/);
+        return RLENGTH;
+      }
+
+      BEGIN {
+        in_block = 0;
+        block_indent = 0;
+        # Detect YAML block scalar headers (e.g. `run: |`, `restore-keys: >-`).
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      }
+
+      {
+        raw = $0;
+        sub(/\r$/, "", raw);
+        ind = indent(raw);
+
+        if (in_block) {
+          # Blank/whitespace-only lines can appear inside block scalars with any indentation.
+          # Treat them as part of the scalar so we do not accidentally stop skipping early.
+          if (raw ~ /^[[:space:]]*$/) {
+            next;
+          }
+          if (ind > block_indent) {
+            next;
+          }
+          in_block = 0;
+        }
+
+        # Strip YAML comments (best-effort; avoids tripping on documentation).
+        line = raw;
+        sub(/#.*/, "", line);
+
+        is_block = (line ~ block_re);
+
+        if (line ~ re) {
+          printf "%s:%d:%s\n", FILENAME, NR, raw;
+        }
+
+        if (is_block) {
+          in_block = 1;
+          block_indent = ind;
+        }
+      }
+    ' "$workflow"
+  )"
+  if [ -n "$out" ]; then
+    if [ -n "$matches" ]; then
+      matches+=$'\n'
+    fi
+    matches+="$out"
+  fi
+done
 
 if [ -n "$matches" ]; then
   echo "Found workflow `name:` fields containing an unquoted ':' (invalid YAML):" >&2
