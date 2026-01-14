@@ -28,6 +28,8 @@ pub const MAX_IPC_URL_BYTES: usize = 8_192; // 8 KiB
 /// This is kept separate from `MAX_IPC_URL_BYTES` so the limit can be tightened independently if
 /// needed in the future.
 pub const MAX_OAUTH_REDIRECT_URI_BYTES: usize = MAX_IPC_URL_BYTES;
+// Guardrail: the OAuth redirect URI limit must never exceed the global IPC URL limit.
+const _: () = assert!(MAX_OAUTH_REDIRECT_URI_BYTES <= MAX_IPC_URL_BYTES);
 
 /// Maximum size (in bytes) of a system notification title accepted over IPC.
 ///
