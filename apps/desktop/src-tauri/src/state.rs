@@ -5730,7 +5730,7 @@ mod tests {
                 2,
                 None,
                 Some("=CELL(\"width\",A1)".to_string()),
-            )
+        )
             .expect("set width formula");
         let c1 = state.get_cell(&app_sheet_id, 0, 2).expect("read C1");
         match c1.value {

@@ -225,13 +225,12 @@ fn decrypt_agile_package_key_from_password(
             key_encrypt_key_len,
             password_key.hash_algorithm,
         )?;
-        let decrypted =
-            decrypt_aes_cbc_no_padding(&k, key_value_iv, &password_key.encrypted_key_value)
-                .map_err(|e| OffCryptoError::InvalidAttribute {
-                    element: "p:encryptedKey".to_string(),
-                    attr: "encryptedKeyValue".to_string(),
-                    reason: e.to_string(),
-                })?;
+        let decrypted = decrypt_aes_cbc_no_padding(&k, key_value_iv, &password_key.encrypted_key_value)
+            .map_err(|e| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedKeyValue".to_string(),
+                reason: e.to_string(),
+            })?;
         decrypted
             .get(..package_key_len)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {

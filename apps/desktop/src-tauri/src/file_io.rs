@@ -3248,13 +3248,13 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
                             )
                             .map_err(|biff_err| {
                                 anyhow::anyhow!(
-                                     "cannot save .xlsb: unsupported formula edit at {}!({}, {}): {ctx_err}; fallback encoder also failed ({biff_err}). Save As .xlsx instead",
-                                     sheet.name,
-                                     *row + 1,
-                                     *col + 1
-                                 )
-                             }),
-                         };
+                                    "cannot save .xlsb: unsupported formula edit at {}!({}, {}): {ctx_err}; fallback encoder also failed ({biff_err}). Save As .xlsx instead",
+                                    sheet.name,
+                                    *row + 1,
+                                    *col + 1
+                                )
+                            }),
+                        };
                         edit.with_context(|| {
                             format!("encode RGCE for formula cell at ({row}, {col})")
                         })?
@@ -3936,7 +3936,7 @@ mod tests {
                 2,
                 None,
                 Some("=CELL(\"width\",A1)".to_string()),
-            )
+        )
             .expect("set CELL(width) formula for A1");
         let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
         match c1.value {
