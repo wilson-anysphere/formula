@@ -4120,11 +4120,15 @@ fn import_biff8_shared_formulas(
             let cell_ref = CellRef::new(row as u32, col as u32);
             let anchor_cell = sheet.merged_regions.resolve_cell(cell_ref);
 
-            // Best-effort: allow overriding an existing `#UNKNOWN!` formula (usually the result of
-            // decoding a PtgExp token stream without resolving its backing SHRFMLA definition).
-            if sheet
-                .formula(anchor_cell)
-                .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+            // Best-effort: allow overriding formulas for PtgExp-backed cells when we can resolve the
+            // backing SHRFMLA token stream.
+            //
+            // For merged regions, only overwrite the anchor when it is currently unset or just a
+            // placeholder (`#UNKNOWN!`); otherwise preserve the existing anchor formula.
+            if anchor_cell != cell_ref
+                && sheet
+                    .formula(anchor_cell)
+                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
             {
                 continue;
             }

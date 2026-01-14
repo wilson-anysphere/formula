@@ -339,6 +339,31 @@ pub fn build_calamine_formula_error_biff_fallback_fixture_xls() -> Vec<u8> {
 /// (variable-arity function) to exercise decoding of its payload (argc + function id).
 pub fn build_shared_formula_ptgfuncvar_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgfuncvar_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with a shared formula whose shared `SHRFMLA.rgce` includes a
+/// `PtgMemAreaN` token.
+///
+/// Shared formula range: `B1:B2`
+/// - `B1`: `A1+1`
+/// - `B2`: `A2+1` (via `PtgExp`)
+///
+/// The shared formula `rgce` intentionally includes:
+/// `PtgRefN` + `PtgMemAreaN(cce=0)` + `PtgInt(1)` + `PtgAdd`
+///
+/// `PtgMem*` tokens are no-ops for printing but carry a variable-length payload; if the shared
+/// formula decoder mishandles them, subsequent tokens will be mis-parsed.
+pub fn build_shared_formula_ptgmemarean_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgmemarean_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -5677,6 +5702,14 @@ fn build_array_formula_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Array", &sheet_stream, 1252)
 }
 
+fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
+    // Minimal single-sheet workbook containing a shared formula where the shared SHRFMLA.rgce
+    // includes a PtgMemAreaN token (with cce=0).
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgmemarean_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("Shared", &sheet, 1252)
+}
+
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -8283,6 +8316,76 @@ fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
         RECORD_FORMULA,
         &formula_cell_with_grbit(1, 0, xf_cell, 0.0, grbit_shared, &ptgexp),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgmemarean_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide inputs in A1/A2 (not strictly required for formula decoding).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Shared formula over B1:B2:
+    //   B1: A1+1
+    //   B2: A2+1 (via PtgExp)
+    //
+    // Base (full) formula for B1: PtgRef(A1, relative) + PtgInt(1) + PtgAdd
+    let full_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // row = 0 (A1)
+        0x00, 0xC0, // col = 0 (A), row+col relative
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+
+    // Mark the base cell as a shared-formula anchor via FORMULA.grbit.fShrFmla (0x0008).
+    let mut b1 = formula_cell(0, 1, xf_cell, 0.0, &full_rgce);
+    b1[14..16].copy_from_slice(&0x0008u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_FORMULA, &b1);
+
+    // Shared SHRFMLA record containing the base rgce in relative form:
+    //   PtgRefN(row_off=0,col_off=-1) + PtgMemAreaN(cce=0) + PtgInt(1) + PtgAdd
+    //
+    // Note: PtgMemAreaN is a no-op for printing but carries a payload; decoders must still skip the
+    // `cce` field to keep the token stream aligned.
+    let shared_rgce: Vec<u8> = vec![
+        0x2C, // PtgRefN
+        0x00, 0x00, // row_off = 0
+        0xFF, 0xFF, // col_off = -1 (14-bit two's complement) + row/col relative flags
+        0x2E, // PtgMemAreaN
+        0x00, 0x00, // cce = 0
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &shared_rgce),
+    );
+
+    // B2 uses PtgExp to reference base cell B1 (row=0,col=1).
+    let exp_rgce: Vec<u8> = vec![0x01, 0x00, 0x00, 0x01, 0x00];
+    let mut b2 = formula_cell(1, 1, xf_cell, 0.0, &exp_rgce);
+    b2[14..16].copy_from_slice(&0x0008u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_FORMULA, &b2);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
