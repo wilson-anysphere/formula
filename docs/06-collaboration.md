@@ -1221,6 +1221,8 @@ Notes:
 - `cellConflicts` writes causal metadata into a shared `cellStructuralOps` log. Per-user history is bounded via
   `maxOpRecordsPerUser`, and you can additionally enable age-based pruning (`maxOpRecordAgeMs`) to avoid
   unbounded growth in docs with many distinct user ids over time (best-effort).
+  - Age pruning is conservative: newly-arriving records are not deleted in the same op-log transaction they are added,
+    so late-arriving/offline records can still be ingested and compared before cleanup.
 - Implementation: [`packages/collab/conflicts/src/formula-conflict-monitor.js`](../packages/collab/conflicts/src/formula-conflict-monitor.js)
 - Conflict monitors support an `ignoredOrigins` option to ignore bulk “time travel” transactions such as version restores
   (`"versioning-restore"`) and branch apply operations (`"branching-apply"`). `createCollabSession` wires this by default.
