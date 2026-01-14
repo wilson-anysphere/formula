@@ -19,8 +19,8 @@ use crate::locale::{
     canonicalize_formula, canonicalize_formula_with_style, localize_formula,
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
-pub use crate::metadata::FormatRun;
 use crate::metadata::style_id_for_row_in_runs;
+pub use crate::metadata::FormatRun;
 use crate::pivot::{
     refresh_pivot, PivotRefreshContext, PivotRefreshError, PivotRefreshOutput, PivotSource,
     PivotTableDefinition, PivotTableId,

@@ -616,10 +616,14 @@ impl CreatePivotTableRequest {
                     let name = vf
                         .name
                         .unwrap_or_else(|| {
+                            // For Data Model measures, prefer a human-friendly name without the
+                            // DAX bracket syntax (Excel displays the measure as `Total Sales`, not
+                            // `[Total Sales]`, in the default "Sum of ..." label).
+                            let label = pivot_field_ref_caption(&source_field);
                             format!(
                                 "{:?} of {}",
                                 aggregation,
-                                pivot_field_ref_caption(&source_field)
+                                label
                             )
                         });
                     ValueField {
