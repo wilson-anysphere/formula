@@ -242,15 +242,32 @@ async function main() {
 
   const frontendDistDir = path.join(desktopDir, "dist");
   const frontendDistIndex = path.join(frontendDistDir, "index.html");
+  const frontendDistWorker = path.join(frontendDistDir, "coi-check-worker.js");
 
   if (!noBuild) {
     console.log("[coi-check] Building desktop frontend (Vite)...");
     const buildFrontendCode = await run("pnpm", ["build"], { cwd: desktopDir });
     if (buildFrontendCode !== 0) process.exit(buildFrontendCode);
+
+    if (!fs.existsSync(frontendDistIndex) || !fs.existsSync(frontendDistWorker)) {
+      console.error("[coi-check] ERROR: desktop frontend build completed but required dist files are missing.");
+      if (!fs.existsSync(frontendDistIndex)) {
+        console.error(`[coi-check] Missing: ${frontendDistIndex}`);
+      }
+      if (!fs.existsSync(frontendDistWorker)) {
+        console.error(`[coi-check] Missing: ${frontendDistWorker}`);
+      }
+      console.error("[coi-check] Hint: ensure Vite outputs to apps/desktop/dist and includes public/coi-check-worker.js.");
+      process.exit(1);
+    }
   } else {
     console.log("[coi-check] --no-build enabled; skipping frontend + Rust builds.");
-    if (!fs.existsSync(frontendDistIndex)) {
-      console.error(`[coi-check] ERROR: expected frontend dist is missing: ${frontendDistIndex}`);
+    const missingDist = [];
+    if (!fs.existsSync(frontendDistIndex)) missingDist.push(frontendDistIndex);
+    if (!fs.existsSync(frontendDistWorker)) missingDist.push(frontendDistWorker);
+    if (missingDist.length > 0) {
+      console.error("[coi-check] ERROR: expected built frontend dist is missing required files:");
+      for (const p of missingDist) console.error(`  - ${p}`);
       console.error("[coi-check] Hint: build the desktop frontend with:");
       console.error("  pnpm -C apps/desktop build");
       console.error("[coi-check] Or run the COI check without --no-build to build automatically:");
