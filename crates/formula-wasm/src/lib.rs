@@ -116,7 +116,8 @@ fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
     // programmatically (password required vs invalid password vs unsupported encryption).
     let kind = match &err {
         formula_office_crypto::OfficeCryptoError::PasswordRequired => "PasswordRequired",
-        formula_office_crypto::OfficeCryptoError::InvalidPassword => "InvalidPassword",
+        formula_office_crypto::OfficeCryptoError::InvalidPassword
+        | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => "InvalidPassword",
         formula_office_crypto::OfficeCryptoError::SpinCountTooLarge { .. } => "SpinCountTooLarge",
         formula_office_crypto::OfficeCryptoError::UnsupportedEncryption(_) => "UnsupportedEncryption",
         formula_office_crypto::OfficeCryptoError::InvalidOptions(_) => "InvalidOptions",
@@ -129,12 +130,19 @@ fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
         formula_office_crypto::OfficeCryptoError::EncryptedPackageAllocationFailed { .. } => {
             "EncryptedPackageAllocationFailed"
         }
-        formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => "IntegrityCheckFailed",
         formula_office_crypto::OfficeCryptoError::Io(_) => "Io",
+    };
+    let message = match &err {
+        // Treat integrity mismatches as invalid passwords so callers can re-prompt. This matches the
+        // `formula-io` and desktop semantics (integrity mismatch = retryable invalid password).
+        formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
+            formula_office_crypto::OfficeCryptoError::InvalidPassword.to_string()
+        }
+        _ => err.to_string(),
     };
     let payload = serde_json::json!({
         "kind": kind,
-        "message": err.to_string(),
+        "message": message,
     });
     JsValue::from_str(&format!("{OFFICE_CRYPTO_ERROR_PREFIX}{payload}"))
 }
