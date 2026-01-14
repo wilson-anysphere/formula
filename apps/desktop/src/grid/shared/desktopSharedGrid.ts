@@ -3,6 +3,7 @@ import type {
   CellProviderUpdate,
   CellRange,
   FillCommitEvent,
+  FillDragPreview,
   FillMode,
   GridAxisSizeChange,
   CanvasGridImageResolver,
@@ -127,6 +128,11 @@ export class DesktopSharedGrid {
   private readonly pickCellScratch = { row: 0, col: 0 };
   private readonly fillHandlePointerCellScratch = { row: 0, col: 0 };
   private readonly selectionDragRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
+  private readonly fillDragPreviewScratch: FillDragPreview = {
+    axis: "vertical",
+    unionRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+    targetRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 }
+  };
   private lastDragPickedRow: number | null = null;
   private lastDragPickedCol: number | null = null;
   private lastFillHandlePointerRow: number | null = null;
@@ -138,7 +144,7 @@ export class DesktopSharedGrid {
     source: CellRange;
     target: CellRange;
     mode: FillMode;
-    previewTarget: CellRange | null;
+    previewTarget: CellRange;
     endCell: { row: number; col: number };
   } | null = null;
 
@@ -1316,22 +1322,42 @@ export class DesktopSharedGrid {
     const pointerCell = this.fillHandlePointerCellScratch;
     pointerCell.row = pointerRow;
     pointerCell.col = pointerCol;
-    const preview = computeFillPreview(state.source, pointerCell);
-    const unionRange = preview?.unionRange ?? state.source;
-    const previewTarget = preview?.targetRange ?? null;
+    const preview = computeFillPreview(state.source, pointerCell, this.fillDragPreviewScratch);
+    const union = preview ? this.fillDragPreviewScratch.unionRange : state.source;
+    const targetRange = preview ? this.fillDragPreviewScratch.targetRange : null;
 
-    const endRow = clamp(picked.row, unionRange.startRow, unionRange.endRow - 1);
-    const endCol = clamp(picked.col, unionRange.startCol, unionRange.endCol - 1);
+    const unionStartRow = union.startRow;
+    const unionEndRow = union.endRow;
+    const unionStartCol = union.startCol;
+    const unionEndCol = union.endCol;
 
-    if (rangesEqual(unionRange, state.target) && endRow === state.endCell.row && endCol === state.endCell.col) {
+    const endRow = clamp(picked.row, unionStartRow, unionEndRow - 1);
+    const endCol = clamp(picked.col, unionStartCol, unionEndCol - 1);
+
+    if (
+      state.target.startRow === unionStartRow &&
+      state.target.endRow === unionEndRow &&
+      state.target.startCol === unionStartCol &&
+      state.target.endCol === unionEndCol &&
+      endRow === state.endCell.row &&
+      endCol === state.endCell.col
+    ) {
       return;
     }
 
-    state.target = unionRange;
-    state.previewTarget = previewTarget;
+    state.target.startRow = unionStartRow;
+    state.target.endRow = unionEndRow;
+    state.target.startCol = unionStartCol;
+    state.target.endCol = unionEndCol;
+    if (targetRange) {
+      state.previewTarget.startRow = targetRange.startRow;
+      state.previewTarget.endRow = targetRange.endRow;
+      state.previewTarget.startCol = targetRange.startCol;
+      state.previewTarget.endCol = targetRange.endCol;
+    }
     state.endCell.row = endRow;
     state.endCell.col = endCol;
-    this.renderer.setFillPreviewRange(unionRange);
+    this.renderer.setFillPreviewRange(state.target);
   }
 
   private cacheViewportOrigin(): { left: number; top: number } {
@@ -1556,11 +1582,13 @@ export class DesktopSharedGrid {
             this.dragMode = "fillHandle";
             this.selectionAnchor = null;
             const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
+            const target: CellRange = { ...source };
+            const previewTarget: CellRange = { ...source };
             this.fillHandleState = {
               source,
-              target: source,
+              target,
               mode,
-              previewTarget: null,
+              previewTarget,
               endCell: { row: source.endRow - 1, col: source.endCol - 1 }
             };
             // Seed the fill-handle pointer-cell cache with the selection corner so high-frequency
@@ -1867,23 +1895,20 @@ export class DesktopSharedGrid {
 
         const shouldCommit = event.type === "pointerup";
         if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
-          const targetRange = state.previewTarget;
-          if (targetRange) {
-            const commitResult = this.callbacks.onFillCommit?.({
-              sourceRange: state.source,
-              targetRange,
-              mode: state.mode
-            });
-            void Promise.resolve(commitResult).catch(() => {
-              // Consumers own commit error handling; swallow to avoid unhandled rejections.
-            });
+          const commitResult = this.callbacks.onFillCommit?.({
+            sourceRange: state.source,
+            targetRange: state.previewTarget,
+            mode: state.mode
+          });
+          void Promise.resolve(commitResult).catch(() => {
+            // Consumers own commit error handling; swallow to avoid unhandled rejections.
+          });
 
-            const ranges = renderer.getSelectionRanges();
-            const activeIndex = renderer.getActiveSelectionIndex();
-            const updatedRanges = ranges.length === 0 ? [state.target] : [...ranges];
-            updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = state.target;
-            renderer.setSelectionRanges(updatedRanges, { activeIndex, activeCell: state.endCell });
-          }
+          const ranges = renderer.getSelectionRanges();
+          const activeIndex = renderer.getActiveSelectionIndex();
+          const updatedRanges = ranges.length === 0 ? [state.target] : [...ranges];
+          updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = state.target;
+          renderer.setSelectionRanges(updatedRanges, { activeIndex, activeCell: state.endCell });
         }
 
         const nextSelection = renderer.getSelection();

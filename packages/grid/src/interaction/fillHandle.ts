@@ -31,7 +31,11 @@ export function pointInRect(x: number, y: number, rect: RectLike): boolean {
   return x >= rect.x && y >= rect.y && x <= rect.x + rect.width && y <= rect.y + rect.height;
 }
 
-export function computeFillPreview(sourceRange: CellRange, pointerCell: { row: number; col: number }): FillDragPreview | null {
+export function computeFillPreview(
+  sourceRange: CellRange,
+  pointerCell: { row: number; col: number },
+  out?: FillDragPreview
+): FillDragPreview | null {
   const srcTop = sourceRange.startRow;
   const srcBottomExclusive = sourceRange.endRow;
   const srcBottom = srcBottomExclusive - 1;
@@ -51,58 +55,65 @@ export function computeFillPreview(sourceRange: CellRange, pointerCell: { row: n
     rowExtension !== 0 && colExtension !== 0 ? (Math.abs(rowExtension) >= Math.abs(colExtension) ? "vertical" : "horizontal") : rowExtension !== 0 ? "vertical" : "horizontal";
 
   if (axis === "vertical") {
-    const unionRange: CellRange = {
-      startRow: Math.min(srcTop, row),
-      endRow: Math.max(srcBottomExclusive, row + 1),
-      startCol: sourceRange.startCol,
-      endCol: sourceRange.endCol
+    const unionStartRow = Math.min(srcTop, row);
+    const unionEndRow = Math.max(srcBottomExclusive, row + 1);
+    const unionStartCol = sourceRange.startCol;
+    const unionEndCol = sourceRange.endCol;
+
+    const targetStartRow = row >= srcBottomExclusive ? srcBottomExclusive : row < srcTop ? row : null;
+    const targetEndRow = row >= srcBottomExclusive ? row + 1 : row < srcTop ? srcTop : null;
+
+    if (targetStartRow == null || targetEndRow == null) return null;
+
+    if (out) {
+      out.axis = axis;
+      out.unionRange.startRow = unionStartRow;
+      out.unionRange.endRow = unionEndRow;
+      out.unionRange.startCol = unionStartCol;
+      out.unionRange.endCol = unionEndCol;
+      out.targetRange.startRow = targetStartRow;
+      out.targetRange.endRow = targetEndRow;
+      out.targetRange.startCol = unionStartCol;
+      out.targetRange.endCol = unionEndCol;
+      return out;
+    }
+
+    const unionRange: CellRange = { startRow: unionStartRow, endRow: unionEndRow, startCol: unionStartCol, endCol: unionEndCol };
+    const targetRange: CellRange = {
+      startRow: targetStartRow,
+      endRow: targetEndRow,
+      startCol: unionStartCol,
+      endCol: unionEndCol
     };
-
-    const targetRange: CellRange | null =
-      row >= srcBottomExclusive
-        ? {
-            startRow: srcBottomExclusive,
-            endRow: row + 1,
-            startCol: sourceRange.startCol,
-            endCol: sourceRange.endCol
-          }
-        : row < srcTop
-          ? {
-              startRow: row,
-              endRow: srcTop,
-              startCol: sourceRange.startCol,
-              endCol: sourceRange.endCol
-            }
-          : null;
-
-    return targetRange ? { axis, targetRange, unionRange } : null;
+    return { axis, targetRange, unionRange };
   }
 
-  const unionRange: CellRange = {
-    startRow: sourceRange.startRow,
-    endRow: sourceRange.endRow,
-    startCol: Math.min(srcLeft, col),
-    endCol: Math.max(srcRightExclusive, col + 1)
-  };
+  const unionStartRow = sourceRange.startRow;
+  const unionEndRow = sourceRange.endRow;
+  const unionStartCol = Math.min(srcLeft, col);
+  const unionEndCol = Math.max(srcRightExclusive, col + 1);
 
-  const targetRange: CellRange | null =
-    col >= srcRightExclusive
-      ? {
-          startRow: sourceRange.startRow,
-          endRow: sourceRange.endRow,
-          startCol: srcRightExclusive,
-          endCol: col + 1
-        }
-      : col < srcLeft
-        ? {
-            startRow: sourceRange.startRow,
-            endRow: sourceRange.endRow,
-            startCol: col,
-            endCol: srcLeft
-          }
-        : null;
+  const targetStartCol = col >= srcRightExclusive ? srcRightExclusive : col < srcLeft ? col : null;
+  const targetEndCol = col >= srcRightExclusive ? col + 1 : col < srcLeft ? srcLeft : null;
 
-  return targetRange ? { axis, targetRange, unionRange } : null;
+  if (targetStartCol == null || targetEndCol == null) return null;
+
+  if (out) {
+    out.axis = axis;
+    out.unionRange.startRow = unionStartRow;
+    out.unionRange.endRow = unionEndRow;
+    out.unionRange.startCol = unionStartCol;
+    out.unionRange.endCol = unionEndCol;
+    out.targetRange.startRow = unionStartRow;
+    out.targetRange.endRow = unionEndRow;
+    out.targetRange.startCol = targetStartCol;
+    out.targetRange.endCol = targetEndCol;
+    return out;
+  }
+
+  const unionRange: CellRange = { startRow: unionStartRow, endRow: unionEndRow, startCol: unionStartCol, endCol: unionEndCol };
+  const targetRange: CellRange = { startRow: unionStartRow, endRow: unionEndRow, startCol: targetStartCol, endCol: targetEndCol };
+  return { axis, targetRange, unionRange };
 }
 
 export function getSelectionHandleRect(renderer: CanvasGridRenderer, options?: { size?: number }): RectLike | null {

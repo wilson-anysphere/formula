@@ -9,7 +9,7 @@ import {
 import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
-import { computeFillPreview, hitTestSelectionHandle, type FillMode } from "../interaction/fillHandle";
+import { computeFillPreview, hitTestSelectionHandle, type FillDragPreview, type FillMode } from "../interaction/fillHandle";
 import { clampZoom } from "../utils/zoomMath";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
@@ -341,7 +341,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     source: CellRange;
     target: CellRange;
     mode: FillMode;
-    previewTarget: CellRange | null;
+    previewTarget: CellRange;
   } | null>(null);
   const lastEmittedScrollRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -1046,6 +1046,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const pickCellScratch = { row: 0, col: 0 };
     const fillHandlePointerCellScratch = { row: 0, col: 0 };
     const selectionDragRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
+    const fillDragPreviewScratch: FillDragPreview = {
+      axis: "vertical",
+      unionRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      targetRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 }
+    };
 
     // Cache the last picked cell during pointer-driven selection / fill-handle drags so we can
     // skip redundant work (and allocations) when high-frequency pointermove events stay within
@@ -1164,12 +1169,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const rangesEqual = (a: CellRange, b: CellRange) =>
       a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
 
-    const rangesEqualNullable = (a: CellRange | null, b: CellRange | null) => {
-      if (a === b) return true;
-      if (!a || !b) return false;
-      return rangesEqual(a, b);
-    };
-
     const applyFillHandleDrag = (picked: { row: number; col: number }) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
@@ -1192,18 +1191,67 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       fillHandlePointerCellScratch.row = pointerRow;
       fillHandlePointerCellScratch.col = pointerCol;
-      const preview = computeFillPreview(state.source, fillHandlePointerCellScratch);
-      const target = preview?.unionRange ?? state.source;
-      const previewTarget = preview?.targetRange ?? null;
-      if (rangesEqual(target, state.target)) return;
+      const preview = computeFillPreview(state.source, fillHandlePointerCellScratch, fillDragPreviewScratch);
+      const union = preview ? fillDragPreviewScratch.unionRange : state.source;
+      const targetRange = preview ? fillDragPreviewScratch.targetRange : null;
 
-      const prevPreviewTarget = state.previewTarget;
-      state.target = target;
-      state.previewTarget = previewTarget;
-      renderer.setFillPreviewRange(target);
-      onFillHandleChangeRef.current?.({ source: state.source, target });
-      if (!rangesEqualNullable(previewTarget, prevPreviewTarget)) {
-        onFillPreviewChangeRef.current?.(previewTarget);
+      const unionStartRow = union.startRow;
+      const unionEndRow = union.endRow;
+      const unionStartCol = union.startCol;
+      const unionEndCol = union.endCol;
+
+      if (
+        state.target.startRow === unionStartRow &&
+        state.target.endRow === unionEndRow &&
+        state.target.startCol === unionStartCol &&
+        state.target.endCol === unionEndCol
+      ) {
+        return;
+      }
+
+      const prevHadPreview =
+        state.target.startRow !== state.source.startRow ||
+        state.target.endRow !== state.source.endRow ||
+        state.target.startCol !== state.source.startCol ||
+        state.target.endCol !== state.source.endCol;
+      const prevPreviewStartRow = state.previewTarget.startRow;
+      const prevPreviewEndRow = state.previewTarget.endRow;
+      const prevPreviewStartCol = state.previewTarget.startCol;
+      const prevPreviewEndCol = state.previewTarget.endCol;
+
+      state.target.startRow = unionStartRow;
+      state.target.endRow = unionEndRow;
+      state.target.startCol = unionStartCol;
+      state.target.endCol = unionEndCol;
+
+      const nextHadPreview = targetRange != null;
+      if (targetRange) {
+        state.previewTarget.startRow = targetRange.startRow;
+        state.previewTarget.endRow = targetRange.endRow;
+        state.previewTarget.startCol = targetRange.startCol;
+        state.previewTarget.endCol = targetRange.endCol;
+      }
+
+      renderer.setFillPreviewRange(state.target);
+
+      const onFillHandleChange = onFillHandleChangeRef.current;
+      if (onFillHandleChange) {
+        onFillHandleChange({ source: state.source, target: nextHadPreview ? { ...state.target } : state.source });
+      }
+
+      const onFillPreviewChange = onFillPreviewChangeRef.current;
+      if (onFillPreviewChange) {
+        if (!nextHadPreview) {
+          if (prevHadPreview) onFillPreviewChange(null);
+        } else if (
+          !prevHadPreview ||
+          state.previewTarget.startRow !== prevPreviewStartRow ||
+          state.previewTarget.endRow !== prevPreviewEndRow ||
+          state.previewTarget.startCol !== prevPreviewStartCol ||
+          state.previewTarget.endCol !== prevPreviewEndCol
+        ) {
+          onFillPreviewChange({ ...state.previewTarget });
+        }
       }
     };
 
@@ -1522,7 +1570,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           selectionPointerIdRef.current = event.pointerId;
           dragModeRef.current = "fillHandle";
           const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
-          fillHandleStateRef.current = { source, target: source, mode, previewTarget: null };
+          const target: CellRange = { ...source };
+          const previewTarget: CellRange = { ...source };
+          fillHandleStateRef.current = { source, target, mode, previewTarget };
 
           // Seed the fill-handle pointer-cell cache with the selection corner so a "still" drag
           // (high-frequency pointermoves within the same cell) doesn't recompute previews.
@@ -2128,44 +2178,40 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
           const { source, target } = state;
-          const targetRange = state.previewTarget;
+          const commitResult = onFillCommitRef.current
+            ? onFillCommitRef.current({ sourceRange: source, targetRange: state.previewTarget, mode: state.mode })
+            : onFillHandleCommitRef.current?.({ source, target });
+          void Promise.resolve(commitResult).catch(() => {
+            // Consumers own commit error handling; swallow to avoid unhandled rejections.
+          });
 
-          if (targetRange) {
-            const commitResult = onFillCommitRef.current
-              ? onFillCommitRef.current({ sourceRange: source, targetRange, mode: state.mode })
-              : onFillHandleCommitRef.current?.({ source, target });
-            void Promise.resolve(commitResult).catch(() => {
-              // Consumers own commit error handling; swallow to avoid unhandled rejections.
-            });
+          const prevSelection = renderer.getSelection();
+          const prevRange = renderer.getSelectionRange();
 
-            const prevSelection = renderer.getSelection();
-            const prevRange = renderer.getSelectionRange();
+          const ranges = renderer.getSelectionRanges();
+          const activeIndex = renderer.getActiveSelectionIndex();
+          const updatedRanges = ranges.length === 0 ? [target] : [...ranges];
+          updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = target;
+          renderer.setSelectionRanges(updatedRanges, { activeIndex });
 
-            const ranges = renderer.getSelectionRanges();
-            const activeIndex = renderer.getActiveSelectionIndex();
-            const updatedRanges = ranges.length === 0 ? [target] : [...ranges];
-            updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = target;
-            renderer.setSelectionRanges(updatedRanges, { activeIndex });
+          const nextSelection = renderer.getSelection();
+          const nextRange = renderer.getSelectionRange();
+          announceSelection(nextSelection, nextRange);
 
-            const nextSelection = renderer.getSelection();
-            const nextRange = renderer.getSelectionRange();
-            announceSelection(nextSelection, nextRange);
+          if (
+            (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+            (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+          ) {
+            onSelectionChangeRef.current?.(nextSelection);
+          }
 
-            if (
-              (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
-              (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
-            ) {
-              onSelectionChangeRef.current?.(nextSelection);
-            }
-
-            if (
-              (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
-              (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
-              (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
-              (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
-            ) {
-              onSelectionRangeChangeRef.current?.(nextRange);
-            }
+          if (
+            (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+            (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+            (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+            (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+          ) {
+            onSelectionRangeChangeRef.current?.(nextRange);
           }
         }
       } else {
