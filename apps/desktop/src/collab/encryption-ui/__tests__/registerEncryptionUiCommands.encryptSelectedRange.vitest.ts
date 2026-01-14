@@ -220,6 +220,54 @@ describe("registerEncryptionUiCommands", () => {
     expect(manager.add).toHaveBeenCalledWith(expect.objectContaining({ keyId: "k1" }));
   });
 
+  it("encryptSelectedRange does not delete the key on add failure when it cannot verify whether the key id already existed", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const keyStore = {
+      getCachedKey: vi.fn(() => null),
+      get: vi.fn(async () => {
+        throw new Error("backend unavailable");
+      }),
+      set: vi.fn(async (_docId: string, keyId: string) => ({ keyId })),
+      delete: vi.fn(async () => {}),
+    };
+
+    const manager = {
+      add: vi.fn(() => {
+        throw new Error("boom");
+      }),
+      list: () => [],
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({
+        doc: { guid: "doc-1" },
+        getRole: () => "editor",
+        getPermissions: () => ({ userId: "u1" }),
+      }),
+      getEncryptedRangeManager: () => manager,
+      getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("k1");
+    vi.mocked(showQuickPick).mockResolvedValue("encrypt");
+
+    await commandRegistry.executeCommand("collab.encryptSelectedRange");
+
+    expect(keyStore.set).toHaveBeenCalledTimes(1);
+    expect(manager.add).toHaveBeenCalledTimes(1);
+    // Safety: if we couldn't verify whether the key id already existed, do not delete on failure.
+    expect(keyStore.delete).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Failed to encrypt range/i), "error");
+  });
+
   it("encryptSelectedRange refuses to generate new key bytes for a keyId already used in policy when key bytes are missing", async () => {
     const commandRegistry = new CommandRegistry();
 
