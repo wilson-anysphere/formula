@@ -1065,8 +1065,8 @@ export function registerDesktopCommands(params: {
         { category: commandCategoryFile, when: "false" },
       );
     };
-    registerPanelAlias("file.info.manageWorkbook.versions", "Version History", "view.togglePanel.versionHistory");
-    registerPanelAlias("file.info.manageWorkbook.branches", "Branches", "view.togglePanel.branchManager");
+    registerPanelAlias("file.info.manageWorkbook.versions", t("panels.versionHistory.title"), "view.togglePanel.versionHistory");
+    registerPanelAlias("file.info.manageWorkbook.branches", t("branchManager.title"), "view.togglePanel.branchManager");
   }
  
   if (formatPainter) {

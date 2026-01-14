@@ -2613,6 +2613,16 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       // The visible label is already "Theme: X"; use the same value so screen readers can
       // announce the current preference.
       "view.appearance.theme.ariaLabel": themeLabel,
+      // Panel toggles: localize schema-provided English labels/aria labels.
+      "view.togglePanel.versionHistory": t("panels.versionHistory.title"),
+      "view.togglePanel.versionHistory.ariaLabel": t("commandDescription.view.togglePanel.versionHistory"),
+      "view.togglePanel.branchManager": t("branchManager.title"),
+      "view.togglePanel.branchManager.ariaLabel": t("commandDescription.view.togglePanel.branchManager"),
+      // File → Info → Manage Workbook submenu.
+      "file.info.manageWorkbook.versions": t("panels.versionHistory.title"),
+      "file.info.manageWorkbook.versions.ariaLabel": t("panels.versionHistory.title"),
+      "file.info.manageWorkbook.branches": t("branchManager.title"),
+      "file.info.manageWorkbook.branches.ariaLabel": t("branchManager.title"),
       // Common formatting toggles: use localized command titles for icon-only button tooltips/aria labels.
       "format.toggleBold": t("command.format.toggleBold"),
       "format.toggleItalic": t("command.format.toggleItalic"),
