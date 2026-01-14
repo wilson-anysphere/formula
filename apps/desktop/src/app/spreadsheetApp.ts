@@ -202,6 +202,11 @@ const MAX_CHART_DATA_CELLS = 100_000;
 const MAX_FORMULA_RANGE_PREVIEW_CELLS = 100;
 const FORMULA_RANGE_PREVIEW_SAMPLE_ROWS = 3;
 const FORMULA_RANGE_PREVIEW_SAMPLE_COLS = 3;
+let formulaRangePreviewTooltipIdCounter = 0;
+function nextFormulaRangePreviewTooltipId(): string {
+  formulaRangePreviewTooltipIdCounter += 1;
+  return `formula-range-preview-tooltip-${formulaRangePreviewTooltipIdCounter}`;
+}
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
@@ -3653,6 +3658,7 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
+    this.syncFormulaRangePreviewTooltipDescribedBy(false);
     this.formulaRangePreviewTooltip?.remove();
     this.formulaRangePreviewTooltip = null;
     this.formulaRangePreviewTooltipVisible = false;
@@ -8969,6 +8975,7 @@ export class SpreadsheetApp {
     tooltip.hidden = true;
     tooltip.setAttribute("role", "tooltip");
     tooltip.setAttribute("aria-hidden", "true");
+    tooltip.id = nextFormulaRangePreviewTooltipId();
     return tooltip;
   }
 
@@ -9076,6 +9083,34 @@ export class SpreadsheetApp {
     tooltip.hidden = true;
     tooltip.setAttribute("aria-hidden", "true");
     tooltip.classList.remove("formula-range-preview-tooltip--visible");
+    this.syncFormulaRangePreviewTooltipDescribedBy(false);
+  }
+
+  private syncFormulaRangePreviewTooltipDescribedBy(visible: boolean): void {
+    const tooltip = this.formulaRangePreviewTooltip;
+    if (!tooltip?.id) return;
+    const textarea = this.formulaBar?.textarea;
+    if (!textarea) return;
+
+    const describedBy = textarea.getAttribute("aria-describedby") ?? "";
+    const tokens = describedBy
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const idx = tokens.indexOf(tooltip.id);
+    if (visible) {
+      if (idx >= 0) return;
+      tokens.push(tooltip.id);
+      textarea.setAttribute("aria-describedby", tokens.join(" "));
+      return;
+    }
+
+    if (idx < 0) return;
+    tokens.splice(idx, 1);
+    const next = tokens.join(" ");
+    if (next) textarea.setAttribute("aria-describedby", next);
+    else textarea.removeAttribute("aria-describedby");
   }
 
   private resolveFormulaRangePreviewTargetSheet(refText: string | null): { explicit: boolean; sheetId: string | null } {
@@ -9349,6 +9384,7 @@ export class SpreadsheetApp {
     tooltip.hidden = false;
     tooltip.setAttribute("aria-hidden", "false");
     tooltip.classList.add("formula-range-preview-tooltip--visible");
+    this.syncFormulaRangePreviewTooltipDescribedBy(true);
   }
 
   private clearSharedHoverCellCache(): void {
