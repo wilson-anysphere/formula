@@ -251,11 +251,7 @@ describe("DrawingOverlay images", () => {
     const overlay = new DrawingOverlay(canvas, images, geom);
 
     const getMock = vi.fn(() => {
-      const rejected = Promise.reject(new Error("boom"));
-      // Attach a handler immediately to avoid Node's unhandled rejection warnings;
-      // the overlay will still `await` the original rejection and render a placeholder.
-      rejected.catch(() => {});
-      return rejected;
+      return Promise.reject(new Error("boom"));
     });
     (overlay as any).bitmapCache = { get: getMock };
 
