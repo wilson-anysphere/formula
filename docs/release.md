@@ -1476,11 +1476,26 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
 
     ```bash
     # Option A: from the updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
-    # Avoid picking Linux `.AppImage.tar.gz` if you downloaded all assets into one folder.
-    app_tgz="$(
-      ls *.app.tar.gz *.app.tgz *.tar.gz *.tgz 2>/dev/null | grep -v -i -F '.appimage.' | head -n 1 || true
-    )"
-    test -n "$app_tgz" || { echo "No macOS updater tarball found (*.app.tar.gz/*.tar.gz/*.tgz)" >&2; exit 1; }
+    #
+    # Prefer selecting the exact updater tarball referenced in latest.json so we don't accidentally
+    # pick:
+    # - GitHub "Source code (tar.gz)" archives
+    # - Linux `.AppImage.tar.gz` bundles
+    app_tgz=""
+    if [[ -f latest.json ]]; then
+      app_tgz="$(
+        jq -r '.platforms["darwin-aarch64"].url // .platforms["darwin-x86_64"].url // empty' latest.json \
+          | sed 's|[?#].*$||' \
+          | sed 's|.*/||' \
+          | head -n 1
+      )"
+    fi
+    if [[ -z "$app_tgz" ]]; then
+      app_tgz="$(
+        ls *.app.tar.gz *.app.tgz *.tar.gz *.tgz 2>/dev/null | grep -v -i -F '.appimage.' | head -n 1 || true
+      )"
+    fi
+    test -n "$app_tgz" || { echo "No macOS updater tarball found (see latest.json or expected *.app.tar.gz/*.tar.gz/*.tgz)" >&2; exit 1; }
     tar -xzf "$app_tgz"
     lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
