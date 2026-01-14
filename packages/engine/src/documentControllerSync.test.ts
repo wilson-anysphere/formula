@@ -620,6 +620,44 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual(recalcResult);
   });
 
+  it("clears row/col/sheet style layers by passing null (without interning styles) and still forces a recalc", async () => {
+    const recalcResult: CellChange[] = [{ sheet: "Sheet1", address: "C3", value: 123 }];
+
+    const internStyle = vi.fn(() => 999);
+    const setRowStyleId = vi.fn(async () => {});
+    const setColStyleId = vi.fn(async () => {});
+    const setSheetDefaultStyleId = vi.fn(async () => {});
+    const recalculate = vi.fn(async () => recalcResult);
+
+    const engine: EngineSyncTarget = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate,
+      // Provide internStyle to assert it is not required for clearing (styleId=0).
+      internStyle,
+      setRowStyleId,
+      setColStyleId,
+      setSheetDefaultStyleId,
+    };
+
+    const payload = {
+      recalc: false,
+      rowStyleDeltas: [{ sheetId: "Sheet1", row: 0, afterStyleId: 0 }],
+      colStyleDeltas: [{ sheetId: "Sheet1", col: 1, afterStyleId: 0 }],
+      sheetStyleDeltas: [{ sheetId: "Sheet1", afterStyleId: 0 }],
+    };
+
+    const changes = await engineApplyDocumentChange(engine, payload);
+
+    expect(internStyle).toHaveBeenCalledTimes(0);
+    expect(setRowStyleId).toHaveBeenCalledWith("Sheet1", 0, null);
+    expect(setColStyleId).toHaveBeenCalledWith("Sheet1", 1, null);
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith("Sheet1", null);
+
+    expect(recalculate).toHaveBeenCalledTimes(1);
+    expect(changes).toEqual(recalcResult);
+  });
+
   it("engineApplyDocumentChange syncs sheet view column width overrides into the engine (CELL width metadata)", async () => {
     const doc = new DocumentController();
     let payload: any = null;

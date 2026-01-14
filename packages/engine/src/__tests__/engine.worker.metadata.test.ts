@@ -149,6 +149,15 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
+        id: 9,
+        method: "setRowStyleId",
+        // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
+        params: { sheet: "Sheet1", row: 6, styleId: null }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
         id: 4,
         method: "setColStyleId",
         params: { sheet: "Sheet1", col: 2, styleId: 11 }
@@ -192,6 +201,7 @@ describe("engine.worker workbook metadata RPCs", () => {
         ["setWorkbookFileMetadata", "/tmp", "book.xlsx"],
         ["setCellStyleId", "A1", 7, "Sheet1"],
         ["setRowStyleId", "Sheet1", 5, 9],
+        ["setRowStyleId", "Sheet1", 6, 0],
         ["setColStyleId", "Sheet1", 2, 11],
         ["setSheetDefaultStyleId", "Sheet1", 13],
         ["setColWidth", "Sheet1", 2, 120],
