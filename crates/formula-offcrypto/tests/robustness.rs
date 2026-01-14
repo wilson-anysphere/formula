@@ -1,7 +1,7 @@
 use formula_offcrypto::{
     parse_encrypted_package_header, parse_encryption_info, validate_agile_segment_decrypt_inputs,
     validate_standard_encrypted_package_stream, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionInfo, StandardEncryptionVerifier,
+    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
 };
 
 fn minimal_standard_encryption_info_bytes() -> Vec<u8> {
@@ -15,7 +15,10 @@ fn minimal_standard_encryption_info_bytes() -> Vec<u8> {
 
     // EncryptionHeader (fixed 8 DWORDs only; CSPName omitted).
     bytes.extend_from_slice(&32u32.to_le_bytes()); // header_size
-    bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+    bytes.extend_from_slice(
+        &(StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES)
+            .to_le_bytes(),
+    ); // flags
     bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
     bytes.extend_from_slice(&CALG_AES_128.to_le_bytes()); // algId
     bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
@@ -75,7 +78,9 @@ fn standard_verify_key_rejects_unaligned_encrypted_verifier_hash() {
     // Ensure malformed inputs return a structured error rather than panicking.
     let info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0x0000_8004,

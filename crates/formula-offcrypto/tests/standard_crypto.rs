@@ -2,7 +2,7 @@ use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_offcrypto::{
     standard_derive_key, standard_verify_key, OffcryptoError, StandardEncryptionHeader,
-    StandardEncryptionInfo, StandardEncryptionVerifier,
+    StandardEncryptionHeaderFlags, StandardEncryptionInfo, StandardEncryptionVerifier,
 };
 use sha1::{Digest as _, Sha1};
 
@@ -25,7 +25,9 @@ const ENCRYPTED_VERIFIER_HASH: [u8; 32] = [
 fn standard_info() -> StandardEncryptionInfo {
     StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0x0000_8004, // CALG_SHA1
@@ -93,7 +95,9 @@ fn standard_verify_key_matches_msoffcrypto_vector() {
 fn standard_verify_key_accepts_correct_key_and_rejects_incorrect_key() {
     let base_info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0x0000_8004, // CALG_SHA1
@@ -145,7 +149,9 @@ fn standard_verify_key_accepts_correct_key_and_rejects_incorrect_key() {
 fn standard_derive_key_rejects_non_sha1_alg_id_hash() {
     let info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0, // not CALG_SHA1
@@ -174,7 +180,9 @@ fn standard_derive_key_rejects_non_sha1_alg_id_hash() {
 fn standard_derive_key_rejects_key_size_mismatch() {
     let info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0x0000_8004, // CALG_SHA1
@@ -205,7 +213,9 @@ fn standard_derive_key_rejects_key_size_mismatch() {
 fn standard_verify_key_rejects_invalid_salt_len() {
     let info = StandardEncryptionInfo {
         header: StandardEncryptionHeader {
-            flags: 0,
+            flags: StandardEncryptionHeaderFlags::from_raw(
+                StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            ),
             size_extra: 0,
             alg_id: 0x0000_660E,
             alg_id_hash: 0x0000_8004, // CALG_SHA1

@@ -4,8 +4,8 @@ use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use cbc::cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
 use formula_offcrypto::{
-    standard_derive_key, StandardEncryptionHeader, StandardEncryptionInfo,
-    StandardEncryptionVerifier,
+    standard_derive_key, StandardEncryptionHeader, StandardEncryptionHeaderFlags,
+    StandardEncryptionInfo, StandardEncryptionVerifier,
 };
 use sha1::{Digest as _, Sha1};
 
@@ -133,7 +133,9 @@ pub fn build_standard_encrypted_ooxml_ole_bytes(package_bytes: &[u8], password: 
     ];
 
     let header = StandardEncryptionHeader {
-        flags: 0,
+        flags: StandardEncryptionHeaderFlags::from_raw(
+            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+        ),
         size_extra: 0,
         alg_id: 0x0000_660E,      // AES-128
         alg_id_hash: 0x0000_8004, // CALG_SHA1
@@ -179,7 +181,7 @@ pub fn build_standard_encrypted_ooxml_ole_bytes(package_bytes: &[u8], password: 
     let header_bytes_len = 8 * 4;
     encryption_info_bytes.extend_from_slice(&(header_bytes_len as u32).to_le_bytes());
 
-    encryption_info_bytes.extend_from_slice(&header.flags.to_le_bytes());
+    encryption_info_bytes.extend_from_slice(&header.flags.raw.to_le_bytes());
     encryption_info_bytes.extend_from_slice(&header.size_extra.to_le_bytes());
     encryption_info_bytes.extend_from_slice(&header.alg_id.to_le_bytes());
     encryption_info_bytes.extend_from_slice(&header.alg_id_hash.to_le_bytes());

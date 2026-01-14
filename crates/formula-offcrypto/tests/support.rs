@@ -11,7 +11,10 @@ use cipher::block_padding::NoPadding;
 use cipher::{BlockEncryptMut, KeyIvInit};
 use sha1::{Digest as _, Sha1};
 
-use formula_offcrypto::{StandardEncryptionHeader, StandardEncryptionInfo, StandardEncryptionVerifier};
+use formula_offcrypto::{
+    StandardEncryptionHeader, StandardEncryptionHeaderFlags, StandardEncryptionInfo,
+    StandardEncryptionVerifier,
+};
 
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 4096;
 
@@ -106,7 +109,9 @@ pub fn encrypt_standard(
     let verifier_plain: [u8; 16] = *b"formula-std-test";
 
     let header = StandardEncryptionHeader {
-        flags: 0,
+        flags: StandardEncryptionHeaderFlags::from_raw(
+            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+        ),
         size_extra: 0,
         alg_id: CALG_AES_128,
         alg_id_hash: CALG_SHA1,
@@ -140,7 +145,10 @@ pub fn encrypt_standard(
 
     // Build `EncryptionInfo` binary payload (version 3.2).
     let mut header_bytes = Vec::new();
-    header_bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+    header_bytes.extend_from_slice(
+        &(StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES)
+            .to_le_bytes(),
+    ); // flags
     header_bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
     header_bytes.extend_from_slice(&CALG_AES_128.to_le_bytes());
     header_bytes.extend_from_slice(&CALG_SHA1.to_le_bytes());

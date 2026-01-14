@@ -174,7 +174,7 @@ mod test_alloc {
 /// Parsed Standard (CryptoAPI) `EncryptionHeader`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StandardEncryptionHeader {
-    pub flags: u32,
+    pub flags: StandardEncryptionHeaderFlags,
     pub size_extra: u32,
     pub alg_id: u32,
     pub alg_id_hash: u32,
@@ -183,6 +183,33 @@ pub struct StandardEncryptionHeader {
     pub reserved1: u32,
     pub reserved2: u32,
     pub csp_name: String,
+}
+
+/// Parsed `EncryptionHeader.Flags` bits for MS-OFFCRYPTO Standard encryption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StandardEncryptionHeaderFlags {
+    pub raw: u32,
+    pub f_cryptoapi: bool,
+    pub f_doc_props: bool,
+    pub f_external: bool,
+    pub f_aes: bool,
+}
+
+impl StandardEncryptionHeaderFlags {
+    pub const F_CRYPTOAPI: u32 = 0x0000_0004;
+    pub const F_DOCPROPS: u32 = 0x0000_0008;
+    pub const F_EXTERNAL: u32 = 0x0000_0010;
+    pub const F_AES: u32 = 0x0000_0020;
+
+    pub fn from_raw(raw: u32) -> Self {
+        Self {
+            raw,
+            f_cryptoapi: raw & Self::F_CRYPTOAPI != 0,
+            f_doc_props: raw & Self::F_DOCPROPS != 0,
+            f_external: raw & Self::F_EXTERNAL != 0,
+            f_aes: raw & Self::F_AES != 0,
+        }
+    }
 }
 
 /// Parsed Standard (CryptoAPI) `EncryptionVerifier`.
@@ -430,6 +457,12 @@ pub enum OffcryptoError {
     /// For example: attempting to decrypt an Agile-encrypted OOXML package using a Standard-only
     /// decryptor.
     UnsupportedEncryption { encryption_type: EncryptionType },
+    /// Standard external encryption (`fExternal`) is not supported.
+    UnsupportedExternalEncryption,
+    /// Standard encryption without the CryptoAPI flag (`fCryptoAPI`) is not supported.
+    UnsupportedNonCryptoApiStandardEncryption,
+    /// Standard `EncryptionHeader.Flags` does not match the declared algorithm.
+    InvalidFlags { flags: u32, alg_id: u32 },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
@@ -483,6 +516,19 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::UnsupportedEncryption { encryption_type } => {
                 write!(f, "unsupported encryption type {encryption_type:?}")
             }
+            OffcryptoError::UnsupportedExternalEncryption => {
+                write!(f, "unsupported external Standard encryption")
+            }
+            OffcryptoError::UnsupportedNonCryptoApiStandardEncryption => {
+                write!(
+                    f,
+                    "unsupported Standard encryption: CryptoAPI flag (fCryptoAPI) not set"
+                )
+            }
+            OffcryptoError::InvalidFlags { flags, alg_id } => write!(
+                f,
+                "invalid Standard EncryptionHeader flags for algId: flags=0x{flags:08x}, algId=0x{alg_id:08x}"
+            ),
             OffcryptoError::InvalidCiphertextLength { len } => write!(
                 f,
                 "ciphertext length must be a multiple of 16 bytes for AES-ECB, got {len}"
@@ -627,10 +673,32 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     let header_bytes = r.take(header_size, "EncryptionHeader")?;
 
     let mut hr = Reader::new(header_bytes);
+    let raw_flags = hr.read_u32_le("EncryptionHeader.flags")?;
+    let flags = StandardEncryptionHeaderFlags::from_raw(raw_flags);
+    if flags.f_external {
+        return Err(OffcryptoError::UnsupportedExternalEncryption);
+    }
+    if !flags.f_cryptoapi {
+        return Err(OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
+    }
+
+    let size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;
+    let alg_id = hr.read_u32_le("EncryptionHeader.algId")?;
+
+    // Policy: be strict about the AES flag/AlgId relationship. This reduces false positives when
+    // parsing arbitrary OLE streams as "Standard encryption".
+    let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
+    if flags.f_aes != alg_is_aes {
+        return Err(OffcryptoError::InvalidFlags {
+            flags: raw_flags,
+            alg_id,
+        });
+    }
+
     let header = StandardEncryptionHeader {
-        flags: hr.read_u32_le("EncryptionHeader.flags")?,
-        size_extra: hr.read_u32_le("EncryptionHeader.sizeExtra")?,
-        alg_id: hr.read_u32_le("EncryptionHeader.algId")?,
+        flags,
+        size_extra,
+        alg_id,
         alg_id_hash: hr.read_u32_le("EncryptionHeader.algIdHash")?,
         key_size_bits: hr.read_u32_le("EncryptionHeader.keySize")?,
         provider_type: hr.read_u32_le("EncryptionHeader.providerType")?,
@@ -2032,8 +2100,10 @@ pub fn decrypt_encrypted_package_ecb(
 /// streams.
 pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, OffcryptoError> {
     let cursor = Cursor::new(data);
-    let mut ole = cfb::CompoundFile::open(cursor)
-        .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}")))?;
+    let mut ole =
+        cfb::CompoundFile::open(cursor).map_err(|err| {
+            OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {err}"))
+        })?;
 
     let mut encryption_info = Vec::new();
     {
@@ -3238,7 +3308,7 @@ mod tests {
 
         let info = StandardEncryptionInfo {
             header: StandardEncryptionHeader {
-                flags: 0,
+                flags: StandardEncryptionHeaderFlags::from_raw(0),
                 size_extra: 0,
                 alg_id: CALG_AES_128,
                 alg_id_hash: CALG_SHA1,

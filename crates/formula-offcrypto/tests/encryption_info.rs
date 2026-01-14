@@ -1,6 +1,7 @@
 use formula_offcrypto::{
     inspect_encryption_info, parse_encryption_info, EncryptionInfo, EncryptionType, OffcryptoError,
-    StandardAlgId, StandardEncryptionHeader, StandardEncryptionVerifier,
+    StandardAlgId, StandardEncryptionHeader, StandardEncryptionHeaderFlags,
+    StandardEncryptionVerifier,
 };
 
 const CALG_AES_128: u32 = 0x0000_660E;
@@ -20,6 +21,7 @@ fn utf16le_bytes(s: &str, terminated: bool) -> Vec<u8> {
 fn build_standard_encryption_info_with_version(
     version_major: u16,
     version_minor: u16,
+    header_flags: u32,
     csp_name: &[u8],
     alg_id: u32,
     alg_id_hash: u32,
@@ -37,7 +39,7 @@ fn build_standard_encryption_info_with_version(
 
     // EncryptionHeader (8 DWORDs + cspName)
     let mut header = Vec::new();
-    header.extend_from_slice(&0x11111111u32.to_le_bytes()); // flags
+    header.extend_from_slice(&header_flags.to_le_bytes()); // flags
     header.extend_from_slice(&0x22222222u32.to_le_bytes()); // sizeExtra
     header.extend_from_slice(&alg_id.to_le_bytes()); // algId
     header.extend_from_slice(&alg_id_hash.to_le_bytes()); // algIdHash
@@ -60,6 +62,7 @@ fn build_standard_encryption_info_with_version(
 }
 
 fn build_standard_encryption_info(
+    header_flags: u32,
     csp_name: &[u8],
     alg_id: u32,
     alg_id_hash: u32,
@@ -71,6 +74,7 @@ fn build_standard_encryption_info(
     build_standard_encryption_info_with_version(
         3,
         2,
+        header_flags,
         csp_name,
         alg_id,
         alg_id_hash,
@@ -84,7 +88,19 @@ fn build_standard_encryption_info(
 #[test]
 fn parse_synthetic_standard_encryption_info() {
     let csp_name = utf16le_bytes("Test CSP", true);
-    let bytes = build_standard_encryption_info(&csp_name, CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI
+        | StandardEncryptionHeaderFlags::F_AES
+        | StandardEncryptionHeaderFlags::F_DOCPROPS;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &csp_name,
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
 
     let info = parse_encryption_info(&bytes).expect("parse");
     let EncryptionInfo::Standard {
@@ -103,7 +119,7 @@ fn parse_synthetic_standard_encryption_info() {
     assert_eq!(
         header,
         StandardEncryptionHeader {
-            flags: 0x11111111,
+            flags: StandardEncryptionHeaderFlags::from_raw(header_flags),
             size_extra: 0x22222222,
             alg_id: CALG_AES_128,
             alg_id_hash: CALG_SHA1,
@@ -131,6 +147,7 @@ fn parse_synthetic_standard_encryption_info_accepts_major_2_minor_2() {
     let bytes = build_standard_encryption_info_with_version(
         2,
         2,
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("Test CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -151,6 +168,7 @@ fn parse_synthetic_standard_encryption_info_accepts_major_4_minor_2() {
     let bytes = build_standard_encryption_info_with_version(
         4,
         2,
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("Test CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -171,6 +189,7 @@ fn inspect_encryption_info_accepts_major_2_minor_2() {
     let bytes = build_standard_encryption_info_with_version(
         2,
         2,
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("Test CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -196,6 +215,7 @@ fn inspect_encryption_info_accepts_major_4_minor_2() {
     let bytes = build_standard_encryption_info_with_version(
         4,
         2,
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("Test CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -251,7 +271,10 @@ fn truncation_missing_verifier_fields() {
 
     // Header with fixed fields only (no CSPName, ok).
     bytes.extend_from_slice(&32u32.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+    bytes.extend_from_slice(
+        &(StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES)
+            .to_le_bytes(),
+    ); // flags
     bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
     bytes.extend_from_slice(&CALG_AES_128.to_le_bytes()); // algId
     bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
@@ -270,30 +293,34 @@ fn truncation_missing_verifier_fields() {
 
 #[test]
 fn csp_name_accepts_terminated_and_non_terminated_utf16le() {
-    let bytes_term = build_standard_encryption_info(
-        &utf16le_bytes("CSP", true),
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes_term =
+        build_standard_encryption_info(
+            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            &utf16le_bytes("CSP", true),
+            CALG_AES_128,
+            CALG_SHA1,
+            128,
+            16,
+            20,
+            32,
+        );
     let info = parse_encryption_info(&bytes_term).expect("terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
     };
     assert_eq!(header.csp_name, "CSP");
 
-    let bytes_no_term = build_standard_encryption_info(
-        &utf16le_bytes("CSP", false),
-        CALG_AES_128,
-        CALG_SHA1,
-        128,
-        16,
-        20,
-        32,
-    );
+    let bytes_no_term =
+        build_standard_encryption_info(
+            StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+            &utf16le_bytes("CSP", false),
+            CALG_AES_128,
+            CALG_SHA1,
+            128,
+            16,
+            20,
+            32,
+        );
     let info = parse_encryption_info(&bytes_no_term).expect("non-terminated parse");
     let EncryptionInfo::Standard { header, .. } = info else {
         panic!("expected standard");
@@ -305,7 +332,16 @@ fn csp_name_accepts_terminated_and_non_terminated_utf16le() {
 fn csp_name_rejects_invalid_utf16() {
     // Unpaired surrogate.
     let bad = 0xD800u16.to_le_bytes();
-    let bytes = build_standard_encryption_info(&bad, CALG_AES_128, CALG_SHA1, 128, 16, 20, 32);
+    let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
+        &bad,
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
     let err = parse_encryption_info(&bytes).unwrap_err();
     assert!(matches!(err, OffcryptoError::InvalidCspNameUtf16));
 }
@@ -313,6 +349,7 @@ fn csp_name_rejects_invalid_utf16() {
 #[test]
 fn rejects_key_size_mismatch_for_aes() {
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -331,6 +368,7 @@ fn rejects_key_size_mismatch_for_aes() {
 #[test]
 fn rejects_non_sha1_alg_id_hash() {
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         0x0000_800C, // CALG_SHA_256
@@ -349,6 +387,7 @@ fn rejects_non_sha1_alg_id_hash() {
 #[test]
 fn rejects_verifier_salt_size_mismatch() {
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -370,6 +409,7 @@ fn rejects_verifier_salt_size_mismatch() {
 fn rejects_truncated_encrypted_verifier_hash() {
     // verifierHashSize says SHA1 (20 bytes) => requires 32 bytes of encrypted hash, but provide 16.
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -385,6 +425,7 @@ fn rejects_truncated_encrypted_verifier_hash() {
 #[test]
 fn rejects_verifier_hash_size_mismatch() {
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         CALG_SHA1,
@@ -406,6 +447,7 @@ fn rejects_verifier_hash_size_mismatch() {
 #[test]
 fn rejects_unsupported_standard_alg_id() {
     let bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI,
         &utf16le_bytes("CSP", true),
         0xDEAD_BEEF,
         CALG_SHA1,
@@ -422,8 +464,92 @@ fn rejects_unsupported_standard_alg_id() {
 }
 
 #[test]
+fn rejects_standard_external_encryption_flag() {
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI
+        | StandardEncryptionHeaderFlags::F_EXTERNAL
+        | StandardEncryptionHeaderFlags::F_AES;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[],
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(err, OffcryptoError::UnsupportedExternalEncryption);
+}
+
+#[test]
+fn rejects_standard_without_cryptoapi_flag() {
+    let bytes = build_standard_encryption_info(
+        0,
+        &[],
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(err, OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
+}
+
+#[test]
+fn rejects_aes_algid_without_faes_flag() {
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[],
+        CALG_AES_128,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::InvalidFlags {
+            flags: header_flags,
+            alg_id: CALG_AES_128
+        }
+    );
+}
+
+#[test]
+fn rejects_faes_flag_with_non_aes_algid() {
+    // CALG_RC4
+    let alg_id = 0x0000_6801;
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[],
+        alg_id,
+        CALG_SHA1,
+        128,
+        16,
+        20,
+        32,
+    );
+    let err = parse_encryption_info(&bytes).unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::InvalidFlags {
+            flags: header_flags,
+            alg_id
+        }
+    );
+}
+
+#[test]
 fn truncation_missing_encrypted_verifier_bytes() {
     let mut bytes = build_standard_encryption_info(
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES,
         &utf16le_bytes("CSP", true),
         CALG_AES_128,
         CALG_SHA1,
