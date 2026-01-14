@@ -9,6 +9,14 @@ import type { SheetMeta, WorkbookSheetStore } from "./workbookSheetStore";
 export type OrganizeSheetsDialogHost = {
   store: WorkbookSheetStore;
   /**
+   * Optional: return the current authoritative sheet store.
+   *
+   * In collaboration mode `main.ts` can rebuild the sheet store instance when remote
+   * metadata changes. Providing this hook lets the dialog re-bind to the latest store
+   * instead of operating on a stale instance.
+   */
+  getStore?: () => WorkbookSheetStore;
+  /**
    * Read the current active sheet id.
    *
    * Used to:
@@ -547,7 +555,39 @@ export function openOrganizeSheetsDialog(host: OrganizeSheetsDialogHost): void {
 
   const close = () => closeDialog(dialog);
 
-  root.render(React.createElement(OrganizeSheetsDialog, { host, onClose: close }));
+  function Wrapper() {
+    const [store, setStore] = React.useState<WorkbookSheetStore>(() => host.store);
+
+    // Ensure the dialog updates its store binding if the host swaps it (e.g. collab metadata update).
+    React.useEffect(() => {
+      setStore(host.store);
+    }, [host.store]);
+
+    React.useEffect(() => {
+      if (typeof window === "undefined") return;
+      if (typeof host.getStore !== "function") return;
+
+      const updateStore = () => {
+        try {
+          const next = host.getStore?.();
+          if (next && next !== store) {
+            setStore(next);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      // `main.ts` emits this on any sheet metadata change (including store replacement).
+      window.addEventListener("formula:sheet-metadata-changed", updateStore);
+      return () => window.removeEventListener("formula:sheet-metadata-changed", updateStore);
+    }, [host.getStore, store]);
+
+    const hostWithStore = React.useMemo(() => ({ ...host, store }), [store]);
+    return React.createElement(OrganizeSheetsDialog, { host: hostWithStore, onClose: close });
+  }
+
+  root.render(React.createElement(Wrapper));
 
   dialog.addEventListener(
     "close",

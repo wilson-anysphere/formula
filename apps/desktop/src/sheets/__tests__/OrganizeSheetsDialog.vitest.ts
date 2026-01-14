@@ -461,6 +461,50 @@ describe("OrganizeSheetsDialog", () => {
     expect(focusGrid).toHaveBeenCalledTimes(1);
   });
 
+  it("re-binds to the latest sheet store when the host replaces it (collab-style)", async () => {
+    const doc = new DocumentController();
+    const store1 = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+    const store2 = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "s1";
+    let currentStore: WorkbookSheetStore = store1;
+    const getStore = () => currentStore;
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store: currentStore,
+        getStore,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    // Wait a tick for the dialog's effect to install the metadata-change listener.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+    expect(dialog!.querySelector('[data-testid="organize-sheet-row-s2"]')).toBeNull();
+
+    act(() => {
+      currentStore = store2;
+      window.dispatchEvent(new CustomEvent("formula:sheet-metadata-changed"));
+    });
+
+    expect(dialog!.querySelector('[data-testid="organize-sheet-row-s2"]')).toBeInstanceOf(HTMLElement);
+  });
+
   it("disables sheet-structure mutations in readOnly mode", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([

@@ -1758,8 +1758,10 @@ const openFormatCells = createOpenFormatCells({
 });
 
 function openOrganizeSheets(): void {
+  const getStore = () => createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null);
   openOrganizeSheetsDialog({
-    store: createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null),
+    store: getStore(),
+    getStore,
     getActiveSheetId: () => app.getCurrentSheetId(),
     activateSheet: (sheetId) => {
       app.activateSheet(sheetId);
