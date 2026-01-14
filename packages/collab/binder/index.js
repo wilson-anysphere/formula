@@ -1852,6 +1852,22 @@ export function bindYjsToDocumentController(options) {
             // If an existing entry was stored as a plain object, preserve any unknown
             // metadata keys by copying them into the new Y.Map.
             if (isRecord(found?.entry)) {
+              // Preserve any existing view object so we can merge unknown keys (drawings, merged ranges,
+              // layered format defaults, etc) when we apply the next view update below.
+              //
+              // Without this, upgrading a plain-object sheet entry to a Y.Map would drop any view-scoped
+              // metadata that this binder does not explicitly manage.
+              if (Object.prototype.hasOwnProperty.call(found.entry, "view")) {
+                const rawView = found.entry.view;
+                if (rawView !== undefined) {
+                  try {
+                    sheetMap.set("view", structuredClone(rawView));
+                  } catch {
+                    sheetMap.set("view", rawView);
+                  }
+                }
+              }
+
               const keys = Object.keys(found.entry).sort();
               for (const key of keys) {
                 if (

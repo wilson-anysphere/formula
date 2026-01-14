@@ -70,7 +70,15 @@ test("binder: DocumentController→Yjs upgrades existing plain-object sheet entr
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
   ydoc.transact(() => {
-    sheets.push([{ id: "Sheet1", name: "Sheet1" }]);
+    sheets.push([
+      {
+        id: "Sheet1",
+        name: "Sheet1",
+        // Include extra view metadata so we can verify the binder preserves unknown keys
+        // when upgrading a plain-object sheet entry into a Y.Map.
+        view: { frozenRows: 0, frozenCols: 0, drawings: [{ id: "drawing-1" }], defaultFormat: { font: { bold: true } } },
+      },
+    ]);
   });
 
   const documentController = new DocumentController();
@@ -90,7 +98,12 @@ test("binder: DocumentController→Yjs upgrades existing plain-object sheet entr
     assert.equal(sheets.length, 1);
     const entry = sheets.get(0);
     assert.ok(entry instanceof Y.Map, "expected sheet entry to be upgraded to a Y.Map");
-    assert.deepEqual(entry.get("view"), { frozenRows: 2, frozenCols: 0 });
+    assert.deepEqual(entry.get("view"), {
+      frozenRows: 2,
+      frozenCols: 0,
+      defaultFormat: { font: { bold: true } },
+      drawings: [{ id: "drawing-1" }],
+    });
   } finally {
     binder.destroy();
     ydoc.destroy();
