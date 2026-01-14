@@ -81,6 +81,8 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         // plaintext length is implausible for the available ciphertext bytes.
         //
         // The ciphertext length must be at least `ceil(orig_size / 16) * 16` bytes for AES-CBC.
+        // (We treat this as a hard requirement rather than deferring errors to `read()`: callers
+        // cannot recover a valid OOXML ZIP package when the final ciphertext segment is missing.)
         let expected_min_ciphertext_len = expected_min_ciphertext_len(orig_size)?;
         if ciphertext_len < expected_min_ciphertext_len {
             return Err(std::io::Error::new(
