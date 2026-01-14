@@ -79,6 +79,91 @@ fn encode_xl_wide_string(
     out
 }
 
+fn read_varint(data: &[u8], offset: &mut usize) -> u32 {
+    let mut v: u32 = 0;
+    for i in 0..4 {
+        let byte = *data.get(*offset).expect("varint byte");
+        *offset += 1;
+        v |= ((byte & 0x7F) as u32) << (7 * i);
+        if byte & 0x80 == 0 {
+            return v;
+        }
+    }
+    panic!("invalid BIFF12 varint (more than 4 bytes)");
+}
+
+fn rewrite_formula_string_headers_as_two_byte_varints(sheet_bin: &[u8]) -> Vec<u8> {
+    const FORMULA_STRING: u32 = 0x0008;
+
+    let mut offset = 0usize;
+    let mut out = Vec::with_capacity(sheet_bin.len() + 16);
+
+    while offset < sheet_bin.len() {
+        let record_start = offset;
+        let id = read_varint(sheet_bin, &mut offset);
+        let _id_end = offset;
+        let len = read_varint(sheet_bin, &mut offset) as usize;
+        let len_end = offset;
+        let payload_start = len_end;
+        let payload_end = payload_start + len;
+        let payload = sheet_bin
+            .get(payload_start..payload_end)
+            .expect("record payload");
+        offset = payload_end;
+
+        if id == FORMULA_STRING {
+            assert!(
+                id < 0x80 && len < 0x80,
+                "test helper only supports 1-byte varints"
+            );
+            // Non-canonical, but valid, 2-byte LEB128 varints for values < 128.
+            out.extend_from_slice(&[(id as u8) | 0x80, 0x00]);
+            out.extend_from_slice(&[(len as u8) | 0x80, 0x00]);
+            out.extend_from_slice(payload);
+        } else {
+            out.extend_from_slice(
+                sheet_bin
+                    .get(record_start..payload_end)
+                    .expect("record bytes"),
+            );
+        }
+    }
+
+    out
+}
+
+fn formula_string_header_raw(sheet_bin: &[u8], desired_col: u32) -> (Vec<u8>, Vec<u8>, usize) {
+    const FORMULA_STRING: u32 = 0x0008;
+
+    let mut offset = 0usize;
+    while offset < sheet_bin.len() {
+        let record_start = offset;
+        let id = read_varint(sheet_bin, &mut offset);
+        let id_end = offset;
+        let len = read_varint(sheet_bin, &mut offset) as usize;
+        let len_end = offset;
+        let payload_start = len_end;
+        let payload_end = payload_start + len;
+        let payload = sheet_bin
+            .get(payload_start..payload_end)
+            .expect("record payload");
+        offset = payload_end;
+
+        if id == FORMULA_STRING {
+            let col = u32::from_le_bytes(payload[0..4].try_into().expect("col bytes"));
+            if col == desired_col {
+                return (
+                    sheet_bin[record_start..id_end].to_vec(),
+                    sheet_bin[id_end..len_end].to_vec(),
+                    len,
+                );
+            }
+        }
+    }
+
+    panic!("FORMULA_STRING record for col {desired_col} not found");
+}
+
 fn build_sheet_bin() -> (Vec<u8>, String, Vec<u8>, String, Vec<u8>, String, Vec<u8>) {
     // Record ids (subset):
     // - BrtBeginSheetData 0x0091
@@ -167,6 +252,31 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
 fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
     let (sheet_bin, _inline_text, rich_runs, rich_text, phonetic_bytes, pho_text, new_rgce) =
         build_sheet_bin();
+    let tweaked = rewrite_formula_string_headers_as_two_byte_varints(&sheet_bin);
+
+    let (rich_id_raw, rich_len_raw, rich_len) = formula_string_header_raw(&tweaked, 1);
+    assert_eq!(
+        rich_id_raw,
+        vec![0x88, 0x00],
+        "expected non-canonical id varint for BrtFmlaString"
+    );
+    assert_eq!(
+        rich_len_raw,
+        vec![(rich_len as u8) | 0x80, 0x00],
+        "expected non-canonical len varint for rich formula payload"
+    );
+
+    let (pho_id_raw, pho_len_raw, pho_len) = formula_string_header_raw(&tweaked, 2);
+    assert_eq!(
+        pho_id_raw,
+        vec![0x88, 0x00],
+        "expected non-canonical id varint for BrtFmlaString"
+    );
+    assert_eq!(
+        pho_len_raw,
+        vec![(pho_len as u8) | 0x80, 0x00],
+        "expected non-canonical len varint for phonetic formula payload"
+    );
 
     let edit_rich = CellEdit {
         row: 0,
@@ -179,7 +289,13 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         shared_string_index: None,
         new_style: None,
     };
-    let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
+    let patched_rich = patch_sheet_bin(&tweaked, &[edit_rich]).expect("patch rich formula");
+
+    let (patched_id_raw, patched_len_raw, patched_len) =
+        formula_string_header_raw(&patched_rich, 1);
+    assert_eq!(patched_id_raw, rich_id_raw);
+    assert_eq!(patched_len_raw, rich_len_raw);
+    assert_eq!(patched_len, rich_len);
 
     // Ensure the cached rich-run bytes were preserved verbatim.
     assert!(
@@ -211,7 +327,12 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         shared_string_index: None,
         new_style: None,
     };
-    let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
+    let patched_pho = patch_sheet_bin(&tweaked, &[edit_pho]).expect("patch phonetic formula");
+
+    let (patched_id_raw, patched_len_raw, patched_len) = formula_string_header_raw(&patched_pho, 2);
+    assert_eq!(patched_id_raw, pho_id_raw);
+    assert_eq!(patched_len_raw, pho_len_raw);
+    assert_eq!(patched_len, pho_len);
 
     assert!(
         patched_pho
