@@ -169,6 +169,14 @@ describe('desktopStartupUtil resolveDesktopStartupMode', () => {
 });
 
 describe('desktopStartupUtil resolveDesktopStartupBenchKind', () => {
+  it('defaults to full when env is empty and CI is unset', () => {
+    expect(resolveDesktopStartupBenchKind({ env: {} })).toBe('full');
+  });
+
+  it('defaults to shell when CI is set', () => {
+    expect(resolveDesktopStartupBenchKind({ env: { CI: '1' } })).toBe('shell');
+  });
+
   it('uses the provided default when env is empty', () => {
     expect(resolveDesktopStartupBenchKind({ env: {}, defaultKind: 'shell' })).toBe('shell');
   });

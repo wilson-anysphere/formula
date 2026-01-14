@@ -62,7 +62,7 @@ export function resolveDesktopStartupMode(options: {
    */
   env?: NodeJS.ProcessEnv;
   defaultMode?: DesktopStartupMode;
-}): DesktopStartupMode {
+} = {}): DesktopStartupMode {
   const env = options.env ?? process.env;
   const defaultMode = options.defaultMode ?? 'cold';
   const modeRaw = String(env.FORMULA_DESKTOP_STARTUP_MODE ?? '').trim().toLowerCase();
@@ -89,11 +89,17 @@ export function resolveDesktopStartupBenchKind(options: {
    * Defaults to `process.env`.
    */
   env?: NodeJS.ProcessEnv;
-  defaultKind: DesktopStartupBenchKind;
-}): DesktopStartupBenchKind {
+  /**
+   * Default benchmark kind when the env var is unset.
+   *
+   * Defaults to `shell` on CI and `full` locally.
+   */
+  defaultKind?: DesktopStartupBenchKind;
+} = {}): DesktopStartupBenchKind {
   const env = options.env ?? process.env;
+  const defaultKind: DesktopStartupBenchKind = options.defaultKind ?? (env.CI ? 'shell' : 'full');
   const kindRaw = String(env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
-  if (!kindRaw) return options.defaultKind;
+  if (!kindRaw) return defaultKind;
   const parsed = parseDesktopStartupBenchKind(kindRaw);
   if (!parsed) {
     throw new Error(

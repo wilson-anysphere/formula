@@ -81,16 +81,14 @@ function parseArgs(argv: string[]): {
   benchKind: DesktopStartupBenchKind;
 } {
   const args = [...argv];
-  let mode: DesktopStartupMode = resolveDesktopStartupMode({ defaultMode: "cold" });
+  let mode: DesktopStartupMode = resolveDesktopStartupMode();
 
   const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
 
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
-  const defaultKind: DesktopStartupBenchKind = resolveDesktopStartupBenchKind({
-    defaultKind: process.env.CI ? "shell" : "full",
-  });
+  const defaultKind: DesktopStartupBenchKind = resolveDesktopStartupBenchKind();
 
   let windowTargetMsOverride: number | null = null;
   let firstRenderTargetMsOverride: number | null = null;

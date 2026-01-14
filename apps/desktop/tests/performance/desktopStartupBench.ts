@@ -25,9 +25,9 @@
  *   then reused for the measured runs so persisted caches are reflected in the results.
  *
  * Benchmark kind (what we measure):
- * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default locally; requires built frontend assets): launch the normal app.
- * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell` (default on CI): launch `--startup-bench` (measures shell/webview startup
- *   without requiring `apps/desktop/dist`).
+  * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=full` (default locally; requires built frontend assets): launch the normal app.
+  * - `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell` (default on CI): launch `--startup-bench` (measures shell/webview startup
+  *   without requiring `apps/desktop/dist`).
  *
  * Optional idle RSS metric:
  * - Metric: `desktop.memory.<mode>.rss_mb.p95` (and `desktop.memory.rss_mb.p95` alias for cold mode)
@@ -200,10 +200,8 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     return [];
   }
 
-  const startupMode = resolveDesktopStartupMode({ defaultMode: 'cold' });
-  // Prefer the lightweight shell benchmark in CI so we can measure startup without requiring
-  // built frontend assets. Locally, default to full end-to-end startup timings.
-  const benchKind = resolveDesktopStartupBenchKind({ defaultKind: process.env.CI ? 'shell' : 'full' });
+  const startupMode = resolveDesktopStartupMode();
+  const benchKind = resolveDesktopStartupBenchKind();
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
   const timeoutMs = Math.max(
