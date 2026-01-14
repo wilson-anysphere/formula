@@ -48,7 +48,12 @@ impl fmt::Display for PivotFieldRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
-            PivotFieldRef::DataModelColumn { table, column } => write!(f, "{table}[{column}]"),
+            PivotFieldRef::DataModelColumn { table, column } => {
+                // Prefer a DAX-like display shape to make debugging/logging consistent with Excel.
+                // Always quote the table name to avoid ambiguity (spaces, special chars, etc).
+                let escaped_table = table.replace('\'', "''");
+                write!(f, "'{escaped_table}'[{column}]")
+            }
             PivotFieldRef::DataModelMeasure(name) => write!(f, "[{name}]"),
         }
     }

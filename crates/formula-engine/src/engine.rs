@@ -456,10 +456,10 @@ impl Workbook {
         if current == new_index {
             return true;
         }
-        let sheet_id = self.sheet_order.remove(current);
+        let id = self.sheet_order.remove(current);
         // `new_index` is expressed in terms of the final tab order; inserting at that index after
         // removal produces the expected result (Vec::insert supports `index == len`).
-        self.sheet_order.insert(new_index, sheet_id);
+        self.sheet_order.insert(new_index, id);
         true
     }
 
