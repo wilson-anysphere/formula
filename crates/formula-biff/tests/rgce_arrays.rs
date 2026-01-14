@@ -77,3 +77,13 @@ fn rgce_roundtrip_array_literal_string_with_quotes() {
     let decoded = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
     assert_eq!(normalize("{\"a\"\"b\"}"), normalize(&decoded));
 }
+
+#[test]
+fn rgce_encodes_na_bang_error_literal_in_array_literals() {
+    // `#N/A!` is accepted by the formula parser, but BIFF encodes it as the canonical `#N/A`
+    // error code.
+    let encoded = encode_rgce_with_rgcb("={#N/A!}").expect("encode");
+    assert!(!encoded.rgcb.is_empty(), "rgcb should be non-empty for PtgArray");
+    let decoded = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(normalize("{#N/A}"), normalize(&decoded));
+}

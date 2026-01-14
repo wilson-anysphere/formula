@@ -65,6 +65,15 @@ fn rgce_roundtrip_spill_range() {
 }
 
 #[test]
+fn rgce_encode_accepts_na_bang_error_literal() {
+    // Excel sometimes serializes `#N/A` as `#N/A!` in user-facing formula text. The BIFF token
+    // stream uses a single error code, so decoding always normalizes back to `#N/A`.
+    let rgce = encode_rgce("=#N/A!").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(decoded, "#N/A");
+}
+
+#[test]
 fn rgce_encode_structured_ref_is_unsupported() {
     for formula in [
         "Table1[Col]",
