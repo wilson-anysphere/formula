@@ -4180,6 +4180,37 @@ export class DocumentController {
   }
 
   /**
+   * Set a cell's raw state in a single delta (value + formula + style).
+   *
+   * This is primarily intended for tests and snapshot/import plumbing where
+   * we need to represent a formula cell that also carries a cached value
+   * payload (e.g. rich values like images) without triggering the normal
+   * formula edit semantics (`setCellFormula` clears value).
+   *
+   * User-facing edits should prefer `setCellInput` / `setCellValue` / `setCellFormula`.
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @param {CellState} cell
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
+   */
+  setCell(sheetId, row, col, cell, options = {}) {
+    const r = Number(row);
+    const c = Number(col);
+    if (!Number.isInteger(r) || r < 0) return;
+    if (!Number.isInteger(c) || c < 0) return;
+
+    const before = this.model.getCell(sheetId, r, c);
+    const after = {
+      value: cell?.value ?? null,
+      formula: normalizeFormula(cell?.formula ?? null),
+      styleId: typeof cell?.styleId === "number" ? cell.styleId : before.styleId,
+    };
+    this.#applyUserDeltas([{ sheetId, row: r, col: c, before, after: cloneCellState(after) }], options);
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {string | null} formula
