@@ -798,6 +798,15 @@ The loopback listener implementation (`oauth_loopback_listen` in `apps/desktop/s
   - If the request uses a different path it returns `404` and keeps listening.
   - Non-`GET` requests return `405` and keep listening.
 
+IPC guardrail note: the `oauth_loopback_listen` `redirect_uri` argument is deserialized as
+`LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>` (see `apps/desktop/src-tauri/src/ipc_limits.rs`). The OAuth redirect URI limit is
+currently equal to `MAX_IPC_URL_BYTES`.
+
+##### Task tracker (OAuth redirects)
+
+- DONE (obsolete) — Task 252: OAuth loopback `redirect_uri` IPC guardrail mismatch is resolved;
+  `ipc_limits::tests::source_guardrail_main_use_limited_string_for_oauth_redirect_uri` now passes on `main`.
+
 ##### Redirect forwarding to the frontend (`oauth-redirect` + readiness handshake)
 
 Both deep-link and loopback flows end up as the same desktop event:
