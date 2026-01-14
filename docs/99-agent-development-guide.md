@@ -666,24 +666,31 @@ mockups/README.md                # Full design system
 
 **Colors (light mode):**
 ```css
-/* Backgrounds */
---bg-app: #f8f8f8;          /* App background */
---bg-surface: #ffffff;       /* Panels, cards */
---bg-hover: #f0f0f0;         /* Hover states */
+/* Backgrounds - layered with subtle depth */
+--bg-app: #f5f5f5;           /* App background */
+--bg-surface: #fafafa;       /* Panels, card backgrounds */
+--bg-elevated: #ffffff;      /* Active content, inputs */
+--bg-hover: #eeeeee;         /* Hover states */
+--bg-inset: #f0f0f0;         /* Inset panels, code blocks */
 
-/* Text */
---text-primary: #1f1f1f;     /* Primary text */
---text-secondary: #6e6e6e;   /* Secondary text */
---text-tertiary: #9a9a9a;    /* Hints */
+/* Text - clear hierarchy */
+--text-primary: #1a1a1a;     /* Primary text */
+--text-secondary: #5c5c5c;   /* Secondary text */
+--text-tertiary: #8a8a8a;    /* Hints */
 
 /* Borders */
---border: #e5e5e5;           /* Standard */
---border-strong: #d0d0d0;    /* Emphasized */
+--border: #e0e0e0;           /* Standard border */
+--border-strong: #c8c8c8;    /* Emphasized border */
 
 /* Accent - professional blue */
---accent: #0969da;
---link: #0969da;
---accent-bg: #ddf4ff;
+--accent: #0969da;           /* Primary accent */
+--link: #0969da;             /* Hyperlinks */
+--accent-bg: #ddf4ff;        /* Accent background */
+--accent-border: #54aeff;    /* Accent border */
+
+/* Selection */
+--selection-bg: rgba(9, 105, 218, 0.08);
+--selection-border: #0969da;
 
 /* Semantic */
 --green: #1a7f37;            /* Positive */
