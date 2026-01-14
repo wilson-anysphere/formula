@@ -1356,14 +1356,18 @@ export class ToolExecutor {
 
     const needsDistributionValues = requested.has("median") || requested.has("mode") || requested.has("quartiles");
 
-    const needsStreamingAgg =
-      requested.has("count") ||
-      requested.has("sum") ||
-      requested.has("mean") ||
-      requested.has("stdev") ||
-      requested.has("variance") ||
-      requested.has("min") ||
-      requested.has("max");
+    const wantsCount = requested.has("count");
+    const wantsSum = requested.has("sum");
+    const wantsMean = requested.has("mean");
+    const wantsStdev = requested.has("stdev");
+    const wantsVariance = requested.has("variance");
+    const wantsMin = requested.has("min");
+    const wantsMax = requested.has("max");
+
+    const needsCount = wantsCount || wantsSum || wantsMean || wantsStdev || wantsVariance;
+    const needsSum = wantsSum || wantsMean;
+    const needsWelford = wantsStdev || wantsVariance;
+    const needsMinMax = wantsMin || wantsMax;
 
     const wantsCorrelation = requested.has("correlation");
     const cols = range.endCol - range.startCol + 1;
@@ -1377,10 +1381,11 @@ export class ToolExecutor {
     const values: number[] | null = needsDistributionValues ? [] : null;
     let redactedCellCount = 0;
 
-    // Basic streaming aggregates (Welford).
+    // Basic streaming aggregates.
     let count = 0;
     let sum = 0;
-    let mean = 0;
+    // Welford state (only computed when variance/stdev are requested).
+    let welfordMean = 0;
     let m2 = 0;
     let min = 0;
     let max = 0;
@@ -1427,7 +1432,7 @@ export class ToolExecutor {
 
         if (values) values.push(numeric);
 
-        if (needsStreamingAgg) {
+        if (needsMinMax) {
           if (!hasMinMax) {
             min = numeric;
             max = numeric;
@@ -1438,12 +1443,18 @@ export class ToolExecutor {
             if (numeric < min) min = numeric;
             if (numeric > max) max = numeric;
           }
+        }
 
+        if (needsCount) {
           count += 1;
+        }
+        if (needsSum) {
           sum += numeric;
-          const delta = numeric - mean;
-          mean += delta / count;
-          const delta2 = numeric - mean;
+        }
+        if (needsWelford) {
+          const delta = numeric - welfordMean;
+          welfordMean += delta / count;
+          const delta2 = numeric - welfordMean;
           m2 += delta * delta2;
         }
       }
