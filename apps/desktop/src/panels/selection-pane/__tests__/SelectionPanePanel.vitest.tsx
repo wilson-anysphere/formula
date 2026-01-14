@@ -186,9 +186,20 @@ describe("Selection Pane panel", () => {
     expect(app.getSelectedDrawingId()).toBe(1);
     expect(itemEls[1]?.getAttribute("aria-selected")).toBe("true");
 
+    // Bring Forward should update z-order and re-render the list (so Picture 1 becomes topmost).
+    const bringForwardBtn = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-1"]');
+    expect(bringForwardBtn).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      bringForwardBtn!.click();
+    });
+    const reorderedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
+    expect(reorderedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(reorderedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
+
     // Adding a drawing should update the panel list via subscribeDrawings.
+    const currentDrawings = (app.getDocument() as any).getSheetDrawings(sheetId);
     const nextDrawings: DrawingObject[] = [
-      ...drawings,
+      ...(Array.isArray(currentDrawings) ? currentDrawings : []),
       {
         id: 3,
         kind: { type: "shape", label: "Shape 3" },
