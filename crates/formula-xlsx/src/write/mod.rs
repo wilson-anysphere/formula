@@ -1085,9 +1085,20 @@ fn build_parts(
         // parts. Only run the streaming rewrite for existing worksheets (where we need to inject
         // `<conditionalFormatting>` blocks into preserved XML that previously had none).
         if conditional_formatting_changed && !is_new_sheet {
+            // `CfRule.dxf_id` indexes into the per-worksheet `conditional_formatting_dxfs` vector.
+            // In SpreadsheetML, `cfRule/@dxfId` indexes into the *workbook-global* `<dxfs>` table in
+            // `xl/styles.xml`. When we insert conditional formatting into an existing worksheet via
+            // the streaming XML rewriter, we must remap those indices to the aggregated global
+            // table.
+            let mut rules = sheet.conditional_formatting_rules.clone();
+            for rule in &mut rules {
+                rule.dxf_id = rule
+                    .dxf_id
+                    .and_then(|local| local_to_global_dxf.and_then(|m| m.get(local as usize).copied()));
+            }
             sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
                 &sheet_xml,
-                &sheet.conditional_formatting_rules,
+                &rules,
             )?;
         }
         if is_new_sheet || merges_changed {
