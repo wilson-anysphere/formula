@@ -1967,37 +1967,43 @@ function applyIdentifierCase(name, typedPrefix) {
   // letters. This avoids surprising behavior for prefixes like "'" (start of a
   // quoted sheet name) where `typedPrefix === typedPrefix.toUpperCase()` would
   // otherwise be true and we'd incorrectly uppercase the entire identifier.
-  const hasUpper = /[A-Z]/.test(typedPrefix);
-  const hasLower = /[a-z]/.test(typedPrefix);
-  const hasLetter = hasUpper || hasLower;
+  const segments = typedPrefix.split(LETTER_SEGMENT_SPLIT_RE).filter((s) => s.length > 0);
+  if (segments.length === 0) return name;
+
+  const isAllUpper = segments.every((s) => s === s.toUpperCase());
+  const isAllLower = segments.every((s) => s === s.toLowerCase());
+  const isTitleCase = segments.every((s) => s[0] === s[0].toUpperCase() && s.slice(1) === s.slice(1).toLowerCase());
 
   // If the user is typing in uppercase, treat that as an explicit signal to
   // uppercase the full identifier (common for people who prefer Excel-style
   // uppercase references).
-  if (hasLetter && hasUpper && !hasLower) return name.toUpperCase();
+  if (isAllUpper) return name.toUpperCase();
 
   // If the user is typing in lowercase, preserve internal capitalization for
   // CamelCase identifiers (e.g. named ranges), but avoid producing "suM"-style
   // completions for ALL-CAPS identifiers by downcasing them fully.
-  if (hasLetter && hasLower && !hasUpper && name === name.toUpperCase()) return name.toLowerCase();
+  if (isAllLower && name === name.toUpperCase()) return name.toLowerCase();
 
   // Title-ish casing: first letter uppercase, remainder lowercase.
   // If the canonical identifier is ALL-CAPS, produce a nicer completion by
   // title-casing the remainder (e.g. "Vlo" -> "Vlookup", "Fa" -> "False").
-  if (hasLetter && name === name.toUpperCase()) {
-    const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
-    if (letters) {
-      const lower = letters.toLowerCase();
-      const upper = letters.toUpperCase();
-      if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
-        const lowered = name.toLowerCase();
-        const firstLetterIdx = lowered.search(/[a-z]/);
-        if (firstLetterIdx >= 0) {
-          return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx].toUpperCase() + lowered.slice(firstLetterIdx + 1);
-        }
-        return lowered;
+  if (isTitleCase && name === name.toUpperCase()) {
+    const lowered = name.toLowerCase();
+    let out = "";
+    let capitalizeNext = true;
+    for (const ch of lowered) {
+      if (capitalizeNext && UNICODE_SINGLE_LETTER_RE.test(ch)) {
+        out += ch.toUpperCase();
+        capitalizeNext = false;
+      } else {
+        out += ch;
       }
+      // Treat any non-letter as a segment separator so ALL-CAPS identifiers like
+      // `FOO_BAR` or `TABLE1[[#ALL],[COL]]` can complete nicely from title-case
+      // prefixes without producing mixed-case tails like `Foo_BaR`.
+      if (!UNICODE_SINGLE_LETTER_RE.test(ch)) capitalizeNext = true;
     }
+    return out;
   }
 
   return name;

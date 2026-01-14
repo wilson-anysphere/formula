@@ -3801,6 +3801,52 @@ test("Named ranges preserve the typed prefix case (lowercase)", async () => {
   );
 });
 
+test("Named ranges title-case ALL-CAPS identifiers for a Unicode title-style prefix", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [{ name: "ZÄHLENWENN", range: "Sheet1!A1:A10" }],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Zä";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Zählenwenn)"),
+    `Expected a Unicode title-cased named-range completion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Named ranges title-case ALL-CAPS identifiers across segments (underscore)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [{ name: "FOO_BAR", range: "Sheet1!A1:A10" }],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Foo_Ba";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Foo_Bar)"),
+    `Expected a segment-aware title-cased named-range completion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Completion client request is structured and completion inserts at the cursor", async () => {
   /** @type {any} */
   let seenReq = null;
