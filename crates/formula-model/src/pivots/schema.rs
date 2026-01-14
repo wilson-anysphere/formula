@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::serde_defaults::default_true;
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
 /// Canonical reference to a field used by a pivot configuration.
@@ -370,10 +369,6 @@ impl Default for SubtotalPosition {
     fn default() -> Self {
         Self::None
     }
-}
-
-const fn default_true() -> bool {
-    true
 }
 
 /// Whether to render grand totals for rows and/or columns.
