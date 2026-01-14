@@ -405,7 +405,9 @@ function extractCell(cellData) {
   if (map) {
     const enc = map.get("enc");
     return {
-      ...(enc !== null && enc !== undefined
+      // Treat any `enc` marker (including `null`) as authoritative encryption state.
+      // This is fail-closed: never fall back to plaintext when `enc` is present.
+      ...(enc !== undefined
         ? { enc: yjsValueToJson(enc), value: null, formula: null }
         : { value: map.get("value") ?? null, formula: map.get("formula") ?? null }),
       format: map.get("format") ?? map.get("style") ?? null,
@@ -414,7 +416,7 @@ function extractCell(cellData) {
   if (cellData && typeof cellData === "object") {
     const enc = cellData.enc;
     return {
-      ...(enc !== null && enc !== undefined
+      ...(enc !== undefined
         ? { enc: yjsValueToJson(enc), value: null, formula: null }
         : { value: cellData.value ?? null, formula: cellData.formula ?? null }),
       format: cellData.format ?? cellData.style ?? null,
@@ -446,9 +448,9 @@ export function mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData) {
   // legacy key encoding), treat the cell as encrypted and do not allow plaintext
   // duplicates to overwrite the ciphertext.
   const enc = cell?.enc;
-  const isEncrypted = enc !== null && enc !== undefined;
+  const isEncrypted = enc !== undefined;
   const existingEnc = existing?.enc;
-  const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
+  const existingIsEncrypted = existingEnc !== undefined;
 
   if (isEncrypted) {
     const isCanonical = parsed.isCanonical === true;

@@ -64,7 +64,9 @@ export function normalizeCell(cell) {
   const normalized = {};
 
   const enc = /** @type {any} */ (cell).enc;
-  if (enc !== null && enc !== undefined) {
+  // Treat any `enc` marker (including `null`) as encrypted so callers never
+  // fall back to plaintext fields when an encryption marker exists.
+  if (enc !== undefined) {
     normalized.enc = enc;
   }
 

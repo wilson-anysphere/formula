@@ -162,7 +162,9 @@ function stableStringifyInner(value, stack) {
  */
 function encryptionMeta(cell) {
   const enc = cell?.enc;
-  if (enc === null || enc === undefined) return { encrypted: false, keyId: null };
+  // Fail closed: treat any `enc` marker (including `null`) as encrypted so diffs never
+  // fall back to plaintext when an encryption marker exists.
+  if (enc === undefined) return { encrypted: false, keyId: null };
   const keyId = enc && typeof enc === "object" && typeof enc.keyId === "string" ? enc.keyId : null;
   return { encrypted: true, keyId };
 }
@@ -173,7 +175,7 @@ function encryptionMeta(cell) {
  */
 function cellSignature(cell) {
   const enc = cell?.enc;
-  const isEncrypted = enc !== null && enc !== undefined;
+  const isEncrypted = enc !== undefined;
   const normalized = {
     enc: isEncrypted ? enc : null,
     value: isEncrypted ? null : (cell?.value ?? null),
@@ -190,8 +192,8 @@ function cellSignature(cell) {
 function sameValueAndFormula(a, b) {
   const aEnc = a?.enc;
   const bEnc = b?.enc;
-  const aEncrypted = aEnc !== null && aEnc !== undefined;
-  const bEncrypted = bEnc !== null && bEnc !== undefined;
+  const aEncrypted = aEnc !== undefined;
+  const bEncrypted = bEnc !== undefined;
   if (aEncrypted || bEncrypted) {
     if (!aEncrypted || !bEncrypted) return false;
     return deepEqual(aEnc, bEnc);

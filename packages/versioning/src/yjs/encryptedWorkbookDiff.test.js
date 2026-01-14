@@ -201,6 +201,43 @@ test("diffYjsWorkbookSnapshots: encrypted cells win over plaintext duplicates ac
   assert.equal(sheetDiff.modified[0].newKeyId, "k1");
 });
 
+test("diffYjsWorkbookSnapshots: enc=null markers win over plaintext duplicates across legacy keys", () => {
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  doc.transact(() => {
+    const encrypted = new Y.Map();
+    // Explicit null marker (should still be treated as encrypted).
+    encrypted.set("enc", null);
+    // Stored under a legacy key encoding.
+    cells.set("Sheet1:0,0", encrypted);
+
+    const plain = new Y.Map();
+    plain.set("value", "leaked-1");
+    cells.set("Sheet1:0:0", plain);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  // Mutate the plaintext duplicate; diff should ignore it because an `enc` marker exists.
+  doc.transact(() => {
+    const plain = cells.get("Sheet1:0:0");
+    assert.ok(plain instanceof Y.Map);
+    plain.set("value", "leaked-2");
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.added.length, 0);
+  assert.equal(sheetDiff.removed.length, 0);
+  assert.equal(sheetDiff.modified.length, 0);
+  assert.equal(sheetDiff.formatOnly.length, 0);
+  assert.equal(sheetDiff.moved.length, 0);
+});
+
 test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when format is only present on a legacy duplicate", () => {
   const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
 

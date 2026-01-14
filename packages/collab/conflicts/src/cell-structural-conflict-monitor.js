@@ -994,7 +994,7 @@ export class CellStructuralConflictMonitor {
     // Never downgrade an encrypted cell to plaintext (CollabSession enforces the
     // same invariant). We allow format-only writes by preserving the existing
     // encrypted payload.
-    if (existingEnc !== undefined && normalized.enc == null) {
+    if (existingEnc !== undefined && normalized.enc === undefined) {
       const wantsContent = normalized.formula != null || normalized.value != null;
       if (wantsContent) {
         throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
@@ -1002,8 +1002,12 @@ export class CellStructuralConflictMonitor {
       cellMap.set("enc", existingEnc);
       cellMap.delete("value");
       cellMap.delete("formula");
-    } else if (normalized.enc != null) {
-      cellMap.set("enc", normalized.enc);
+    } else if (normalized.enc !== undefined) {
+      // Never downgrade a ciphertext payload to a null marker. If a caller passes
+      // `{ enc: null }` while an existing non-null payload exists, preserve the
+      // existing payload to avoid data loss.
+      const nextEnc = normalized.enc === null && existingEnc !== undefined && existingEnc !== null ? existingEnc : normalized.enc;
+      cellMap.set("enc", nextEnc);
       cellMap.delete("value");
       cellMap.delete("formula");
     } else if (normalized.formula != null) {
@@ -1377,7 +1381,7 @@ function normalizeCell(cellData) {
   /** @type {string | null} */
   let formula = null;
   /** @type {any} */
-  let enc = null;
+  let enc = undefined;
   /** @type {Record<string, unknown> | null} */
   let format = null;
 
@@ -1386,13 +1390,16 @@ function normalizeCell(cellData) {
     value = readYMapValue(map, "value") ?? null;
     formula = yjsValueToJson(readYMapValue(map, "formula") ?? null);
     if (formula != null) formula = String(formula);
-    enc = readYMapValue(map, "enc") ?? null;
+    // Fail closed: preserve the distinction between an absent `enc` key (`undefined`)
+    // and an explicit `enc: null` marker. Any defined `enc` value is treated as an
+    // encryption marker so we never fall back to plaintext fields when it exists.
+    enc = readYMapValue(map, "enc");
     format = (readYMapValue(map, "format") ?? readYMapValue(map, "style")) ?? null;
   } else if (typeof cellData === "object") {
     value = cellData.value ?? null;
     formula = yjsValueToJson(cellData.formula ?? null);
     if (formula != null) formula = String(formula);
-    enc = cellData.enc ?? null;
+    enc = Object.prototype.hasOwnProperty.call(cellData, "enc") ? cellData.enc : undefined;
     format = cellData.format ?? cellData.style ?? null;
   } else {
     value = cellData;
@@ -1410,7 +1417,7 @@ function normalizeCell(cellData) {
     format = null;
   }
 
-  const hasEnc = enc !== null && enc !== undefined;
+  const hasEnc = enc !== undefined;
   const hasValue = value !== null && value !== undefined;
   const hasFormula = formula != null && formula !== "";
   const hasFormat = format != null;

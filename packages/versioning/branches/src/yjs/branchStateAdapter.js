@@ -439,7 +439,9 @@ function cellFromYjsValue(cellData) {
     const formula = normalizeFormula(cellMap.get("formula"));
     const value = cellMap.get("value");
     const format = cellMap.get("format") ?? cellMap.get("style");
-    if (enc !== null && enc !== undefined) {
+    // Treat any `enc` marker (including `null`) as encrypted so we never fall
+    // back to plaintext duplicates when an encryption marker exists.
+    if (enc !== undefined) {
       cell.enc = yjsValueToJson(enc);
     } else if (formula) {
       cell.formula = formula;
@@ -455,7 +457,7 @@ function cellFromYjsValue(cellData) {
     const formula = normalizeFormula(cellData.formula);
     const value = cellData.value;
     const format = cellData.format ?? cellData.style;
-    if (enc !== null && enc !== undefined) {
+    if (enc !== undefined) {
       cell.enc = yjsValueToJson(enc);
     } else if (formula) {
       cell.formula = formula;
@@ -707,16 +709,22 @@ export function branchStateFromYjsDoc(doc) {
     // overwrite the ciphertext in branch snapshots.
     const isCanonical = parsed.isCanonical === true;
 
-    if (cell.enc != null) {
-      if (!existing || existing.enc == null || isCanonical) {
+    if (cell.enc !== undefined) {
+      const existingEnc = existing ? existing.enc : undefined;
+      const existingHasEnc = existingEnc !== undefined;
+      const existingHasPayload = existingHasEnc && existingEnc !== null;
+      const nextHasPayload = cell.enc !== null;
+      // Prefer encrypted cells over plaintext, and prefer a non-null ciphertext
+      // payload over a null encryption marker when both exist.
+      if (!existing || !existingHasEnc || (existingHasEnc && !existingHasPayload && nextHasPayload) || isCanonical) {
         cells[sheetId][addr] = cell;
-      } else if (existing.enc != null && existing.format == null && cell.format != null) {
+      } else if (existingHasEnc && existing.format == null && cell.format != null) {
         cells[sheetId][addr] = { ...existing, format: cell.format };
       }
       return;
     }
 
-    if (existing && existing.enc != null) {
+    if (existing && existing.enc !== undefined) {
       if (existing.format == null && cell.format != null) {
         cells[sheetId][addr] = { ...existing, format: cell.format };
       }

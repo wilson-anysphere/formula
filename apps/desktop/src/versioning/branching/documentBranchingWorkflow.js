@@ -118,10 +118,13 @@ export class DocumentBranchingWorkflow {
         const isMasked =
           cell &&
           typeof cell === "object" &&
-          cell.enc == null &&
+          // Fail closed: treat any defined `enc` field (including `null`) as an
+          // encryption marker so masked placeholder detection never applies to
+          // encrypted cells.
+          cell.enc === undefined &&
           cell.formula == null &&
           cell.value === MASKED_CELL_VALUE &&
-          (canEdit === false || (baseCell && typeof baseCell === "object" && baseCell.enc != null));
+          (canEdit === false || (baseCell && typeof baseCell === "object" && baseCell.enc !== undefined));
 
         if (isMasked && baseSheet[addr] !== undefined) {
           mergedSheet[addr] = baseSheet[addr];

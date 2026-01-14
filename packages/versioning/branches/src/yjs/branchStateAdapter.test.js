@@ -595,6 +595,31 @@ test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicate
   assert.deepEqual(state.cells.Sheet1.A1, { enc });
 });
 
+test("branchStateFromYjsDoc: treats enc=null markers as encrypted and ignores plaintext duplicates", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cellEnc = new Y.Map();
+    cellEnc.set("enc", null);
+    // Encrypted marker stored under a legacy key encoding.
+    cells.set("Sheet1:0,0", cellEnc);
+
+    const cellPlain = new Y.Map();
+    cellPlain.set("value", "leaked");
+    // Plaintext duplicate stored under the canonical key.
+    cells.set("Sheet1:0:0", cellPlain);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.cells.Sheet1.A1, { enc: null });
+});
+
 test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips workbook metadata", () => {
   const doc = new Y.Doc();
   doc.transact(() => {
