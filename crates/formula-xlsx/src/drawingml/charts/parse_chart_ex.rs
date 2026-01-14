@@ -1102,8 +1102,9 @@ mod tests {
         assert_eq!(
             hints,
             vec![
+                // Output is sorted for stability (diagnostic-only helper).
+                "chartType=waterfall".to_string(),
                 "layoutId=treemap".to_string(),
-                "chartType=waterfall".to_string()
             ]
         );
     }
@@ -1126,18 +1127,19 @@ mod tests {
         assert_eq!(
             hints,
             vec![
-                "layoutId=kind0",
                 "chartType=type0",
-                "layoutId=kind1",
                 "chartType=type1",
-                "layoutId=kind2",
                 "chartType=type2",
-                "layoutId=kind3",
                 "chartType=type3",
-                "layoutId=kind4",
                 "chartType=type4",
-                "layoutId=kind5",
                 "chartType=type5",
+                // Followed by the sorted layoutId hints.
+                "layoutId=kind0",
+                "layoutId=kind1",
+                "layoutId=kind2",
+                "layoutId=kind3",
+                "layoutId=kind4",
+                "layoutId=kind5",
             ]
             .into_iter()
             .map(str::to_string)
