@@ -67,6 +67,20 @@ fn mask_to_bools(mask: &BitVec) -> Vec<bool> {
 }
 
 #[test]
+fn bitvec_iter_ones_yields_increasing_indices() {
+    let mut mask = BitVec::new();
+    mask.push(false);
+    mask.push(true);
+    mask.push(false);
+    mask.push(true);
+    mask.push(true);
+    mask.push(false);
+
+    let ones: Vec<usize> = mask.iter_ones().collect();
+    assert_eq!(ones, vec![1, 3, 4]);
+}
+
+#[test]
 fn filter_numeric_comparisons() {
     let table = build_table();
 

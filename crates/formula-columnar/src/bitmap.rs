@@ -205,6 +205,52 @@ impl BitVec {
         self.ones = self.len.saturating_sub(self.ones);
     }
 
+    /// Iterate the indices of set bits (true values) in increasing order.
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+        struct OnesIter<'a> {
+            words: &'a [u64],
+            len: usize,
+            word_idx: usize,
+            current_word: u64,
+            base: usize,
+        }
+
+        impl<'a> Iterator for OnesIter<'a> {
+            type Item = usize;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                loop {
+                    if self.current_word != 0 {
+                        let bit = self.current_word.trailing_zeros() as usize;
+                        // Clear lowest set bit.
+                        self.current_word &= self.current_word - 1;
+                        let idx = self.base + bit;
+                        if idx < self.len {
+                            return Some(idx);
+                        }
+                        continue;
+                    }
+
+                    if self.word_idx >= self.words.len() {
+                        return None;
+                    }
+
+                    self.current_word = self.words[self.word_idx];
+                    self.base = self.word_idx * 64;
+                    self.word_idx += 1;
+                }
+            }
+        }
+
+        OnesIter {
+            words: &self.words,
+            len: self.len,
+            word_idx: 0,
+            current_word: 0,
+            base: 0,
+        }
+    }
+
     /// Reconstruct a [`BitVec`] from a raw word buffer and a bit length.
     ///
     /// This is primarily used by persistence layers that store the `u64` words

@@ -276,14 +276,15 @@ pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTabl
         return Err(QueryError::InternalInvariant("filter mask length must match table"));
     }
 
+    if mask.all_true() {
+        return Ok(table.clone());
+    }
+
     let schema: Vec<ColumnSchema> = table.schema().to_vec();
     let mut builder = ColumnarTableBuilder::new(schema, table.options());
     let mut scratch_row: Vec<Value> = vec![Value::Null; table.column_count()];
 
-    for row in 0..table.row_count() {
-        if !mask.get(row) {
-            continue;
-        }
+    for row in mask.iter_ones() {
         for col in 0..table.column_count() {
             scratch_row[col] = table.get_cell(row, col);
         }
