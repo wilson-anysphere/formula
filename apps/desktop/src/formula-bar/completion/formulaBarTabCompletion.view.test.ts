@@ -95,6 +95,66 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("evaluates preview values for implicit this-row structured references ([@Column])", async () => {
+    const doc = new DocumentController();
+    // Table range includes header row at A1:C1 and data rows at A2:C4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Total Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 2 }, "Calc");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 100);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 200);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 30);
+    doc.setCellValue("Sheet1", { row: 3, col: 1 }, 300);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    // Edit a cell inside the table (row 3 / col C).
+    view.setActiveCell({ address: "C3", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      schemaProvider: {
+        getSheetNames: () => ["Sheet1"],
+        getNamedRanges: () => [],
+        getTables: () => [
+          {
+            name: "TableThisRow",
+            sheetName: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 3,
+            endCol: 2,
+            columns: ["Amount", "Total Amount", "Calc"],
+          },
+        ],
+        getCacheKey: () => "schema:v1",
+      },
+      completionClient: {
+        completeTabCompletion: async () => "[@Amount]",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=1+[@Amount]");
+    expect(view.model.aiSuggestionPreview()).toBe(21);
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("suggests contiguous ranges for SUM when typing a column reference", async () => {
     const doc = new DocumentController();
     for (let row = 0; row < 10; row += 1) {

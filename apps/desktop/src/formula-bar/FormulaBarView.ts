@@ -5,6 +5,7 @@ import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
+  tokenizeFormula,
   toggleA1AbsoluteAtCursor,
   type ExtractFormulaReferencesOptions,
   type FormulaReferenceRange,
@@ -110,37 +111,33 @@ function isWhitespace(ch: string): boolean {
 function computeFormulaIndentation(text: string, cursor: number): string {
   const cursorPos = Math.max(0, Math.min(cursor, text.length));
 
-  let inString = false;
   let parenDepth = 0;
   let lastSignificantOutsideString: string | null = null;
+  let inString = false;
 
-  for (let i = 0; i < cursorPos; i++) {
-    const ch = text[i]!;
+  const tokens = tokenizeFormula(text);
 
-    if (ch === '"') {
-      if (inString) {
-        // Excel-style escaping: `""` inside a string literal is an escaped `"`.
-        if (text[i + 1] === '"') {
-          i++; // Skip the escaped quote.
-          continue;
-        }
-        inString = false;
-      } else {
+  for (const token of tokens) {
+    if (token.start >= cursorPos) break;
+
+    if (token.type === "string") {
+      // `tokenizeFormula` returns unterminated strings as a single token that runs to the
+      // end of the input. If the cursor is at the end of an unterminated string, treat it
+      // as "inside" the string so we avoid inserting indentation into the literal.
+      const unterminated = !token.text.endsWith('"');
+      if (token.start < cursorPos && (cursorPos < token.end || (unterminated && cursorPos === token.end))) {
         inString = true;
       }
       continue;
     }
 
-    if (inString) continue;
-
-    if (ch === "(") {
-      parenDepth++;
-    } else if (ch === ")") {
-      parenDepth = Math.max(0, parenDepth - 1);
+    if (token.type === "punctuation") {
+      if (token.text === "(") parenDepth += 1;
+      else if (token.text === ")") parenDepth = Math.max(0, parenDepth - 1);
     }
 
-    if (!isWhitespace(ch)) {
-      lastSignificantOutsideString = ch;
+    if (token.type !== "whitespace") {
+      lastSignificantOutsideString = token.text;
     }
   }
 
@@ -149,7 +146,7 @@ function computeFormulaIndentation(text: string, cursor: number): string {
 
   // Optional continuation indent: if the preceding token is a comma but we're not inside parentheses
   // (e.g. array constants / union expressions), add a single indentation level.
-  if (parenDepth === 0 && lastSignificantOutsideString === ",") {
+  if (parenDepth === 0 && (lastSignificantOutsideString === "," || lastSignificantOutsideString === ";")) {
     parenDepth = 1;
   }
 

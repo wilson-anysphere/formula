@@ -116,4 +116,58 @@ describe("FormulaBarView Alt+Enter auto-indentation", () => {
 
     host.remove();
   });
+
+  it("ignores parentheses inside structured references", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const commits: string[] = [];
+    const view = new FormulaBarView(host, { onCommit: (text) => commits.push(text) });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    // The `(` inside the structured-ref column name should not increase indentation depth.
+    const formula = `=SUM(Table1[Amount(USD)],1`;
+    view.textarea.value = formula;
+    view.textarea.setSelectionRange(formula.length, formula.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+
+    const expected = `=SUM(Table1[Amount(USD)],1\n  `;
+    expect(view.textarea.value).toBe(expected);
+    expect(view.model.draft).toBe(expected);
+    expect(view.textarea.selectionStart).toBe(expected.length);
+    expect(view.textarea.selectionEnd).toBe(expected.length);
+    expect(commits).toEqual([]);
+
+    host.remove();
+  });
+
+  it("ignores parentheses inside quoted sheet names", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const commits: string[] = [];
+    const view = new FormulaBarView(host, { onCommit: (text) => commits.push(text) });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    // The `)` in the sheet name should not reduce indentation depth.
+    const formula = `=SUM('Budget,2025)'!A1,1`;
+    view.textarea.value = formula;
+    view.textarea.setSelectionRange(formula.length, formula.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+
+    const expected = `=SUM('Budget,2025)'!A1,1\n  `;
+    expect(view.textarea.value).toBe(expected);
+    expect(view.model.draft).toBe(expected);
+    expect(view.textarea.selectionStart).toBe(expected.length);
+    expect(view.textarea.selectionEnd).toBe(expected.length);
+    expect(commits).toEqual([]);
+
+    host.remove();
+  });
 });
