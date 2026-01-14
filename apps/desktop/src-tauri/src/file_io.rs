@@ -1320,7 +1320,21 @@ pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
 }
 
 fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    let wb = XlsbWorkbook::open(path).with_context(|| format!("open xlsb workbook {:?}", path))?;
+    // Open XLSB with minimal preservation to reduce memory usage and exposure to
+    // potentially-large/unsupported OPC parts (e.g. embedded media). The desktop app's XLSB save
+    // path re-opens `Workbook::origin_xlsb_path` with preservation disabled as well, so we do not
+    // need to keep `formula-xlsb`'s `preserved_parts` in-memory during read.
+    let wb = XlsbWorkbook::open_with_options(
+        path,
+        XlsbOpenOptions {
+            preserve_unknown_parts: false,
+            preserve_parsed_parts: false,
+            preserve_worksheets: false,
+            // Keep formula decoding enabled to preserve historical behavior (UI-visible formulas).
+            decode_formulas: true,
+        },
+    )
+    .with_context(|| format!("open xlsb workbook {:?}", path))?;
 
     let date_system = if wb.workbook_properties().date_system_1904 {
         WorkbookDateSystem::Excel1904
@@ -2894,6 +2908,35 @@ mod tests {
             sniff_workbook_format(&xlsb_path),
             Some(SniffedWorkbookFormat::Xlsb)
         );
+    }
+
+    #[test]
+    fn read_xlsb_blocking_opens_fixture_and_reads_cells() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        );
+        let workbook = read_xlsb_blocking(Path::new(fixture_path)).expect("read xlsb workbook");
+
+        assert_eq!(workbook.origin_xlsb_path.as_deref(), Some(fixture_path));
+        assert_eq!(workbook.date_system, WorkbookDateSystem::Excel1900);
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+        let sheet = workbook.sheet("Sheet1").expect("Sheet1 present");
+
+        assert_eq!(
+            sheet.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Number(42.5)
+        );
+
+        let formula_cell = sheet.get_cell(0, 2);
+        assert_eq!(formula_cell.formula.as_deref(), Some("=B1*2"));
+        assert_eq!(formula_cell.computed_value, CellScalar::Number(85.0));
     }
 
     #[test]
