@@ -85,6 +85,11 @@ The committed translation sources live under:
 
 `crates/formula-engine/src/locale/data/sources/*.json`
 
+See also:
+
+- [`crates/formula-engine/src/locale/data/README.md`](../../crates/formula-engine/src/locale/data/README.md)
+  for completeness requirements, generators, and verification steps (especially for `es-ES`).
+
 To extract a full mapping from a **real Excel install** for the active Excel UI language, run
 (from repo root on Windows):
 
