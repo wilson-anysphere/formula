@@ -517,10 +517,11 @@ function reportSize({ env }) {
   // This is intentionally separate from installer artifact size budgets.
   // eslint-disable-next-line no-console
   console.log("\n[desktop-size] frontend asset download size (compressed JS/CSS/WASM):\n");
-  runOptional(process.execPath, ["scripts/frontend_asset_size_report.mjs", "--dist", "apps/desktop/dist"], {
+  const assetStatus = runOptional(process.execPath, ["scripts/frontend_asset_size_report.mjs", "--dist", "apps/desktop/dist"], {
     env,
     label: "frontend_asset_size_report",
   });
+  if (assetStatus !== 0) failed = true;
 
   const bundleDirs = findBundleDirs();
   if (bundleDirs.length === 0) {
