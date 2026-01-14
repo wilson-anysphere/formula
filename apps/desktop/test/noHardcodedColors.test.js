@@ -154,12 +154,12 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   );
   const domStyleColor = new RegExp(
     // DOM style assignments (e.g. `el.style.color = "red"`)
-    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const canvasStyleColor = new RegExp(
     // CanvasRenderingContext2D assignments (e.g. `ctx.fillStyle = "red"`)
-    String.raw`\b(?:fillStyle|strokeStyle)\b\s*=\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\b(?:fillStyle|strokeStyle)\b\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const styleCssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
