@@ -10925,7 +10925,7 @@ export class SpreadsheetApp {
           const candidates = keys.filter((k) => k !== "sheetId" && k !== "sheet_id");
           const variantKeys = candidates.filter((k) => {
             const value = (rawAnchor as any)[k];
-            return value && typeof value === "object";
+            return value && typeof value === "object" && !Array.isArray(value);
           });
           return variantKeys.length === 1 ? variantKeys[0]! : null;
         })();
