@@ -188,8 +188,10 @@ These are **vendored test fixtures** used by `crates/formula-io/tests/encrypted_
 
 Attribution / provenance:
 
-- The committed fixture bytes were generated using Python + `msoffcrypto-tool` (see
-  `fixtures/encrypted/ooxml/README.md` for the exact tool versions + passwords).
+- The committed fixture bytes were generated using Python +
+  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
+  [`fixtures/encrypted/ooxml/README.md`](../fixtures/encrypted/ooxml/README.md) for the exact tool
+  versions + passwords).
 - Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI),
   but it is not used for the committed fixture bytes.
 
