@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 
+import { yjsValueToJson } from "@formula/collab-yjs-utils";
 import { FormulaConflictMonitor } from "../src/formula-conflict-monitor.js";
 
 /**
@@ -66,7 +67,7 @@ function runScenario(ids) {
   Y.applyUpdate(localDoc, overwriteUpdate, "versioning-restore");
 
   const finalCell = /** @type {any} */ (cells.get(cellKey));
-  const finalFormula = (finalCell?.get?.("formula") ?? "").toString();
+  const finalFormula = String(yjsValueToJson(finalCell?.get?.("formula") ?? ""));
 
   const trackedAfter = monitor._lastLocalFormulaEditByCellKey.get(cellKey);
   const trackedContentAfter = monitor._lastLocalContentEditByCellKey.get(cellKey);
