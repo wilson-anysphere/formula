@@ -118,13 +118,20 @@ function parseErrorTsv(contents, label) {
       continue;
     }
     const parts = raw.split("\t");
-    if (parts.length < 2) {
-      throw new Error(`Invalid TSV line in ${label}:${i + 1} (expected 2 columns): ${inspect(raw)}`);
+    if (parts.length !== 2) {
+      throw new Error(
+        `Invalid TSV line in ${label}:${i + 1} (expected exactly 2 columns): ${inspect(raw)}`,
+      );
     }
     const canonical = parts[0].trim();
     const localized = parts[1].trim();
     if (!canonical || !localized) {
       throw new Error(`Invalid TSV line in ${label}:${i + 1} (empty field): ${inspect(raw)}`);
+    }
+    if (!canonical.startsWith("#") || !localized.startsWith("#")) {
+      throw new Error(
+        `Invalid TSV line in ${label}:${i + 1} (expected error literals to start with '#'): ${inspect(raw)}`,
+      );
     }
 
     // Detect duplicated localized spellings (case-insensitive) to avoid ambiguous parsing.
