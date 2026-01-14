@@ -1241,6 +1241,9 @@ export interface SimulationResult {
   outputSamples: Record<CellRef, number[]>;
 }
 
+// Note: `outputStats` / `outputSamples` come from Rust `HashMap`s; JSON key order is not stable.
+// Treat them as maps keyed by output `CellRef`, not as ordered lists.
+
 /**
  * Proposed `formula-wasm` request shape (mirrors the existing `goalSeek` style).
  *
@@ -1545,6 +1548,8 @@ Validation + edge cases (Rust behavior):
         - `"cell reference cannot be empty"`
         - `"invalid cell reference '<input>': missing address"` (e.g. `"Sheet1!"`)
         - `"invalid cell reference '<input>': missing sheet name"` (e.g. `"!A1"`)
+    - Note: `EngineSolverModel` does **not** validate that the address portion is a syntactically-valid A1 reference (it stores it as a string).
+      - Invalid A1 strings will be read as `#REF!` by the engine and then handled by the numeric coercion rules below.
     - A future `formula-wasm` binding will likely mirror `goalSeek` and accept A1 addresses without `Sheet!` prefixes, using a separate `sheet` field as the default sheet.
   - Numeric coercion:
     - Decision variables are read **strictly** at construction time:
