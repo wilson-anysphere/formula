@@ -94,7 +94,10 @@ test.describe("Insert → Pictures", () => {
   for (const mode of GRID_MODES) {
     test(`Insert → Pictures → This Device opens file picker and inserts image drawings (${mode})`, async ({ page }) => {
       const url = mode === "legacy" ? "/?grid=legacy" : "/?grid=shared";
-      await gotoDesktop(page, url);
+      // Pictures insertion triggers async image decode/IndexedDB writes. Avoid relying on an
+      // unbounded `whenIdle()` at navigation time: give the app a moment to settle, but don't
+      // hang forever if background work keeps it busy.
+      await gotoDesktop(page, url, { idleTimeoutMs: 10_000 });
       await whenIdle(page);
 
       // Ensure insertion starts from a deterministic location so the inserted pictures land in the viewport.
