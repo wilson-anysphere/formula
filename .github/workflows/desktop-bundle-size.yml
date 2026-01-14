@@ -247,6 +247,9 @@ jobs:
       - name: Validate produced AppImage desktop integration (.desktop + xlsx MIME)
         run: bash scripts/validate-linux-appimage.sh
 
+      - name: Validate produced RPM package payload (rpm -qp)
+        run: bash scripts/validate-linux-rpm.sh --no-container
+
       - name: Report desktop installer artifact sizes
         # If earlier steps fail (dependency install / build), still try to emit an
         # empty report + JSON artifact to aid debugging. When the build succeeds,
