@@ -572,6 +572,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: "Guard: desktop bundles ship LICENSE/NOTICE (config)"
+        run: node scripts/ci/check-desktop-compliance-artifacts.mjs
+
       - name: "Guard: locale function TSVs match generator output"
         env:
           # The function TSV generator derives its header date from SOURCE_DATE_EPOCH.
