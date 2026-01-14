@@ -3,6 +3,17 @@ use std::io::{Cursor, Write};
 use formula_model::Workbook;
 use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
 
+const STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="0.00"/>
+  </numFmts>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>"#;
+
 fn build_minimal_xlsx(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -56,19 +67,20 @@ fn assert_row_col_style_defaults(workbook: &Workbook, style_id: u32) {
     assert_eq!(sheet.row_properties(1).unwrap().style_id, Some(style_id));
 }
 
-fn fixture_bytes() -> Vec<u8> {
-    // Custom number format to force a non-default style entry.
-    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="1">
-    <numFmt numFmtId="164" formatCode="0.00"/>
-  </numFmts>
-  <cellXfs count="2">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-  </cellXfs>
-</styleSheet>"#;
+fn assert_no_row_col_style_defaults(workbook: &Workbook) {
+    let sheet = workbook.sheet_by_name("Sheet1").expect("sheet exists");
+    assert!(
+        sheet.col_properties(1).and_then(|p| p.style_id).is_none(),
+        "expected col 2 to have no default style override"
+    );
+    assert!(
+        sheet.row_properties(1).and_then(|p| p.style_id).is_none(),
+        "expected row 2 to have no default style override"
+    );
+}
 
+#[test]
+fn reads_row_and_col_default_styles_load_from_bytes() {
     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <cols>
@@ -78,13 +90,7 @@ fn fixture_bytes() -> Vec<u8> {
     <row r="2" s="1" customFormat="1"/>
   </sheetData>
 </worksheet>"#;
-
-    build_minimal_xlsx(sheet_xml, styles_xml)
-}
-
-#[test]
-fn reads_row_and_col_default_styles_load_from_bytes() {
-    let bytes = fixture_bytes();
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
     let doc = load_from_bytes(&bytes).expect("load_from_bytes");
 
     let style_id = style_id_for_number_format(&doc.workbook, "0.00");
@@ -93,8 +99,99 @@ fn reads_row_and_col_default_styles_load_from_bytes() {
 
 #[test]
 fn reads_row_and_col_default_styles_read_workbook_model_from_bytes() {
-    let bytes = fixture_bytes();
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="1" customFormat="1"/>
+  </cols>
+  <sheetData>
+    <row r="2" s="1" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
     let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
     let style_id = style_id_for_number_format(&workbook, "0.00");
     assert_row_col_style_defaults(&workbook, style_id);
+}
+
+#[test]
+fn reads_row_and_col_default_styles_when_custom_format_is_omitted() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="1"/>
+  </cols>
+  <sheetData>
+    <row r="2" s="1"/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    let style_id = style_id_for_number_format(&doc.workbook, "0.00");
+    assert_row_col_style_defaults(&doc.workbook, style_id);
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    let style_id = style_id_for_number_format(&workbook, "0.00");
+    assert_row_col_style_defaults(&workbook, style_id);
+}
+
+#[test]
+fn ignores_row_and_col_default_styles_when_custom_format_is_false() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="1" customFormat="0"/>
+  </cols>
+  <sheetData>
+    <row r="2" s="1" customFormat="0"/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    assert_no_row_col_style_defaults(&doc.workbook);
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    assert_no_row_col_style_defaults(&workbook);
+}
+
+#[test]
+fn ignores_row_and_col_default_styles_when_xf_is_zero() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="0" customFormat="1"/>
+  </cols>
+  <sheetData>
+    <row r="2" s="0" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    assert_no_row_col_style_defaults(&doc.workbook);
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    assert_no_row_col_style_defaults(&workbook);
+}
+
+#[test]
+fn ignores_malformed_row_and_col_style_indices_best_effort() {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" style="bogus" customFormat="1"/>
+  </cols>
+  <sheetData>
+    <row r="2" s="bogus" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+
+    let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+    assert_no_row_col_style_defaults(&doc.workbook);
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+    assert_no_row_col_style_defaults(&workbook);
 }
