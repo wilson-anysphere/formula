@@ -17805,10 +17805,17 @@ export class SpreadsheetApp {
         const baseStartCol = Math.min(startCol, endCol);
         const baseEndCol = Math.max(startCol, endCol);
 
-        const colIdx = findColumnIndex(table.columns, columnName);
-        if (colIdx == null) return null;
-        const col = baseStartCol + colIdx;
-        if (col < baseStartCol || col > baseEndCol) return null;
+        const normalizedColumn = String(columnName ?? "").trim();
+        const wantsWholeRow = normalizedColumn === "";
+        const col = (() => {
+          if (wantsWholeRow) return null;
+          const colIdx = findColumnIndex(table.columns, normalizedColumn);
+          if (colIdx == null) return null;
+          const resolved = baseStartCol + colIdx;
+          if (resolved < baseStartCol || resolved > baseEndCol) return null;
+          return resolved;
+        })();
+        if (!wantsWholeRow && col == null) return null;
 
         // Require the formula edit target to be on the same sheet as the table.
         const tableSheet =
@@ -17826,7 +17833,9 @@ export class SpreadsheetApp {
         const dataStartRow = baseStartRow + 1;
         if (row < dataStartRow || row > baseEndRow) return null;
 
-        const addr = cellToA1({ row, col });
+        const addr = wantsWholeRow
+          ? rangeToA1({ startRow: row, endRow: row, startCol: baseStartCol, endCol: baseEndCol })
+          : cellToA1({ row, col: col as number });
         const sheetToken = tableSheet ? formatSheetNameForA1(tableSheet) : "";
         const prefix = sheetToken ? `${sheetToken}!` : "";
         return `${prefix}${addr}`;
@@ -17860,10 +17869,8 @@ export class SpreadsheetApp {
         if (item.startsWith("@")) {
           const columnName =
             item.startsWith("@[") && item.endsWith("]") && item.length > 3 ? item.slice(2, -1).trim() : item.slice(1).trim();
-          if (columnName) {
-            const resolved = resolveThisRowStructuredRef(simpleMatch[1]!, columnName);
-            if (resolved) return resolved;
-          }
+          const resolved = resolveThisRowStructuredRef(simpleMatch[1]!, columnName);
+          if (resolved) return resolved;
           return null;
         }
       }
