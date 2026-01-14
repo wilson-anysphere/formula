@@ -335,6 +335,98 @@ fn userelationship_resolves_unicode_relationship_case_insensitively() {
 }
 
 #[test]
+fn related_resolves_unicode_identifiers_case_insensitively() {
+    let mut model = DataModel::new();
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            r#"SUMX(orders, IF(RELATED(STRASSE[REGION]) = "East", orders[amount], 0))"#,
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(30.0));
+}
+
+#[test]
+fn relatedtable_resolves_unicode_identifiers_case_insensitively() {
+    let mut model = DataModel::new();
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "SUMX(STRASSE, COUNTROWS(RELATEDTABLE(orders)))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(3_i64));
+}
+
+#[test]
 fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
     // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
     let mut model = DataModel::new();
