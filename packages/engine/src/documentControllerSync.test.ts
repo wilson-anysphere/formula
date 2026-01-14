@@ -918,6 +918,64 @@ describe("engine sync helpers", () => {
     expect(col0?.runs).toEqual(expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]));
   });
 
+  it("engineApplyDocumentChange clears range-run formatting even when style sync hooks are unavailable", async () => {
+    const doc = new DocumentController();
+
+    // Seed a range-run formatting layer.
+    doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+
+    // Capture the clearing payload.
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+    doc.setRangeFormat("Sheet1", "A1:Z2000", null);
+    unsubscribe();
+
+    expect(Array.isArray(payload?.rangeRunDeltas)).toBe(true);
+    expect(payload.rangeRunDeltas.length).toBeGreaterThan(0);
+    expect(payload.rangeRunDeltas[0]?.afterRuns).toEqual([]);
+
+    const engine = new FakeEngine([]);
+    // Disable style sync hooks to simulate a legacy engine that can't resolve style objects.
+    (engine as any).internStyle = undefined;
+    (engine as any).setCellStyleId = undefined;
+
+    await engineApplyDocumentChange(engine, payload);
+
+    const col0 = engine.formatRunsByColCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
+    expect(col0).toBeTruthy();
+    expect(col0?.runs).toEqual([]);
+    // Clearing should still force a recalc tick so volatile metadata functions observe the change.
+    expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
+  it("engineApplyDocumentChange clears range-run formatting via setColFormatRuns fallback when setFormatRunsByCol is unavailable", async () => {
+    const doc = new DocumentController();
+
+    doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+    doc.setRangeFormat("Sheet1", "A1:Z2000", null);
+    unsubscribe();
+
+    const engine = new FakeEngine([]);
+    (engine as any).setFormatRunsByCol = undefined;
+    (engine as any).internStyle = undefined;
+    (engine as any).setCellStyleId = undefined;
+
+    await engineApplyDocumentChange(engine, payload);
+
+    expect(engine.formatRunsByColCalls).toEqual([]);
+    const col0 = engine.colFormatRunsCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
+    expect(col0).toBeTruthy();
+    expect(col0?.runs).toEqual([]);
+    expect(engine.recalcCalls).toEqual([undefined]);
+  });
+
   it("engineHydrateFromDocument falls back to setColFormatRuns when setFormatRunsByCol is unavailable", async () => {
     const doc = new DocumentController();
     doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
