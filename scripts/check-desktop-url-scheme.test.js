@@ -75,17 +75,20 @@ const defaultFileAssociations = [
   { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
 ];
 
+const parquetMimeDest = `usr/share/mime/packages/${defaultIdentifier}.xml`;
+const parquetMimeSrc = `mime/${defaultIdentifier}.xml`;
+
 const defaultLinuxBundle = {
   deb: {
     depends: ["shared-mime-info"],
-    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
+    files: { [parquetMimeDest]: parquetMimeSrc },
   },
   rpm: {
     depends: ["shared-mime-info"],
-    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
+    files: { [parquetMimeDest]: parquetMimeSrc },
   },
   appimage: {
-    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
+    files: { [parquetMimeDest]: parquetMimeSrc },
   },
 };
 
