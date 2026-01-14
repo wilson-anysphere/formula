@@ -186,15 +186,9 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
         key_len_bytes
     );
 
-    // CryptoAPI's `CryptDeriveKey` behaves differently for MD5 vs SHA-1 when the requested key
-    // length is <= the digest length.
-    //
-    // Empirically (and matching `msoffcrypto-tool` / Windows CryptoAPI behavior):
-    // - MD5 can be used directly as the key when `key_len_bytes <= 16`.
-    // - SHA-1 still runs the ipad/opad expansion even when `key_len_bytes <= 20`.
-    if matches!(hash_alg, HashAlg::Md5) && key_len_bytes <= hash_len {
-        return hash_value[..key_len_bytes].to_vec();
-    }
+    // MS-OFFCRYPTO Standard AES uses CryptoAPI `CryptDeriveKey` semantics for both SHA-1 and MD5,
+    // and performs the ipad/opad expansion **even when the requested key length is <= the digest
+    // length** (e.g. AES-128).
 
     // The MS-OFFCRYPTO Standard mode only uses MD5/SHA-1, both of which have a 64-byte block size.
     // `hash_len` is guaranteed <= 64.
