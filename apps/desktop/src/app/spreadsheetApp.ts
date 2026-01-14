@@ -3770,6 +3770,14 @@ export class SpreadsheetApp {
       this.drawingsRenderScheduled = false;
       if (this.disposed) return;
       if (!this.uiReady) return;
+      // In shared-grid mode, axis size changes (and related scroll clamping/alignment) can update the
+      // renderer's internal scroll offsets even when the user didn't actively scroll. Keep our legacy
+      // scroll state in sync before computing drawing viewport geometry so overlays remain pixel-aligned.
+      if (this.sharedGrid) {
+        const scroll = this.sharedGrid.getScroll();
+        this.scrollX = scroll.x;
+        this.scrollY = scroll.y;
+      }
       this.renderDrawings();
     });
   }
