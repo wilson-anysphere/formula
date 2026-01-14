@@ -330,6 +330,32 @@ pub(crate) fn decrypt_agile_encrypted_package(
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
+    // `EncryptedPackage` begins with an 8-byte (little-endian) decrypted length. This value is
+    // untrusted and must not be used to drive large allocations without plausibility checks.
+    //
+    // Special-case: allow an empty package only when both the declared length and ciphertext are
+    // empty.
+    if expected_len == 0 {
+        if !ciphertext.is_empty() {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage size is zero but ciphertext is non-empty".to_string(),
+            ));
+        }
+    } else if ciphertext.is_empty() {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptedPackage ciphertext missing".to_string(),
+        ));
+    }
+    // Conservative bound: AES-CBC encryption cannot produce fewer bytes than the original
+    // plaintext length (padding can only increase the size).
+    if expected_len > ciphertext.len() {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptedPackage size {} larger than ciphertext length {}",
+            expected_len,
+            ciphertext.len()
+        )));
+    }
+
     if info.key_data.cipher_algorithm != "AES" {
         return Err(OfficeCryptoError::UnsupportedEncryption(format!(
             "unsupported cipherAlgorithm {}",
@@ -386,6 +412,36 @@ pub(crate) fn decrypt_agile_encrypted_package(
             max: opts.max_spin_count,
         });
     }
+
+    // Ciphertext is stored in 4096-byte segments, with each segment padded to the AES block size.
+    // Some producers may include trailing bytes in the OLE stream beyond the padded plaintext
+    // length; ignore them by decrypting only what we need.
+    const SEGMENT_LEN: usize = 4096;
+    let required_ciphertext_len = if expected_len == 0 {
+        0usize
+    } else {
+        let full_segments_len = (expected_len / SEGMENT_LEN) * SEGMENT_LEN;
+        let rem = expected_len % SEGMENT_LEN;
+        let last_padded = if rem == 0 {
+            0usize
+        } else {
+            rem.checked_add(15)
+                .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string()))?
+                / 16
+                * 16
+        };
+        full_segments_len
+            .checked_add(last_padded)
+            .ok_or_else(|| OfficeCryptoError::InvalidFormat("EncryptedPackage expected length overflow".to_string()))?
+    };
+    if ciphertext.len() < required_ciphertext_len {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "EncryptedPackage ciphertext truncated (len {}, expected at least {})",
+            ciphertext.len(),
+            required_ciphertext_len
+        )));
+    }
+    let ciphertext_decrypt = &ciphertext[..required_ciphertext_len];
 
     let schemes = [
         PasswordKeyEncryptorIvScheme::SaltValue,
@@ -552,16 +608,15 @@ pub(crate) fn decrypt_agile_encrypted_package(
         })?;
 
         // Decrypt the package data in 4096-byte segments.
-        const SEGMENT_LEN: usize = 4096;
         let mut out = Vec::new();
-        out.try_reserve_exact(ciphertext.len()).map_err(|source| {
+        out.try_reserve_exact(ciphertext_decrypt.len()).map_err(|source| {
             OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
         })?;
         let mut offset = 0usize;
         let mut block_index = 0u32;
-        while offset < ciphertext.len() {
-            let seg_len = (ciphertext.len() - offset).min(SEGMENT_LEN);
-            let seg = &ciphertext[offset..offset + seg_len];
+        while offset < ciphertext_decrypt.len() {
+            let seg_len = (ciphertext_decrypt.len() - offset).min(SEGMENT_LEN);
+            let seg = &ciphertext_decrypt[offset..offset + seg_len];
             let iv = derive_iv(
                 info.key_data.hash_algorithm,
                 &info.key_data.salt,
@@ -2101,5 +2156,50 @@ pub(crate) mod tests {
             ),
             "unexpected error: {err:?}"
         );
+    }
+
+    fn parsed_info() -> super::AgileEncryptionInfo {
+        let info_bytes = agile_encryption_info_fixture();
+        let header = parse_encryption_info_header(&info_bytes).expect("parse header");
+        super::parse_agile_encryption_info(&info_bytes, &header).expect("parse agile")
+    }
+
+    #[test]
+    fn decrypt_agile_rejects_u64_max_encrypted_package_size() {
+        let info = parsed_info();
+
+        // `u64::MAX` should be rejected as an absurd EncryptedPackage size before any allocation.
+        let encrypted_package = u64::MAX.to_le_bytes().to_vec();
+
+        let err = decrypt_agile_encrypted_package(
+            &info,
+            &encrypted_package,
+            "Password",
+            &crate::DecryptOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            OfficeCryptoError::EncryptedPackageSizeOverflow { total_size }
+                if total_size == u64::MAX
+        ));
+    }
+
+    #[test]
+    fn decrypt_agile_rejects_size_larger_than_ciphertext() {
+        let info = parsed_info();
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&100u64.to_le_bytes());
+        encrypted_package.extend_from_slice(&[0u8; 16]);
+
+        let err = decrypt_agile_encrypted_package(
+            &info,
+            &encrypted_package,
+            "Password",
+            &crate::DecryptOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
     }
 }

@@ -546,6 +546,23 @@ pub(crate) fn decrypt_standard_encrypted_package(
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
+    // `EncryptedPackage` begins with an 8-byte (little-endian) decrypted length. This value is
+    // untrusted and must not be used to drive allocations without plausibility checks.
+    //
+    // Special-case: allow an empty package only when both the declared length and ciphertext are
+    // empty.
+    if expected_len == 0 {
+        if !ciphertext.is_empty() {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "EncryptedPackage size is zero but ciphertext is non-empty".to_string(),
+            ));
+        }
+    } else if ciphertext.is_empty() {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptedPackage ciphertext missing".to_string(),
+        ));
+    }
+
     let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
 
     match info.header.alg_id {
@@ -1359,5 +1376,40 @@ pub(crate) mod tests {
         );
         let key0 = deriver.derive_key_for_block(0).expect("derive key");
         assert_eq!(key0.as_slice(), key_ref.as_slice());
+    }
+
+    fn parsed_info() -> super::StandardEncryptionInfo {
+        let info_bytes = standard_encryption_info_fixture();
+        let header = parse_encryption_info_header(&info_bytes).expect("parse header");
+        super::parse_standard_encryption_info(&info_bytes, &header).expect("parse standard")
+    }
+
+    #[test]
+    fn decrypt_standard_rejects_u64_max_encrypted_package_size() {
+        let info = parsed_info();
+
+        // `u64::MAX` should be rejected as an absurd EncryptedPackage size before any allocation.
+        let encrypted_package = u64::MAX.to_le_bytes().to_vec();
+
+        let err = super::decrypt_standard_encrypted_package(&info, &encrypted_package, "Password")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            OfficeCryptoError::EncryptedPackageSizeOverflow { total_size }
+                if total_size == u64::MAX
+        ));
+    }
+
+    #[test]
+    fn decrypt_standard_rejects_size_larger_than_ciphertext() {
+        let info = parsed_info();
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&100u64.to_le_bytes());
+        encrypted_package.extend_from_slice(&[0u8; 16]);
+
+        let err = super::decrypt_standard_encrypted_package(&info, &encrypted_package, "Password")
+            .unwrap_err();
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
     }
 }
