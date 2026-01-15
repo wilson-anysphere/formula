@@ -951,21 +951,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         // External 3D sheet spans are not valid structured-ref prefixes.
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     } else {
-                        // Workbook-only external reference (`[Book.xlsx]...`); parse the
-                        // bracketed workbook prefix.
-                        // Workbook ids can contain `]` (either escaped as `]]` in quoted
-                        // references or from bracketed path components like `C:\[foo]\Book.xlsx`),
-                        // so locate the last closing bracket.
-                        let Some(end) = key.rfind(']') else {
+                        let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
+                        else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        let workbook = &key[1..end];
-                        if workbook.is_empty() {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        if !key[end + 1..].is_empty() {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
                         (workbook, None)
                     };
 

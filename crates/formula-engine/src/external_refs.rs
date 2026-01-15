@@ -27,6 +27,24 @@ pub(crate) fn split_external_sheet_key_parts(key: &str) -> Option<(&str, &str)> 
     Some((workbook, sheet_part))
 }
 
+/// Parse a workbook-only external key in the canonical bracketed form: `"[Book]"`.
+///
+/// This is used for workbook-scoped external structured references like `[Book.xlsx]Table1[Col]`,
+/// which lower to a `SheetReference::External("[Book.xlsx]")` key (no explicit sheet name).
+///
+/// Returns the workbook identifier slice (borrowed from `key`).
+pub(crate) fn parse_external_workbook_key(key: &str) -> Option<&str> {
+    if !key.starts_with('[') {
+        return None;
+    }
+    let end = key.rfind(']')?;
+    if end + 1 != key.len() {
+        return None;
+    }
+    let workbook = &key[1..end];
+    (!workbook.is_empty()).then_some(workbook)
+}
+
 /// Parse an external workbook sheet key in the canonical bracketed form: `"[Book]Sheet"`.
 ///
 /// Returns the workbook name and sheet name slices (borrowed from `key`).
@@ -69,6 +87,29 @@ pub(crate) fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_external_workbook_key_parses_workbook_only() {
+        let workbook = parse_external_workbook_key("[Book.xlsx]").expect("parse");
+        assert_eq!(workbook, "Book.xlsx");
+    }
+
+    #[test]
+    fn parse_external_workbook_key_accepts_bracketed_directories_in_paths() {
+        let workbook = parse_external_workbook_key("[C:\\[foo]\\Book.xlsx]").expect("parse");
+        assert_eq!(workbook, "C:\\[foo]\\Book.xlsx");
+    }
+
+    #[test]
+    fn parse_external_workbook_key_rejects_missing_or_empty_workbook() {
+        assert!(parse_external_workbook_key("[Book.xlsx").is_none());
+        assert!(parse_external_workbook_key("[]").is_none());
+    }
+
+    #[test]
+    fn parse_external_workbook_key_rejects_sheet_qualified_keys() {
+        assert!(parse_external_workbook_key("[Book.xlsx]Sheet1").is_none());
+    }
 
     #[test]
     fn parse_external_key_accepts_spaces_and_hyphens_in_workbook() {

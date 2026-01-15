@@ -2730,7 +2730,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 },
                             );
                         } else {
-                            let Some(end) = key.rfind(']') else {
+                            let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
+                            else {
                                 let value = Value::Error(ErrorKind::Ref);
                                 return (
                                     EvalValue::Scalar(value.clone()),
@@ -2743,33 +2744,6 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     },
                                 );
                             };
-                            let workbook = &key[1..end];
-                            if workbook.is_empty() {
-                                let value = Value::Error(ErrorKind::Ref);
-                                return (
-                                    EvalValue::Scalar(value.clone()),
-                                    TraceNode {
-                                        kind: TraceKind::StructuredRef,
-                                        span: expr.span,
-                                        value,
-                                        reference: None,
-                                        children: Vec::new(),
-                                    },
-                                );
-                            }
-                            if !key[end + 1..].is_empty() {
-                                let value = Value::Error(ErrorKind::Ref);
-                                return (
-                                    EvalValue::Scalar(value.clone()),
-                                    TraceNode {
-                                        kind: TraceKind::StructuredRef,
-                                        span: expr.span,
-                                        value,
-                                        reference: None,
-                                        children: Vec::new(),
-                                    },
-                                );
-                            }
                             (workbook, None)
                         };
 

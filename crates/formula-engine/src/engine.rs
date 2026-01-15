@@ -16561,16 +16561,10 @@ fn walk_external_dependencies(
                     }
                 } else if key.starts_with('[') {
                     // Workbook-only external ref key like `[Book.xlsx]`.
-                    let Some(end) = key.rfind(']') else {
+                    let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
+                    else {
                         return;
                     };
-                    if end <= 1 {
-                        return;
-                    }
-                    let workbook = &key[1..end];
-                    if workbook.is_empty() {
-                        return;
-                    }
                     external_workbooks.insert(workbook.to_string());
 
                     // Attempt to refine workbook-level invalidation down to a sheet key when table
@@ -17012,13 +17006,10 @@ fn walk_external_expr(
                 None => {
                     // Workbook-only external reference (`[Book.xlsx]...`); parse the bracketed
                     // workbook prefix.
-                    let Some(end) = key.rfind(']') else {
+                    let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
+                    else {
                         return;
                     };
-                    let workbook = key.get(1..end).unwrap_or_default();
-                    if workbook.is_empty() {
-                        return;
-                    }
                     (workbook, None)
                 }
             };
