@@ -139,6 +139,7 @@ fn expand_external_spans_in_multirange(
     }
 
     let mut orders: HashMap<Arc<str>, Vec<String>> = HashMap::new();
+    let mut spans: HashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<Arc<str>>> = HashMap::new();
     let mut expanded: Vec<SheetRangeRef> = Vec::with_capacity(ranges.areas.len());
 
     for area in ranges.areas.iter() {
@@ -148,26 +149,33 @@ fn expand_external_spans_in_multirange(
                 start,
                 end,
             } => {
-                let order = match orders.entry(workbook.clone()) {
+                let cache_key = (workbook.clone(), start.clone(), end.clone());
+                let keys = match spans.entry(cache_key) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
-                        let Some(order) = grid.external_sheet_order(workbook.as_ref()) else {
-                            return Err(ErrorKind::Ref);
+                        let order = match orders.entry(workbook.clone()) {
+                            Entry::Occupied(entry) => entry.into_mut(),
+                            Entry::Vacant(entry) => {
+                                let Some(order) = grid.external_sheet_order(workbook.as_ref()) else {
+                                    return Err(ErrorKind::Ref);
+                                };
+                                entry.insert(order)
+                            }
                         };
-                        entry.insert(order)
+
+                        let keys = expand_external_sheet_span_from_order(
+                            workbook.as_ref(),
+                            start.as_ref(),
+                            end.as_ref(),
+                            order,
+                        )
+                        .ok_or(ErrorKind::Ref)?;
+                        entry.insert(keys.into_iter().map(Arc::<str>::from).collect())
                     }
                 };
 
-                let keys = expand_external_sheet_span_from_order(
-                    workbook.as_ref(),
-                    start.as_ref(),
-                    end.as_ref(),
-                    order,
-                )
-                .ok_or(ErrorKind::Ref)?;
-
-                expanded.extend(keys.into_iter().map(|key| {
-                    SheetRangeRef::new(SheetId::External(Arc::<str>::from(key)), area.range)
+                expanded.extend(keys.iter().map(|key| {
+                    SheetRangeRef::new(SheetId::External(key.clone()), area.range)
                 }));
             }
             SheetId::Local(_) | SheetId::External(_) => expanded.push(area.clone()),

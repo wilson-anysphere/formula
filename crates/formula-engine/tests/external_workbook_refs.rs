@@ -1,6 +1,7 @@
 use formula_engine::calc_settings::{CalcSettings, CalculationMode};
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ExternalValueProvider, PrecedentNode, Value};
+use formula_model::external_refs::format_external_key;
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
 use std::collections::HashMap;
@@ -665,8 +666,9 @@ fn precedents_expand_external_3d_sheet_spans_when_sheet_order_is_available() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -712,8 +714,9 @@ fn precedents_expand_path_qualified_external_3d_sheet_spans() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key(r"C:\path\Book.xlsx", sheet);
         provider.set(
-            &format!(r"[C:\path\Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1396,8 +1399,9 @@ fn external_3d_sheet_span_with_quoted_sheet_names_expands_via_provider_sheet_ord
         ],
     );
     for (sheet, value) in [("Sheet 1", 1.0), ("Sheet 2", 2.0), ("Sheet 3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1425,8 +1429,9 @@ fn external_3d_sheet_span_matches_endpoints_case_insensitively() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1454,8 +1459,9 @@ fn external_3d_sheet_span_allows_reversed_endpoints() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1483,8 +1489,9 @@ fn sheet_and_sheets_over_external_3d_span_use_provider_tab_order() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1548,8 +1555,9 @@ fn external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
         ],
     );
     for (sheet, value) in [("Kelvin", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
@@ -1853,8 +1861,9 @@ fn external_workbook_sheet_names_api_drives_sheet_and_span_expansion() {
         ],
     );
     for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        let key = format_external_key("Book.xlsx", sheet);
         provider.set(
-            &format!("[Book.xlsx]{sheet}"),
+            &key,
             CellAddr { row: 0, col: 0 },
             value,
         );
