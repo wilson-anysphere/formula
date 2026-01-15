@@ -361,8 +361,8 @@ fn parse_unquoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str
 
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
     if first == '[' {
-        let end = crate::external_refs::find_external_workbook_prefix_end(formula, start)?;
-        i = end;
+        let (prefix, _) = crate::external_refs::split_external_workbook_prefix(&formula[start..])?;
+        i = start + prefix.len();
 
         if i >= bytes.len() {
             return None;
@@ -1012,6 +1012,14 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("=[Book1.xlsx]Sheet1!A1", "Sheet1", "Data"),
             "=[Book1.xlsx]Sheet1!A1"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_unquoted_external_workbook_reference_with_bracketed_path() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=[C:\\[foo]\\Book1.xlsx]Sheet1!A1", "Sheet1", "Data"),
+            "=[C:\\[foo]\\Book1.xlsx]Sheet1!A1"
         );
     }
 
