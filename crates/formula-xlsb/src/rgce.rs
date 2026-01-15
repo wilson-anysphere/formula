@@ -10,8 +10,11 @@ use crate::errors::{xlsb_error_code_from_literal, xlsb_error_literal};
 use crate::format::push_column_label;
 use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
+use formula_biff::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use formula_biff::structured_refs::{
-    format_structured_ref, structured_ref_is_single_cell, StructuredColumns, StructuredRefItem,
+    format_structured_ref, structured_columns_placeholder_from_ids,
+    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK,
+    StructuredColumns, StructuredRefItem,
 };
 use formula_model::external_refs::{format_external_key, format_external_span_key};
 #[cfg(feature = "write")]
@@ -887,14 +890,7 @@ fn decode_rgce_impl(
                         // Interpret row/item flags. We intentionally accept unknown bits and
                         // continue decoding.
                         let flags16 = (decoded.flags & 0xFFFF) as u16;
-                        const FLAG_ALL: u16 = 0x0001;
-                        const FLAG_HEADERS: u16 = 0x0002;
-                        const FLAG_DATA: u16 = 0x0004;
-                        const FLAG_TOTALS: u16 = 0x0008;
-                        const FLAG_THIS_ROW: u16 = 0x0010;
-                        const KNOWN_FLAGS: u16 =
-                            FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
-                        let unknown = flags16 & !KNOWN_FLAGS;
+                        let unknown = flags16 & !KNOWN_FLAGS_MASK;
                         if unknown != 0 {
                             if let Some(warnings) = warnings.as_deref_mut() {
                                 warnings.push(DecodeWarning::UnknownStructuredRefFlags {
@@ -904,19 +900,7 @@ fn decode_rgce_impl(
                             }
                         }
 
-                        let item = if flags16 & FLAG_THIS_ROW != 0 {
-                            Some(StructuredRefItem::ThisRow)
-                        } else if flags16 & FLAG_HEADERS != 0 {
-                            Some(StructuredRefItem::Headers)
-                        } else if flags16 & FLAG_TOTALS != 0 {
-                            Some(StructuredRefItem::Totals)
-                        } else if flags16 & FLAG_ALL != 0 {
-                            Some(StructuredRefItem::All)
-                        } else if flags16 & FLAG_DATA != 0 {
-                            Some(StructuredRefItem::Data)
-                        } else {
-                            None
-                        };
+                        let item = structured_ref_item_from_flags(flags16);
 
                         let table_name = ctx
                             .and_then(|ctx| ctx.table_name(decoded.table_id))
@@ -926,26 +910,28 @@ fn decode_rgce_impl(
                         let col_first = decoded.col_first;
                         let col_last = decoded.col_last;
 
-                        let columns = if col_first == 0 && col_last == 0 {
-                            StructuredColumns::All
-                        } else if col_first == col_last {
-                            StructuredColumns::Single(
-                                ctx.and_then(|ctx| {
-                                    ctx.table_column_name(decoded.table_id, col_first)
-                                })
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("Column{col_first}")),
-                            )
+                        let columns = if let Some(ctx) = ctx {
+                            if col_first == 0 && col_last == 0 {
+                                StructuredColumns::All
+                            } else if col_first == col_last {
+                                let name = ctx
+                                    .table_column_name(decoded.table_id, col_first)
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("Column{col_first}"));
+                                StructuredColumns::Single(name)
+                            } else {
+                                let start = ctx
+                                    .table_column_name(decoded.table_id, col_first)
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("Column{col_first}"));
+                                let end = ctx
+                                    .table_column_name(decoded.table_id, col_last)
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("Column{col_last}"));
+                                StructuredColumns::Range { start, end }
+                            }
                         } else {
-                            let start = ctx
-                                .and_then(|ctx| ctx.table_column_name(decoded.table_id, col_first))
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("Column{col_first}"));
-                            let end = ctx
-                                .and_then(|ctx| ctx.table_column_name(decoded.table_id, col_last))
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("Column{col_last}"));
-                            StructuredColumns::Range { start, end }
+                            structured_columns_placeholder_from_ids(col_first, col_last)
                         };
 
                         let display_table_name = match item {
@@ -2435,14 +2421,6 @@ fn format_row_ref_from_field(row0: u32, col_field: u16) -> String {
     out
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PtgListDecoded {
-    table_id: u32,
-    flags: u32,
-    col_first: u32,
-    col_last: u32,
-}
-
 fn decode_ptg_list_payload_best_effort(
     payload: &[u8; 12],
     ctx: Option<&WorkbookContext>,
@@ -2463,50 +2441,7 @@ fn decode_ptg_list_payload_best_effort(
     //   [table_id: u32][flags: u32][col_spec: u32]
     //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
 
-    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-
-    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
-    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
-    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
-
-    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_b = (col_first_raw & 0xFFFF) as u32;
-    let flags_b = (col_first_raw >> 16) & 0xFFFF;
-    let col_last_b = (col_last_raw & 0xFFFF) as u32;
-
-    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_c = (col_spec_c & 0xFFFF) as u32;
-    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
-
-    let mut candidates = [
-        PtgListDecoded {
-            table_id,
-            flags: flags_a,
-            col_first: col_first_a,
-            col_last: col_last_a,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_b,
-            col_first: col_first_b,
-            col_last: col_last_b,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_c,
-            col_first: col_first_c,
-            col_last: col_last_c,
-        },
-        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
-        PtgListDecoded {
-            table_id,
-            flags: 0,
-            col_first: col_first_raw,
-            col_last: col_last_raw,
-        },
-    ];
+    let mut candidates = decode_ptg_list_payload_candidates(payload);
 
     if let Some(ctx) = ctx {
         candidates.sort_by_key(|cand| std::cmp::Reverse(score_ptg_list_candidate(cand, ctx)));

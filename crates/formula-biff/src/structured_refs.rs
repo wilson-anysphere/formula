@@ -2,6 +2,13 @@ use std::borrow::Cow;
 
 use formula_model::external_refs::escape_bracketed_identifier_content;
 
+pub const FLAG_ALL: u16 = 0x0001;
+pub const FLAG_HEADERS: u16 = 0x0002;
+pub const FLAG_DATA: u16 = 0x0004;
+pub const FLAG_TOTALS: u16 = 0x0008;
+pub const FLAG_THIS_ROW: u16 = 0x0010;
+pub const KNOWN_FLAGS_MASK: u16 = FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
+
 /// Structured reference item selector (Excel table "special items").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StructuredRefItem {
@@ -21,6 +28,40 @@ pub enum StructuredColumns {
     Single(String),
     /// Column range selector (e.g. `[[Col1]:[Col2]]`).
     Range { start: String, end: String },
+}
+
+pub fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {
+    // Flags are not strictly documented as mutually exclusive. Prefer the same priority order as
+    // the XLSB decoder: this-row beats header/totals/all/data.
+    if flags & FLAG_THIS_ROW != 0 {
+        Some(StructuredRefItem::ThisRow)
+    } else if flags & FLAG_HEADERS != 0 {
+        Some(StructuredRefItem::Headers)
+    } else if flags & FLAG_TOTALS != 0 {
+        Some(StructuredRefItem::Totals)
+    } else if flags & FLAG_ALL != 0 {
+        Some(StructuredRefItem::All)
+    } else if flags & FLAG_DATA != 0 {
+        Some(StructuredRefItem::Data)
+    } else {
+        None
+    }
+}
+
+pub fn structured_columns_placeholder_from_ids(
+    col_first: u32,
+    col_last: u32,
+) -> StructuredColumns {
+    if col_first == 0 && col_last == 0 {
+        StructuredColumns::All
+    } else if col_first == col_last {
+        StructuredColumns::Single(format!("Column{col_first}"))
+    } else {
+        StructuredColumns::Range {
+            start: format!("Column{col_first}"),
+            end: format!("Column{col_last}"),
+        }
+    }
 }
 
 pub fn structured_ref_is_single_cell(
@@ -196,6 +237,33 @@ mod tests {
             Some(StructuredRefItem::Headers),
             &StructuredColumns::All
         ));
+    }
+
+    #[test]
+    fn structured_ref_item_from_flags_prefers_this_row_over_other_items() {
+        assert_eq!(
+            structured_ref_item_from_flags(FLAG_THIS_ROW | FLAG_HEADERS),
+            Some(StructuredRefItem::ThisRow)
+        );
+    }
+
+    #[test]
+    fn structured_columns_placeholder_from_ids_formats_expected_names() {
+        assert_eq!(
+            structured_columns_placeholder_from_ids(0, 0),
+            StructuredColumns::All
+        );
+        assert_eq!(
+            structured_columns_placeholder_from_ids(2, 2),
+            StructuredColumns::Single("Column2".to_string())
+        );
+        assert_eq!(
+            structured_columns_placeholder_from_ids(2, 3),
+            StructuredColumns::Range {
+                start: "Column2".to_string(),
+                end: "Column3".to_string()
+            }
+        );
     }
 }
 

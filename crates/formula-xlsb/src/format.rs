@@ -1,5 +1,7 @@
 use std::fmt::Write;
 
+use formula_model::push_column_label as push_column_label_model;
+
 /// Format helpers intended for diagnostics and developer tooling.
 pub fn format_a1(row: u32, col: u32) -> String {
     // XLSB row/col indices are 0-based, matching `formula-model::CellRef`.
@@ -11,19 +13,7 @@ pub fn format_a1(row: u32, col: u32) -> String {
 
 /// Convert a 0-based column index to an Excel column label and append it to `out`.
 pub fn push_column_label(col: u32, out: &mut String) {
-    // Excel column labels are 1-based.
-    let mut col = u64::from(col) + 1;
-    let mut buf = [0u8; 10];
-    let mut i = 0usize;
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf[i] = b'A' + rem;
-        i += 1;
-        col = (col - 1) / 26;
-    }
-    for ch in buf[..i].iter().rev() {
-        out.push(*ch as char);
-    }
+    push_column_label_model(col, out);
 }
 
 /// Format bytes as an uppercase hex string, separated by spaces.

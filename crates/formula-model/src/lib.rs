@@ -40,7 +40,7 @@ mod view;
 mod workbook;
 mod worksheet;
 
-pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
+pub use address::{push_column_label, A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use autofilter::{
     DateComparison, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
     OpaqueDynamicFilter, SheetAutoFilter, TextMatch, TextMatchKind,

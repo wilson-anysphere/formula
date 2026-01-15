@@ -24,9 +24,13 @@ use super::{
     strings,
     supbook::{SupBookInfo, SupBookKind},
 };
+use formula_biff::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use formula_biff::structured_refs::{
-    format_structured_ref, structured_ref_is_single_cell, StructuredColumns, StructuredRefItem,
+    format_structured_ref, structured_columns_placeholder_from_ids,
+    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK,
+    StructuredRefItem,
 };
+use formula_model::push_column_label;
 use formula_model::external_refs::format_external_workbook_key;
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
@@ -605,14 +609,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
 
                         // Interpret row/item flags. Accept unknown bits and continue decoding.
                         let flags16 = (decoded.flags & 0xFFFF) as u16;
-                        const FLAG_ALL: u16 = 0x0001;
-                        const FLAG_HEADERS: u16 = 0x0002;
-                        const FLAG_DATA: u16 = 0x0004;
-                        const FLAG_TOTALS: u16 = 0x0008;
-                        const FLAG_THIS_ROW: u16 = 0x0010;
-                        const KNOWN_FLAGS: u16 =
-                            FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
-                        let unknown = flags16 & !KNOWN_FLAGS;
+                        let unknown = flags16 & !KNOWN_FLAGS_MASK;
                         if unknown != 0 {
                             push_warning(
                                 &mut warnings,
@@ -624,35 +621,14 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                             );
                         }
 
-                        let item = if flags16 & FLAG_THIS_ROW != 0 {
-                            Some(StructuredRefItem::ThisRow)
-                        } else if flags16 & FLAG_HEADERS != 0 {
-                            Some(StructuredRefItem::Headers)
-                        } else if flags16 & FLAG_TOTALS != 0 {
-                            Some(StructuredRefItem::Totals)
-                        } else if flags16 & FLAG_ALL != 0 {
-                            Some(StructuredRefItem::All)
-                        } else if flags16 & FLAG_DATA != 0 {
-                            Some(StructuredRefItem::Data)
-                        } else {
-                            None
-                        };
+                        let item = structured_ref_item_from_flags(flags16);
 
                         let table_name = format!("Table{}", decoded.table_id);
 
                         let col_first = decoded.col_first;
                         let col_last = decoded.col_last;
 
-                        let columns = if col_first == 0 && col_last == 0 {
-                            StructuredColumns::All
-                        } else if col_first == col_last {
-                            StructuredColumns::Single(format!("Column{col_first}"))
-                        } else {
-                            StructuredColumns::Range {
-                                start: format!("Column{col_first}"),
-                                end: format!("Column{col_last}"),
-                            }
-                        };
+                        let columns = structured_columns_placeholder_from_ids(col_first, col_last);
 
                         let display_table_name = match item {
                             Some(StructuredRefItem::ThisRow) => None,
@@ -3044,7 +3020,7 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
 #[cfg(test)]
 fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
     let mut out = String::new();
-    push_column(col0, &mut out);
+    push_column_label(col0, &mut out);
     out.push_str(&(row0 + 1).to_string());
     out
 }
@@ -3058,7 +3034,7 @@ fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
     if !col_rel {
         out.push('$');
     }
-    push_column(col as u32, &mut out);
+    push_column_label(col as u32, &mut out);
     if !row_rel {
         out.push('$');
     }
@@ -3079,7 +3055,7 @@ fn format_col_ref(col: u16, col_rel: bool) -> String {
     if !col_rel {
         out.push('$');
     }
-    push_column(col as u32, &mut out);
+    push_column_label(col as u32, &mut out);
     out
 }
 
@@ -3601,14 +3577,6 @@ fn col_from_a1(col: &str) -> Option<u32> {
     Some(value - 1)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PtgListDecoded {
-    table_id: u32,
-    flags: u32,
-    col_first: u32,
-    col_last: u32,
-}
-
 fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
     // There are multiple observed encodings for the 12-byte PtgList payload (table refs /
     // structured references). Try a handful of plausible layouts and prefer the one that looks
@@ -3625,51 +3593,7 @@ fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
     // Layout C (3*u32):
     //   [table_id: u32][flags: u32][col_spec: u32]
     //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
-    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-
-    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
-    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
-    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
-
-    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_b = (col_first_raw & 0xFFFF) as u32;
-    let flags_b = (col_first_raw >> 16) & 0xFFFF;
-    let col_last_b = (col_last_raw & 0xFFFF) as u32;
-
-    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_c = (col_spec_c & 0xFFFF) as u32;
-    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
-
-    let candidates = [
-        PtgListDecoded {
-            table_id,
-            flags: flags_a,
-            col_first: col_first_a,
-            col_last: col_last_a,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_b,
-            col_first: col_first_b,
-            col_last: col_last_b,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_c,
-            col_first: col_first_c,
-            col_last: col_last_c,
-        },
-        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
-        PtgListDecoded {
-            table_id,
-            flags: 0,
-            col_first: col_first_raw,
-            col_last: col_last_raw,
-        },
-    ];
-
+    let candidates = decode_ptg_list_payload_candidates(payload);
     *candidates
         .iter()
         .max_by_key(|cand| score_ptg_list_candidate(cand))
@@ -3707,19 +3631,6 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
     }
 
     score
-}
-
-fn push_column(col: u32, out: &mut String) {
-    // Excel columns are 1-based in A1 notation. We store 0-based internally.
-    let mut n = col + 1;
-    let mut buf = Vec::<u8>::new();
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        buf.push(b'A' + rem as u8);
-        n = (n - 1) / 26;
-    }
-    buf.reverse();
-    out.push_str(&String::from_utf8(buf).expect("A1 column bytes"));
 }
 
 #[cfg(test)]

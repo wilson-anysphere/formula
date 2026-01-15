@@ -382,17 +382,27 @@ impl std::error::Error for RangeParseError {
     }
 }
 
-fn col_to_name(col: u32) -> String {
-    // Excel columns are 1-based in A1 notation. We store 0-based internally.
-    let mut n = u64::from(col) + 1;
-    let mut out = Vec::<u8>::new();
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        out.push(b'A' + rem as u8);
-        n = (n - 1) / 26;
+/// Convert a 0-based column index to an Excel column label and append it to `out`.
+pub fn push_column_label(col: u32, out: &mut String) {
+    // Excel column labels are 1-based.
+    let mut col = u64::from(col) + 1;
+    let mut buf = [0u8; 10];
+    let mut i = 0usize;
+    while col > 0 {
+        let rem = ((col - 1) % 26) as u8;
+        buf[i] = b'A' + rem;
+        i += 1;
+        col = (col - 1) / 26;
     }
-    out.reverse();
-    String::from_utf8(out).expect("column letters are always valid UTF-8")
+    for ch in buf[..i].iter().rev() {
+        out.push(*ch as char);
+    }
+}
+
+fn col_to_name(col: u32) -> String {
+    let mut out = String::new();
+    push_column_label(col, &mut out);
+    out
 }
 
 fn name_to_col(s: &str) -> Result<u32, A1ParseError> {

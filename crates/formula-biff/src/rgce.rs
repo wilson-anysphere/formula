@@ -1,7 +1,9 @@
 use crate::function_ids::{function_id_to_name, function_spec_from_id};
+use crate::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use crate::structured_refs::{
-    format_structured_ref, structured_ref_is_single_cell, StructuredColumns, StructuredRefItem,
+    format_structured_ref, structured_ref_is_single_cell, StructuredRefItem,
 };
+use formula_model::{push_column_label, CellRef};
 
 /// Structured `rgce` decode failure with ptg id + offset.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -986,9 +988,12 @@ fn decode_rgce_impl(
                         // Best-effort: map table/column IDs to placeholder names (we don't have
                         // workbook context in this crate).
                         let table_name = format!("Table{table_id}");
-                        let columns = structured_columns_from_ids(col_first, col_last);
+                        let columns =
+                            crate::structured_refs::structured_columns_placeholder_from_ids(
+                                col_first, col_last,
+                            );
 
-                        let item = structured_ref_item_from_flags(flags16);
+                        let item = crate::structured_refs::structured_ref_item_from_flags(flags16);
                         let display_table_name = match item {
                             Some(StructuredRefItem::ThisRow) => None,
                             _ => Some(table_name.as_str()),
@@ -1427,7 +1432,9 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let row = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) + 1;
+                let row =
+                    u64::from(u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]))
+                        + 1;
                 let col = u16::from_le_bytes([rgce[i + 4], rgce[i + 5] & 0x3F]) as u32;
                 let flags = rgce[i + 5];
                 i += 6;
@@ -1436,7 +1443,7 @@ fn decode_rgce_impl(
                 if flags & 0x80 == 0 {
                     text.push('$');
                 }
-                push_column(col, &mut text);
+                push_column_label(col, &mut text);
                 if flags & 0x40 == 0 {
                     text.push('$');
                 }
@@ -1453,9 +1460,15 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let row1 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) + 1;
-                let row2 =
-                    u32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) + 1;
+                let row1 =
+                    u64::from(u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]))
+                        + 1;
+                let row2 = u64::from(u32::from_le_bytes([
+                    rgce[i + 4],
+                    rgce[i + 5],
+                    rgce[i + 6],
+                    rgce[i + 7],
+                ])) + 1;
                 let col1 = u16::from_le_bytes([rgce[i + 8], rgce[i + 9] & 0x3F]) as u32;
                 let col2 = u16::from_le_bytes([rgce[i + 10], rgce[i + 11] & 0x3F]) as u32;
                 let flags1 = rgce[i + 9];
@@ -1466,7 +1479,7 @@ fn decode_rgce_impl(
                 if flags1 & 0x80 == 0 {
                     start.push('$');
                 }
-                push_column(col1, &mut start);
+                push_column_label(col1, &mut start);
                 if flags1 & 0x40 == 0 {
                     start.push('$');
                 }
@@ -1476,7 +1489,7 @@ fn decode_rgce_impl(
                 if flags2 & 0x80 == 0 {
                     end.push('$');
                 }
-                push_column(col2, &mut end);
+                push_column_label(col2, &mut end);
                 if flags2 & 0x40 == 0 {
                     end.push('$');
                 }
@@ -1829,7 +1842,7 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
     if !col_relative {
         out.push('$');
     }
-    push_column(col, &mut out);
+    push_column_label(col, &mut out);
     if !row_relative {
         out.push('$');
     }
@@ -1838,34 +1851,7 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
 }
 
 fn format_cell_ref_a1(row0: u32, col0: u32) -> String {
-    let mut out = String::new();
-    push_column(col0, &mut out);
-    out.push_str(&(row0 + 1).to_string());
-    out
-}
-
-fn push_column(mut col: u32, out: &mut String) {
-    // Excel column labels are 1-based.
-    col += 1;
-    let mut buf = [0u8; 10];
-    let mut i = 0usize;
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf[i] = b'A' + rem;
-        i += 1;
-        col = (col - 1) / 26;
-    }
-    for ch in buf[..i].iter().rev() {
-        out.push(*ch as char);
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct PtgListDecoded {
-    table_id: u32,
-    flags: u32,
-    col_first: u32,
-    col_last: u32,
+    CellRef::new(row0, col0).to_a1()
 }
 
 fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
@@ -1887,50 +1873,7 @@ fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
     // Layout C (3*u32):
     //   [table_id: u32][flags: u32][col_spec: u32]
     //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
-    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-
-    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
-    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
-    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
-
-    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_b = (col_first_raw & 0xFFFF) as u32;
-    let flags_b = (col_first_raw >> 16) & 0xFFFF;
-    let col_last_b = (col_last_raw & 0xFFFF) as u32;
-
-    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
-    let col_first_c = (col_spec_c & 0xFFFF) as u32;
-    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
-
-    let mut candidates = [
-        PtgListDecoded {
-            table_id,
-            flags: flags_a,
-            col_first: col_first_a,
-            col_last: col_last_a,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_b,
-            col_first: col_first_b,
-            col_last: col_last_b,
-        },
-        PtgListDecoded {
-            table_id,
-            flags: flags_c,
-            col_first: col_first_c,
-            col_last: col_last_c,
-        },
-        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
-        PtgListDecoded {
-            table_id,
-            flags: 0,
-            col_first: col_first_raw,
-            col_last: col_last_raw,
-        },
-    ];
+    let mut candidates = decode_ptg_list_payload_candidates(payload);
 
     // Default to the canonical (documented) layout when it yields a plausible result, to avoid
     // mis-decoding well-formed payloads that are ambiguous under other interpretations.
@@ -1967,13 +1910,6 @@ fn ptg_list_candidate_is_plausible(cand: &PtgListDecoded) -> bool {
 }
 
 fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
-    const FLAG_ALL: u16 = 0x0001;
-    const FLAG_HEADERS: u16 = 0x0002;
-    const FLAG_DATA: u16 = 0x0004;
-    const FLAG_TOTALS: u16 = 0x0008;
-    const FLAG_THIS_ROW: u16 = 0x0010;
-    const KNOWN_FLAGS: u16 = FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
-
     let mut score = 0i32;
 
     // Prefer non-zero table ids.
@@ -1986,7 +1922,7 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
     // Prefer candidates where the low 16 bits of the flags field look like known structured-ref
     // flags. Unknown bits are allowed, but usually indicate we chose the wrong layout.
     let flags16 = (cand.flags & 0xFFFF) as u16;
-    let unknown = flags16 & !KNOWN_FLAGS;
+    let unknown = flags16 & !crate::structured_refs::KNOWN_FLAGS_MASK;
     if unknown == 0 {
         score += 10;
     } else {
@@ -2034,43 +1970,6 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
     }
 
     score
-}
-
-fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {
-    const FLAG_ALL: u16 = 0x0001;
-    const FLAG_HEADERS: u16 = 0x0002;
-    const FLAG_DATA: u16 = 0x0004;
-    const FLAG_TOTALS: u16 = 0x0008;
-    const FLAG_THIS_ROW: u16 = 0x0010;
-
-    // Flags are not strictly documented as mutually exclusive. Prefer the same priority order as
-    // `formula-xlsb`'s decoder.
-    if flags & FLAG_THIS_ROW != 0 {
-        Some(StructuredRefItem::ThisRow)
-    } else if flags & FLAG_HEADERS != 0 {
-        Some(StructuredRefItem::Headers)
-    } else if flags & FLAG_TOTALS != 0 {
-        Some(StructuredRefItem::Totals)
-    } else if flags & FLAG_ALL != 0 {
-        Some(StructuredRefItem::All)
-    } else if flags & FLAG_DATA != 0 {
-        Some(StructuredRefItem::Data)
-    } else {
-        None
-    }
-}
-
-fn structured_columns_from_ids(col_first: u32, col_last: u32) -> StructuredColumns {
-    if col_first == 0 && col_last == 0 {
-        StructuredColumns::All
-    } else if col_first == col_last {
-        StructuredColumns::Single(format!("Column{col_first}"))
-    } else {
-        StructuredColumns::Range {
-            start: format!("Column{col_first}"),
-            end: format!("Column{col_last}"),
-        }
-    }
 }
 
 #[cfg(feature = "encode")]
