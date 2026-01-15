@@ -4635,64 +4635,32 @@ fn extern_sheet_range_index_with_fallback(
     // `'[Book]Sheet1:Sheet3'!A1` (workbook prefix appears once). The AST encoder
     // (`sheet_spec_from_ref_prefix`) expands this into `"[Book]Sheet1"` and `"[Book]Sheet3"`.
     // Try both representations so callers can register ExternSheet entries either way.
-    if let Some((prefix, _sheet)) = split_external_workbook_prefix(first) {
-        if split_external_workbook_prefix(last).is_none() {
-            let last_with_prefix = format!("{prefix}{last}");
-            if let Some(ixti) = ctx.extern_sheet_range_index(first, &last_with_prefix) {
-                return Some(ixti);
-            }
+    let first_prefix = formula_model::external_refs::split_external_workbook_prefix(first);
+    let last_prefix = formula_model::external_refs::split_external_workbook_prefix(last);
+
+    if let (Some((prefix, _)), None) = (first_prefix, last_prefix) {
+        let last_with_prefix = format!("{prefix}{last}");
+        if let Some(ixti) = ctx.extern_sheet_range_index(first, &last_with_prefix) {
+            return Some(ixti);
         }
     }
 
-    if let Some((prefix, last_sheet)) = split_external_workbook_prefix(last) {
-        if split_external_workbook_prefix(first).is_none() {
-            let first_with_prefix = format!("{prefix}{first}");
-            if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last) {
-                return Some(ixti);
-            }
-            if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last_sheet) {
-                return Some(ixti);
-            }
+    if let (None, Some((prefix, last_sheet))) = (first_prefix, last_prefix) {
+        let first_with_prefix = format!("{prefix}{first}");
+        if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last) {
+            return Some(ixti);
+        }
+        if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last_sheet) {
+            return Some(ixti);
         }
     }
 
-    if let (Some((prefix1, _)), Some((prefix2, last_sheet))) = (
-        split_external_workbook_prefix(first),
-        split_external_workbook_prefix(last),
-    ) {
+    if let (Some((prefix1, _)), Some((prefix2, last_sheet))) = (first_prefix, last_prefix) {
         if sheet_name_eq_case_insensitive(prefix1, prefix2) {
             if let Some(ixti) = ctx.extern_sheet_range_index(first, last_sheet) {
                 return Some(ixti);
             }
         }
-    }
-
-    None
-}
-
-fn split_external_workbook_prefix(raw: &str) -> Option<(&str, &str)> {
-    // Workbook prefixes are *not* nesting; workbook names may contain `[` characters. Excel also
-    // escapes literal `]` characters by doubling them (`]]`).
-    let bytes = raw.as_bytes();
-    if bytes.first() != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = 1;
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            let prefix_len = i + 1; // include closing `]`
-            return Some((&raw[..prefix_len], &raw[prefix_len..]));
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = raw[i..].chars().next()?;
-        i += ch.len_utf8();
     }
 
     None

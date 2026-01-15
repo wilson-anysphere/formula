@@ -3884,34 +3884,6 @@ fn is_ident_cont_char(c: char) -> bool {
     ) || (!c.is_ascii() && c.is_alphanumeric())
 }
 
-fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
-    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
-    //
-    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside a multi-byte sequence as actual bracket characters.
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-
-    None
-}
-
 fn skip_ws(src: &str, mut i: usize) -> usize {
     while i < src.len() {
         let Some(ch) = src[i..].chars().next() else {
@@ -3977,7 +3949,7 @@ fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
 }
 
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
-    let end = find_workbook_prefix_end(src, start)?;
+    let end = formula_model::external_refs::find_external_workbook_prefix_end(src, start)?;
 
     // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
     // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR

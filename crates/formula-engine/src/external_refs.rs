@@ -12,28 +12,7 @@
 /// - Excel escapes literal `]` characters inside workbook identifiers by doubling them: `]]` -> `]`.
 /// - Workbook identifiers may contain `[` characters; treat them as plain text (no nesting).
 pub(crate) fn find_external_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-
-    None
+    formula_model::external_refs::find_external_workbook_prefix_end(src, start)
 }
 
 /// Split an external workbook key on the bracketed workbook boundary.

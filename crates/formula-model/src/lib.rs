@@ -18,6 +18,7 @@ mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
 mod error;
+pub mod external_refs;
 pub mod formula_rewrite;
 mod formula_text;
 mod hyperlinks;
