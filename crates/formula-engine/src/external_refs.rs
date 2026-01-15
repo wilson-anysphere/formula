@@ -20,22 +20,7 @@ pub(crate) fn find_external_workbook_prefix_end(src: &str, start: usize) -> Opti
 /// Accepts both single-sheet keys (`"[Book]Sheet"`) and 3D span keys (`"[Book]Start:End"`).
 /// The returned `sheet_part` is everything after the closing bracket (it may contain `:`).
 pub(crate) fn split_external_sheet_key_parts(key: &str) -> Option<(&str, &str)> {
-    if !key.starts_with('[') {
-        return None;
-    }
-
-    // External workbook ids can include a path prefix (e.g. from a quoted reference like
-    // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`), and that prefix may itself contain `[` / `]`. Locate
-    // the *last* closing bracket to recover the full workbook id.
-    let end = key.rfind(']')?;
-    let workbook = &key[1..end];
-    let sheet_part = &key[end + 1..];
-
-    if workbook.is_empty() || sheet_part.is_empty() {
-        return None;
-    }
-
-    Some((workbook, sheet_part))
+    formula_model::external_refs::split_external_sheet_key_parts(key)
 }
 
 /// Parse a workbook-only external key in the canonical bracketed form: `"[Book]"`.
@@ -45,15 +30,7 @@ pub(crate) fn split_external_sheet_key_parts(key: &str) -> Option<(&str, &str)> 
 ///
 /// Returns the workbook identifier slice (borrowed from `key`).
 pub(crate) fn parse_external_workbook_key(key: &str) -> Option<&str> {
-    if !key.starts_with('[') {
-        return None;
-    }
-    let end = key.rfind(']')?;
-    if end + 1 != key.len() {
-        return None;
-    }
-    let workbook = &key[1..end];
-    (!workbook.is_empty()).then_some(workbook)
+    formula_model::external_refs::parse_external_workbook_key(key)
 }
 
 /// Parse an external workbook sheet key in the canonical bracketed form: `"[Book]Sheet"`.
@@ -64,35 +41,14 @@ pub(crate) fn parse_external_workbook_key(key: &str) -> Option<&str> {
 /// - External 3D spans (`"[Book]Sheet1:Sheet3"`) are **not** accepted here; use
 ///   [`parse_external_span_key`] instead.
 pub(crate) fn parse_external_key(key: &str) -> Option<(&str, &str)> {
-    let (workbook, sheet) = split_external_sheet_key_parts(key)?;
-
-    // `:` indicates an external workbook 3D span like `"[Book]Sheet1:Sheet3"`. Those are parsed
-    // separately by [`parse_external_span_key`].
-    if sheet.contains(':') {
-        return None;
-    }
-
-    Some((workbook, sheet))
+    formula_model::external_refs::parse_external_key(key)
 }
 
 /// Parse an external workbook 3D span key in the canonical bracketed form: `"[Book]Start:End"`.
 ///
 /// Returns the workbook name, start sheet, and end sheet slices (borrowed from `key`).
 pub(crate) fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
-    let (workbook, sheet_part) = split_external_sheet_key_parts(key)?;
-
-    let (start, end) = sheet_part.split_once(':')?;
-    if start.is_empty() || end.is_empty() {
-        return None;
-    }
-
-    // Sheet names cannot contain `:` in Excel, so reject additional separators to avoid
-    // ambiguity.
-    if end.contains(':') {
-        return None;
-    }
-
-    Some((workbook, start, end))
+    formula_model::external_refs::parse_external_span_key(key)
 }
 
 #[cfg(test)]
