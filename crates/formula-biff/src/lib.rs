@@ -19,6 +19,7 @@
 mod ftab;
 mod function_ids;
 mod rgce;
+pub mod structured_refs;
 
 pub use ftab::{function_id_from_name, function_name_from_id, FTAB_USER_DEFINED};
 pub use function_ids::{function_id_to_name, function_name_to_id, function_spec_from_id};

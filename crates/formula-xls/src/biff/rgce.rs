@@ -24,6 +24,9 @@ use super::{
     strings,
     supbook::{SupBookInfo, SupBookKind},
 };
+use formula_biff::structured_refs::{
+    format_structured_ref, structured_ref_is_single_cell, StructuredColumns, StructuredRefItem,
+};
 use formula_model::external_refs::format_external_workbook_key;
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
@@ -3599,22 +3602,6 @@ fn col_from_a1(col: &str) -> Option<u32> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StructuredRefItem {
-    All,
-    Data,
-    Headers,
-    Totals,
-    ThisRow,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StructuredColumns {
-    All,
-    Single(String),
-    Range { start: String, end: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PtgListDecoded {
     table_id: u32,
     flags: u32,
@@ -3720,97 +3707,6 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
     }
 
     score
-}
-
-fn structured_ref_is_single_cell(
-    item: Option<StructuredRefItem>,
-    columns: &StructuredColumns,
-) -> bool {
-    match (item, columns) {
-        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
-        (Some(StructuredRefItem::Headers), StructuredColumns::Single(_)) => true,
-        (Some(StructuredRefItem::Totals), StructuredColumns::Single(_)) => true,
-        _ => false,
-    }
-}
-
-fn format_structured_ref(
-    table_name: Option<&str>,
-    item: Option<StructuredRefItem>,
-    columns: &StructuredColumns,
-) -> String {
-    // This-row shorthand: `[@Col]`, `[@]`, and `[@[Col1]:[Col2]]`.
-    if matches!(item, Some(StructuredRefItem::ThisRow)) {
-        match columns {
-            StructuredColumns::Single(col) => {
-                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
-                return format!("[@{col}]");
-            }
-            StructuredColumns::All => return "[@]".to_string(),
-            StructuredColumns::Range { start, end } => {
-                let start =
-                    formula_model::external_refs::escape_bracketed_identifier_content(start);
-                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
-                return format!("[@[{start}]:[{end}]]");
-            }
-        }
-    }
-
-    let table = table_name.unwrap_or("");
-
-    // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
-    if columns == &StructuredColumns::All {
-        if let Some(item) = item {
-            return format!("{table}[{}]", structured_ref_item_literal(item));
-        }
-        // Default row selector with no column selection: treat as `[#Data]`.
-        return format!("{table}[#Data]");
-    }
-
-    // Single-column selection with default/data item: `Table1[Col]`.
-    if matches!(item, None | Some(StructuredRefItem::Data)) {
-        match columns {
-            StructuredColumns::Single(col) => {
-                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
-                return format!("{table}[{col}]");
-            }
-            StructuredColumns::Range { start, end } => {
-                let start =
-                    formula_model::external_refs::escape_bracketed_identifier_content(start);
-                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
-                return format!("{table}[[{start}]:[{end}]]");
-            }
-            StructuredColumns::All => {}
-        }
-    }
-
-    // General nested form: `Table1[[#Headers],[Col]]` or `Table1[[#Headers],[Col1]:[Col2]]`.
-    let item = item.expect("handled None above");
-    match columns {
-        StructuredColumns::Single(col) => {
-            let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
-            format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
-        }
-        StructuredColumns::Range { start, end } => {
-            let start = formula_model::external_refs::escape_bracketed_identifier_content(start);
-            let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
-            format!(
-                "{table}[[{}],[{start}]:[{end}]]",
-                structured_ref_item_literal(item)
-            )
-        }
-        StructuredColumns::All => unreachable!("handled above"),
-    }
-}
-
-fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
-    match item {
-        StructuredRefItem::All => "#All",
-        StructuredRefItem::Data => "#Data",
-        StructuredRefItem::Headers => "#Headers",
-        StructuredRefItem::Totals => "#Totals",
-        StructuredRefItem::ThisRow => "#This Row",
-    }
 }
 
 fn push_column(col: u32, out: &mut String) {

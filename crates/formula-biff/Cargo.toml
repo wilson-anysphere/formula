@@ -10,6 +10,7 @@ encode = ["dep:formula-engine"]
 
 [dependencies]
 thiserror = "1.0"
+formula-model = { path = "../formula-model" }
 
 # Keep the parser dependency optional so other crates (e.g. minimal XLSB reader)
 # can depend on `formula-biff` for rgce decoding without pulling in the full

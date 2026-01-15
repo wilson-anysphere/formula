@@ -1944,6 +1944,7 @@ name = "formula-biff"
 version = "0.1.0"
 dependencies = [
  "formula-engine",
+ "formula-model",
  "pretty_assertions",
  "proptest",
  "thiserror 1.0.69",
