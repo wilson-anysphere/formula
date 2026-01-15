@@ -1,27 +1,4 @@
-use unicode_normalization::UnicodeNormalization;
-
-/// Excel compares sheet names case-insensitively across Unicode.
-///
-/// We approximate Excel's behavior by normalizing both names with Unicode NFKC
-/// (compatibility normalization) and then applying Unicode uppercasing. This is
-/// deterministic and locale-independent.
-pub fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
-    a.nfkc()
-        .flat_map(|c| c.to_uppercase())
-        .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
-}
-
-/// Returns a canonical "case folded" representation of a sheet name that matches
-/// [`sheet_name_eq_case_insensitive`].
-///
-/// This is useful when building hash map keys for sheet-name lookups that need
-/// to behave like Excel (e.g. treating `Straße` and `STRASSE` as equal).
-pub fn sheet_name_casefold(name: &str) -> String {
-    if name.is_ascii() {
-        return name.to_ascii_uppercase();
-    }
-    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
-}
+pub use crate::sheet_name::{sheet_name_casefold, sheet_name_eq_case_insensitive};
 
 fn looks_like_a1_cell_reference(name: &str) -> bool {
     // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
@@ -808,7 +785,9 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
                 || b == b'.'
                 || b == b'['
                 || b == b']'
-                || b == b':';
+                || b == b':'
+                || b == b'\\'
+                || b == b'/';
             if !allowed {
                 break;
             }
