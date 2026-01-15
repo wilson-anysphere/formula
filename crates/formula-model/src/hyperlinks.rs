@@ -24,7 +24,7 @@ impl HyperlinkTarget {
         let HyperlinkTarget::Internal { sheet, .. } = self else {
             return;
         };
-        if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet, old_name) {
+        if crate::sheet_name::sheet_name_eq_case_insensitive(sheet, old_name) {
             *sheet = new_name.to_string();
         }
     }

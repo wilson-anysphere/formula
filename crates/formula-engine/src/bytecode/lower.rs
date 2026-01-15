@@ -17,15 +17,8 @@ pub enum LowerError {
     /// This indicates an external workbook reference shape that the bytecode backend does not
     /// currently implement.
     ///
-    /// Notably, non-degenerate external 3D sheet spans like `[Book.xlsx]Sheet1:Sheet3!A1` require
-    /// expanding the span using external workbook tab order.
-    ///
-    /// The bytecode backend caches compiled programs by a normalized expression key. Encoding a
-    /// particular expansion into a cached bytecode program would become stale if the external
-    /// workbook's sheet order changes, unless we plumb sheet-order invalidation into the bytecode
-    /// cache key / recompilation path. The AST evaluator expands spans at evaluation time using
-    /// provider-supplied sheet order, so the engine intentionally falls back to AST for these
-    /// references to preserve correctness.
+    /// Notably, some external workbook reference shapes require runtime expansion using external
+    /// workbook tab order.
     #[error("unsupported external workbook reference")]
     ExternalReference,
     #[error("cross-sheet references are not supported")]
@@ -103,7 +96,7 @@ fn sheet_max_indices(
 ) -> Result<(i32, i32), LowerError> {
     let (rows, cols) = match sheet {
         SheetId::Local(id) => sheet_dimensions(*id).unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS)),
-        SheetId::External(_) => (EXCEL_MAX_ROWS, EXCEL_MAX_COLS),
+        SheetId::External(_) | SheetId::ExternalSpan { .. } => (EXCEL_MAX_ROWS, EXCEL_MAX_COLS),
     };
     let rows = i32::try_from(rows).map_err(|_| LowerError::Unsupported)?;
     let cols = i32::try_from(cols).map_err(|_| LowerError::Unsupported)?;
@@ -119,10 +112,7 @@ fn validate_prefix(
 ) -> Result<(), LowerError> {
     if prefix.workbook.is_some() {
         // External workbook reference.
-        // Validate that the canonical external sheet key is representable.
-        // This rejects external 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) which the engine cannot
-        // currently lower into bytecode (the AST backend expands these spans using provider sheet
-        // order).
+        // Validate that the external sheet key/span is representable.
         let _ = external_sheet_id(prefix)?;
         return Ok(());
     }
@@ -152,23 +142,34 @@ fn external_sheet_id(prefix: &RefPrefix) -> Result<SheetId, LowerError> {
 
     // Mirror `eval::compiler::lower_sheet_reference` so we build the same canonical key string
     // that `ValueResolver::get_external_value` expects.
-    let key = match prefix.sheet.as_ref() {
-        Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
+    match prefix.sheet.as_ref() {
+        Some(crate::SheetRef::Sheet(sheet)) => {
+            let key = crate::external_refs::format_external_key(book, sheet);
+            if !crate::eval::is_valid_external_single_sheet_key(&key) {
+                return Err(LowerError::ExternalReference);
+            }
+            Ok(SheetId::External(Arc::from(key)))
+        }
         Some(crate::SheetRef::SheetRange { start, end }) => {
             if formula_model::sheet_name_eq_case_insensitive(start, end) {
-                format!("[{book}]{start}")
+                let key = crate::external_refs::format_external_key(book, start);
+                if !crate::eval::is_valid_external_single_sheet_key(&key) {
+                    return Err(LowerError::ExternalReference);
+                }
+                Ok(SheetId::External(Arc::from(key)))
             } else {
-                format!("[{book}]{start}:{end}")
+                if start.is_empty() || end.is_empty() || start.contains(':') || end.contains(':') {
+                    return Err(LowerError::ExternalReference);
+                }
+                Ok(SheetId::ExternalSpan {
+                    workbook: Arc::from(book.as_str()),
+                    start: Arc::from(start.as_str()),
+                    end: Arc::from(end.as_str()),
+                })
             }
         }
-        None => format!("[{book}]"),
-    };
-
-    if !crate::eval::is_valid_external_single_sheet_key(&key) {
-        return Err(LowerError::ExternalReference);
+        None => Err(LowerError::ExternalReference),
     }
-
-    Ok(SheetId::External(Arc::from(key)))
 }
 
 fn expand_sheet_span(

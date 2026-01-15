@@ -5,7 +5,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
-use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
+use formula_model::sheet_name_eq_case_insensitive;
 use formula_model::EXCEL_MAX_COLS;
 
 /// Excel column limit (0-indexed).
@@ -220,16 +220,22 @@ fn lower_sheet_reference(
 ) -> SheetReference<String> {
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::Sheet(sheet) => {
+                SheetReference::External(crate::external_refs::format_external_key(book, sheet))
+            }
             SheetRef::SheetRange { start, end } => {
                 if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(format!("[{book}]{start}"))
+                    SheetReference::External(crate::external_refs::format_external_key(book, start))
                 } else {
-                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                    SheetReference::External(crate::external_refs::format_external_span_key(
+                        book, start, end,
+                    ))
                 }
             }
         },
-        (Some(book), None) => SheetReference::External(format!("[{book}]")),
+        (Some(book), None) => {
+            SheetReference::External(crate::external_refs::format_external_workbook_key(book))
+        }
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::Sheet(sheet.clone()),
             SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
@@ -897,16 +903,16 @@ fn compile_sheet_reference(
 ) -> SheetReference<usize> {
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::Sheet(sheet) => SheetReference::External(crate::external_refs::format_external_key(book, sheet)),
             SheetRef::SheetRange { start, end } => {
                 if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(format!("[{book}]{start}"))
+                    SheetReference::External(crate::external_refs::format_external_key(book, start))
                 } else {
-                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                    SheetReference::External(crate::external_refs::format_external_span_key(book, start, end))
                 }
             }
         },
-        (Some(book), None) => SheetReference::External(format!("[{book}]")),
+        (Some(book), None) => SheetReference::External(crate::external_refs::format_external_workbook_key(book)),
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => resolve_sheet(sheet)
                 .map(SheetReference::Sheet)

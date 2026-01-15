@@ -466,6 +466,21 @@ pub fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
     Some((workbook, start, end))
 }
 
+/// Format a workbook-only canonical external key: `"[Book]"`.
+pub fn format_external_workbook_key(workbook: &str) -> String {
+    format!("[{workbook}]")
+}
+
+/// Format a single-sheet canonical external key: `"[Book]Sheet"`.
+pub fn format_external_key(workbook: &str, sheet: &str) -> String {
+    format!("[{workbook}]{sheet}")
+}
+
+/// Format a 3D-span canonical external key: `"[Book]Start:End"`.
+pub fn format_external_span_key(workbook: &str, start: &str, end: &str) -> String {
+    format!("[{workbook}]{start}:{end}")
+}
+
 /// Expand an external workbook 3D sheet span into per-sheet canonical external keys.
 ///
 /// Given:
@@ -510,7 +525,7 @@ pub fn expand_external_sheet_span_from_order(
     Some(
         sheet_names[lo..=hi]
             .iter()
-            .map(|name| format!("[{workbook}]{name}"))
+            .map(|name| format_external_key(workbook, name))
             .collect(),
     )
 }
@@ -518,6 +533,56 @@ pub fn expand_external_sheet_span_from_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_external_keys_roundtrip_with_parsers() {
+        let workbook = "Book.xlsx";
+        let sheet = "Sheet1";
+        let span_start = "Sheet1";
+        let span_end = "Sheet3";
+
+        let single = format_external_key(workbook, sheet);
+        assert_eq!(parse_external_key(&single), Some((workbook, sheet)));
+
+        let workbook_only = format_external_workbook_key(workbook);
+        assert_eq!(parse_external_workbook_key(&workbook_only), Some(workbook));
+
+        let span = format_external_span_key(workbook, span_start, span_end);
+        assert_eq!(
+            parse_external_span_key(&span),
+            Some((workbook, span_start, span_end))
+        );
+    }
+
+    #[test]
+    fn format_external_keys_roundtrip_with_paths_and_escapes() {
+        let workbook_with_path = r"C:\dir\Book.xlsx";
+        let workbook_with_escaped_rbracket = "Book]]Name.xlsx";
+
+        let key = format_external_key(workbook_with_path, "Sheet 1");
+        assert_eq!(
+            parse_external_key(&key),
+            Some((workbook_with_path, "Sheet 1"))
+        );
+
+        let key = format_external_key(workbook_with_escaped_rbracket, "Sheet1");
+        assert_eq!(
+            parse_external_key(&key),
+            Some((workbook_with_escaped_rbracket, "Sheet1"))
+        );
+
+        let span = format_external_span_key(workbook_with_path, "A", "B");
+        assert_eq!(
+            parse_external_span_key(&span),
+            Some((workbook_with_path, "A", "B"))
+        );
+
+        let wb_only = format_external_workbook_key(workbook_with_escaped_rbracket);
+        assert_eq!(
+            parse_external_workbook_key(&wb_only),
+            Some(workbook_with_escaped_rbracket)
+        );
+    }
 
     #[test]
     fn find_external_workbook_prefix_end_parses_escaped_brackets() {

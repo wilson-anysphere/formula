@@ -16,8 +16,11 @@ duplicated follow-up work across the task queue.
 - DONE — Task 380: External invalidation (sheet/workbook) + external dependency indexing
 - DONE — Task 383: Copy rewrite for external refs (`90719fa5f`)
 - DONE — Task 384: Bytecode direct external refs
+- DONE — Task 386: Bytecode external 3D spans (runtime expansion via provider sheet order)
 - DONE — Task 385: Docs
-- DONE — INDIRECT supports external single-sheet refs in both bytecode + AST; rejects external 3D spans
+- DONE — INDIRECT supports external single-sheet refs in both bytecode + AST; rejects external 3D spans (by design)
 - DONE — Task 381: Dynamic external deps (dependency tracing/indexing for dynamic ref producers; structured refs participate in invalidation/precedents; `external_refs_volatile` applies) (`efb7d5af9`)
 
 ## Remaining (open)
+
+- None currently.

@@ -275,7 +275,7 @@ impl Workbook {
 
         for sheet_settings in &mut self.print_settings.sheets {
             if let Some(sheet) = self.sheets.iter().find(|s| {
-                crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                crate::sheet_name::sheet_name_eq_case_insensitive(
                     &s.name,
                     &sheet_settings.sheet_name,
                 )
@@ -310,7 +310,7 @@ impl Workbook {
     ) -> Result<(), SheetNameError> {
         if self.sheets.iter().any(|sheet| {
             exclude_sheet.map_or(true, |exclude| sheet.id != exclude)
-                && crate::formula_rewrite::sheet_name_eq_case_insensitive(&sheet.name, name)
+                && crate::sheet_name::sheet_name_eq_case_insensitive(&sheet.name, name)
         }) {
             return Err(SheetNameError::DuplicateName);
         }
@@ -551,7 +551,7 @@ impl Workbook {
             .sheets
             .iter()
             .find(|s| {
-                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &source_name)
+                crate::sheet_name::sheet_name_eq_case_insensitive(&s.sheet_name, &source_name)
             })
             .cloned()
         {
@@ -621,7 +621,7 @@ impl Workbook {
                 }
                 PivotDestination::CellName { sheet_name, .. }
                 | PivotDestination::RangeName { sheet_name, .. } => {
-                    if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                    if crate::sheet_name::sheet_name_eq_case_insensitive(
                         sheet_name,
                         source_sheet_name,
                     ) {
@@ -642,7 +642,7 @@ impl Workbook {
                     }
                 }
                 PivotSource::RangeName { sheet_name, .. } => {
-                    if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                    if crate::sheet_name::sheet_name_eq_case_insensitive(
                         sheet_name,
                         source_sheet_name,
                     ) {
@@ -874,7 +874,7 @@ impl Workbook {
 
         // Keep print settings aligned with the sheet name (XLSX print settings are keyed by name).
         for settings in &mut self.print_settings.sheets {
-            if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+            if crate::sheet_name::sheet_name_eq_case_insensitive(
                 &settings.sheet_name,
                 &old_name,
             ) {
@@ -929,7 +929,7 @@ impl Workbook {
 
         // Drop print settings for the deleted worksheet.
         self.print_settings.sheets.retain(|s| {
-            !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name)
+            !crate::sheet_name::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name)
         });
         self.sort_print_settings_by_sheet_order();
 
@@ -1023,7 +1023,7 @@ impl Workbook {
     pub fn sheet_by_name(&self, name: &str) -> Option<&Worksheet> {
         self.sheets
             .iter()
-            .find(|s| crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, name))
+            .find(|s| crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, name))
     }
 
     /// Find a table by its workbook-scoped name.
@@ -1320,7 +1320,7 @@ impl Workbook {
             .sheets
             .iter()
             .find(|s| {
-                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
+                crate::sheet_name::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
             })
             .cloned()
             .map(|mut settings| {
@@ -1454,7 +1454,7 @@ impl Workbook {
         update: F,
     ) {
         let idx = self.print_settings.sheets.iter().position(|s| {
-            crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
+            crate::sheet_name::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
         });
 
         match idx {
@@ -1520,7 +1520,7 @@ fn generate_duplicate_sheet_name(base: &str, sheets: &[Worksheet]) -> String {
         let candidate = format!("{truncated}{suffix}");
         if sheets
             .iter()
-            .all(|s| !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, &candidate))
+            .all(|s| !crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, &candidate))
         {
             return candidate;
         }
@@ -1591,7 +1591,7 @@ fn pivot_destination_is_on_sheet(
         }
         | PivotDestination::RangeName {
             sheet_name: name, ..
-        } => crate::formula_rewrite::sheet_name_eq_case_insensitive(name, sheet_name),
+        } => crate::sheet_name::sheet_name_eq_case_insensitive(name, sheet_name),
     }
 }
 
@@ -1679,7 +1679,7 @@ impl<'de> Deserialize<'de> for Workbook {
         let mut print_settings = helper.print_settings;
         for sheet_settings in &mut print_settings.sheets {
             if let Some(sheet) = sheets.iter().find(|s| {
-                crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                crate::sheet_name::sheet_name_eq_case_insensitive(
                     &s.name,
                     &sheet_settings.sheet_name,
                 )

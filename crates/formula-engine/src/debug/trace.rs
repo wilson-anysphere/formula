@@ -4,7 +4,7 @@ use crate::eval::{
 };
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
 use crate::value::{Array, ErrorKind, Value};
-use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
+use formula_model::sheet_name_eq_case_insensitive;
 use std::cmp::Ordering;
 
 /// Maximum number of cells the debug trace evaluator will materialize when a formula result is a
@@ -723,7 +723,10 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
         if start_sheet.is_empty() || end_sheet.is_empty() {
             return None;
         }
-        return Some((format!("[{workbook}]{start_sheet}"), end_sheet.to_string()));
+        return Some((
+            crate::external_refs::format_external_key(workbook, start_sheet),
+            end_sheet.to_string(),
+        ));
     }
 
     let (start, end) = name.split_once(':')?;
@@ -1101,7 +1104,9 @@ impl ParserImpl {
                         Ok(SpannedExpr {
                             span: sheet_name_tok.span,
                             kind: SpannedExprKind::NameRef(crate::eval::NameRef {
-                                sheet: SheetReference::External(format!("[{workbook}]")),
+                                sheet: SheetReference::External(
+                                    crate::external_refs::format_external_workbook_key(&workbook),
+                                ),
                                 name,
                             }),
                         })
@@ -1155,7 +1160,9 @@ impl ParserImpl {
             return Ok(SpannedExpr {
                 span,
                 kind: SpannedExprKind::NameRef(crate::eval::NameRef {
-                    sheet: SheetReference::External(format!("[{workbook}]")),
+                    sheet: SheetReference::External(
+                        crate::external_refs::format_external_workbook_key(&workbook),
+                    ),
                     name,
                 }),
             });
@@ -1731,9 +1738,16 @@ impl ParserImpl {
                 // endpoint sheet names match, collapse to the single external sheet key so
                 // evaluation can consult the external provider directly.
                 if sheet_name_eq_case_insensitive(start_sheet, &end_name) {
-                    SheetReference::External(format!("[{workbook}]{start_sheet}"))
+                    SheetReference::External(crate::external_refs::format_external_key(
+                        workbook,
+                        start_sheet,
+                    ))
                 } else {
-                    SheetReference::External(format!("[{workbook}]{start_sheet}:{end_name}"))
+                    SheetReference::External(crate::external_refs::format_external_span_key(
+                        workbook,
+                        start_sheet,
+                        &end_name,
+                    ))
                 }
             } else {
                 SheetReference::SheetRange(start_name, end_name)
@@ -1744,12 +1758,19 @@ impl ParserImpl {
                 match split_sheet_span_name(sheet_part) {
                     Some((start, end)) => {
                         if sheet_name_eq_case_insensitive(&start, &end) {
-                            SheetReference::External(format!("[{workbook}]{start}"))
+                            SheetReference::External(crate::external_refs::format_external_key(
+                                workbook, &start,
+                            ))
                         } else {
-                            SheetReference::External(format!("[{workbook}]{start}:{end}"))
+                            SheetReference::External(crate::external_refs::format_external_span_key(
+                                workbook, &start, &end,
+                            ))
                         }
                     }
-                    None => SheetReference::External(format!("[{workbook}]{sheet_part}")),
+                    None => SheetReference::External(crate::external_refs::format_external_key(
+                        workbook,
+                        sheet_part,
+                    )),
                 }
             } else if let Some((start, end)) = split_sheet_span_name(&start_name) {
                 if let Some((_, start_sheet)) = crate::external_refs::parse_external_key(&start) {
@@ -2673,7 +2694,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
                     let sheet_key = explicit_sheet_key
                         .map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+                        .unwrap_or_else(|| crate::external_refs::format_external_key(workbook, &table_sheet));
 
                     let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
                         &table,

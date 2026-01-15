@@ -24,6 +24,7 @@ use super::{
     strings,
     supbook::{SupBookInfo, SupBookKind},
 };
+use formula_model::external_refs::format_external_workbook_key;
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
@@ -3393,7 +3394,7 @@ fn format_namex_ref(
             // names, include a stable qualifier so the decoded formula text remains unambiguous
             // and parseable by `formula-engine`.
             if sb.virt_path.trim_end_matches('\0') == "\u{0002}" {
-                let token = format!("[AddIn]{extern_name}");
+                let token = format!("{}{}", format_external_workbook_key("AddIn"), extern_name);
                 return Ok(quote_sheet_name_if_needed(&token));
             }
             Ok(extern_name.clone())

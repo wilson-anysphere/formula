@@ -8327,17 +8327,17 @@ fn bytecode_compile_diagnostics_reports_unknown_sheet_reason() {
 fn bytecode_compile_diagnostics_reports_external_reference_reason() {
     let mut engine = Engine::new();
 
-    // External workbook references are supported by the bytecode backend, but external 3D sheet
-    // spans (`[Book]Sheet1:Sheet3!A1`) cannot be represented via `ExternalValueProvider`, so they
-    // should still fall back to the AST evaluator with an ExternalReference lowering error.
+    // External workbook references are supported by the bytecode backend, including external 3D
+    // sheet spans (`[Book]Sheet1:Sheet3!A1`) which are expanded at evaluation time using provider
+    // sheet order. This should compile to bytecode (no AST fallback).
     engine
         .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
     assert_eq!(
         stats
             .fallback_reasons
@@ -8346,7 +8346,7 @@ fn bytecode_compile_diagnostics_reports_external_reference_reason() {
             ))
             .copied()
             .unwrap_or(0),
-        1
+        0
     );
 }
 

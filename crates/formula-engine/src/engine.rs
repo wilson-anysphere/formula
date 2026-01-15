@@ -7614,7 +7614,9 @@ impl Engine {
                 let cols = i32::try_from(cols).unwrap_or(i32::MAX);
                 (rows, cols)
             }
-            bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => {
+                (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+            }
         };
         bytecode_expr_within_grid_limits(
             &expr,
@@ -11086,30 +11088,37 @@ fn update_sheet_prefix_flags(
     flags: &mut PrefixLowerErrorFlags,
 ) {
     if let Some(book) = workbook_prefix.as_ref() {
-        // External workbook reference. This is supported by the bytecode backend as long as we can
-        // construct a canonical external sheet key that matches what `ExternalValueProvider`
-        // expects (e.g. `"[Book.xlsx]Sheet1"`).
+        // External workbook reference.
         //
-        // Non-degenerate external 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) are not currently
-        // lowered into bytecode. Expanding a span requires external workbook tab order; encoding a
-        // particular expansion into a cached bytecode program would become stale if the provider's
-        // sheet order changes unless we plumb sheet-order invalidation into the bytecode cache.
-        //
-        // The AST evaluator expands these spans at evaluation time using provider sheet order, so
-        // treat them as a lowering error and let the engine fall back to AST evaluation.
-        let key = match sheet {
-            Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
-            Some(crate::SheetRef::SheetRange { start, end }) => {
-                if formula_model::sheet_name_eq_case_insensitive(start, end) {
-                    format!("[{book}]{start}")
-                } else {
-                    format!("[{book}]{start}:{end}")
+        // Bytecode supports:
+        // - single-sheet external keys like `"[Book.xlsx]Sheet1"` (validated here), and
+        // - external 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` (expanded at evaluation time using
+        //   provider-supplied tab order).
+        match sheet {
+            Some(crate::SheetRef::Sheet(sheet)) => {
+                let key = crate::external_refs::format_external_key(book, sheet);
+                if !crate::eval::is_valid_external_single_sheet_key(&key) {
+                    flags.external_reference = true;
                 }
             }
-            None => format!("[{book}]"),
-        };
-        if !crate::eval::is_valid_external_single_sheet_key(&key) {
-            flags.external_reference = true;
+            Some(crate::SheetRef::SheetRange { start, end })
+                if formula_model::sheet_name_eq_case_insensitive(start, end) =>
+            {
+                let key = crate::external_refs::format_external_key(book, start);
+                if !crate::eval::is_valid_external_single_sheet_key(&key) {
+                    flags.external_reference = true;
+                }
+            }
+            Some(crate::SheetRef::SheetRange { .. }) => {
+                // Non-degenerate external 3D spans are validated at evaluation time (sheet-order
+                // lookups); the bytecode backend can represent them without embedding the expansion
+                // into the bytecode cache.
+            }
+            None => {
+                // Workbook-only external prefixes are ambiguous (defined names vs structured refs)
+                // and are not lowered by the bytecode backend.
+                flags.external_reference = true;
+            }
         }
         return;
     }
@@ -13543,7 +13552,9 @@ impl BytecodeColumnCache {
                         bytecode::SheetId::Local(sheet_id) => *sheet_id,
                         // External workbook ranges cannot be cached in the columnar local-sheet
                         // buffers, and we don't know their true dimensions anyway.
-                        bytecode::SheetId::External(_) => continue,
+                        bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => {
+                            continue;
+                        }
                     };
                     if sheet_id >= sheet_count {
                         continue;
@@ -13908,6 +13919,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                     .map(engine_value_to_bytecode)
                     .unwrap_or(bytecode::Value::Error(bytecode::ErrorKind::Ref))
             }
+            bytecode::SheetId::ExternalSpan { .. } => {
+                // External 3D sheet spans are expanded by the bytecode runtime before range
+                // iteration/dereferencing. Treat any leaked span as an invalid reference.
+                bytecode::Value::Error(bytecode::ErrorKind::Ref)
+            }
         }
     }
 
@@ -13988,6 +14004,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                 };
                 guard.record_reference(reference);
             }
+            bytecode::SheetId::ExternalSpan { .. } => {}
         }
     }
 
@@ -14046,7 +14063,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
         let sheet_id = match sheet {
             bytecode::SheetId::Local(id) => *id,
-            bytecode::SheetId::External(_) => return None,
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => return None,
         };
         // When external values are provided out-of-band, we cannot safely iterate just the
         // snapshot's stored cells because we'd miss provider-backed cells that should contribute
@@ -14096,7 +14113,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     ) -> Option<&[f64]> {
         let sheet_id = match sheet {
             bytecode::SheetId::Local(id) => *id,
-            bytecode::SheetId::External(_) => return None,
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => return None,
         };
         if !self.snapshot.sheet_exists(sheet_id) {
             return None;
@@ -14124,7 +14141,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     ) -> Option<&[f64]> {
         let sheet_id = match sheet {
             bytecode::SheetId::Local(id) => *id,
-            bytecode::SheetId::External(_) => return None,
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => return None,
         };
         if !self.snapshot.sheet_exists(sheet_id) {
             return None;
@@ -14178,7 +14195,9 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                 let cols = i32::try_from(cols).unwrap_or(i32::MAX);
                 (rows, cols)
             }
-            bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => {
+                (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+            }
         }
     }
 
@@ -14202,7 +14221,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn spill_origin(&self, sheet_id: &bytecode::SheetId, addr: CellAddr) -> Option<CellAddr> {
         match sheet_id {
             bytecode::SheetId::Local(sheet_id) => self.snapshot.spill_origin(*sheet_id, addr),
-            bytecode::SheetId::External(_) => None,
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => None,
         }
     }
 
@@ -14213,7 +14232,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     ) -> Option<(CellAddr, CellAddr)> {
         match sheet_id {
             bytecode::SheetId::Local(sheet_id) => self.snapshot.spill_range(*sheet_id, origin),
-            bytecode::SheetId::External(_) => None,
+            bytecode::SheetId::External(_) | bytecode::SheetId::ExternalSpan { .. } => None,
         }
     }
 }
@@ -16546,7 +16565,10 @@ fn walk_external_dependencies(
                             if let Some((table_sheet, _table)) =
                                 provider.workbook_table(workbook, table_name)
                             {
-                                external_sheets.insert(format!("[{workbook}]{table_sheet}"));
+                                external_sheets.insert(crate::external_refs::format_external_key(
+                                    workbook,
+                                    &table_sheet,
+                                ));
                             }
                         }
                     }
@@ -17012,7 +17034,7 @@ fn walk_external_expr(
 
             let sheet_key = explicit_sheet_key
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+                .unwrap_or_else(|| crate::external_refs::format_external_key(workbook, &table_sheet));
 
             let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
                 &table,

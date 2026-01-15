@@ -1,4 +1,4 @@
-//! Helpers for parsing canonical external workbook sheet keys.
+//! Helpers for parsing and formatting canonical external workbook keys.
 //!
 //! The engine represents external workbook references using a bracketed "external sheet key"
 //! string such as `"[Book.xlsx]Sheet1"`. Centralizing parsing here ensures consistent validation
@@ -65,4 +65,19 @@ pub(crate) fn expand_external_sheet_span_from_order(
         end,
         sheet_names,
     )
+}
+
+/// Format a workbook-only canonical external key: `"[Book]"`.
+pub(crate) fn format_external_workbook_key(workbook: &str) -> String {
+    formula_model::external_refs::format_external_workbook_key(workbook)
+}
+
+/// Format a single-sheet canonical external key: `"[Book]Sheet"`.
+pub(crate) fn format_external_key(workbook: &str, sheet: &str) -> String {
+    formula_model::external_refs::format_external_key(workbook, sheet)
+}
+
+/// Format a 3D-span canonical external key: `"[Book]Start:End"`.
+pub(crate) fn format_external_span_key(workbook: &str, start: &str, end: &str) -> String {
+    formula_model::external_refs::format_external_span_key(workbook, start, end)
 }

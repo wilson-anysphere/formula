@@ -87,7 +87,7 @@ impl PivotSource {
     pub fn rewrite_sheet_name(&mut self, old_name: &str, new_name: &str) -> bool {
         match self {
             PivotSource::RangeName { sheet_name, .. } => {
-                if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet_name, old_name) {
+                if crate::sheet_name::sheet_name_eq_case_insensitive(sheet_name, old_name) {
                     *sheet_name = new_name.to_string();
                     true
                 } else {
@@ -160,7 +160,7 @@ impl PivotDestination {
         match self {
             PivotDestination::CellName { sheet_name, .. }
             | PivotDestination::RangeName { sheet_name, .. } => {
-                if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet_name, old_name) {
+                if crate::sheet_name::sheet_name_eq_case_insensitive(sheet_name, old_name) {
                     *sheet_name = new_name.to_string();
                     true
                 } else {

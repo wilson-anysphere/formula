@@ -979,7 +979,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
                     let sheet_key = explicit_sheet_key
                         .map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+                        .unwrap_or_else(|| {
+                            crate::external_refs::format_external_key(workbook, &table_sheet)
+                        });
 
                     let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
                         &table,

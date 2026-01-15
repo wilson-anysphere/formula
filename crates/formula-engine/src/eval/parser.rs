@@ -7,7 +7,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
-use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
+use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -341,16 +341,22 @@ fn lower_sheet_reference(
             }
         },
         (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::Sheet(sheet) => {
+                SheetReference::External(crate::external_refs::format_external_key(book, sheet))
+            }
             SheetRef::SheetRange { start, end } => {
                 if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(format!("[{book}]{start}"))
+                    SheetReference::External(crate::external_refs::format_external_key(book, start))
                 } else {
-                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                    SheetReference::External(crate::external_refs::format_external_span_key(
+                        book, start, end,
+                    ))
                 }
             }
         },
-        (Some(book), None) => SheetReference::External(format!("[{book}]")),
+        (Some(book), None) => {
+            SheetReference::External(crate::external_refs::format_external_workbook_key(book))
+        }
     }
 }
 

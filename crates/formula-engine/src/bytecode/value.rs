@@ -16,6 +16,16 @@ pub enum SheetId {
     Local(usize),
     /// Canonical external sheet key string (e.g. `"[Book.xlsx]Sheet1"`).
     External(Arc<str>),
+    /// External-workbook 3D sheet span (`[Book.xlsx]Sheet1:Sheet3`) that must be expanded using the
+    /// external workbook's sheet tab order at evaluation time.
+    ///
+    /// This variant exists so the bytecode backend can represent external 3D references without
+    /// baking a particular sheet-order expansion into the bytecode cache key.
+    ExternalSpan {
+        workbook: Arc<str>,
+        start: Arc<str>,
+        end: Arc<str>,
+    },
 }
 
 /// 0-indexed cell coordinate.

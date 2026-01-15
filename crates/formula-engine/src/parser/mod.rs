@@ -6,7 +6,7 @@ use crate::{
     PostfixExpr, PostfixOp, ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr,
     UnaryOp,
 };
-use formula_model::formula_rewrite::sheet_name_eq_case_insensitive;
+use formula_model::sheet_name_eq_case_insensitive;
 
 /// Excel formula limits enforced by this parser.
 ///
@@ -4168,7 +4168,7 @@ mod tests {
         );
 
         let mut resolve_sheet = |name: &str| {
-            formula_model::formula_rewrite::sheet_name_eq_case_insensitive(name, "ß")
+            formula_model::sheet_name_eq_case_insensitive(name, "ß")
                 .then_some(0usize)
         };
         let mut sheet_dims =

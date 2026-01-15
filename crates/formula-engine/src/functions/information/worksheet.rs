@@ -516,12 +516,10 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 return Value::Text(String::new());
             };
 
+            let key = crate::external_refs::format_external_key(filename, &sheet_name);
             match ctx.workbook_directory().filter(|s| !s.is_empty()) {
-                Some(dir) => Value::Text(format!(
-                    "{}[{filename}]{sheet_name}",
-                    workbook_dir_for_excel(dir)
-                )),
-                None => Value::Text(format!("[{filename}]{sheet_name}")),
+                Some(dir) => Value::Text(format!("{}{}", workbook_dir_for_excel(dir), key)),
+                None => Value::Text(key),
             }
         }
     }

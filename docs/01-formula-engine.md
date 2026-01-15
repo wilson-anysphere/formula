@@ -340,10 +340,11 @@ need the “display” workbook name should unescape `]]` to `]`.
 * **Bytecode backend:**
   * The bytecode backend supports external workbook references that lower to a single external sheet
     key (e.g. `[Book.xlsx]Sheet1!A1`, plus path-qualified variants).
-  * External workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are not currently compiled to
-    bytecode (they fall back to the AST evaluator), since span expansion requires
-    external workbook sheet order (via `ExternalValueProvider::workbook_sheet_names` /
-    `ExternalValueProvider::sheet_order`).
+  * External workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are compiled to bytecode and are
+    **expanded at evaluation time** using external workbook sheet order (via
+    `ExternalValueProvider::workbook_sheet_names` / `ExternalValueProvider::sheet_order`).
+    * If external workbook sheet order is unavailable (or endpoints are missing), these spans
+      evaluate to `#REF!` (matching AST semantics).
   * The bytecode backend *does* support same-workbook 3D spans like `Sheet1:Sheet3!A1` (lowered as a
     multi-area reference) when all referenced sheets exist.
 * **External structured references:** external workbook table refs like

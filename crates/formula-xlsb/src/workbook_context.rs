@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use formula_model::external_refs::escape_external_workbook_name_for_prefix;
+use formula_model::external_refs::{
+    escape_external_workbook_name_for_prefix, format_external_key, format_external_span_key,
+    format_external_workbook_key,
+};
 use formula_model::sheet_name_casefold;
 #[cfg(feature = "write")]
 use formula_model::sheet_name_eq_case_insensitive;
@@ -178,8 +181,8 @@ impl WorkbookContext {
         // Also populate the forward map used by formula encoders. `formula-engine` represents
         // external workbook refs as `[Book]Sheet`, so store the ExternSheet mapping using the same
         // prefix on both ends of the span.
-        let first_key = format!("[{workbook}]{first_sheet}");
-        let last_key = format!("[{workbook}]{last_sheet}");
+        let first_key = format_external_key(&workbook, &first_sheet);
+        let last_key = format_external_key(&workbook, &last_sheet);
         self.extern_sheets
             .insert((normalize_key(&first_key), normalize_key(&last_key)), ixti);
 
@@ -355,7 +358,7 @@ impl WorkbookContext {
                         });
 
                     if let Some(sheet_name) = sheet_name {
-                        let sheet_token = format!("[{book}]{sheet_name}");
+                        let sheet_token = format_external_key(book.as_ref(), sheet_name);
                         return Some(format!(
                             "{}!{}",
                             quote_excel_quoted_ident(&sheet_token),
@@ -375,7 +378,7 @@ impl WorkbookContext {
                         self.extern_sheet_target(ixti)
                     {
                         if normalize_key(first_sheet) != normalize_key(last_sheet) {
-                            let token = format!("[{workbook}]{first_sheet}:{last_sheet}");
+                            let token = format_external_span_key(workbook, first_sheet, last_sheet);
                             return Some(format!(
                                 "{}!{}",
                                 quote_excel_quoted_ident(&token),
@@ -388,7 +391,11 @@ impl WorkbookContext {
                 // Workbook-scoped external names use the Excel form `[Book]Name`, but the
                 // formula-engine parser currently can't disambiguate `[Book]Name` from a
                 // structured reference. Quote the entire token so it becomes a `QuotedIdent`.
-                let token = format!("[{book}]{}", extern_name.name);
+                let token = format!(
+                    "{}{}",
+                    format_external_workbook_key(book.as_ref()),
+                    extern_name.name
+                );
                 Some(quote_excel_quoted_ident(&token))
             }
             SupBookKind::Internal => {
@@ -433,7 +440,7 @@ impl WorkbookContext {
                         });
 
                     if let Some(sheet_name) = sheet_name {
-                        let sheet_token = format!("[{book}]{sheet_name}");
+                        let sheet_token = format_external_key(book.as_ref(), sheet_name);
                         return Some(format!(
                             "{}!{}",
                             quote_excel_quoted_ident(&sheet_token),
@@ -442,7 +449,11 @@ impl WorkbookContext {
                     }
                 }
 
-                let token = format!("[{book}]{}", extern_name.name);
+                let token = format!(
+                    "{}{}",
+                    format_external_workbook_key(book.as_ref()),
+                    extern_name.name
+                );
                 Some(quote_excel_quoted_ident(&token))
             }
             _ => Some(extern_name.name.clone()),

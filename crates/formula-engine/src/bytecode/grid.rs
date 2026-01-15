@@ -44,7 +44,7 @@ pub trait Grid: Sync {
     fn get_value_on_sheet(&self, sheet: &SheetId, coord: CellCoord) -> Value {
         match sheet {
             SheetId::Local(_) => self.get_value(coord),
-            SheetId::External(_) => Value::Error(ErrorKind::Ref),
+            SheetId::External(_) | SheetId::ExternalSpan { .. } => Value::Error(ErrorKind::Ref),
         }
     }
 
@@ -68,8 +68,9 @@ pub trait Grid: Sync {
     /// references). The default implementation records local sheets and ignores external sheets.
     #[inline]
     fn record_reference_on_sheet(&self, sheet: &SheetId, start: CellCoord, end: CellCoord) {
-        if let SheetId::Local(sheet_id) = sheet {
-            self.record_reference(*sheet_id, start, end);
+        match sheet {
+            SheetId::Local(sheet_id) => self.record_reference(*sheet_id, start, end),
+            SheetId::External(_) | SheetId::ExternalSpan { .. } => {}
         }
     }
 
@@ -135,7 +136,7 @@ pub trait Grid: Sync {
     ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
         match sheet {
             SheetId::Local(_) => self.iter_cells(),
-            SheetId::External(_) => None,
+            SheetId::External(_) | SheetId::ExternalSpan { .. } => None,
         }
     }
 
@@ -150,7 +151,7 @@ pub trait Grid: Sync {
     ) -> Option<&[f64]> {
         match sheet {
             SheetId::Local(_) => self.column_slice(col, row_start, row_end),
-            SheetId::External(_) => None,
+            SheetId::External(_) | SheetId::ExternalSpan { .. } => None,
         }
     }
 
@@ -178,7 +179,7 @@ pub trait Grid: Sync {
             // External sheets do not expose true dimensions, but references are still valid within
             // Excel's fixed maximum grid. This matches the AST evaluator which treats external
             // bounds as unknown/valid.
-            SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
+            SheetId::External(_) | SheetId::ExternalSpan { .. } => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
         }
     }
 

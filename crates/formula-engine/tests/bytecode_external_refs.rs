@@ -431,7 +431,7 @@ fn bytecode_degenerate_external_3d_sheet_range_matches_endpoints_nfkc_case_insen
 }
 
 #[test]
-fn bytecode_non_degenerate_external_3d_sheet_range_falls_back_to_ast_and_evaluates() {
+fn bytecode_non_degenerate_external_3d_sheet_range_compiles_and_evaluates_via_provider_tab_order() {
     struct SpanProvider;
 
     impl ExternalValueProvider for SpanProvider {
@@ -465,10 +465,132 @@ fn bytecode_non_degenerate_external_3d_sheet_range_falls_back_to_ast_and_evaluat
         .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1:Sheet3!A1)")
         .unwrap();
 
-    // The bytecode backend does not currently support expanding external 3D sheet spans, so this
-    // should not compile to bytecode.
-    assert_eq!(engine.bytecode_program_count(), 0);
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected external 3D sheet spans to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn bytecode_external_3d_span_as_formula_result_is_value_error_when_expandable() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            if addr != (CellAddr { row: 0, col: 0 }) {
+                return None;
+            }
+            match sheet {
+                "[Book.xlsx]Sheet1" => Some(Value::Number(1.0)),
+                "[Book.xlsx]Sheet2" => Some(Value::Number(2.0)),
+                _ => None,
+            }
+        }
+
+        fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+            (workbook == "Book.xlsx").then(|| vec!["Sheet1".to_string(), "Sheet2".to_string()])
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet2!A1")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected external 3D span formula results to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn bytecode_external_3d_span_as_formula_result_is_ref_error_without_sheet_order() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+            None
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet2!A1")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected external 3D span formula results to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn bytecode_indirect_external_3d_span_is_ref_error() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+            Some(Value::Number(123.0))
+        }
+
+        fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+            (workbook == "Book.xlsx").then(|| {
+                vec![
+                    "Sheet1".to_string(),
+                    "Sheet2".to_string(),
+                    "Sheet3".to_string(),
+                ]
+            })
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1:Sheet3!A1")"#)
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }

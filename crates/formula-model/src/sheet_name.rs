@@ -73,6 +73,12 @@ pub fn validate_sheet_name(name: &str) -> Result<(), SheetNameError> {
 /// We approximate Excel's behavior by normalizing both names with Unicode NFKC (compatibility
 /// normalization) and then applying Unicode uppercasing. This is deterministic and locale-independent.
 pub fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
     a.nfkc()
         .flat_map(|c| c.to_uppercase())
         .eq(b.nfkc().flat_map(|c| c.to_uppercase()))

@@ -1152,6 +1152,19 @@ fn sheet_id_to_key(sheet: &SheetId, out: &mut String) {
             out.push_str(key);
             out.push('\0');
         }
+        SheetId::ExternalSpan {
+            workbook,
+            start,
+            end,
+        } => {
+            out.push('X');
+            out.push_str(workbook);
+            out.push(']');
+            out.push_str(start);
+            out.push(':');
+            out.push_str(end);
+            out.push('\0');
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use formula_engine::locale;
+use formula_model::external_refs::format_external_key;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use std::path::Path;
@@ -164,7 +165,10 @@ fn arb_workbook_name() -> impl Strategy<Value = String> {
 }
 
 fn arb_external_cell_ref() -> impl Strategy<Value = String> {
-    (arb_workbook_name(), arb_cell_ref()).prop_map(|(book, addr)| format!("[{book}]Sheet1!{addr}"))
+    (arb_workbook_name(), arb_cell_ref()).prop_map(|(book, addr)| {
+        let prefix = format_external_key(&book, "Sheet1");
+        format!("{prefix}!{addr}")
+    })
 }
 
 fn arb_structured_ref() -> impl Strategy<Value = String> {

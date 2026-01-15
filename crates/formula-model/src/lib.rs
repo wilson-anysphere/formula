@@ -57,7 +57,7 @@ pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisp
 pub use error::ErrorValue;
 pub use formula_rewrite::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
-    rewrite_table_names_in_formula, sheet_name_casefold, sheet_name_eq_case_insensitive,
+    rewrite_table_names_in_formula,
 };
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
@@ -77,7 +77,8 @@ pub use protection::{
     WorkbookProtection,
 };
 pub use sheet_name::{
-    sanitize_sheet_name, validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
+    sanitize_sheet_name, sheet_name_casefold, sheet_name_eq_case_insensitive, validate_sheet_name,
+    SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
 };
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,

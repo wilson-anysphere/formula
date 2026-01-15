@@ -10,6 +10,9 @@ use crate::errors::{xlsb_error_code_from_literal, xlsb_error_literal};
 use crate::format::push_column_label;
 use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
+use formula_model::external_refs::{format_external_key, format_external_span_key};
+#[cfg(feature = "write")]
+use formula_model::external_refs::format_external_workbook_key;
 use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
@@ -477,7 +480,7 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         // quoted identifier before `!` (e.g. `'[Book.xlsx]Sheet1:Sheet3'!A1`).
         //
         // Excel sheet names cannot contain ':' so this representation is unambiguous.
-        let combined = format!("[{book}]{first}:{last}");
+        let combined = format_external_span_key(book, first, last);
         let mut out = String::new();
         out.push('\'');
         for ch in combined.chars() {
@@ -494,7 +497,7 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
     }
 
     if sheet_name_needs_quotes(first) {
-        let combined = format!("[{book}]{first}");
+        let combined = format_external_key(book, first);
         let mut out = String::new();
         out.push('\'');
         for ch in combined.chars() {
@@ -509,7 +512,9 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         out.push('!');
         out
     } else {
-        format!("[{book}]{first}!")
+        let mut out = format_external_key(book, first);
+        out.push('!');
+        out
     }
 }
 
@@ -3559,12 +3564,12 @@ mod encode_ast {
             (None, Some(fe::SheetRef::SheetRange { start, end })) => {
                 SheetSpec::Range(start.clone(), end.clone())
             }
-            (Some(book), None) => SheetSpec::Single(format!("[{book}]")),
+            (Some(book), None) => SheetSpec::Single(format_external_workbook_key(book)),
             (Some(book), Some(fe::SheetRef::Sheet(sheet))) => {
-                SheetSpec::Single(format!("[{book}]{sheet}"))
+                SheetSpec::Single(format_external_key(book, sheet))
             }
             (Some(book), Some(fe::SheetRef::SheetRange { start, end })) => {
-                SheetSpec::Range(format!("[{book}]{start}"), format!("[{book}]{end}"))
+                SheetSpec::Range(format_external_key(book, start), format_external_key(book, end))
             }
         }
     }
@@ -3822,7 +3827,7 @@ mod encode_ast {
         // encoded using `PtgName` (defined name index).
         if let Some(fe::SheetRef::SheetRange { start, end }) = name.sheet.as_ref() {
             let (first_key, last_key) = match name.workbook.as_deref() {
-                Some(book) => (format!("[{book}]{start}"), format!("[{book}]{end}")),
+                Some(book) => (format_external_key(book, start), format_external_key(book, end)),
                 None => (start.clone(), end.clone()),
             };
 
@@ -5625,7 +5630,7 @@ impl<'a> FormulaParser<'a> {
             return Ok(None);
         };
 
-        Ok(Some(format!("[{book}]{sheet}")))
+        Ok(Some(format_external_key(book, &sheet)))
     }
 
     fn parse_quoted_sheet_name(&mut self) -> Result<String, String> {
