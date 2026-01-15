@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::eval::{
-    compile_canonical_expr, is_valid_external_sheet_key, split_external_sheet_key_parts,
+    compile_canonical_expr, is_valid_external_single_sheet_key, split_external_sheet_key_parts,
 };
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{ArgValue, FunctionContext};
@@ -101,7 +101,7 @@ fn parse_database_range(
                 // single-sheet 2D rectangle. Even though the evaluator can expand external-workbook
                 // 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1:D4` into a multi-area reference,
                 // Excel treats that form as an invalid database range.
-                if !is_valid_external_sheet_key(key) {
+                if !is_valid_external_single_sheet_key(key) {
                     return Err(ErrorKind::Value);
                 }
             }
@@ -281,7 +281,7 @@ fn parse_criteria_range(
                         .map_err(|_| ErrorKind::Value)?;
                         let mut expr = ast.expr;
                         if let crate::functions::SheetId::External(key) = &db_ref.sheet_id {
-                            if !is_valid_external_sheet_key(key) {
+                            if !is_valid_external_single_sheet_key(key) {
                                 return Err(ErrorKind::Value);
                             }
                             let (workbook, sheet) =

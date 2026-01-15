@@ -17,7 +17,7 @@ pub use ast::{
 pub use compiler::{compile_canonical_expr, lower_ast, lower_expr};
 pub(crate) use evaluator::MAX_MATERIALIZED_ARRAY_CELLS;
 pub(crate) use evaluator::{
-    is_valid_external_sheet_key, split_external_sheet_key_parts, split_external_sheet_span_key,
+    is_valid_external_single_sheet_key, split_external_sheet_key_parts, split_external_sheet_span_key,
 };
 pub use evaluator::{
     DependencyTrace, EvalContext, Evaluator, RecalcContext, ResolvedName, ValueResolver,
@@ -27,7 +27,8 @@ pub use parser::{FormulaParseError, Parser};
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_external_sheet_key, split_external_sheet_key_parts, split_external_sheet_span_key,
+        is_valid_external_single_sheet_key, split_external_sheet_key_parts,
+        split_external_sheet_span_key,
     };
 
     #[test]
@@ -79,9 +80,9 @@ mod tests {
     }
 
     #[test]
-    fn is_valid_external_sheet_key_is_strict_about_spans() {
-        assert!(is_valid_external_sheet_key("[Book.xlsx]Sheet1"));
-        assert!(!is_valid_external_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
-        assert!(!is_valid_external_sheet_key("not a key"));
+    fn is_valid_external_single_sheet_key_is_strict_about_spans() {
+        assert!(is_valid_external_single_sheet_key("[Book.xlsx]Sheet1"));
+        assert!(!is_valid_external_single_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
+        assert!(!is_valid_external_single_sheet_key("not a key"));
     }
 }

@@ -154,7 +154,7 @@ fn external_sheet_id(prefix: &RefPrefix) -> Result<SheetId, LowerError> {
         None => format!("[{book}]"),
     };
 
-    if !crate::eval::is_valid_external_sheet_key(&key) {
+    if !crate::eval::is_valid_external_single_sheet_key(&key) {
         return Err(LowerError::ExternalReference);
     }
 

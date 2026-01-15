@@ -484,7 +484,9 @@ impl<'a> Lexer<'a> {
         //
         // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
         // Treat those escapes as part of the workbook segment (not as the terminator).
-        let Some(close) = find_workbook_prefix_end(self.input, bracket_start) else {
+        let Some(close) =
+            crate::external_refs::find_external_workbook_prefix_end(self.input, bracket_start)
+        else {
             return false;
         };
 
@@ -593,7 +595,9 @@ impl<'a> Lexer<'a> {
         // everything up to the closing `]` before switching back to strict identifier rules for
         // the sheet name portion.
         if self.peek_char() == Some('[') {
-            if let Some(end) = find_workbook_prefix_end(self.input, self.pos) {
+            if let Some(end) =
+                crate::external_refs::find_external_workbook_prefix_end(self.input, self.pos)
+            {
                 self.pos = end;
             } else {
                 // No closing bracket; treat the rest of the input as part of this identifier.
@@ -756,7 +760,7 @@ fn parse_workbook_scoped_external_name_ref(name: &str) -> Option<(String, String
         return None;
     }
 
-    let end = find_workbook_prefix_end(name, 0)?;
+    let end = crate::external_refs::find_external_workbook_prefix_end(name, 0)?;
     if end >= name.len() {
         return None;
     }
@@ -798,7 +802,7 @@ fn parse_path_qualified_external_sheet_key(name: &str) -> Option<(String, String
 
     while i < bytes.len() {
         if bytes[i] == b'[' {
-            if let Some(end) = find_workbook_prefix_end(name, i) {
+            if let Some(end) = crate::external_refs::find_external_workbook_prefix_end(name, i) {
                 // Only treat this as a workbook prefix if there is a remainder (sheet name) after
                 // the closing `]`.
                 if end < name.len() {
@@ -845,34 +849,6 @@ fn parse_path_qualified_external_sheet_key(name: &str) -> Option<(String, String
     workbook.push_str(prefix);
     workbook.push_str(book);
     Some((workbook, sheet.to_string()))
-}
-
-fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
-    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
-    //
-    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-
-    None
 }
 
 fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
@@ -3286,7 +3262,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     None
                 }
             }
-            SheetReference::External(key) => crate::eval::is_valid_external_sheet_key(key)
+            SheetReference::External(key) => crate::eval::is_valid_external_single_sheet_key(key)
                 .then(|| FnSheetId::External(key.clone())),
         }
     }
@@ -3300,7 +3276,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 .expand_sheet_span(*a, *b)
                 .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
             SheetReference::External(key) => {
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::is_valid_external_single_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);
                 }
 

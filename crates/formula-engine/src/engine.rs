@@ -8724,7 +8724,7 @@ impl Engine {
                 workbook_keys.insert(workbook.to_string());
             }
 
-            if crate::eval::is_valid_external_sheet_key(key) {
+            if crate::eval::is_valid_external_single_sheet_key(key) {
                 sheet_keys.insert(key.clone());
             } else if crate::eval::split_external_sheet_span_key(key).is_some() {
                 if let Some(expanded) =
@@ -11104,7 +11104,7 @@ fn update_sheet_prefix_flags(
             }
             None => format!("[{book}]"),
         };
-        if !crate::eval::is_valid_external_sheet_key(&key) {
+        if !crate::eval::is_valid_external_single_sheet_key(&key) {
             flags.external_reference = true;
         }
         return;
@@ -16515,7 +16515,7 @@ fn walk_external_dependencies(
                 if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key_parts(key) {
                     external_workbooks.insert(workbook.to_string());
                 }
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::is_valid_external_single_sheet_key(key) {
                     external_sheets.insert(key.clone());
                 } else if crate::eval::split_external_sheet_span_key(key).is_some() {
                     if let Some(expanded) =
@@ -16535,7 +16535,7 @@ fn walk_external_dependencies(
                 if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key_parts(key) {
                     external_workbooks.insert(workbook.to_string());
                 }
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::is_valid_external_single_sheet_key(key) {
                     external_sheets.insert(key.clone());
                 } else if crate::eval::split_external_sheet_span_key(key).is_some() {
                     if let Some(expanded) =
@@ -16556,7 +16556,7 @@ fn walk_external_dependencies(
                 // both `[workbook]sheet` and `[workbook]` forms.
                 if let Some((workbook, _sheet)) = crate::eval::split_external_sheet_key_parts(key) {
                     external_workbooks.insert(workbook.to_string());
-                    if crate::eval::is_valid_external_sheet_key(key) {
+                    if crate::eval::is_valid_external_single_sheet_key(key) {
                         external_sheets.insert(key.clone());
                     }
                 } else if key.starts_with('[') {
@@ -16721,7 +16721,7 @@ fn walk_external_dependencies(
                                         {
                                             // Match the runtime behavior: allow single-sheet external workbook
                                             // references, but reject external 3D spans.
-                                            if crate::eval::is_valid_external_sheet_key(&key) {
+                                            if crate::eval::is_valid_external_single_sheet_key(&key) {
                                                 if let Some((workbook_id, _sheet)) =
                                                     crate::eval::split_external_sheet_key_parts(&key)
                                                 {
@@ -16918,7 +16918,7 @@ fn walk_external_expr(
     match expr {
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::is_valid_external_single_sheet_key(key) {
                     let Some(addr) = r.addr.resolve(current_cell.addr) else {
                         return;
                     };
@@ -16945,7 +16945,7 @@ fn walk_external_expr(
         }
         Expr::RangeRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::is_valid_external_single_sheet_key(key) {
                     let Some(start) = r.start.resolve(current_cell.addr) else {
                         return;
                     };

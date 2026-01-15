@@ -1416,7 +1416,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
             }
             SheetReference::External(key) => {
-                is_valid_external_sheet_key(key).then(|| FnSheetId::External(key.clone()))
+                is_valid_external_single_sheet_key(key).then(|| FnSheetId::External(key.clone()))
             }
         }
     }
@@ -1430,7 +1430,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 .expand_sheet_span(*a, *b)
                 .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
             SheetReference::External(key) => {
-                if is_valid_external_sheet_key(key) {
+                if is_valid_external_single_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);
                 }
 
@@ -1767,7 +1767,7 @@ fn intersect_ranges(a: &ResolvedRange, b: &ResolvedRange) -> Option<ResolvedRang
     })
 }
 
-pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
+pub(crate) fn is_valid_external_single_sheet_key(key: &str) -> bool {
     crate::external_refs::parse_external_key(key).is_some()
 }
 
@@ -1849,9 +1849,9 @@ mod tests {
     }
 
     #[test]
-    fn is_valid_external_sheet_key_accepts_single_sheet_rejects_span() {
-        assert!(is_valid_external_sheet_key("[Book.xlsx]Sheet1"));
-        assert!(!is_valid_external_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
+    fn is_valid_external_single_sheet_key_accepts_single_sheet_rejects_span() {
+        assert!(is_valid_external_single_sheet_key("[Book.xlsx]Sheet1"));
+        assert!(!is_valid_external_single_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
     }
 }
 

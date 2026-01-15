@@ -4,6 +4,38 @@
 //! string such as `"[Book.xlsx]Sheet1"`. Centralizing parsing here ensures consistent validation
 //! across the evaluator, engine, and debug tooling.
 
+/// Find the end of a raw Excel external workbook prefix that starts with `[` (e.g. `[Book.xlsx]`).
+///
+/// Returns the index *after* the closing bracket.
+///
+/// Notes:
+/// - Excel escapes literal `]` characters inside workbook identifiers by doubling them: `]]` -> `]`.
+/// - Workbook identifiers may contain `[` characters; treat them as plain text (no nesting).
+pub(crate) fn find_external_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
+}
+
 /// Split an external workbook key on the bracketed workbook boundary.
 ///
 /// Accepts both single-sheet keys (`"[Book]Sheet"`) and 3D span keys (`"[Book]Start:End"`).
@@ -89,6 +121,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn find_external_workbook_prefix_end_parses_escaped_brackets() {
+        let src = "[Book]]Name.xlsx]Sheet1";
+        let end = find_external_workbook_prefix_end(src, 0).expect("end");
+        assert_eq!(&src[..end], "[Book]]Name.xlsx]");
+        assert_eq!(&src[end..], "Sheet1");
+    }
+
+    #[test]
+    fn find_external_workbook_prefix_end_requires_leading_open_bracket() {
+        assert_eq!(find_external_workbook_prefix_end("Book.xlsx]Sheet1", 0), None);
+        assert_eq!(find_external_workbook_prefix_end("[]Sheet1", 0), Some(2));
+    }
+
+    #[test]
     fn parse_external_workbook_key_parses_workbook_only() {
         let workbook = parse_external_workbook_key("[Book.xlsx]").expect("parse");
         assert_eq!(workbook, "Book.xlsx");
@@ -140,6 +186,19 @@ mod tests {
         assert_eq!(workbook, "Book.xlsx");
         assert_eq!(start, "Sheet1");
         assert_eq!(end, "Sheet3");
+    }
+
+    #[test]
+    fn parse_external_key_accepts_escaped_close_brackets_in_workbook() {
+        let (workbook, sheet) = parse_external_key("[Book]]Name.xlsx]Sheet1").expect("parse");
+        assert_eq!(workbook, "Book]]Name.xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn parse_external_workbook_key_accepts_escaped_close_brackets() {
+        let workbook = parse_external_workbook_key("[Book]]Name.xlsx]").expect("parse");
+        assert_eq!(workbook, "Book]]Name.xlsx");
     }
 
     #[test]

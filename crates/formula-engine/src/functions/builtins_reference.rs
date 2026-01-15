@@ -704,7 +704,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     // `"[Book.xlsx]Sheet1:Sheet3"`.
                     match &r.sheet_id {
                         crate::functions::SheetId::External(key)
-                            if !crate::eval::is_valid_external_sheet_key(key) =>
+                            if !crate::eval::is_valid_external_single_sheet_key(key) =>
                         {
                             Value::Error(ErrorKind::Ref)
                         }

@@ -492,34 +492,6 @@ fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
-    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
-    //
-    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-
-    None
-}
-
 fn skip_ws(src: &str, mut i: usize) -> usize {
     while i < src.len() {
         let Some(ch) = src[i..].chars().next() else {
@@ -650,7 +622,9 @@ fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
                     // If the next bracketed segment itself looks like an external workbook sheet
                     // prefix (`[Book.xlsx]Sheet1!`), treat this as a false delimiter and keep
                     // scanning for the real workbook end.
-                    if let Some(nested_end) = find_workbook_prefix_end(src, next) {
+                    if let Some(nested_end) =
+                        crate::external_refs::find_external_workbook_prefix_end(src, next)
+                    {
                         let nested_after = skip_ws(src, nested_end);
                         if let Some(mut nested_sheet_end) = scan_sheet_name_token(src, nested_after)
                         {
@@ -4033,7 +4007,7 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
 
     while i < bytes.len() {
         if bytes[i] == b'[' {
-            if let Some(end) = find_workbook_prefix_end(name, i) {
+            if let Some(end) = crate::external_refs::find_external_workbook_prefix_end(name, i) {
                 // Only treat this as a workbook prefix if there is a remainder (sheet name) after
                 // the closing `]`.
                 if end < name.len() {
