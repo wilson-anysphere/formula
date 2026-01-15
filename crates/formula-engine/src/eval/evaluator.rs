@@ -11,7 +11,7 @@ use crate::functions::{
 use crate::locale::ValueLocaleConfig;
 use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
 use crate::LocaleConfig;
-use formula_model::HorizontalAlignment;
+use formula_model::{sheet_name_casefold, HorizontalAlignment};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -545,8 +545,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 //
                 // Fall back to lexicographic ordering when workbook order is unavailable.
                 match (
-                    split_external_sheet_key(a_key),
-                    split_external_sheet_key(b_key),
+                    split_external_sheet_key_parts(a_key),
+                    split_external_sheet_key_parts(b_key),
                 ) {
                     (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
                         match self.resolver.workbook_sheet_names(a_wb) {
@@ -1451,12 +1451,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
 
-                let start_key = crate::external_refs::casefold_sheet_name(start);
-                let end_key = crate::external_refs::casefold_sheet_name(end);
+                let start_key = sheet_name_casefold(start);
+                let end_key = sheet_name_casefold(end);
                 let mut start_idx: Option<usize> = None;
                 let mut end_idx: Option<usize> = None;
                 for (idx, name) in order.iter().enumerate() {
-                    let name_key = crate::external_refs::casefold_sheet_name(name);
+                    let name_key = sheet_name_casefold(name);
                     if start_idx.is_none() && name_key == start_key {
                         start_idx = Some(idx);
                     }
@@ -1782,7 +1782,7 @@ pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
     crate::external_refs::parse_external_key(key).is_some()
 }
 
-pub(crate) fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_external_sheet_key_parts(key: &str) -> Option<(&str, &str)> {
     crate::external_refs::split_external_sheet_key_parts(key)
 }
 
@@ -1795,9 +1795,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_external_sheet_key_parses_workbook_and_sheet() {
+    fn split_external_sheet_key_parts_parses_workbook_and_sheet() {
         let key = "[Book.xlsx]Sheet1";
-        let (workbook, sheet) = split_external_sheet_key(key).unwrap();
+        let (workbook, sheet) = split_external_sheet_key_parts(key).unwrap();
         assert_eq!(workbook, "Book.xlsx");
         assert_eq!(sheet, "Sheet1");
     }
@@ -1821,16 +1821,16 @@ mod tests {
     }
 
     #[test]
-    fn split_external_sheet_key_uses_last_closing_bracket_for_workbook_id() {
+    fn split_external_sheet_key_parts_uses_last_closing_bracket_for_workbook_id() {
         // Workbook ids can contain `[` / `]` in a path prefix, so we must locate the *last* `]`.
         let key = "[C:\\[foo]\\Book.xlsx]Sheet1";
-        let (workbook, sheet) = split_external_sheet_key(key).unwrap();
+        let (workbook, sheet) = split_external_sheet_key_parts(key).unwrap();
         assert_eq!(workbook, "C:\\[foo]\\Book.xlsx");
         assert_eq!(sheet, "Sheet1");
     }
 
     #[test]
-    fn split_external_sheet_key_rejects_invalid_inputs() {
+    fn split_external_sheet_key_parts_rejects_invalid_inputs() {
         for key in [
             "Book.xlsx]Sheet1", // missing leading '['
             "[Book.xlsxSheet1", // missing closing ']'
@@ -1839,7 +1839,7 @@ mod tests {
             "[Book.xlsx]",      // empty sheet
         ] {
             assert!(
-                split_external_sheet_key(key).is_none(),
+                split_external_sheet_key_parts(key).is_none(),
                 "expected None for key {key:?}"
             );
         }

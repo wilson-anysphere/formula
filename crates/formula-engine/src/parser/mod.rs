@@ -3999,7 +3999,7 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     // Canonical external sheet keys are encoded as `"[{workbook}]{sheet}"`. Workbook ids can
     // include path prefixes from quoted external references (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`)
     // and those prefixes may themselves contain `[` / `]`. To avoid ambiguity, we split workbook
-    // ids on the **last** `]` (matching `eval::split_external_sheet_key`).
+    // ids on the **last** `]` (matching `eval::split_external_sheet_key_parts`).
     //
     // Note: Excel's raw formula syntax escapes literal `]` characters inside workbook names by
     // doubling them (`]]`). The canonical form preserves those characters, so `]]` may appear in

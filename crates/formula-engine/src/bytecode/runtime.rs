@@ -6,7 +6,7 @@ use super::value::{
 };
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
-use crate::eval::split_external_sheet_key;
+use crate::eval::split_external_sheet_key_parts;
 use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::lookup;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
@@ -135,8 +135,8 @@ fn cmp_sheet_ids_in_tab_order(grid: &dyn Grid, a: &SheetId, b: &SheetId) -> Orde
         (SheetId::External(a_key), SheetId::External(b_key)) => {
             // Preserve external-workbook tab order when available.
             match (
-                split_external_sheet_key(a_key),
-                split_external_sheet_key(b_key),
+                split_external_sheet_key_parts(a_key),
+                split_external_sheet_key_parts(b_key),
             ) {
                 (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
                     match grid.external_sheet_order(a_wb) {

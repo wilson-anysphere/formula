@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::eval::{compile_canonical_expr, is_valid_external_sheet_key, split_external_sheet_key};
+use crate::eval::{
+    compile_canonical_expr, is_valid_external_sheet_key, split_external_sheet_key_parts,
+};
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{ArgValue, FunctionContext};
 use crate::value::{casefold, Array, ErrorKind, Value};
@@ -283,7 +285,7 @@ fn parse_criteria_range(
                                 return Err(ErrorKind::Value);
                             }
                             let (workbook, sheet) =
-                                split_external_sheet_key(key).ok_or(ErrorKind::Value)?;
+                                split_external_sheet_key_parts(key).ok_or(ErrorKind::Value)?;
                             expr = qualify_unprefixed_sheet_references(&expr, workbook, sheet);
                         }
                         computed.push(ComputedCriteria { expr });

@@ -3333,12 +3333,12 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
 
-                let start_key = crate::external_refs::casefold_sheet_name(start);
-                let end_key = crate::external_refs::casefold_sheet_name(end);
+                let start_key = formula_model::sheet_name_casefold(start);
+                let end_key = formula_model::sheet_name_casefold(end);
                 let mut start_idx: Option<usize> = None;
                 let mut end_idx: Option<usize> = None;
                 for (idx, name) in order.iter().enumerate() {
-                    let name_key = crate::external_refs::casefold_sheet_name(name);
+                    let name_key = formula_model::sheet_name_casefold(name);
                     if start_idx.is_none() && name_key == start_key {
                         start_idx = Some(idx);
                     }

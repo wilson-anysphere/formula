@@ -17,7 +17,7 @@ pub use ast::{
 pub use compiler::{compile_canonical_expr, lower_ast, lower_expr};
 pub(crate) use evaluator::MAX_MATERIALIZED_ARRAY_CELLS;
 pub(crate) use evaluator::{
-    is_valid_external_sheet_key, split_external_sheet_key, split_external_sheet_span_key,
+    is_valid_external_sheet_key, split_external_sheet_key_parts, split_external_sheet_span_key,
 };
 pub use evaluator::{
     DependencyTrace, EvalContext, Evaluator, RecalcContext, ResolvedName, ValueResolver,
@@ -27,13 +27,13 @@ pub use parser::{FormulaParseError, Parser};
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_external_sheet_key, split_external_sheet_key, split_external_sheet_span_key,
+        is_valid_external_sheet_key, split_external_sheet_key_parts, split_external_sheet_span_key,
     };
 
     #[test]
     fn split_external_sheet_key_parses_basic() {
         assert_eq!(
-            split_external_sheet_key("[Book.xlsx]Sheet1"),
+            split_external_sheet_key_parts("[Book.xlsx]Sheet1"),
             Some(("Book.xlsx", "Sheet1"))
         );
     }
@@ -50,17 +50,17 @@ mod tests {
         // The folder name `[foo]` introduces an interior `]`, so we must split on the last `]`.
         let key = "[C:\\[foo]\\Book.xlsx]Sheet1";
         assert_eq!(
-            split_external_sheet_key(key),
+            split_external_sheet_key_parts(key),
             Some(("C:\\[foo]\\Book.xlsx", "Sheet1"))
         );
     }
 
     #[test]
     fn split_external_sheet_key_rejects_missing_components() {
-        assert_eq!(split_external_sheet_key("Book.xlsx]Sheet1"), None);
-        assert_eq!(split_external_sheet_key("[Book.xlsxSheet1"), None);
-        assert_eq!(split_external_sheet_key("[]Sheet1"), None);
-        assert_eq!(split_external_sheet_key("[Book.xlsx]"), None);
+        assert_eq!(split_external_sheet_key_parts("Book.xlsx]Sheet1"), None);
+        assert_eq!(split_external_sheet_key_parts("[Book.xlsxSheet1"), None);
+        assert_eq!(split_external_sheet_key_parts("[]Sheet1"), None);
+        assert_eq!(split_external_sheet_key_parts("[Book.xlsx]"), None);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::eval::split_external_sheet_key;
+use crate::eval::split_external_sheet_key_parts;
 use crate::eval::CompiledExpr;
 use crate::functions::information::workbook as workbook_info;
 use crate::functions::{
@@ -24,7 +24,7 @@ inventory::submit! {
 }
 
 fn external_sheet_index(ctx: &dyn FunctionContext, sheet_key: &str) -> Option<usize> {
-    let (workbook, sheet) = split_external_sheet_key(sheet_key)?;
+    let (workbook, sheet) = split_external_sheet_key_parts(sheet_key)?;
     let order = ctx.workbook_sheet_names(workbook)?;
     order
         .iter()
@@ -58,7 +58,7 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
                 let SheetId::External(key) = &r.sheet_id else {
                     return Value::Error(ErrorKind::NA);
                 };
-                let Some((wb, sheet)) = split_external_sheet_key(key) else {
+                let Some((wb, sheet)) = split_external_sheet_key_parts(key) else {
                     return Value::Error(ErrorKind::NA);
                 };
 

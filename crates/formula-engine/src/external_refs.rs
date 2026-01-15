@@ -2,9 +2,7 @@
 //!
 //! The engine represents external workbook references using a bracketed "external sheet key"
 //! string such as `"[Book.xlsx]Sheet1"`. Centralizing parsing here ensures consistent validation
-//! and case-insensitive matching semantics across the evaluator, engine, and debug tooling.
-
-use unicode_normalization::UnicodeNormalization;
+//! across the evaluator, engine, and debug tooling.
 
 /// Split an external workbook key on the bracketed workbook boundary.
 ///
@@ -66,15 +64,6 @@ pub(crate) fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
     }
 
     Some((workbook, start, end))
-}
-
-/// Canonicalize a sheet name for case-insensitive comparisons (Unicode-aware).
-pub(crate) fn casefold_sheet_name(name: &str) -> String {
-    if name.is_ascii() {
-        return name.to_ascii_uppercase();
-    }
-
-    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
 }
 
 #[cfg(test)]
