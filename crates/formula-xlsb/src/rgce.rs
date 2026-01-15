@@ -2798,6 +2798,7 @@ pub fn encode_rgce_with_context_ast_in_sheet(
 #[cfg(feature = "write")]
 mod encode_ast {
     use super::{
+        format_external_key, format_external_workbook_key,
         ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError, EncodedRgce, PtgClass,
         WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA, PTG_AREA3D, PTG_FUNCVAR,
         PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UMINUS, PTG_UPLUS,
@@ -2806,6 +2807,7 @@ mod encode_ast {
     use crate::errors::xlsb_error_code_from_literal;
 
     use formula_engine as fe;
+    use fe::structured_refs::{parse_structured_ref, StructuredColumns, StructuredRefItem};
     use formula_model::sheet_name_eq_case_insensitive;
 
     const PTG_ERR: u8 = 0x1C;
@@ -3178,7 +3180,7 @@ mod encode_ast {
             }
         };
 
-        let (flags, col_first, col_last) = parse_structured_ref_spec(&r.spec, table_id, ctx)?;
+        let (flags, col_first, col_last) = encode_structured_ref_spec(r, table_id, ctx)?;
 
         rgce.push(ptg_with_class(PTG_EXTEND, class));
         rgce.push(ETPG_LIST);
@@ -3190,227 +3192,86 @@ mod encode_ast {
         Ok(())
     }
 
-    fn parse_structured_ref_spec(
-        spec: &str,
+    fn encode_structured_ref_spec(
+        r: &fe::StructuredRef,
         table_id: u32,
         ctx: &WorkbookContext,
     ) -> Result<(u16, u16, u16), EncodeError> {
-        let spec = spec.trim();
-
-        if let Some(rest) = spec.strip_prefix('@') {
-            // This-row shorthand: `Table1[@Col]` and `Table1[@[Col1]:[Col2]]`.
-            let rest = rest.trim();
-            if rest.is_empty() {
-                return Ok((FLAG_THIS_ROW, 0, 0));
-            }
-            let (col_first, col_last) = parse_structured_ref_column_selector(rest, table_id, ctx)?;
-            return Ok((FLAG_THIS_ROW, col_first, col_last));
+        // `formula-engine` lexes/parses structured references and stores the bracket contents as
+        // `r.spec`. Re-parse via the authoritative structured-ref parser to avoid drift in
+        // edge cases (nested brackets vs escaped `]]`).
+        let mut text = String::new();
+        if let Some(table) = &r.table {
+            text.push_str(table);
         }
+        text.push('[');
+        text.push_str(&r.spec);
+        text.push(']');
 
-        if spec.starts_with('#') {
-            let flags = structured_ref_item_flag(spec).ok_or_else(|| {
-                EncodeError::Parse(format!("unsupported structured reference item: {spec}"))
-            })?;
-            return Ok((flags, 0, 0));
+        let (sref, end) = parse_structured_ref(&text, 0)
+            .ok_or_else(|| EncodeError::Parse(format!("invalid structured reference: {text}")))?;
+        if end != text.len() {
+            return Err(EncodeError::Parse(format!(
+                "invalid structured reference: {text}"
+            )));
         }
-
-        let parts = split_structured_ref_parts(spec);
-        if parts.len() == 1 {
-            let part = parts[0];
-            // Item-only selection written in nested form: `Table1[[#Headers]]`.
-            if part.starts_with('[') {
-                if let Some((content, rest)) = parse_bracketed_token(part) {
-                    if rest.trim().is_empty() {
-                        if let Some(flags) = structured_ref_item_flag(&content) {
-                            return Ok((flags, 0, 0));
-                        }
-                    }
-                }
-            }
-
-            let (col_first, col_last) = parse_structured_ref_column_selector(part, table_id, ctx)?;
-            return Ok((0, col_first, col_last));
+        if sref.table_name.as_deref() != r.table.as_deref() {
+            return Err(EncodeError::Parse(format!(
+                "invalid structured reference: {text}"
+            )));
         }
 
         let mut flags = 0u16;
-        for item_part in &parts[..parts.len().saturating_sub(1)] {
-            let item_part = item_part.trim();
-            let item_text = if item_part.starts_with('[') {
-                let (content, rest) = parse_bracketed_token(item_part).ok_or_else(|| {
-                    EncodeError::Parse(format!("invalid structured reference item: {item_part}"))
-                })?;
-                if !rest.trim().is_empty() {
-                    return Err(EncodeError::Parse(format!(
-                        "invalid structured reference item: {item_part}"
-                    )));
-                }
-                content
-            } else {
-                item_part.to_string()
+        for item in &sref.items {
+            flags |= match item {
+                StructuredRefItem::All => FLAG_ALL,
+                StructuredRefItem::Headers => FLAG_HEADERS,
+                StructuredRefItem::Data => FLAG_DATA,
+                StructuredRefItem::Totals => FLAG_TOTALS,
+                StructuredRefItem::ThisRow => FLAG_THIS_ROW,
             };
-
-            let item_flag = structured_ref_item_flag(&item_text).ok_or_else(|| {
-                EncodeError::Parse(format!(
-                    "unsupported structured reference item: {item_text}"
-                ))
-            })?;
-            flags |= item_flag;
         }
-
-        let (col_first, col_last) =
-            parse_structured_ref_column_selector(parts[parts.len() - 1], table_id, ctx)?;
-        Ok((flags, col_first, col_last))
-    }
-
-    fn parse_structured_ref_column_selector(
-        selector: &str,
-        table_id: u32,
-        ctx: &WorkbookContext,
-    ) -> Result<(u16, u16), EncodeError> {
-        let selector = selector.trim();
-        if selector.is_empty() {
-            return Err(EncodeError::Parse(
-                "structured reference is missing a column selector".to_string(),
+        if (flags & FLAG_THIS_ROW) != 0 && (flags & !FLAG_THIS_ROW) != 0 {
+            return Err(EncodeError::Unsupported(
+                "structured references combining #This Row with other items",
             ));
         }
 
-        if selector.starts_with('[') {
-            let (start, rest) = parse_bracketed_token(selector).ok_or_else(|| {
-                EncodeError::Parse(format!(
-                    "invalid structured reference column selector: {selector}"
-                ))
-            })?;
-            let rest = rest.trim();
-            if rest.is_empty() {
-                let col = structured_ref_column_id(ctx, table_id, &start)?;
-                return Ok((col, col));
+        let (col_first, col_last) = match &sref.columns {
+            StructuredColumns::All => (0u16, 0u16),
+            StructuredColumns::Single(col) => {
+                let id = structured_ref_column_id(ctx, table_id, col)?;
+                (id, id)
             }
-
-            let Some(rest) = rest.strip_prefix(':') else {
-                return Err(EncodeError::Parse(format!(
-                    "invalid structured reference column selector: {selector}"
-                )));
-            };
-
-            let (end, tail) = parse_bracketed_token(rest.trim()).ok_or_else(|| {
-                EncodeError::Parse(format!(
-                    "invalid structured reference column range: {selector}"
-                ))
-            })?;
-            if !tail.trim().is_empty() {
-                return Err(EncodeError::Parse(format!(
-                    "invalid structured reference column range: {selector}"
-                )));
+            StructuredColumns::Range { start, end } => {
+                let first = structured_ref_column_id(ctx, table_id, start)?;
+                let last = structured_ref_column_id(ctx, table_id, end)?;
+                (first, last)
             }
+            StructuredColumns::Multi(_) => {
+                return Err(EncodeError::Unsupported(
+                    "structured references selecting multiple non-contiguous columns",
+                ));
+            }
+        };
 
-            let col_first = structured_ref_column_id(ctx, table_id, &start)?;
-            let col_last = structured_ref_column_id(ctx, table_id, &end)?;
-            return Ok((col_first, col_last));
-        }
-
-        // Unbracketed single column name: `Table1[Qty]`.
-        let col = structured_ref_column_id(ctx, table_id, selector)?;
-        Ok((col, col))
-    }
-
-    fn structured_ref_item_flag(item: &str) -> Option<u16> {
-        match item.trim().to_ascii_uppercase().as_str() {
-            "#ALL" => Some(FLAG_ALL),
-            "#HEADERS" => Some(FLAG_HEADERS),
-            "#DATA" => Some(FLAG_DATA),
-            "#TOTALS" => Some(FLAG_TOTALS),
-            "#THIS ROW" | "#THISROW" => Some(FLAG_THIS_ROW),
-            _ => None,
-        }
+        Ok((flags, col_first, col_last))
     }
 
     fn structured_ref_column_id(
         ctx: &WorkbookContext,
         table_id: u32,
-        raw: &str,
+        name: &str,
     ) -> Result<u16, EncodeError> {
-        let name = unescape_structured_ref_text(raw);
+        let name = name.trim();
         let col_id = ctx
-            .table_column_id_by_name(table_id, &name)
+            .table_column_id_by_name(table_id, name)
             .ok_or_else(|| EncodeError::Parse(format!("unknown table column: {name}")))?;
         u16::try_from(col_id).map_err(|_| {
             EncodeError::Parse(format!(
                 "table column id {col_id} is out of range for BIFF12"
             ))
         })
-    }
-
-    fn unescape_structured_ref_text(s: &str) -> String {
-        if !s.contains("]]") {
-            return s.to_string();
-        }
-        s.replace("]]", "]")
-    }
-
-    fn parse_bracketed_token(input: &str) -> Option<(String, &str)> {
-        let input = input.trim();
-        if !input.starts_with('[') {
-            return None;
-        }
-
-        let bytes = input.as_bytes();
-        let mut out = String::new();
-        let mut i = 1usize;
-        let mut last = i;
-        while i < bytes.len() {
-            if bytes[i] == b']' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b']' {
-                    if last < i {
-                        out.push_str(&input[last..i]);
-                    }
-                    out.push(']');
-                    i += 2;
-                    last = i;
-                    continue;
-                }
-
-                if last < i {
-                    out.push_str(&input[last..i]);
-                }
-                return Some((out, &input[i + 1..]));
-            }
-            i += 1;
-        }
-        None
-    }
-
-    fn split_structured_ref_parts(spec: &str) -> Vec<&str> {
-        let bytes = spec.as_bytes();
-        let mut depth = 0usize;
-        let mut start = 0usize;
-        let mut i = 0usize;
-        let mut out = Vec::new();
-
-        while i < bytes.len() {
-            match bytes[i] {
-                b'[' => {
-                    depth = depth.saturating_add(1);
-                    i += 1;
-                }
-                b']' => {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b']' {
-                        // Escaped `]` inside a bracketed identifier.
-                        i += 2;
-                    } else {
-                        depth = depth.saturating_sub(1);
-                        i += 1;
-                    }
-                }
-                b',' if depth == 0 => {
-                    out.push(spec[start..i].trim());
-                    start = i + 1;
-                    i += 1;
-                }
-                _ => i += 1,
-            }
-        }
-        out.push(spec[start..].trim());
-        out
     }
 
     fn emit_reference_expr(

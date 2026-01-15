@@ -1,4 +1,5 @@
 use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
+use formula_model::external_refs::unescape_bracketed_identifier_content;
 
 pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, usize)> {
     if pos >= input.len() {
@@ -331,7 +332,7 @@ fn parse_item(item: &str) -> Option<StructuredRefItem> {
 
 fn unescape_column_name(name: &str) -> String {
     // Excel escapes ']' as ']]' in structured references.
-    name.trim().replace("]]", "]")
+    unescape_bracketed_identifier_content(name.trim()).into_owned()
 }
 
 fn is_name_start(ch: char) -> bool {

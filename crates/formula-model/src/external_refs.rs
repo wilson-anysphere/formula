@@ -193,11 +193,28 @@ pub fn find_external_workbook_prefix_end(src: &str, start: usize) -> Option<usiz
 /// escaped by doubling them (`]]`).
 ///
 /// This helper is intentionally small and allocation-aware: it borrows when no escaping is needed.
+///
+/// Despite the workbook-centric name in surrounding docs, this escaping rule is also used by other
+/// bracketed identifier constructs in Excel formula text (notably structured references), so the
+/// API is intentionally generic.
 pub fn escape_bracketed_identifier_content(raw: &str) -> Cow<'_, str> {
     if raw.contains(']') {
         Cow::Owned(raw.replace(']', "]]"))
     } else {
         Cow::Borrowed(raw)
+    }
+}
+
+/// Unescape bracketed identifier content from Excel formula text.
+///
+/// Excel represents literal `]` characters inside some bracketed identifier contexts by doubling
+/// them (`]]`). This helper performs the inverse mapping (`]]` -> `]`) and borrows when no
+/// unescaping is needed.
+pub fn unescape_bracketed_identifier_content(escaped: &str) -> Cow<'_, str> {
+    if escaped.contains("]]") {
+        Cow::Owned(escaped.replace("]]", "]"))
+    } else {
+        Cow::Borrowed(escaped)
     }
 }
 
@@ -533,6 +550,23 @@ pub fn expand_external_sheet_span_from_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bracketed_identifier_escape_roundtrips_with_unescape() {
+        let cases = [
+            "",
+            "plain",
+            "A]B",
+            "A]]B",
+            "trailing]",
+            "many]]]]brackets",
+        ];
+        for raw in cases {
+            let escaped = escape_bracketed_identifier_content(raw);
+            let unescaped = unescape_bracketed_identifier_content(escaped.as_ref());
+            assert_eq!(unescaped.as_ref(), raw, "roundtrip failed for raw={raw:?}");
+        }
+    }
 
     #[test]
     fn format_external_keys_roundtrip_with_parsers() {
