@@ -1,4 +1,7 @@
-use formula_model::sheet_name_eq_case_insensitive;
+use formula_model::{
+    push_escaped_excel_single_quotes, push_excel_single_quoted_identifier,
+    sheet_name_eq_case_insensitive,
+};
 use serde::{Deserialize, Serialize};
 
 /// 0-indexed cell address.
@@ -1103,30 +1106,14 @@ fn fmt_sheet_name(out: &mut String, sheet: &str, reference_style: ReferenceStyle
     // quote sheet names that look like cell references (e.g. `A1` or `R1C1`).
     let needs_quotes = sheet_name_needs_quotes(sheet, reference_style);
     if needs_quotes {
-        out.push('\'');
-        for ch in sheet.chars() {
-            if ch == '\'' {
-                out.push('\'');
-                out.push('\'');
-            } else {
-                out.push(ch);
-            }
-        }
-        out.push('\'');
+        push_excel_single_quoted_identifier(out, sheet);
     } else {
         out.push_str(sheet);
     }
 }
 
 fn fmt_sheet_name_escaped(out: &mut String, sheet: &str) {
-    for ch in sheet.chars() {
-        if ch == '\'' {
-            out.push('\'');
-            out.push('\'');
-        } else {
-            out.push(ch);
-        }
-    }
+    push_escaped_excel_single_quotes(out, sheet);
 }
 
 fn fmt_sheet_range_name(out: &mut String, start: &str, end: &str, reference_style: ReferenceStyle) {

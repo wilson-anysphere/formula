@@ -1,5 +1,7 @@
 use core::fmt;
 
+use std::borrow::Cow;
+
 use unicode_normalization::UnicodeNormalization;
 
 /// Maximum worksheet name length enforced by Excel.
@@ -145,4 +147,58 @@ pub fn sanitize_sheet_name(name: &str) -> String {
     );
 
     sanitized
+}
+
+/// Escape `'` for Excel single-quoted identifiers by doubling it (`'` → `''`).
+///
+/// Excel uses single quotes to quote sheet references and other identifier-like tokens. Within a
+/// quoted identifier, a literal `'` is represented as `''`.
+pub fn escape_excel_single_quotes(s: &str) -> Cow<'_, str> {
+    if !s.contains('\'') {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len().saturating_add(4));
+    push_escaped_excel_single_quotes(&mut out, s);
+    Cow::Owned(out)
+}
+
+/// Append `s` to `out`, escaping `'` as `''` (Excel single-quoted identifier rules).
+pub fn push_escaped_excel_single_quotes(out: &mut String, s: &str) {
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+}
+
+/// Append a single-quoted Excel identifier to `out`, escaping internal `'` as `''`.
+pub fn push_excel_single_quoted_identifier(out: &mut String, s: &str) {
+    out.push('\'');
+    push_escaped_excel_single_quotes(out, s);
+    out.push('\'');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_excel_single_quotes_doubles_apostrophes() {
+        assert_eq!(escape_excel_single_quotes("Sheet1").as_ref(), "Sheet1");
+        assert_eq!(escape_excel_single_quotes("O'Brien").as_ref(), "O''Brien");
+        assert_eq!(
+            escape_excel_single_quotes("a'b'c").as_ref(),
+            "a''b''c"
+        );
+    }
+
+    #[test]
+    fn push_excel_single_quoted_identifier_wraps_and_escapes() {
+        let mut out = String::new();
+        push_excel_single_quoted_identifier(&mut out, "O'Brien");
+        assert_eq!(out, "'O''Brien'");
+    }
 }

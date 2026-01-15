@@ -77,6 +77,7 @@ pub use protection::{
     WorkbookProtection,
 };
 pub use sheet_name::{
+    escape_excel_single_quotes, push_escaped_excel_single_quotes, push_excel_single_quoted_identifier,
     sanitize_sheet_name, sheet_name_casefold, sheet_name_eq_case_insensitive, validate_sheet_name,
     SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
 };

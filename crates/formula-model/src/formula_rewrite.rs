@@ -1,4 +1,5 @@
 pub use crate::sheet_name::{sheet_name_casefold, sheet_name_eq_case_insensitive};
+use crate::sheet_name::escape_excel_single_quotes;
 
 fn looks_like_a1_cell_reference(name: &str) -> bool {
     // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
@@ -129,10 +130,6 @@ fn needs_quoting_for_sheet_reference(
     end.is_some_and(|end| !is_valid_unquoted_sheet_name(end))
 }
 
-fn escape_single_quotes(s: &str) -> String {
-    s.replace('\'', "''")
-}
-
 fn format_sheet_reference(workbook_prefix: Option<&str>, start: &str, end: Option<&str>) -> String {
     let mut content = String::new();
     if let Some(prefix) = workbook_prefix {
@@ -145,7 +142,7 @@ fn format_sheet_reference(workbook_prefix: Option<&str>, start: &str, end: Optio
     }
 
     if needs_quoting_for_sheet_reference(workbook_prefix, start, end) {
-        format!("'{}'", escape_single_quotes(&content))
+        format!("'{}'", escape_excel_single_quotes(&content))
     } else {
         content
     }

@@ -4,7 +4,7 @@ use crate::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use crate::structured_refs::{
     format_structured_ref, structured_ref_is_single_cell, StructuredRefItem,
 };
-use formula_model::{push_column_label, CellRef};
+use formula_model::{push_column_label, push_excel_single_quoted_identifier, CellRef};
 
 #[cfg(feature = "encode")]
 use crate::errors::biff_error_code_from_literal;
@@ -1790,16 +1790,7 @@ fn format_sheet_placeholder(ixti: u16) -> String {
     // name, but we can still emit valid sheet-qualified formula text by quoting a stable placeholder.
     let sheet = format!("Sheet{ixti}");
     let mut out = String::new();
-    out.push('\'');
-    for ch in sheet.chars() {
-        if ch == '\'' {
-            out.push('\'');
-            out.push('\'');
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
+    push_excel_single_quoted_identifier(&mut out, &sheet);
     out.push('!');
     out
 }

@@ -19,6 +19,7 @@ use formula_biff::structured_refs::{
 use formula_model::external_refs::{format_external_key, format_external_span_key};
 #[cfg(feature = "write")]
 use formula_model::external_refs::format_external_workbook_key;
+use formula_model::{push_escaped_excel_single_quotes, push_excel_single_quoted_identifier};
 use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
@@ -440,16 +441,7 @@ fn fmt_sheet_name(out: &mut String, sheet: &str) {
     // Based on `formula-engine`'s `fmt_sheet_name`: be conservative, because quoting is always
     // accepted by Excel while the unquoted form is only valid for identifier-like names.
     if sheet_name_needs_quotes(sheet) {
-        out.push('\'');
-        for ch in sheet.chars() {
-            if ch == '\'' {
-                out.push('\'');
-                out.push('\'');
-            } else {
-                out.push(ch);
-            }
-        }
-        out.push('\'');
+        push_excel_single_quoted_identifier(out, sheet);
     } else {
         out.push_str(sheet);
     }
@@ -465,14 +457,9 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
         // invalid in Excel sheet names, we can round-trip through text by always emitting the
         // combined prefix as one quoted identifier: `'Sheet1:Sheet3'!A1`.
         out.push('\'');
-        for ch in format!("{first}:{last}").chars() {
-            if ch == '\'' {
-                out.push('\'');
-                out.push('\'');
-            } else {
-                out.push(ch);
-            }
-        }
+        push_escaped_excel_single_quotes(&mut out, first);
+        out.push(':');
+        push_escaped_excel_single_quotes(&mut out, last);
         out.push('\'');
     }
     out.push('!');
@@ -488,16 +475,7 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         // Excel sheet names cannot contain ':' so this representation is unambiguous.
         let combined = format_external_span_key(book, first, last);
         let mut out = String::new();
-        out.push('\'');
-        for ch in combined.chars() {
-            if ch == '\'' {
-                out.push('\'');
-                out.push('\'');
-            } else {
-                out.push(ch);
-            }
-        }
-        out.push('\'');
+        push_excel_single_quoted_identifier(&mut out, &combined);
         out.push('!');
         return out;
     }
@@ -505,16 +483,7 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
     if sheet_name_needs_quotes(first) {
         let combined = format_external_key(book, first);
         let mut out = String::new();
-        out.push('\'');
-        for ch in combined.chars() {
-            if ch == '\'' {
-                out.push('\'');
-                out.push('\'');
-            } else {
-                out.push(ch);
-            }
-        }
-        out.push('\'');
+        push_excel_single_quoted_identifier(&mut out, &combined);
         out.push('!');
         out
     } else {
