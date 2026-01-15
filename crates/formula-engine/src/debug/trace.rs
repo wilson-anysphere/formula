@@ -760,18 +760,13 @@ fn parse_workbook_scoped_external_name_ref(name: &str) -> Option<(String, String
         return None;
     }
 
-    let end = crate::external_refs::find_external_workbook_prefix_end(name, 0)?;
-    if end >= name.len() {
+    let (prefix, remainder) = formula_model::external_refs::split_external_workbook_prefix(name)?;
+    let workbook = prefix.strip_prefix('[')?.strip_suffix(']')?;
+    if workbook.is_empty() || remainder.is_empty() {
         return None;
     }
 
-    let workbook = &name[1..end - 1];
-    let name = &name[end..];
-    if workbook.is_empty() || name.is_empty() {
-        return None;
-    }
-
-    Some((workbook.to_string(), name.to_string()))
+    Some((workbook.to_string(), remainder.to_string()))
 }
 
 /// Parse an Excel-style path-qualified external workbook prefix that's been lexed as a single
@@ -4594,6 +4589,14 @@ mod tests {
                 r"[C:\[foo]\Book.xlsx]Sheet1".to_string(),
                 "Sheet3".to_string()
             ))
+        );
+    }
+
+    #[test]
+    fn parse_workbook_scoped_external_name_ref_accepts_bracketed_paths() {
+        assert_eq!(
+            parse_workbook_scoped_external_name_ref(r"[C:\[foo]\Book.xlsx]MyName"),
+            Some((r"C:\[foo]\Book.xlsx".to_string(), "MyName".to_string()))
         );
     }
 
