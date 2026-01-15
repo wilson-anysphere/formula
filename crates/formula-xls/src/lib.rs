@@ -4193,9 +4193,16 @@ fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), Str
 fn strip_workbook_prefix_from_sheet_ref(sheet_name: &str) -> &str {
     // Best-effort: Excel can serialize sheet references as `'[Book1.xlsx]Sheet1'!A1`.
     // If a workbook prefix exists, keep only the portion after the last `]`.
+    //
+    // Prefer the shared workbook-prefix splitter (handles `]]` escaping and bracketed paths),
+    // but retain the legacy fallback for malformed inputs that omit the opening bracket.
+    if let Some((_, remainder)) = formula_model::external_refs::split_external_workbook_prefix(sheet_name)
+    {
+        return remainder;
+    }
     sheet_name
         .rfind(']')
-        .and_then(|idx| (idx + 1 <= sheet_name.len()).then_some(&sheet_name[(idx + 1)..]))
+        .and_then(|idx| sheet_name.get(idx + 1..))
         .filter(|s| !s.is_empty())
         .unwrap_or(sheet_name)
 }
