@@ -5,9 +5,8 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, Ref,
     SheetReference, StructuredRefExpr, UnaryOp,
 };
+use crate::eval::sheet_reference::lower_sheet_reference;
 use crate::value::ErrorKind;
-use crate::SheetRef;
-use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -323,41 +322,6 @@ fn rect_from_row_ref(r: &crate::RowRef) -> Option<RectRef> {
             col: CellAddr::SHEET_END,
         },
     })
-}
-
-fn lower_sheet_reference(
-    workbook: &Option<String>,
-    sheet: &Option<SheetRef>,
-) -> SheetReference<String> {
-    match (workbook.as_ref(), sheet.as_ref()) {
-        (None, None) => SheetReference::Current,
-        (None, Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(s) => SheetReference::Sheet(s.clone()),
-            SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
-                SheetReference::Sheet(start.clone())
-            }
-            SheetRef::SheetRange { start, end } => {
-                SheetReference::SheetRange(start.clone(), end.clone())
-            }
-        },
-        (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => {
-                SheetReference::External(crate::external_refs::format_external_key(book, sheet))
-            }
-            SheetRef::SheetRange { start, end } => {
-                if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(crate::external_refs::format_external_key(book, start))
-                } else {
-                    SheetReference::External(crate::external_refs::format_external_span_key(
-                        book, start, end,
-                    ))
-                }
-            }
-        },
-        (Some(book), None) => {
-            SheetReference::External(crate::external_refs::format_external_workbook_key(book))
-        }
-    }
 }
 
 fn coord_index(coord: &crate::Coord) -> Option<u32> {

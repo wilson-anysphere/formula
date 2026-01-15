@@ -3,6 +3,7 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, Ref,
     SheetReference, StructuredRefExpr, UnaryOp,
 };
+use crate::eval::sheet_reference::lower_sheet_reference;
 use crate::value::ErrorKind;
 use crate::SheetRef;
 use formula_model::sheet_name_eq_case_insensitive;
@@ -211,41 +212,6 @@ fn lower_binary(b: &crate::BinaryExpr, origin: Option<crate::CellAddr>) -> Expr<
             left: Box::new(lower_expr(&b.left, origin)),
             right: Box::new(lower_expr(&b.right, origin)),
         },
-    }
-}
-
-fn lower_sheet_reference(
-    workbook: &Option<String>,
-    sheet: &Option<SheetRef>,
-) -> SheetReference<String> {
-    match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => {
-                SheetReference::External(crate::external_refs::format_external_key(book, sheet))
-            }
-            SheetRef::SheetRange { start, end } => {
-                if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(crate::external_refs::format_external_key(book, start))
-                } else {
-                    SheetReference::External(crate::external_refs::format_external_span_key(
-                        book, start, end,
-                    ))
-                }
-            }
-        },
-        (Some(book), None) => {
-            SheetReference::External(crate::external_refs::format_external_workbook_key(book))
-        }
-        (None, Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => SheetReference::Sheet(sheet.clone()),
-            SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
-                SheetReference::Sheet(start.clone())
-            }
-            SheetRef::SheetRange { start, end } => {
-                SheetReference::SheetRange(start.clone(), end.clone())
-            }
-        },
-        (None, None) => SheetReference::Current,
     }
 }
 
@@ -902,17 +868,12 @@ fn compile_sheet_reference(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> SheetReference<usize> {
     match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(book), Some(sheet_ref)) => match sheet_ref {
-            SheetRef::Sheet(sheet) => SheetReference::External(crate::external_refs::format_external_key(book, sheet)),
-            SheetRef::SheetRange { start, end } => {
-                if sheet_name_eq_case_insensitive(start, end) {
-                    SheetReference::External(crate::external_refs::format_external_key(book, start))
-                } else {
-                    SheetReference::External(crate::external_refs::format_external_span_key(book, start, end))
-                }
-            }
+        (Some(_), _) => match lower_sheet_reference(workbook, sheet) {
+            SheetReference::External(key) => SheetReference::External(key),
+            SheetReference::Sheet(_)
+            | SheetReference::SheetRange(_, _)
+            | SheetReference::Current => unreachable!("workbook-qualified refs always lower to external keys"),
         },
-        (Some(book), None) => SheetReference::External(crate::external_refs::format_external_workbook_key(book)),
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => resolve_sheet(sheet)
                 .map(SheetReference::Sheet)

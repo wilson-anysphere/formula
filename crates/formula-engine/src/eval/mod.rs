@@ -3,6 +3,7 @@ mod ast;
 mod compiler;
 mod evaluator;
 mod parser;
+mod sheet_reference;
 
 /// Internal sentinel prefix used to track omitted LAMBDA parameters.
 ///
