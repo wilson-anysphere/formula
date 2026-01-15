@@ -1,21 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
-use formula_engine::{
-    metadata::FormatRun as EngineFormatRun,
-    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition,
-    NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
-};
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
-    canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
-    iter_locales, text_codepage_for_locale_id, ValueLocaleConfig, EN_US,
+    canonicalize_formula_with_style, get_locale, iter_locales, localize_formula_with_style,
+    text_codepage_for_locale_id, FormulaLocale, ValueLocaleConfig, EN_US,
 };
 use formula_engine::pivot as pivot_engine;
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, WhatIfError, WhatIfModel,
+};
+use formula_engine::{
+    metadata::FormatRun as EngineFormatRun, CellAddr, Coord, EditError as EngineEditError,
+    EditOp as EngineEditOp, EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind,
+    NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
+    Value as EngineValue,
 };
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, Color, DateSystem, DefinedNameScope, Font,
@@ -121,11 +121,15 @@ fn office_crypto_kind_and_message(
         formula_office_crypto::OfficeCryptoError::InvalidPassword
         | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => "InvalidPassword",
         formula_office_crypto::OfficeCryptoError::SpinCountTooLarge { .. } => "SpinCountTooLarge",
-        formula_office_crypto::OfficeCryptoError::UnsupportedEncryption(_) => "UnsupportedEncryption",
+        formula_office_crypto::OfficeCryptoError::UnsupportedEncryption(_) => {
+            "UnsupportedEncryption"
+        }
         formula_office_crypto::OfficeCryptoError::InvalidOptions(_) => "InvalidOptions",
         formula_office_crypto::OfficeCryptoError::InvalidFormat(_) => "InvalidFormat",
         formula_office_crypto::OfficeCryptoError::SizeLimitExceeded { .. } => "SizeLimitExceeded",
-        formula_office_crypto::OfficeCryptoError::SizeLimitExceededU64 { .. } => "SizeLimitExceeded",
+        formula_office_crypto::OfficeCryptoError::SizeLimitExceededU64 { .. } => {
+            "SizeLimitExceeded"
+        }
         formula_office_crypto::OfficeCryptoError::EncryptedPackageSizeOverflow { .. } => {
             "EncryptedPackageSizeOverflow"
         }
@@ -598,7 +602,10 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
                 }
                 if obj
                     .get("auto")
-                    .and_then(|v| v.as_bool().or_else(|| v.as_f64().map(|n| n.is_finite() && n != 0.0)))
+                    .and_then(|v| {
+                        v.as_bool()
+                            .or_else(|| v.as_f64().map(|n| n.is_finite() && n != 0.0))
+                    })
                     .unwrap_or(false)
                 {
                     return Some(Color::Auto);
@@ -616,17 +623,13 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
                         .and_then(parse_tint_thousandths);
                     return Some(Color::Theme { theme, tint });
                 }
-                if let Some(indexed) = obj
-                    .get("indexed")
-                    .and_then(|v| v.as_f64())
-                    .and_then(|n| {
-                        if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
-                            Some(n.trunc() as u16)
-                        } else {
-                            None
-                        }
-                    })
-                {
+                if let Some(indexed) = obj.get("indexed").and_then(|v| v.as_f64()).and_then(|n| {
+                    if n.is_finite() && n >= 0.0 && n <= u16::MAX as f64 {
+                        Some(n.trunc() as u16)
+                    } else {
+                        None
+                    }
+                }) {
                     return Some(Color::Indexed(indexed));
                 }
                 None
@@ -712,7 +715,11 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
     let top_level_has_locked = obj.contains_key("locked");
     let top_level_has_hidden = obj.contains_key("hidden");
 
-    if protection_has_locked || protection_has_hidden || top_level_has_locked || top_level_has_hidden {
+    if protection_has_locked
+        || protection_has_hidden
+        || top_level_has_locked
+        || top_level_has_hidden
+    {
         let mut explicit_default = false;
 
         let locked_raw = protection
@@ -1628,7 +1635,10 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
-fn pivot_value_to_json(value: pivot_engine::PivotValue, date_system: formula_engine::date::ExcelDateSystem) -> JsonValue {
+fn pivot_value_to_json(
+    value: pivot_engine::PivotValue,
+    date_system: formula_engine::date::ExcelDateSystem,
+) -> JsonValue {
     match value {
         pivot_engine::PivotValue::Blank => JsonValue::Null,
         pivot_engine::PivotValue::Bool(b) => JsonValue::Bool(b),
@@ -2212,7 +2222,11 @@ impl WhatIfModel for WorkbookGoalSeekModel<'_> {
         ))
     }
 
-    fn set_cell_value(&mut self, cell: &WhatIfCellRef, value: WhatIfCellValue) -> Result<(), Self::Error> {
+    fn set_cell_value(
+        &mut self,
+        cell: &WhatIfCellRef,
+        value: WhatIfCellValue,
+    ) -> Result<(), Self::Error> {
         self.wb
             .set_cell_internal(&self.sheet, cell.as_str(), what_if_value_to_json(value))
             .map_err(GoalSeekModelError::from)
@@ -2555,7 +2569,8 @@ impl WorkbookState {
             self.col_widths_chars.insert(new_display.clone(), cols);
         }
         if let Some(visibility) = self.sheet_visibility.remove(&old_display) {
-            self.sheet_visibility.insert(new_display.clone(), visibility);
+            self.sheet_visibility
+                .insert(new_display.clone(), visibility);
         }
         if let Some(color) = self.sheet_tab_colors.remove(&old_display) {
             self.sheet_tab_colors.insert(new_display.clone(), color);
@@ -2652,8 +2667,8 @@ impl WorkbookState {
 
         let writes = result.to_cell_writes_with_formats(
             pivot_engine::CellRef {
-            row: destination.row,
-            col: destination.col,
+                row: destination.row,
+                col: destination.col,
             },
             config,
             &pivot_engine::PivotApplyOptions::default(),
@@ -3094,7 +3109,9 @@ impl WorkbookState {
                     format!("cell {sheet}!{cell} is not numeric: {value_desc}")
                 }
                 WhatIfError::InvalidParams(msg) => format!("invalid goal seek parameters: {msg}"),
-                WhatIfError::NoBracketFound => "goal seek: could not bracket a solution".to_string(),
+                WhatIfError::NoBracketFound => {
+                    "goal seek: could not bracket a solution".to_string()
+                }
                 WhatIfError::NumericalFailure(msg) => format!("goal seek numerical failure: {msg}"),
             };
             js_err(message)
@@ -3884,106 +3901,10 @@ fn is_ident_cont_char(c: char) -> bool {
     ) || (!c.is_ascii() && c.is_alphanumeric())
 }
 
-fn skip_ws(src: &str, mut i: usize) -> usize {
-    while i < src.len() {
-        let Some(ch) = src[i..].chars().next() else {
-            break;
-        };
-        if !ch.is_whitespace() {
-            break;
-        }
-        i += ch.len_utf8();
-    }
-    i
-}
-
-fn scan_quoted_sheet_name(src: &str, start: usize) -> Option<usize> {
-    // Quoted sheet names escape apostrophes by doubling them: `''` -> `'`.
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'\'') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b'\'' {
-            if bytes.get(i + 1) == Some(&b'\'') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-    None
-}
-
-fn scan_unquoted_name(src: &str, start: usize) -> Option<usize> {
-    // Match the engine's identifier lexer rules for unquoted sheet names / defined names.
-    let first = src[start..].chars().next()?;
-    if !is_ident_start_char(first) {
-        return None;
-    }
-    let mut i = start + first.len_utf8();
-    while i < src.len() {
-        let ch = src[i..].chars().next()?;
-        if is_ident_cont_char(ch) {
-            i += ch.len_utf8();
-            continue;
-        }
-        break;
-    }
-    Some(i)
-}
-
-fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
-    let i = skip_ws(src, start);
-    if i >= src.len() {
-        return None;
-    }
-    match src[i..].chars().next()? {
-        '\'' => scan_quoted_sheet_name(src, i),
-        _ => scan_unquoted_name(src, i),
-    }
-}
-
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
-    let end = formula_model::external_refs::find_external_workbook_prefix_end(src, start)?;
-
-    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
-    // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR
-    // - a defined name identifier (e.g. `[Book.xlsx]MyName`).
-    //
-    // This avoids incorrectly treating nested structured references (which *are* nested) as
-    // workbook prefixes while still supporting workbook names that contain `[` characters (Excel
-    // treats `[` as plain text within workbook ids).
-    let i = skip_ws(src, end);
-    if let Some(mut sheet_end) = scan_sheet_name_token(src, i) {
-        sheet_end = skip_ws(src, sheet_end);
-
-        // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
-        if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
-            sheet_end += 1;
-            sheet_end = skip_ws(src, sheet_end);
-            sheet_end = scan_sheet_name_token(src, sheet_end)?;
-            sheet_end = skip_ws(src, sheet_end);
-        }
-
-        if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
-            return Some(end);
-        }
-    }
-
-    // Workbook-scoped external defined name `[Book.xlsx]MyName`.
-    // Note: defined names are not quoted with `'` in formula text, so we only scan the unquoted
-    // identifier form here.
-    let name_start = skip_ws(src, end);
-    if scan_unquoted_name(src, name_start).is_some() {
-        return Some(end);
-    }
-
-    None
+    formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+        src, start,
+    )
 }
 
 #[derive(Debug)]
@@ -4425,9 +4346,7 @@ impl WasmWorkbook {
 
             for (idx, item) in arr.iter().enumerate() {
                 let obj = item.dyn_into::<Object>().map_err(|_| {
-                    js_err(format!(
-                        "setFormatRunsByCol: runs[{idx}] must be an object"
-                    ))
+                    js_err(format!("setFormatRunsByCol: runs[{idx}] must be an object"))
                 })?;
 
                 let start_row = parse_u32_field(
@@ -4793,7 +4712,12 @@ impl WasmWorkbook {
             ///
             /// This powers Excel's legacy DBCS (`*B`) text functions (e.g. `LENB`) which behave
             /// differently under Japanese codepages (e.g. 932 / Shift-JIS).
-            #[serde(default, rename = "textCodepage", alias = "codepage", alias = "text_codepage")]
+            #[serde(
+                default,
+                rename = "textCodepage",
+                alias = "codepage",
+                alias = "text_codepage"
+            )]
             text_codepage: Option<u16>,
             sheets: BTreeMap<String, SheetJson>,
             #[serde(default)]
@@ -4926,7 +4850,9 @@ impl WasmWorkbook {
                 } else {
                     let vis = match trimmed {
                         "hidden" => Some(SheetVisibility::Hidden),
-                        "veryHidden" | "very_hidden" | "veryhidden" => Some(SheetVisibility::VeryHidden),
+                        "veryHidden" | "very_hidden" | "veryhidden" => {
+                            Some(SheetVisibility::VeryHidden)
+                        }
                         _ => None,
                     };
                     match vis {
@@ -4994,12 +4920,14 @@ impl WasmWorkbook {
             }
             for (row, style_id) in row_style_ids {
                 if style_id != 0 {
-                    wb.engine.set_row_patch_style_id(&display_name, row, style_id);
+                    wb.engine
+                        .set_row_patch_style_id(&display_name, row, style_id);
                 }
             }
             for (col, style_id) in col_style_ids {
                 if style_id != 0 {
-                    wb.engine.set_col_patch_style_id(&display_name, col, style_id);
+                    wb.engine
+                        .set_col_patch_style_id(&display_name, col, style_id);
                 }
             }
             for (col, runs) in format_runs_by_col {
@@ -5129,7 +5057,8 @@ impl WasmWorkbook {
         for sheet in &model.sheets {
             let sheet_name = wb.ensure_sheet(&sheet.name);
             if sheet.visibility != SheetVisibility::Visible {
-                wb.sheet_visibility.insert(sheet_name.clone(), sheet.visibility);
+                wb.sheet_visibility
+                    .insert(sheet_name.clone(), sheet.visibility);
             }
             if let Some(color) = sheet.tab_color.as_ref() {
                 let is_empty = color.rgb.is_none()
@@ -5225,10 +5154,7 @@ impl WasmWorkbook {
                 let Some(style_id) = props.style_id else {
                     continue;
                 };
-                let mapped = style_id_map
-                    .get(style_id as usize)
-                    .copied()
-                    .unwrap_or(0);
+                let mapped = style_id_map.get(style_id as usize).copied().unwrap_or(0);
                 if mapped != 0 {
                     wb.engine.set_row_style_id(&sheet_name, row, Some(mapped));
                 }
@@ -5671,17 +5597,17 @@ impl WasmWorkbook {
         style_id: u32,
     ) -> Result<(), JsValue> {
         let sheet = sheet.trim();
-        let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
+        let sheet = if sheet.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet
+        };
         self.inner
             .set_cell_style_id_internal(sheet, &address, style_id)
     }
 
     #[wasm_bindgen(js_name = "setSheetOrigin")]
-    pub fn set_sheet_origin(
-        &mut self,
-        sheet_name: String,
-        origin: JsValue,
-    ) -> Result<(), JsValue> {
+    pub fn set_sheet_origin(&mut self, sheet_name: String, origin: JsValue) -> Result<(), JsValue> {
         let sheet_name = sheet_name.trim();
         let sheet_name = if sheet_name.is_empty() {
             DEFAULT_SHEET
@@ -5720,7 +5646,11 @@ impl WasmWorkbook {
             locale_id: Option<&'a str>,
             #[serde(rename = "formulaLanguage")]
             formula_language: WorkbookFormulaLanguageDto,
-            #[serde(default, skip_serializing_if = "Option::is_none", rename = "textCodepage")]
+            #[serde(
+                default,
+                skip_serializing_if = "Option::is_none",
+                rename = "textCodepage"
+            )]
             text_codepage: Option<u16>,
             #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "sheetOrder")]
             sheet_order: Vec<String>,
@@ -5737,7 +5667,11 @@ impl WasmWorkbook {
             visibility: Option<&'static str>,
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "tabColor")]
             tab_color: Option<TabColor>,
-            #[serde(default, skip_serializing_if = "BTreeMap::is_empty", rename = "cellPhonetics")]
+            #[serde(
+                default,
+                skip_serializing_if = "BTreeMap::is_empty",
+                rename = "cellPhonetics"
+            )]
             cell_phonetics: BTreeMap<String, String>,
             cells: BTreeMap<String, JsonValue>,
         }
@@ -5768,11 +5702,15 @@ impl WasmWorkbook {
             let row_count = (rows != EXCEL_MAX_ROWS).then_some(rows);
             let col_count = (cols != EXCEL_MAX_COLS).then_some(cols);
 
-            let visibility = self.inner.sheet_visibility.get(sheet_name).and_then(|v| match v {
-                SheetVisibility::Hidden => Some("hidden"),
-                SheetVisibility::VeryHidden => Some("veryHidden"),
-                SheetVisibility::Visible => None,
-            });
+            let visibility = self
+                .inner
+                .sheet_visibility
+                .get(sheet_name)
+                .and_then(|v| match v {
+                    SheetVisibility::Hidden => Some("hidden"),
+                    SheetVisibility::VeryHidden => Some("veryHidden"),
+                    SheetVisibility::Visible => None,
+                });
             let tab_color = self.inner.sheet_tab_colors.get(sheet_name).cloned();
             sheets.insert(
                 sheet_name.clone(),
@@ -5819,7 +5757,7 @@ impl WasmWorkbook {
             sheet_order,
             sheets,
         })
-            .map_err(|err| js_err(format!("invalid workbook json: {err}")))
+        .map_err(|err| js_err(format!("invalid workbook json: {err}")))
     }
 
     /// Return a lightweight workbook metadata payload (sheet list + dimensions + best-effort used ranges)
@@ -5843,86 +5781,63 @@ impl WasmWorkbook {
         let keys_in_order = self.inner.engine.sheet_keys_in_order();
         let empty_cells: BTreeMap<String, JsonValue> = BTreeMap::new();
 
-        let push_sheet = |sheet_key: &str, cells: &BTreeMap<String, JsonValue>| -> Result<(), JsValue> {
-            let sheet_obj = Object::new();
-            object_set(&sheet_obj, "id", &JsValue::from_str(sheet_key))?;
-            let display_name = self
-                .inner
-                .engine
-                .sheet_id(sheet_key)
-                .and_then(|id| self.inner.engine.sheet_name(id))
-                .unwrap_or(sheet_key);
-            object_set(&sheet_obj, "name", &JsValue::from_str(display_name))?;
+        let push_sheet =
+            |sheet_key: &str, cells: &BTreeMap<String, JsonValue>| -> Result<(), JsValue> {
+                let sheet_obj = Object::new();
+                object_set(&sheet_obj, "id", &JsValue::from_str(sheet_key))?;
+                let display_name = self
+                    .inner
+                    .engine
+                    .sheet_id(sheet_key)
+                    .and_then(|id| self.inner.engine.sheet_name(id))
+                    .unwrap_or(sheet_key);
+                object_set(&sheet_obj, "name", &JsValue::from_str(display_name))?;
 
-            if let Some(visibility) = self.inner.sheet_visibility.get(sheet_key).copied() {
-                let value = match visibility {
-                    SheetVisibility::Visible => "visible",
-                    SheetVisibility::Hidden => "hidden",
-                    SheetVisibility::VeryHidden => "veryHidden",
-                };
-                object_set(&sheet_obj, "visibility", &JsValue::from_str(value))?;
-            }
-
-            if let Some(color) = self.inner.sheet_tab_colors.get(sheet_key) {
-                use serde::ser::Serialize as _;
-                let js = color
-                    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-                    .map_err(|err| js_err(err.to_string()))?;
-                object_set(&sheet_obj, "tabColor", &js)?;
-            }
-
-            // Include sheet dimensions when they differ from Excel defaults (to match `toJson()`).
-            let (rows, cols) = self
-                .inner
-                .engine
-                .sheet_dimensions(sheet_key)
-                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
-            if rows != EXCEL_MAX_ROWS {
-                object_set(&sheet_obj, "rowCount", &JsValue::from_f64(rows as f64))?;
-            }
-            if cols != EXCEL_MAX_COLS {
-                object_set(&sheet_obj, "colCount", &JsValue::from_f64(cols as f64))?;
-            }
-
-            // Best-effort used range derived from the sparse input maps (scalar + rich).
-            let mut used_start_row: Option<u32> = None;
-            let mut used_end_row: u32 = 0;
-            let mut used_start_col: u32 = 0;
-            let mut used_end_col: u32 = 0;
-
-            for (address, input) in cells {
-                // Explicit nulls should not affect used range tracking (sparse semantics).
-                if input.is_null() {
-                    continue;
+                if let Some(visibility) = self.inner.sheet_visibility.get(sheet_key).copied() {
+                    let value = match visibility {
+                        SheetVisibility::Visible => "visible",
+                        SheetVisibility::Hidden => "hidden",
+                        SheetVisibility::VeryHidden => "veryHidden",
+                    };
+                    object_set(&sheet_obj, "visibility", &JsValue::from_str(value))?;
                 }
-                let Ok(cell_ref) = CellRef::from_a1(address) else {
-                    continue;
-                };
 
-                match used_start_row {
-                    None => {
-                        used_start_row = Some(cell_ref.row);
-                        used_end_row = cell_ref.row;
-                        used_start_col = cell_ref.col;
-                        used_end_col = cell_ref.col;
-                    }
-                    Some(start_row) => {
-                        used_start_row = Some(start_row.min(cell_ref.row));
-                        used_end_row = used_end_row.max(cell_ref.row);
-                        used_start_col = used_start_col.min(cell_ref.col);
-                        used_end_col = used_end_col.max(cell_ref.col);
-                    }
+                if let Some(color) = self.inner.sheet_tab_colors.get(sheet_key) {
+                    use serde::ser::Serialize as _;
+                    let js = color
+                        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+                        .map_err(|err| js_err(err.to_string()))?;
+                    object_set(&sheet_obj, "tabColor", &js)?;
                 }
-            }
 
-            if let Some(rich_cells) = self.inner.sheets_rich.get(sheet_key) {
-                for (address, input) in rich_cells {
-                    if input.is_empty() {
+                // Include sheet dimensions when they differ from Excel defaults (to match `toJson()`).
+                let (rows, cols) = self
+                    .inner
+                    .engine
+                    .sheet_dimensions(sheet_key)
+                    .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
+                if rows != EXCEL_MAX_ROWS {
+                    object_set(&sheet_obj, "rowCount", &JsValue::from_f64(rows as f64))?;
+                }
+                if cols != EXCEL_MAX_COLS {
+                    object_set(&sheet_obj, "colCount", &JsValue::from_f64(cols as f64))?;
+                }
+
+                // Best-effort used range derived from the sparse input maps (scalar + rich).
+                let mut used_start_row: Option<u32> = None;
+                let mut used_end_row: u32 = 0;
+                let mut used_start_col: u32 = 0;
+                let mut used_end_col: u32 = 0;
+
+                for (address, input) in cells {
+                    // Explicit nulls should not affect used range tracking (sparse semantics).
+                    if input.is_null() {
                         continue;
                     }
                     let Ok(cell_ref) = CellRef::from_a1(address) else {
                         continue;
                     };
+
                     match used_start_row {
                         None => {
                             used_start_row = Some(cell_ref.row);
@@ -5938,32 +5853,56 @@ impl WasmWorkbook {
                         }
                     }
                 }
-            }
 
-            if let Some(start_row) = used_start_row {
-                let used_obj = Object::new();
-                object_set(&used_obj, "start_row", &JsValue::from_f64(start_row as f64))?;
-                object_set(
-                    &used_obj,
-                    "end_row",
-                    &JsValue::from_f64(used_end_row as f64),
-                )?;
-                object_set(
-                    &used_obj,
-                    "start_col",
-                    &JsValue::from_f64(used_start_col as f64),
-                )?;
-                object_set(
-                    &used_obj,
-                    "end_col",
-                    &JsValue::from_f64(used_end_col as f64),
-                )?;
-                object_set(&sheet_obj, "usedRange", &used_obj.into())?;
-            }
+                if let Some(rich_cells) = self.inner.sheets_rich.get(sheet_key) {
+                    for (address, input) in rich_cells {
+                        if input.is_empty() {
+                            continue;
+                        }
+                        let Ok(cell_ref) = CellRef::from_a1(address) else {
+                            continue;
+                        };
+                        match used_start_row {
+                            None => {
+                                used_start_row = Some(cell_ref.row);
+                                used_end_row = cell_ref.row;
+                                used_start_col = cell_ref.col;
+                                used_end_col = cell_ref.col;
+                            }
+                            Some(start_row) => {
+                                used_start_row = Some(start_row.min(cell_ref.row));
+                                used_end_row = used_end_row.max(cell_ref.row);
+                                used_start_col = used_start_col.min(cell_ref.col);
+                                used_end_col = used_end_col.max(cell_ref.col);
+                            }
+                        }
+                    }
+                }
 
-            sheets_out.push(&sheet_obj);
-            Ok(())
-        };
+                if let Some(start_row) = used_start_row {
+                    let used_obj = Object::new();
+                    object_set(&used_obj, "start_row", &JsValue::from_f64(start_row as f64))?;
+                    object_set(
+                        &used_obj,
+                        "end_row",
+                        &JsValue::from_f64(used_end_row as f64),
+                    )?;
+                    object_set(
+                        &used_obj,
+                        "start_col",
+                        &JsValue::from_f64(used_start_col as f64),
+                    )?;
+                    object_set(
+                        &used_obj,
+                        "end_col",
+                        &JsValue::from_f64(used_end_col as f64),
+                    )?;
+                    object_set(&sheet_obj, "usedRange", &used_obj.into())?;
+                }
+
+                sheets_out.push(&sheet_obj);
+                Ok(())
+            };
 
         if keys_in_order.is_empty() {
             for (sheet_name, cells) in &self.inner.sheets {
@@ -6264,7 +6203,11 @@ impl WasmWorkbook {
         let params: GoalSeekRequestDto =
             serde_wasm_bindgen::from_value(params).map_err(|err| js_err(err.to_string()))?;
         let sheet = params.sheet.as_deref().unwrap_or(DEFAULT_SHEET).trim();
-        let sheet = if sheet.is_empty() { DEFAULT_SHEET } else { sheet };
+        let sheet = if sheet.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet
+        };
 
         let target_cell = params.target_cell.trim();
         if target_cell.is_empty() {
@@ -6477,8 +6420,8 @@ fn xlsb_to_model_workbook(
 ) -> Result<formula_model::Workbook, formula_xlsb::Error> {
     use formula_model::{
         normalize_formula_text, CalculationMode as ModelCalculationMode, CellRef,
-        CellValue as ModelCellValue, DateSystem, DefinedNameScope, SheetVisibility as ModelSheetVisibility,
-        Style, Workbook as ModelWorkbook,
+        CellValue as ModelCellValue, DateSystem, DefinedNameScope,
+        SheetVisibility as ModelSheetVisibility, Style, Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -6530,9 +6473,9 @@ fn xlsb_to_model_workbook(
         Vec::with_capacity(wb.sheet_metas().len());
 
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
-        let sheet_id = out
-            .add_sheet(meta.name.clone())
-            .map_err(|err| formula_xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name)))?;
+        let sheet_id = out.add_sheet(meta.name.clone()).map_err(|err| {
+            formula_xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name))
+        })?;
         worksheet_ids_by_index.push(sheet_id);
 
         let sheet = out
@@ -6553,9 +6496,15 @@ fn xlsb_to_model_workbook(
 
             match cell.value {
                 formula_xlsb::CellValue::Blank => {}
-                formula_xlsb::CellValue::Number(v) => sheet.set_value(cell_ref, ModelCellValue::Number(v)),
-                formula_xlsb::CellValue::Bool(v) => sheet.set_value(cell_ref, ModelCellValue::Boolean(v)),
-                formula_xlsb::CellValue::Text(s) => sheet.set_value(cell_ref, ModelCellValue::String(s)),
+                formula_xlsb::CellValue::Number(v) => {
+                    sheet.set_value(cell_ref, ModelCellValue::Number(v))
+                }
+                formula_xlsb::CellValue::Bool(v) => {
+                    sheet.set_value(cell_ref, ModelCellValue::Boolean(v))
+                }
+                formula_xlsb::CellValue::Text(s) => {
+                    sheet.set_value(cell_ref, ModelCellValue::String(s))
+                }
                 formula_xlsb::CellValue::Error(code) => sheet.set_value(
                     cell_ref,
                     ModelCellValue::Error(xlsb_error_code_to_model_error(code)),
@@ -7305,8 +7254,7 @@ mod tests {
         assert_eq!(normalize_function_context_name(&ctx.name, None), "SEQUENCE");
 
         // Locale-aware canonicalization should run before stripping the `_xlfn.` prefix.
-        let localized =
-            scan_fallback_function_context(r#"=_xlfn.SEQUENZ(1;"hallo"#, ';').unwrap();
+        let localized = scan_fallback_function_context(r#"=_xlfn.SEQUENZ(1;"hallo"#, ';').unwrap();
         assert_eq!(localized.arg_index, 1);
         let de_de = get_locale("de-DE").expect("expected de-DE locale to be registered");
         assert_eq!(
@@ -7330,11 +7278,24 @@ mod tests {
     }
 
     #[test]
-    fn fallback_context_scanner_ignores_commas_in_external_workbook_prefixes_with_brackets_in_workbook_name() {
+    fn fallback_context_scanner_ignores_commas_in_external_workbook_prefixes_with_brackets_in_workbook_name(
+    ) {
         // Workbook names may contain literal `[` characters, but workbook prefixes are not nested.
         // The scanner should still treat the comma after the external name reference as the argument
         // separator.
         let ctx = scan_fallback_function_context("=SUM([A1[Name.xlsx]MyName,1", ',').unwrap();
+        assert_eq!(ctx.name, "SUM");
+        assert_eq!(ctx.arg_index, 1);
+    }
+
+    #[test]
+    fn fallback_context_scanner_ignores_commas_in_external_workbook_prefixes_with_bracketed_path_components(
+    ) {
+        // Some producers emit external workbook prefixes that include bracketed path components
+        // without escaping the interior `]` (e.g. `[C:\[foo]\Book.xlsx]...`). Treat the workbook
+        // prefix as non-nesting and ignore commas inside it.
+        let ctx =
+            scan_fallback_function_context("=SUM([C:\\[foo,bar]\\Book.xlsx]MyName,1", ',').unwrap();
         assert_eq!(ctx.name, "SUM");
         assert_eq!(ctx.arg_index, 1);
     }
@@ -8149,7 +8110,10 @@ mod tests {
         let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
         wb.inner.recalculate_internal(None).unwrap();
 
-        assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
+        assert_eq!(
+            wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"),
+            Some("PHONETIC")
+        );
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
             EngineValue::Text("PHONETIC".to_string())
@@ -8166,7 +8130,10 @@ mod tests {
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Text("Base".to_string())
         );
-        assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
+        assert_eq!(
+            wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"),
+            Some("PHONETIC")
+        );
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
             EngineValue::Text("PHONETIC".to_string())
@@ -8179,8 +8146,14 @@ mod tests {
         let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
         wb.inner.recalculate_internal(None).unwrap();
 
-        assert_eq!(wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"), EngineValue::Text("Base".to_string()));
-        assert_eq!(wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"), Some("PHONETIC"));
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text("Base".to_string())
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"),
+            Some("PHONETIC")
+        );
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
             EngineValue::Text("PHONETIC".to_string())
@@ -8244,13 +8217,16 @@ mod tests {
         let sheet_id = model.add_sheet("Sheet1").unwrap();
         let sheet = model.sheet_mut(sheet_id).unwrap();
 
-        let mut cell = formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
+        let mut cell =
+            formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
         cell.phonetic = Some("かんじ".to_string());
         sheet.set_cell(formula_model::CellRef::from_a1("A1").unwrap(), cell);
 
-        sheet.set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
+        sheet
+            .set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
             .unwrap();
-        sheet.set_formula_a1("C1", Some("LENB(\"あ\")".to_string()))
+        sheet
+            .set_formula_a1("C1", Some("LENB(\"あ\")".to_string()))
             .unwrap();
 
         let json = serde_json::to_string(&model).unwrap();
@@ -8275,13 +8251,15 @@ mod tests {
 
         // A1 is a formula cell that returns a string; the model also stores cached value and
         // phonetic guide metadata.
-        let mut cell = formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
+        let mut cell =
+            formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
         // `formula-model` stores formulas without a leading '='.
         cell.formula = Some("\"漢字\"".to_string());
         cell.phonetic = Some("かんじ".to_string());
         sheet.set_cell(formula_model::CellRef::from_a1("A1").unwrap(), cell);
 
-        sheet.set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
+        sheet
+            .set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
             .unwrap();
 
         let json = serde_json::to_string(&model).unwrap();
@@ -8896,7 +8874,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed["localeId"], json!("de-DE"));
         assert_eq!(parsed["formulaLanguage"], json!("canonical"));
-        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("=LOG(8,2)"));
+        assert_eq!(
+            parsed["sheets"]["Sheet1"]["cells"]["A1"],
+            json!("=LOG(8,2)")
+        );
 
         let mut wb2 = WasmWorkbook::from_json(&json_str).unwrap();
         wb2.inner.recalculate_internal(None).unwrap();
@@ -9817,16 +9798,16 @@ mod tests {
             let mut wb = WorkbookState::new_with_default_sheet();
             wb.engine.set_date_system(system);
 
-            wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Date")).unwrap();
-            wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
+            wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Date"))
+                .unwrap();
+            wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales"))
+                .unwrap();
 
-            let serial = formula_engine::date::ymd_to_serial(
-                date,
-                system,
-            )
-            .unwrap() as f64;
-            wb.set_cell_internal(DEFAULT_SHEET, "A2", json!(serial)).unwrap();
-            wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0)).unwrap();
+            let serial = formula_engine::date::ymd_to_serial(date, system).unwrap() as f64;
+            wb.set_cell_internal(DEFAULT_SHEET, "A2", json!(serial))
+                .unwrap();
+            wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0))
+                .unwrap();
 
             let date_style = wb.engine.intern_style(Style {
                 number_format: Some("m/d/yyyy".to_string()),
@@ -9842,7 +9823,9 @@ mod tests {
                 row_fields: vec![formula_model::pivots::PivotField::new("Date")],
                 column_fields: vec![],
                 value_fields: vec![formula_model::pivots::ValueField {
-                    source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                    source_field: formula_model::pivots::PivotFieldRef::CacheFieldName(
+                        "Sales".to_string(),
+                    ),
                     name: "Sum of Sales".to_string(),
                     aggregation: formula_model::pivots::AggregationType::Sum,
                     number_format: None,
@@ -9878,12 +9861,18 @@ mod tests {
     #[test]
     fn calculate_pivot_includes_value_field_number_format_hints() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(100.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("East")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(150.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(100.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("East"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(150.0))
+            .unwrap();
 
         wb.recalculate_internal(None).unwrap();
 
@@ -9891,7 +9880,9 @@ mod tests {
             row_fields: vec![formula_model::pivots::PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![formula_model::pivots::ValueField {
-                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName(
+                    "Sales".to_string(),
+                ),
                 name: "Sum of Sales".to_string(),
                 aggregation: formula_model::pivots::AggregationType::Sum,
                 number_format: Some("$#,##0.00".to_string()),
@@ -9926,12 +9917,18 @@ mod tests {
     #[test]
     fn calculate_pivot_includes_default_percent_format_for_percent_show_as() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("West")).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(3.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Region"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Sales"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("East"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("West"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(3.0))
+            .unwrap();
 
         wb.recalculate_internal(None).unwrap();
 
@@ -9939,7 +9936,9 @@ mod tests {
             row_fields: vec![formula_model::pivots::PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![formula_model::pivots::ValueField {
-                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName("Sales".to_string()),
+                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName(
+                    "Sales".to_string(),
+                ),
                 name: "Sum of Sales".to_string(),
                 aggregation: formula_model::pivots::AggregationType::Sum,
                 number_format: None,
@@ -10036,18 +10035,13 @@ mod tests {
         use formula_engine::what_if::goal_seek::GoalSeekStatus;
 
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1*A1"))
             .unwrap();
 
         let (result, changes) = wb
-            .goal_seek_internal(
-                DEFAULT_SHEET,
-                "B1",
-                9.0,
-                "A1",
-                GoalSeekTuning::default(),
-            )
+            .goal_seek_internal(DEFAULT_SHEET, "B1", 9.0, "A1", GoalSeekTuning::default())
             .unwrap();
 
         assert_eq!(result.status, GoalSeekStatus::Converged);
@@ -10233,7 +10227,8 @@ mod tests {
         });
         engine.set_sheet_default_style_id("Sheet1", Some(sheet_style));
 
-        let clear_style = style_json_to_model_style(&json!({ "alignment": { "horizontal": null } }));
+        let clear_style =
+            style_json_to_model_style(&json!({ "alignment": { "horizontal": null } }));
         let clear_style_id = engine.intern_style(clear_style);
         assert_ne!(clear_style_id, 0);
         engine.set_col_style_id("Sheet1", 0, Some(clear_style_id));

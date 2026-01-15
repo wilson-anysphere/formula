@@ -11090,9 +11090,13 @@ fn update_sheet_prefix_flags(
         // construct a canonical external sheet key that matches what `ExternalValueProvider`
         // expects (e.g. `"[Book.xlsx]Sheet1"`).
         //
-        // External 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) cannot be represented via
-        // `ExternalValueProvider`, so treat them as a lowering error to surface `#REF!` rather than
-        // silently querying the provider with a misleading key.
+        // Non-degenerate external 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) are not currently
+        // lowered into bytecode. Expanding a span requires external workbook tab order; encoding a
+        // particular expansion into a cached bytecode program would become stale if the provider's
+        // sheet order changes unless we plumb sheet-order invalidation into the bytecode cache.
+        //
+        // The AST evaluator expands these spans at evaluation time using provider sheet order, so
+        // treat them as a lowering error and let the engine fall back to AST evaluation.
         let key = match sheet {
             Some(crate::SheetRef::Sheet(sheet)) => format!("[{book}]{sheet}"),
             Some(crate::SheetRef::SheetRange { start, end }) => {
@@ -16329,39 +16333,7 @@ fn expand_external_sheet_span_key(
     let provider = provider?;
     let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
     let sheet_names = provider.workbook_sheet_names(workbook)?;
-
-    let start_key = formula_model::sheet_name_casefold(start);
-    let end_key = formula_model::sheet_name_casefold(end);
-
-    let mut start_idx: Option<usize> = None;
-    let mut end_idx: Option<usize> = None;
-    for (idx, name) in sheet_names.iter().enumerate() {
-        let name_key = formula_model::sheet_name_casefold(name);
-        if start_idx.is_none() && name_key == start_key {
-            start_idx = Some(idx);
-        }
-        if end_idx.is_none() && name_key == end_key {
-            end_idx = Some(idx);
-        }
-        if start_idx.is_some() && end_idx.is_some() {
-            break;
-        }
-    }
-
-    let start_idx = start_idx?;
-    let end_idx = end_idx?;
-    let (lo, hi) = if start_idx <= end_idx {
-        (start_idx, end_idx)
-    } else {
-        (end_idx, start_idx)
-    };
-
-    Some(
-        sheet_names[lo..=hi]
-            .iter()
-            .map(|name| format!("[{workbook}]{name}"))
-            .collect(),
-    )
+    crate::external_refs::expand_external_sheet_span_from_order(workbook, start, end, &sheet_names)
 }
 
 fn analyze_external_dependencies(
@@ -16721,9 +16693,12 @@ fn walk_external_dependencies(
                                         {
                                             // Match the runtime behavior: allow single-sheet external workbook
                                             // references, but reject external 3D spans.
-                                            if crate::eval::is_valid_external_single_sheet_key(&key) {
+                                            if crate::eval::is_valid_external_single_sheet_key(&key)
+                                            {
                                                 if let Some((workbook_id, _sheet)) =
-                                                    crate::eval::split_external_sheet_key_parts(&key)
+                                                    crate::eval::split_external_sheet_key_parts(
+                                                        &key,
+                                                    )
                                                 {
                                                     external_workbooks
                                                         .insert(workbook_id.to_string());
@@ -16998,21 +16973,23 @@ fn walk_external_expr(
             };
             let (workbook, explicit_sheet_key) =
                 match crate::eval::split_external_sheet_key_parts(key) {
-                Some((workbook, sheet)) if !sheet.contains(':') => (workbook, Some(key.as_str())),
-                Some((_workbook, _sheet)) => {
-                    // External 3D sheet spans are not valid structured-ref prefixes.
-                    return;
-                }
-                None => {
-                    // Workbook-only external reference (`[Book.xlsx]...`); parse the bracketed
-                    // workbook prefix.
-                    let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
-                    else {
+                    Some((workbook, sheet)) if !sheet.contains(':') => {
+                        (workbook, Some(key.as_str()))
+                    }
+                    Some((_workbook, _sheet)) => {
+                        // External 3D sheet spans are not valid structured-ref prefixes.
                         return;
-                    };
-                    (workbook, None)
-                }
-            };
+                    }
+                    None => {
+                        // Workbook-only external reference (`[Book.xlsx]...`); parse the bracketed
+                        // workbook prefix.
+                        let Some(workbook) = crate::external_refs::parse_external_workbook_key(key)
+                        else {
+                            return;
+                        };
+                        (workbook, None)
+                    }
+                };
 
             let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
                 return;

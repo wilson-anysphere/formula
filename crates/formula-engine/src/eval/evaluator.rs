@@ -11,7 +11,7 @@ use crate::functions::{
 use crate::locale::ValueLocaleConfig;
 use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
 use crate::LocaleConfig;
-use formula_model::{sheet_name_casefold, HorizontalAlignment};
+use formula_model::HorizontalAlignment;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -1439,37 +1439,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // workbook sheet order supplied by the resolver.
                 let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
-
-                let start_key = sheet_name_casefold(start);
-                let end_key = sheet_name_casefold(end);
-                let mut start_idx: Option<usize> = None;
-                let mut end_idx: Option<usize> = None;
-                for (idx, name) in order.iter().enumerate() {
-                    let name_key = sheet_name_casefold(name);
-                    if start_idx.is_none() && name_key == start_key {
-                        start_idx = Some(idx);
-                    }
-                    if end_idx.is_none() && name_key == end_key {
-                        end_idx = Some(idx);
-                    }
-                    if start_idx.is_some() && end_idx.is_some() {
-                        break;
-                    }
-                }
-                let start_idx = start_idx?;
-                let end_idx = end_idx?;
-                let (start_idx, end_idx) = if start_idx <= end_idx {
-                    (start_idx, end_idx)
-                } else {
-                    (end_idx, start_idx)
-                };
-
-                Some(
-                    order[start_idx..=end_idx]
-                        .iter()
-                        .map(|sheet| FnSheetId::External(format!("[{workbook}]{sheet}")))
-                        .collect(),
-                )
+                let keys = crate::external_refs::expand_external_sheet_span_from_order(
+                    workbook, start, end, &order,
+                )?;
+                Some(keys.into_iter().map(FnSheetId::External).collect())
             }
         }
     }
@@ -1851,7 +1824,9 @@ mod tests {
     #[test]
     fn is_valid_external_single_sheet_key_accepts_single_sheet_rejects_span() {
         assert!(is_valid_external_single_sheet_key("[Book.xlsx]Sheet1"));
-        assert!(!is_valid_external_single_sheet_key("[Book.xlsx]Sheet1:Sheet3"));
+        assert!(!is_valid_external_single_sheet_key(
+            "[Book.xlsx]Sheet1:Sheet3"
+        ));
     }
 }
 

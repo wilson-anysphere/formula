@@ -47,11 +47,7 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
 
 fn escape_dax_bracket_identifier(raw: &str) -> Cow<'_, str> {
     // In DAX, `]` is escaped as `]]` within `[...]`.
-    if raw.contains(']') {
-        Cow::Owned(raw.replace(']', "]]"))
-    } else {
-        Cow::Borrowed(raw)
-    }
+    formula_model::external_refs::escape_bracketed_identifier_content(raw)
 }
 
 fn dax_quoted_table_name(raw: &str) -> Cow<'_, str> {
@@ -325,7 +321,8 @@ impl PivotCache {
                 }
 
                 // Unquoted table name + escaped bracket identifier.
-                let escaped_column = column.replace(']', "]]");
+                let escaped_column =
+                    formula_model::external_refs::escape_bracketed_identifier_content(column);
                 let unquoted = format!("{table}[{escaped_column}]");
                 if let Some(idx) = self.field_index(&unquoted) {
                     return Some(idx);

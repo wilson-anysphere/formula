@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use formula_model::external_refs::escape_external_workbook_name_for_prefix;
+use formula_model::sheet_name_casefold;
 #[cfg(feature = "write")]
 use formula_model::sheet_name_eq_case_insensitive;
-use unicode_normalization::UnicodeNormalization;
 
 /// Workbook metadata needed to encode/decode sheet-qualified references and defined names.
 ///
@@ -128,19 +129,6 @@ pub struct NameDefinition {
     pub scope: NameScope,
 }
 
-fn escape_workbook_name_for_prefix(workbook: String) -> String {
-    // Excel escapes literal `]` characters inside workbook prefixes by doubling them (`]]`).
-    //
-    // We store external workbook sheet keys in the same canonical form used by `formula-engine`
-    // (e.g. `"[Book]].xlsx]Sheet1"`), so ensure any raw SupBook display names are made safe for
-    // embedding inside `[...]`.
-    if workbook.contains(']') {
-        workbook.replace(']', "]]")
-    } else {
-        workbook
-    }
-}
-
 impl WorkbookContext {
     /// Registers an ExternSheet table entry so formulas can encode/decode 3D references.
     pub fn add_extern_sheet(
@@ -182,7 +170,8 @@ impl WorkbookContext {
         last_sheet: impl Into<String>,
         ixti: u16,
     ) {
-        let workbook = escape_workbook_name_for_prefix(workbook.into());
+        let workbook = workbook.into();
+        let workbook = escape_external_workbook_name_for_prefix(&workbook).into_owned();
         let first_sheet = first_sheet.into();
         let last_sheet = last_sheet.into();
 
@@ -348,7 +337,8 @@ impl WorkbookContext {
         let supbook = self.namex_supbooks.get(supbook_index as usize)?;
         match supbook.kind {
             SupBookKind::ExternalWorkbook => {
-                let book = escape_workbook_name_for_prefix(display_supbook_name(&supbook.raw_name));
+                let display = display_supbook_name(&supbook.raw_name);
+                let book = escape_external_workbook_name_for_prefix(&display);
 
                 if let Some(scope_sheet) = extern_name.scope_sheet {
                     let sheet_name = self
@@ -427,8 +417,8 @@ impl WorkbookContext {
                 // Function extern names should render without qualification (handled above). For
                 // *non*-function extern names, include a workbook-like qualifier so the decoded
                 // formula text remains unambiguous and round-trippable.
-                let book =
-                    escape_workbook_name_for_prefix(display_addin_supbook_name(&supbook.raw_name));
+                let display = display_addin_supbook_name(&supbook.raw_name);
+                let book = escape_external_workbook_name_for_prefix(&display);
 
                 if let Some(scope_sheet) = extern_name.scope_sheet {
                     let sheet_name = self
@@ -563,17 +553,16 @@ impl WorkbookContext {
                 // not specify a workbook prefix.
                 (None, SupBookKind::ExternalWorkbook) => continue,
                 (Some(book), SupBookKind::ExternalWorkbook | SupBookKind::Unknown) => {
-                    let display =
-                        escape_workbook_name_for_prefix(display_supbook_name(&supbook.raw_name));
-                    if normalize_key(&display) != book {
+                    let display = display_supbook_name(&supbook.raw_name);
+                    let display = escape_external_workbook_name_for_prefix(&display);
+                    if normalize_key(display.as_ref()) != book {
                         continue;
                     }
                 }
                 (Some(book), SupBookKind::AddIn) => {
-                    let display = escape_workbook_name_for_prefix(display_addin_supbook_name(
-                        &supbook.raw_name,
-                    ));
-                    if normalize_key(&display) != book {
+                    let display = display_addin_supbook_name(&supbook.raw_name);
+                    let display = escape_external_workbook_name_for_prefix(&display);
+                    if normalize_key(display.as_ref()) != book {
                         continue;
                     }
                 }
@@ -811,9 +800,10 @@ impl WorkbookContext {
 }
 
 fn normalize_key(s: &str) -> String {
-    // Must match Excel's case-insensitive name matching. We follow the same strategy as
-    // `formula_model::sheet_name_eq_case_insensitive`: Unicode NFKC + Unicode uppercasing.
-    s.nfkc().flat_map(|c| c.to_uppercase()).collect()
+    // Must match Excel's case-insensitive name matching.
+    //
+    // Reuse the shared Unicode-aware casefold implementation used across the engine/model.
+    sheet_name_casefold(s)
 }
 
 fn normalize_function_key(s: &str) -> String {

@@ -480,57 +480,28 @@ impl<'a> Lexer<'a> {
             return false;
         }
 
-        // Find the workbook closing bracket.
-        //
-        // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
-        // Treat those escapes as part of the workbook segment (not as the terminator).
-        let Some(close) =
-            crate::external_refs::find_external_workbook_prefix_end(self.input, bracket_start)
-        else {
+        let Some(close) = formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+            self.input,
+            bracket_start,
+        ) else {
             return false;
         };
 
         // Parse sheet name + optional sheet span + '!' after the workbook prefix.
-        let mut pos = close;
-        while let Some(ch) = self.input[pos..].chars().next() {
-            if ch.is_whitespace() {
-                pos += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
+        let mut pos = self.skip_ws_pos(close);
         pos = match self.scan_sheet_name(pos) {
             Some(end) => end,
             None => return false,
         };
-        while let Some(ch) = self.input[pos..].chars().next() {
-            if ch.is_whitespace() {
-                pos += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
+        pos = self.skip_ws_pos(pos);
 
         if self.input[pos..].starts_with(':') {
-            pos += 1;
-            while let Some(ch) = self.input[pos..].chars().next() {
-                if ch.is_whitespace() {
-                    pos += ch.len_utf8();
-                } else {
-                    break;
-                }
-            }
+            pos = self.skip_ws_pos(pos + 1);
             pos = match self.scan_sheet_name(pos) {
                 Some(end) => end,
                 None => return false,
             };
-            while let Some(ch) = self.input[pos..].chars().next() {
-                if ch.is_whitespace() {
-                    pos += ch.len_utf8();
-                } else {
-                    break;
-                }
-            }
+            pos = self.skip_ws_pos(pos);
         }
 
         // Sheet reference like `[Book.xlsx]Sheet1!A1`.
@@ -595,14 +566,11 @@ impl<'a> Lexer<'a> {
         // everything up to the closing `]` before switching back to strict identifier rules for
         // the sheet name portion.
         if self.peek_char() == Some('[') {
-            if let Some(end) =
-                crate::external_refs::find_external_workbook_prefix_end(self.input, self.pos)
-            {
-                self.pos = end;
-            } else {
-                // No closing bracket; treat the rest of the input as part of this identifier.
-                self.pos = self.input.len();
-            }
+            self.pos = formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+                self.input,
+                self.pos,
+            )
+            .unwrap_or_else(|| self.input.len());
         }
 
         while let Some(ch) = self.peek_char() {
@@ -613,6 +581,17 @@ impl<'a> Lexer<'a> {
             }
         }
         TokenKind::Ident(self.input[start..self.pos].to_string())
+    }
+
+    fn skip_ws_pos(&self, mut pos: usize) -> usize {
+        while let Some(ch) = self.input.get(pos..).and_then(|s| s.chars().next()) {
+            if ch.is_whitespace() {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        pos
     }
 
     fn lex_number(&mut self) -> Result<TokenKind, FormulaParseError> {
@@ -737,18 +716,17 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
     //
     // Only treat `:` as a 3D sheet-span separator when it appears in the sheet portion after the
     // closing `]`, not inside the workbook id.
-    let (start, end) = if let Some(rest) = name.strip_prefix('[') {
-        // The workbook id can contain `[` / `]` (e.g. `C:\[foo]\Book.xlsx`), so locate the final
-        // closing bracket which terminates the workbook segment.
-        let close_rel = rest.rfind(']')?;
-        let close = 1 + close_rel;
-        let sheet_part = &name[close + 1..];
-        let colon_rel = sheet_part.find(':')?;
-        let colon = close + 1 + colon_rel;
-        (&name[..colon], &name[colon + 1..])
-    } else {
-        name.split_once(':')?
-    };
+    if name.starts_with('[') {
+        let (workbook, sheet_part) =
+            formula_model::external_refs::split_external_sheet_key_parts(name)?;
+        let (start_sheet, end_sheet) = sheet_part.split_once(':')?;
+        if start_sheet.is_empty() || end_sheet.is_empty() {
+            return None;
+        }
+        return Some((format!("[{workbook}]{start_sheet}"), end_sheet.to_string()));
+    }
+
+    let (start, end) = name.split_once(':')?;
     if start.is_empty() || end.is_empty() {
         return None;
     }
@@ -767,83 +745,6 @@ fn parse_workbook_scoped_external_name_ref(name: &str) -> Option<(String, String
     }
 
     Some((workbook.to_string(), remainder.to_string()))
-}
-
-/// Parse an Excel-style path-qualified external workbook prefix that's been lexed as a single
-/// quoted sheet name, e.g. `C:\path\[Book.xlsx]Sheet1`.
-///
-/// Returns `(workbook, sheet)` where `workbook` is the canonical workbook name/path (without
-/// brackets) and `sheet` is the sheet portion after the closing `]`.
-///
-/// This is a best-effort parser used only by the debug trace subsystem.
-fn parse_path_qualified_external_sheet_key(name: &str) -> Option<(String, String)> {
-    // We only treat this as the path-qualified form when `[` is not the leading character. If the
-    // name starts with `[`, it's already in the canonical external key form (or is malformed).
-    if name.starts_with('[') {
-        return None;
-    }
-
-    // Excel external workbook prefixes:
-    // - are not nested (workbook names may contain `[` characters)
-    // - escape literal `]` characters by doubling them (`]]`)
-    //
-    // Path-qualified references can also contain bracketed path components, e.g.
-    // `C:\[foo]\[Book.xlsx]Sheet1`. Scan for the best `[workbook]sheet` segment by finding the
-    // bracketed component whose closing `]` is furthest to the right, skipping over workbook
-    // prefixes so we do not misclassify `[` characters inside workbook names.
-    let bytes = name.as_bytes();
-    let mut i = 0usize;
-    let mut best: Option<(usize, usize)> = None; // (open, end) where end is exclusive of the closing `]`
-
-    while i < bytes.len() {
-        if bytes[i] == b'[' {
-            if let Some(end) = crate::external_refs::find_external_workbook_prefix_end(name, i) {
-                // Only treat this as a workbook prefix if there is a remainder (sheet name) after
-                // the closing `]`.
-                if end < name.len() {
-                    best = match best {
-                        None => Some((i, end)),
-                        Some((best_start, best_end)) => {
-                            if end > best_end {
-                                Some((i, end))
-                            } else if end == best_end && i < best_start {
-                                Some((i, end))
-                            } else {
-                                Some((best_start, best_end))
-                            }
-                        }
-                    };
-                }
-
-                // Skip the entire bracketed segment to avoid misclassifying `[` characters inside
-                // the workbook name as the start of a new prefix.
-                i = end;
-                continue;
-            }
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = name[i..].chars().next().expect("i always at char boundary");
-        i += ch.len_utf8();
-    }
-
-    let Some((open, end)) = best else {
-        return None;
-    };
-
-    // `end` is exclusive, so `end - 1` is the closing `]`.
-    let book = &name[open + 1..end - 1];
-    let sheet = &name[end..];
-    if book.is_empty() || sheet.is_empty() {
-        return None;
-    }
-
-    let prefix = &name[..open];
-    let mut workbook = String::with_capacity(prefix.len().saturating_add(book.len()));
-    workbook.push_str(prefix);
-    workbook.push_str(book);
-    Some((workbook, sheet.to_string()))
 }
 
 fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
@@ -1787,7 +1688,9 @@ impl ParserImpl {
         // Canonical evaluation normalizes these into the bracketed external key form:
         // `[C:\path\Book.xlsx]Sheet1`.
         let path_qualified_external = start_was_quoted
-            .then(|| parse_path_qualified_external_sheet_key(&start_name))
+            .then(|| {
+                formula_model::external_refs::parse_path_qualified_external_sheet_key(&start_name)
+            })
             .flatten();
 
         let sheet = if matches!(self.peek().kind, TokenKind::Colon) {
@@ -3277,37 +3180,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
                 let (workbook, start, end) = crate::external_refs::parse_external_span_key(key)?;
                 let order = self.resolver.workbook_sheet_names(workbook)?;
-
-                let start_key = formula_model::sheet_name_casefold(start);
-                let end_key = formula_model::sheet_name_casefold(end);
-                let mut start_idx: Option<usize> = None;
-                let mut end_idx: Option<usize> = None;
-                for (idx, name) in order.iter().enumerate() {
-                    let name_key = formula_model::sheet_name_casefold(name);
-                    if start_idx.is_none() && name_key == start_key {
-                        start_idx = Some(idx);
-                    }
-                    if end_idx.is_none() && name_key == end_key {
-                        end_idx = Some(idx);
-                    }
-                    if start_idx.is_some() && end_idx.is_some() {
-                        break;
-                    }
-                }
-                let start_idx = start_idx?;
-                let end_idx = end_idx?;
-                let (start_idx, end_idx) = if start_idx <= end_idx {
-                    (start_idx, end_idx)
-                } else {
-                    (end_idx, start_idx)
-                };
-
-                Some(
-                    order[start_idx..=end_idx]
-                        .iter()
-                        .map(|sheet| FnSheetId::External(format!("[{workbook}]{sheet}")))
-                        .collect(),
-                )
+                let keys = crate::external_refs::expand_external_sheet_span_from_order(
+                    workbook, start, end, &order,
+                )?;
+                Some(keys.into_iter().map(FnSheetId::External).collect())
             }
         }
     }
@@ -4545,8 +4421,10 @@ mod tests {
     #[test]
     fn parse_path_qualified_external_sheet_key_extracts_workbook_and_sheet() {
         let (workbook, sheet) =
-            parse_path_qualified_external_sheet_key(r"C:\path\[Book.xlsx]Sheet1")
-                .expect("expected path-qualified external ref");
+            formula_model::external_refs::parse_path_qualified_external_sheet_key(
+                r"C:\path\[Book.xlsx]Sheet1",
+            )
+            .expect("expected path-qualified external ref");
         assert_eq!(workbook, r"C:\path\Book.xlsx");
         assert_eq!(sheet, "Sheet1");
     }
@@ -4554,8 +4432,10 @@ mod tests {
     #[test]
     fn parse_path_qualified_external_sheet_key_supports_workbook_names_containing_lbracket() {
         let (workbook, sheet) =
-            parse_path_qualified_external_sheet_key(r"C:\path\[A1[Name.xlsx]Sheet1")
-                .expect("expected path-qualified external ref");
+            formula_model::external_refs::parse_path_qualified_external_sheet_key(
+                r"C:\path\[A1[Name.xlsx]Sheet1",
+            )
+            .expect("expected path-qualified external ref");
         assert_eq!(workbook, r"C:\path\A1[Name.xlsx");
         assert_eq!(sheet, "Sheet1");
     }
@@ -4563,8 +4443,10 @@ mod tests {
     #[test]
     fn parse_path_qualified_external_sheet_key_supports_workbook_names_with_escaped_rbracket() {
         let (workbook, sheet) =
-            parse_path_qualified_external_sheet_key(r"C:\path\[Book[Name]].xlsx]Sheet1")
-                .expect("expected path-qualified external ref");
+            formula_model::external_refs::parse_path_qualified_external_sheet_key(
+                r"C:\path\[Book[Name]].xlsx]Sheet1",
+            )
+            .expect("expected path-qualified external ref");
         assert_eq!(workbook, r"C:\path\Book[Name]].xlsx");
         assert_eq!(sheet, "Sheet1");
     }

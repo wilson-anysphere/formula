@@ -1645,7 +1645,10 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
         _ => {
             push_warning(
                 &mut warnings,
-                format!("rgce decode ended with {} expressions on stack", stack.len()),
+                format!(
+                    "rgce decode ended with {} expressions on stack",
+                    stack.len()
+                ),
                 &mut warnings_suppressed,
             );
             stack.pop().expect("non-empty").text
@@ -2275,7 +2278,9 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
     fn inner(input: &[u8], out: &mut Biff8SharedFormulaRgceAnalysis) -> Result<(), String> {
         let mut i = 0usize;
         while i < input.len() {
-            let ptg = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+            let ptg = *input
+                .get(i)
+                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
             i = i.saturating_add(1);
 
             match ptg {
@@ -2290,7 +2295,9 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 0x03..=0x16 | 0x2F => {}
                 // PtgStr: ShortXLUnicodeString (variable).
                 0x17 => {
-                    let remaining = input.get(i..).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let remaining = input
+                        .get(i..)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     let (_s, consumed) = strings::parse_biff8_short_string(remaining, 1252)
                         .map_err(|e| format!("failed to parse PtgStr: {e}"))?;
                     i = i
@@ -2302,7 +2309,9 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgExtend* tokens (ptg=0x18 variants): [etpg: u8][payload...]
                 0x18 | 0x38 | 0x58 | 0x78 => {
-                    let etpg = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let etpg = *input
+                        .get(i)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     i += 1;
                     match etpg {
                         0x19 => {
@@ -2561,7 +2570,9 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
         let mut out = Vec::with_capacity(input.len());
         let mut i = 0usize;
         while i < input.len() {
-            let ptg = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+            let ptg = *input
+                .get(i)
+                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
             i += 1;
 
             match ptg {
@@ -2592,7 +2603,9 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                 }
                 // PtgExtend / PtgExtendV / PtgExtendA (+0x60): [etpg: u8][payload...]
                 0x18 | 0x38 | 0x58 | 0x78 => {
-                    let etpg = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let etpg = *input
+                        .get(i)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     i += 1;
                     out.push(ptg);
                     out.push(etpg);
@@ -2641,7 +2654,9 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                 }
                 // PtgErr / PtgBool: 1 byte.
                 0x1C | 0x1D => {
-                    let b = *input.get(i).ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let b = *input
+                        .get(i)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     out.push(ptg);
                     out.push(b);
                     i += 1;
@@ -2720,8 +2735,16 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     let row_rel = (col_field & ROW_RELATIVE_BIT) != 0;
                     let col_rel = (col_field & COL_RELATIVE_BIT) != 0;
 
-                    let new_row = if row_rel { row_raw + delta_row } else { row_raw };
-                    let new_col = if col_rel { col_raw + delta_col } else { col_raw };
+                    let new_row = if row_rel {
+                        row_raw + delta_row
+                    } else {
+                        row_raw
+                    };
+                    let new_col = if col_rel {
+                        col_raw + delta_col
+                    } else {
+                        col_raw
+                    };
 
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
                         out.push(ptg.saturating_add(0x06)); // PtgRef* -> PtgRefErr*
@@ -2755,10 +2778,26 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     let row2_rel = (col2_field & ROW_RELATIVE_BIT) != 0;
                     let col2_rel = (col2_field & COL_RELATIVE_BIT) != 0;
 
-                    let new_row1 = if row1_rel { row1_raw + delta_row } else { row1_raw };
-                    let new_col1 = if col1_rel { col1_raw + delta_col } else { col1_raw };
-                    let new_row2 = if row2_rel { row2_raw + delta_row } else { row2_raw };
-                    let new_col2 = if col2_rel { col2_raw + delta_col } else { col2_raw };
+                    let new_row1 = if row1_rel {
+                        row1_raw + delta_row
+                    } else {
+                        row1_raw
+                    };
+                    let new_col1 = if col1_rel {
+                        col1_raw + delta_col
+                    } else {
+                        col1_raw
+                    };
+                    let new_row2 = if row2_rel {
+                        row2_raw + delta_row
+                    } else {
+                        row2_raw
+                    };
+                    let new_col2 = if col2_rel {
+                        col2_raw + delta_col
+                    } else {
+                        col2_raw
+                    };
 
                     if new_row1 < 0
                         || new_row1 > MAX_ROW
@@ -2853,8 +2892,16 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     let row_rel = (col_field & ROW_RELATIVE_BIT) != 0;
                     let col_rel = (col_field & COL_RELATIVE_BIT) != 0;
 
-                    let new_row = if row_rel { row_raw + delta_row } else { row_raw };
-                    let new_col = if col_rel { col_raw + delta_col } else { col_raw };
+                    let new_row = if row_rel {
+                        row_raw + delta_row
+                    } else {
+                        row_raw
+                    };
+                    let new_col = if col_rel {
+                        col_raw + delta_col
+                    } else {
+                        col_raw
+                    };
 
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
                         out.push(ptg.saturating_add(0x02)); // PtgRef3d* -> PtgRefErr3d*
@@ -2890,10 +2937,26 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     let row2_rel = (col2_field & ROW_RELATIVE_BIT) != 0;
                     let col2_rel = (col2_field & COL_RELATIVE_BIT) != 0;
 
-                    let new_row1 = if row1_rel { row1_raw + delta_row } else { row1_raw };
-                    let new_col1 = if col1_rel { col1_raw + delta_col } else { col1_raw };
-                    let new_row2 = if row2_rel { row2_raw + delta_row } else { row2_raw };
-                    let new_col2 = if col2_rel { col2_raw + delta_col } else { col2_raw };
+                    let new_row1 = if row1_rel {
+                        row1_raw + delta_row
+                    } else {
+                        row1_raw
+                    };
+                    let new_col1 = if col1_rel {
+                        col1_raw + delta_col
+                    } else {
+                        col1_raw
+                    };
+                    let new_row2 = if row2_rel {
+                        row2_raw + delta_row
+                    } else {
+                        row2_raw
+                    };
+                    let new_col2 = if col2_rel {
+                        col2_raw + delta_col
+                    } else {
+                        col2_raw
+                    };
 
                     if new_row1 < 0
                         || new_row1 > MAX_ROW
@@ -3415,11 +3478,7 @@ fn format_external_workbook_name(workbook: &str) -> String {
 
     // Escape literal `]` characters inside the workbook name by doubling them (`]]`), matching
     // Excel's external workbook prefix syntax.
-    let escaped = if inner.contains(']') {
-        inner.replace(']', "]]")
-    } else {
-        inner.to_string()
-    };
+    let escaped = formula_model::external_refs::escape_external_workbook_name_for_prefix(inner);
     format!("[{escaped}]")
 }
 
@@ -3662,7 +3721,10 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
     score
 }
 
-fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, columns: &StructuredColumns) -> bool {
+fn structured_ref_is_single_cell(
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> bool {
     match (item, columns) {
         (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
         (Some(StructuredRefItem::Headers), StructuredColumns::Single(_)) => true,
@@ -3680,12 +3742,14 @@ fn format_structured_ref(
     if matches!(item, Some(StructuredRefItem::ThisRow)) {
         match columns {
             StructuredColumns::Single(col) => {
-                return format!("[@{}]", escape_structured_ref_bracket_content(col));
+                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
+                return format!("[@{col}]");
             }
             StructuredColumns::All => return "[@]".to_string(),
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
+                let start =
+                    formula_model::external_refs::escape_bracketed_identifier_content(start);
+                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
                 return format!("[@[{start}]:[{end}]]");
             }
         }
@@ -3706,11 +3770,13 @@ fn format_structured_ref(
     if matches!(item, None | Some(StructuredRefItem::Data)) {
         match columns {
             StructuredColumns::Single(col) => {
-                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
+                return format!("{table}[{col}]");
             }
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
+                let start =
+                    formula_model::external_refs::escape_bracketed_identifier_content(start);
+                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
                 return format!("{table}[[{start}]:[{end}]]");
             }
             StructuredColumns::All => {}
@@ -3721,12 +3787,12 @@ fn format_structured_ref(
     let item = item.expect("handled None above");
     match columns {
         StructuredColumns::Single(col) => {
-            let col = escape_structured_ref_bracket_content(col);
+            let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
             format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
         }
         StructuredColumns::Range { start, end } => {
-            let start = escape_structured_ref_bracket_content(start);
-            let end = escape_structured_ref_bracket_content(end);
+            let start = formula_model::external_refs::escape_bracketed_identifier_content(start);
+            let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
             format!(
                 "{table}[[{}],[{start}]:[{end}]]",
                 structured_ref_item_literal(item)
@@ -3744,13 +3810,6 @@ fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
         StructuredRefItem::Totals => "#Totals",
         StructuredRefItem::ThisRow => "#This Row",
     }
-}
-
-fn escape_structured_ref_bracket_content(s: &str) -> String {
-    if !s.contains(']') {
-        return s.to_string();
-    }
-    s.replace(']', "]]")
 }
 
 fn push_column(col: u32, out: &mut String) {
@@ -3776,9 +3835,7 @@ mod tests {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
         let ast = parse_formula(expr, ParseOptions::default()).unwrap_or_else(|err| {
-            panic!(
-                "expected decoded expression to be parseable, expr={expr:?}, err={err:?}"
-            );
+            panic!("expected decoded expression to be parseable, expr={expr:?}, err={err:?}");
         });
 
         // Validate that any error literals in the parsed AST are *known* Excel errors (so we don't
@@ -4053,7 +4110,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1 B1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4085,7 +4146,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4103,16 +4168,31 @@ mod tests {
         let a1_col = encode_col_field(0, true, true);
         let b1_col = encode_col_field(1, true, true);
         let rgce = vec![
-            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
-            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
-            0x10, // union operator
-            0x15, // explicit paren
-            0x22, 0x01, 0x04, 0x00, // SUM(argc=1)
+            0x24,
+            0x00,
+            0x00,
+            a1_col.to_le_bytes()[0],
+            a1_col.to_le_bytes()[1], // A1
+            0x24,
+            0x00,
+            0x00,
+            b1_col.to_le_bytes()[0],
+            b1_col.to_le_bytes()[1], // B1
+            0x10,                    // union operator
+            0x15,                    // explicit paren
+            0x22,
+            0x01,
+            0x04,
+            0x00, // SUM(argc=1)
         ];
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "SUM((A1,B1))");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4130,13 +4210,24 @@ mod tests {
         //   PtgAttr grbit=tAttrSum (0x10), wAttr=0
         let a1_col = encode_col_field(0, true, true);
         let rgce = vec![
-            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
-            0x19, 0x10, 0x00, 0x00, // PtgAttr(tAttrSum)
+            0x24,
+            0x00,
+            0x00,
+            a1_col.to_le_bytes()[0],
+            a1_col.to_le_bytes()[1], // A1
+            0x19,
+            0x10,
+            0x00,
+            0x00, // PtgAttr(tAttrSum)
         ];
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "SUM(A1)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4210,7 +4301,7 @@ mod tests {
         let rgce = [
             0x1E, 0x01, 0x00, // PtgInt 1
             0x20, // PtgArray
-            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+            0, 0, 0, 0, 0, 0, 0,    // 7-byte opaque header
             0x03, // PtgAdd
         ];
 
@@ -4235,7 +4326,7 @@ mod tests {
         let rgce = [
             0x1E, 0x01, 0x00, // PtgInt 1
             0x20, // PtgArray
-            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+            0, 0, 0, 0, 0, 0, 0,    // 7-byte opaque header
             0x03, // PtgAdd
         ];
 
@@ -4411,8 +4502,7 @@ mod tests {
             rgce.push(ptg_ref);
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row=0
             rgce.extend_from_slice(&col_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_ref + 0x06, "ptg={ptg_ref:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4430,8 +4520,7 @@ mod tests {
             rgce.push(ptg_ref);
             rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row=65535
             rgce.extend_from_slice(&col_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_ref + 0x06, "ptg={ptg_ref:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4452,8 +4541,7 @@ mod tests {
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row2
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_area + 0x06, "ptg={ptg_area:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4465,7 +4553,7 @@ mod tests {
         // the materializer must emit the 2D error ptg (`PtgAreaErr*`), preserving token width.
         let base_cell = CellCoord::new(0, 0);
         let target_cell = CellCoord::new(1, 0); // delta_row=+1
-        // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
+                                                // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
         let col1_field = encode_col_field(0, false, false);
         let col2_field = encode_col_field(0, false, true); // row-relative flag set on row2
         for &ptg_area in &[0x25_u8, 0x45, 0x65] {
@@ -4475,8 +4563,7 @@ mod tests {
             rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row2=65535 (shifts OOB)
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_area + 0x06, "ptg={ptg_area:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4495,8 +4582,7 @@ mod tests {
             rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row=0
             rgce.extend_from_slice(&col_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_ref3d + 0x02, "ptg={ptg_ref3d:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4515,8 +4601,7 @@ mod tests {
             rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
             rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row=65535
             rgce.extend_from_slice(&col_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_ref3d + 0x02, "ptg={ptg_ref3d:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4538,8 +4623,7 @@ mod tests {
             rgce.extend_from_slice(&0u16.to_le_bytes()); // row2
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4551,7 +4635,7 @@ mod tests {
         // the materializer must emit the 3D error ptg (`PtgAreaErr3d*`), preserving token width.
         let base_cell = CellCoord::new(0, 0);
         let target_cell = CellCoord::new(1, 0); // delta_row=+1
-        // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
+                                                // Keep the first row fixed in-bounds; shift only the second endpoint out-of-bounds.
         let col1_field = encode_col_field(0, false, false);
         let col2_field = encode_col_field(0, false, true); // row-relative flag set on row2
         for &ptg_area3d in &[0x3B_u8, 0x5B, 0x7B] {
@@ -4562,8 +4646,7 @@ mod tests {
             rgce.extend_from_slice(&u16::MAX.to_le_bytes()); // row2=65535 (shifts OOB)
             rgce.extend_from_slice(&col1_field.to_le_bytes());
             rgce.extend_from_slice(&col2_field.to_le_bytes());
-            let out =
-                materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
+            let out = materialize_biff8_shared_formula_rgce(&rgce, base_cell, target_cell).unwrap();
             assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
             assert_eq!(&out[1..], &rgce[1..], "payload should be preserved");
         }
@@ -4597,7 +4680,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Table1[Column2]");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4626,7 +4713,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "@Table1[Column2]");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4666,7 +4757,11 @@ mod tests {
         let rgce = [0x43, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "@MyName");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4756,7 +4851,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "@A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -4792,7 +4891,11 @@ mod tests {
         ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "@Sheet1!A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -5200,7 +5303,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "@Sheet1!A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -6105,7 +6212,11 @@ mod tests {
         let rgce = [0x59, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "@'[Book2.xlsx]MyName'");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -6230,7 +6341,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(
-            decoded.warnings.iter().any(|w| w.contains("cannot be rendered parseably")),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("cannot be rendered parseably")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -6278,8 +6392,10 @@ mod tests {
         let col_field = encode_col_field(0, true, true);
         let rgce = [
             0x3A, // PtgRef3d
-            0x00, 0x00, // ixti=0
-            0x00, 0x00, // row=0
+            0x00,
+            0x00, // ixti=0
+            0x00,
+            0x00, // row=0
             col_field.to_le_bytes()[0],
             col_field.to_le_bytes()[1],
         ];
@@ -6395,8 +6511,10 @@ mod tests {
         let col_field = encode_col_field(0, true, true);
         let rgce = [
             0x3A, // PtgRef3d
-            0x00, 0x00, // ixti=0
-            0x00, 0x00, // row=0
+            0x00,
+            0x00, // ixti=0
+            0x00,
+            0x00, // row=0
             col_field.to_le_bytes()[0],
             col_field.to_le_bytes()[1],
         ];
@@ -6455,8 +6573,10 @@ mod tests {
         let col_field = encode_col_field(0, true, true);
         let rgce = [
             0x3A, // PtgRef3d
-            0x00, 0x00, // ixti=0
-            0x00, 0x00, // row=0
+            0x00,
+            0x00, // ixti=0
+            0x00,
+            0x00, // row=0
             col_field.to_le_bytes()[0],
             col_field.to_le_bytes()[1],
         ];
@@ -6565,8 +6685,10 @@ mod tests {
         let col_field = encode_col_field(0, true, true);
         let rgce = [
             0x3A, // PtgRef3d
-            0x00, 0x00, // ixti=0
-            0x00, 0x00, // row=0
+            0x00,
+            0x00, // ixti=0
+            0x00,
+            0x00, // row=0
             col_field.to_le_bytes()[0],
             col_field.to_le_bytes()[1],
         ];
@@ -6680,7 +6802,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "MyFunc(1)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -6728,7 +6854,8 @@ mod tests {
         let rgce = vec![
             0x1E, 0x01, 0x00, // PtgInt 1
             0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // PtgNameX (ixti=0, iname=1)
-            0x19, 0x00, 0x00, 0x00, // PtgAttr (no-op; should be skipped by NameX UDF detection)
+            0x19, 0x00, 0x00,
+            0x00, // PtgAttr (no-op; should be skipped by NameX UDF detection)
             0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
         ];
 
@@ -6780,7 +6907,11 @@ mod tests {
         let rgce = [0x39, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'[AddIn]MyAddinConst'");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -6876,10 +7007,21 @@ mod tests {
         let a1_col = encode_col_field(0, true, true);
         let b1_col = encode_col_field(1, true, true);
         let rgce = vec![
-            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
-            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
-            0x10, // union operator
-            0x22, 0x01, 0x04, 0x00, // SUM(argc=1)
+            0x24,
+            0x00,
+            0x00,
+            a1_col.to_le_bytes()[0],
+            a1_col.to_le_bytes()[1], // A1
+            0x24,
+            0x00,
+            0x00,
+            b1_col.to_le_bytes()[0],
+            b1_col.to_le_bytes()[1], // B1
+            0x10,                    // union operator
+            0x22,
+            0x01,
+            0x04,
+            0x00, // SUM(argc=1)
         ];
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
@@ -6913,11 +7055,26 @@ mod tests {
         let b1_col = encode_col_field(1, true, true);
         let c1_col = encode_col_field(2, true, true);
         let rgce = vec![
-            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
-            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
-            0x10, // union operator
-            0x24, 0x00, 0x00, c1_col.to_le_bytes()[0], c1_col.to_le_bytes()[1], // C1
-            0x22, 0x02, 0x04, 0x00, // SUM(argc=2)
+            0x24,
+            0x00,
+            0x00,
+            a1_col.to_le_bytes()[0],
+            a1_col.to_le_bytes()[1], // A1
+            0x24,
+            0x00,
+            0x00,
+            b1_col.to_le_bytes()[0],
+            b1_col.to_le_bytes()[1], // B1
+            0x10,                    // union operator
+            0x24,
+            0x00,
+            0x00,
+            c1_col.to_le_bytes()[0],
+            c1_col.to_le_bytes()[1], // C1
+            0x22,
+            0x02,
+            0x04,
+            0x00, // SUM(argc=2)
         ];
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
@@ -7175,7 +7332,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#NAME?");
         assert!(
-            decoded.warnings.iter().any(|w| w.contains("cannot be rendered parseably")),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("cannot be rendered parseably")),
             "warnings={:?}",
             decoded.warnings
         );

@@ -219,7 +219,11 @@ impl ImportWarnings {
     }
 }
 
-fn push_import_warning(warnings: &mut ImportWarnings, msg: impl Into<String>, suppressed: &mut bool) {
+fn push_import_warning(
+    warnings: &mut ImportWarnings,
+    msg: impl Into<String>,
+    suppressed: &mut bool,
+) {
     // Preserve existing call sites that still thread a `suppressed` flag: callers may set
     // `suppressed=true` to model the post-cap state in tests.
     if *suppressed {
@@ -332,7 +336,12 @@ fn catch_calamine_panic_with_context<T>(
 /// malformed or unsupported records may produce warnings rather than failing
 /// the import.
 pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
-    import_xls_with_biff_reader(path.as_ref(), None, None, biff::read_workbook_stream_from_xls)
+    import_xls_with_biff_reader(
+        path.as_ref(),
+        None,
+        None,
+        biff::read_workbook_stream_from_xls,
+    )
 }
 
 /// Import a legacy `.xls` workbook from disk with an optional password for BIFF `FILEPASS`
@@ -424,29 +433,29 @@ fn import_xls_with_biff_reader(
     // errors for password-protected workbooks.
     let mut warnings = ImportWarnings::new();
     let mut warnings_suppressed = false;
-    let mut workbook_stream = match catch_calamine_panic_with_context(
-        "reading `.xls` workbook stream",
-        || read_biff_workbook_stream(path),
-    ) {
-        Ok(Ok(bytes)) => Some(bytes),
-        Ok(Err(err)) => {
-            push_import_warning(
-                &mut warnings,
-                format!("failed to read `.xls` workbook stream: {err}"),
-                &mut warnings_suppressed,
-            );
-            None
-        }
-        Err(ImportError::CalaminePanic(message)) => {
-            push_import_warning(
-                &mut warnings,
-                format!("panic while reading `.xls` workbook stream: {message}"),
-                &mut warnings_suppressed,
-            );
-            None
-        }
-        Err(other) => return Err(other),
-    };
+    let mut workbook_stream =
+        match catch_calamine_panic_with_context("reading `.xls` workbook stream", || {
+            read_biff_workbook_stream(path)
+        }) {
+            Ok(Ok(bytes)) => Some(bytes),
+            Ok(Err(err)) => {
+                push_import_warning(
+                    &mut warnings,
+                    format!("failed to read `.xls` workbook stream: {err}"),
+                    &mut warnings_suppressed,
+                );
+                None
+            }
+            Err(ImportError::CalaminePanic(message)) => {
+                push_import_warning(
+                    &mut warnings,
+                    format!("panic while reading `.xls` workbook stream: {message}"),
+                    &mut warnings_suppressed,
+                );
+                None
+            }
+            Err(other) => return Err(other),
+        };
 
     // Attempt to decrypt BIFF `FILEPASS` records when a password is provided. We do this before
     // running any BIFF record parsers so downstream metadata scans see plaintext.
@@ -474,11 +483,7 @@ fn import_xls_with_biff_reader(
         biff_version = Some(detected_biff_version);
         biff_codepage = Some(codepage);
 
-        match biff::parse_biff_workbook_globals(
-            workbook_stream,
-            detected_biff_version,
-            codepage,
-        ) {
+        match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
             Ok(globals) => {
                 biff_globals = Some(globals);
             }
@@ -948,11 +953,8 @@ fn import_xls_with_biff_reader(
                 biff_rgce_sheet_names = sheets.iter().map(|s| s.name.clone()).collect();
             }
 
-            let externsheet_table = biff::externsheet::parse_biff_externsheet(
-                workbook_stream,
-                biff_version,
-                codepage,
-            );
+            let externsheet_table =
+                biff::externsheet::parse_biff_externsheet(workbook_stream, biff_version, codepage);
             biff_rgce_externsheet = externsheet_table.entries;
 
             let supbook_table = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
@@ -1436,11 +1438,9 @@ fn import_xls_with_biff_reader(
         // BIFF stores the phonetic metadata on the *shared string* entry (SST) and references it
         // from the worksheet via `LABELSST.isst`. We apply the extracted phonetic string to the
         // corresponding model cell, anchored to merged regions like other cell metadata.
-        if let (Some(workbook_stream), Some(biff_idx), Some(sst_phonetics)) = (
-            workbook_stream.as_deref(),
-            biff_idx,
-            sst_phonetics.as_ref(),
-        ) {
+        if let (Some(workbook_stream), Some(biff_idx), Some(sst_phonetics)) =
+            (workbook_stream.as_deref(), biff_idx, sst_phonetics.as_ref())
+        {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
                     push_import_warning(
@@ -1954,13 +1954,13 @@ fn import_xls_with_biff_reader(
                         let empty_externsheet: &[biff::externsheet::ExternSheetEntry] = &[];
                         let empty_supbooks: &[biff::supbook::SupBookInfo] = &[];
                         let empty_defined_names: &[biff::rgce::DefinedNameMeta] = &[];
-                            biff::rgce::RgceDecodeContext {
-                                codepage,
-                                sheet_names: empty_sheet_names,
-                                externsheet: empty_externsheet,
-                                supbooks: empty_supbooks,
-                                defined_names: empty_defined_names,
-                            }
+                        biff::rgce::RgceDecodeContext {
+                            codepage,
+                            sheet_names: empty_sheet_names,
+                            externsheet: empty_externsheet,
+                            supbooks: empty_supbooks,
+                            defined_names: empty_defined_names,
+                        }
                     };
 
                     // Best-effort: resolve `PtgExp`/`PtgTbl` formulas directly from the worksheet
@@ -2015,9 +2015,9 @@ fn import_xls_with_biff_reader(
 
                     let mut apply_recovered_formulas =
                         |mut recovered: biff::formulas::PtgExpFallbackResult,
-                          override_existing: bool,
-                          warnings: &mut ImportWarnings,
-                          warnings_suppressed: &mut bool| {
+                         override_existing: bool,
+                         warnings: &mut ImportWarnings,
+                         warnings_suppressed: &mut bool| {
                             for warning in recovered.warnings.drain(..) {
                                 push_import_warning(warnings, warning, &mut *warnings_suppressed);
                             }
@@ -2031,38 +2031,35 @@ fn import_xls_with_biff_reader(
                                     // Calamine can return the `#UNKNOWN!` error sentinel for `PtgExp`
                                     // formulas it cannot resolve; treat that as "unresolved" so we can
                                     // replace it with a recovered materialized formula when possible.
-                                    if sheet
-                                        .formula(anchor)
-                                        .is_some_and(|f| {
-                                            f != ErrorValue::Unknown.as_str()
-                                                && !is_calamine_unrecognised_formula_placeholder(f)
-                                        })
-                                    {
+                                    if sheet.formula(anchor).is_some_and(|f| {
+                                        f != ErrorValue::Unknown.as_str()
+                                            && !is_calamine_unrecognised_formula_placeholder(f)
+                                    }) {
                                         continue;
                                     }
                                 }
-                            // Strip NUL bytes so formula text is parseable/stable (matches the
-                            // calamine formula cleanup path).
-                            let formula_text_clean;
-                            let formula_text = if formula_text.contains('\0') {
-                                formula_text_clean = formula_text.replace('\0', "");
-                                formula_text_clean.as_str()
-                            } else {
-                                formula_text.as_str()
-                            };
+                                // Strip NUL bytes so formula text is parseable/stable (matches the
+                                // calamine formula cleanup path).
+                                let formula_text_clean;
+                                let formula_text = if formula_text.contains('\0') {
+                                    formula_text_clean = formula_text.replace('\0', "");
+                                    formula_text_clean.as_str()
+                                } else {
+                                    formula_text.as_str()
+                                };
 
-                            if let Some(normalized) = normalize_formula_text(formula_text) {
-                                sheet.set_formula(anchor, Some(normalized));
-                                if let Some(resolved) = style_id_for_cell_xf(
-                                    xf_style_ids.as_deref(),
-                                    sheet_cell_xfs,
-                                    anchor,
-                                ) {
-                                    sheet.set_style_id(anchor, resolved);
+                                if let Some(normalized) = normalize_formula_text(formula_text) {
+                                    sheet.set_formula(anchor, Some(normalized));
+                                    if let Some(resolved) = style_id_for_cell_xf(
+                                        xf_style_ids.as_deref(),
+                                        sheet_cell_xfs,
+                                        anchor,
+                                    ) {
+                                        sheet.set_style_id(anchor, resolved);
+                                    }
                                 }
                             }
-                        }
-                    };
+                        };
 
                     match biff::formulas::recover_ptgexp_formulas_from_shrfmla_and_array(
                         workbook_stream,
@@ -2996,7 +2993,9 @@ fn import_xls_with_biff_reader(
                 }
                 Err(err) => push_import_warning(
                     &mut warnings,
-                    format!("failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"),
+                    format!(
+                        "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
+                    ),
                     &mut warnings_suppressed,
                 ),
             }
@@ -3095,7 +3094,9 @@ fn import_xls_with_biff_reader(
                 }
                 Err(err) => push_import_warning(
                     &mut warnings,
-                    format!("failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"),
+                    format!(
+                        "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
+                    ),
                     &mut warnings_suppressed,
                 ),
             }
@@ -4195,11 +4196,19 @@ fn strip_workbook_prefix_from_sheet_ref(sheet_name: &str) -> &str {
     // If a workbook prefix exists, keep only the portion after the last `]`.
     //
     // Prefer the shared workbook-prefix splitter (handles `]]` escaping and bracketed paths),
-    // but retain the legacy fallback for malformed inputs that omit the opening bracket.
-    if let Some((_, remainder)) = formula_model::external_refs::split_external_workbook_prefix(sheet_name)
+    // but retain a conservative legacy fallback for malformed inputs that omit the opening bracket.
+    if let Some((_, remainder)) =
+        formula_model::external_refs::split_external_workbook_prefix(sheet_name)
     {
         return remainder;
     }
+
+    // If the input still contains `[`, avoid guessing: it's likely a malformed bracketed segment,
+    // and stripping on `]` could delete meaningful sheet name content.
+    if sheet_name.contains('[') {
+        return sheet_name;
+    }
+
     sheet_name
         .rfind(']')
         .and_then(|idx| sheet_name.get(idx + 1..))
@@ -4670,15 +4679,14 @@ fn import_biff8_shared_formulas(
                     // across `CONTINUE` boundaries have the extra 1-byte continued-segment option
                     // flags stripped out before downstream rgce decoding.
                     let (rgce, rgcb) =
-                        match biff::worksheet_formulas::parse_biff8_shrfmla_record_with_rgcb(&record)
-                        {
+                        match biff::worksheet_formulas::parse_biff8_shrfmla_record_with_rgcb(
+                            &record,
+                        ) {
                             Ok(parsed) => parsed,
                             Err(_) => continue,
                         };
-                    shared_by_anchor.insert(
-                        (anchor_row, anchor_col),
-                        SharedFormulaDef { rgce, rgcb },
-                    );
+                    shared_by_anchor
+                        .insert((anchor_row, anchor_col), SharedFormulaDef { rgce, rgcb });
                 }
                 biff::records::RECORD_EOF => break,
                 _ => {}
@@ -4917,7 +4925,8 @@ fn sanitize_biff8_formula_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>>
         // If the record is long enough, patch the rgce bytes; otherwise set cce=0 so calamine
         // skips parsing.
         if rgce_offset + SAFE_RGCE.len() <= out.len() && data.len() >= 22 + SAFE_RGCE.len() {
-            out[cce_offset..cce_offset + 2].copy_from_slice(&(SAFE_RGCE.len() as u16).to_le_bytes());
+            out[cce_offset..cce_offset + 2]
+                .copy_from_slice(&(SAFE_RGCE.len() as u16).to_le_bytes());
             out[rgce_offset..rgce_offset + SAFE_RGCE.len()].copy_from_slice(&SAFE_RGCE);
         } else {
             out[cce_offset..cce_offset + 2].copy_from_slice(&0u16.to_le_bytes());
@@ -5442,6 +5451,50 @@ mod tests {
         assert!(
             message.contains("boom"),
             "expected panic payload in message, got: {message}"
+        );
+    }
+
+    #[test]
+    fn strip_workbook_prefix_from_sheet_ref_strips_canonical_external_prefix() {
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref("[Book.xlsx]Sheet1"),
+            "Sheet1"
+        );
+    }
+
+    #[test]
+    fn strip_workbook_prefix_from_sheet_ref_strips_path_qualified_external_prefix() {
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref(r"C:\path\[Book.xlsx]Sheet1"),
+            "Sheet1"
+        );
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref(r"C:\[foo]\[Book.xlsx]Sheet1"),
+            "Sheet1"
+        );
+    }
+
+    #[test]
+    fn strip_workbook_prefix_from_sheet_ref_strips_escaped_rbracket_in_workbook_name() {
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref("[Book]]Name.xlsx]Sheet1"),
+            "Sheet1"
+        );
+    }
+
+    #[test]
+    fn strip_workbook_prefix_from_sheet_ref_falls_back_for_missing_open_bracket() {
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref("Book.xlsx]Sheet1"),
+            "Sheet1"
+        );
+    }
+
+    #[test]
+    fn strip_workbook_prefix_from_sheet_ref_does_not_guess_for_malformed_bracket_prefix() {
+        assert_eq!(
+            strip_workbook_prefix_from_sheet_ref("[Book.xlsxSheet1"),
+            "[Book.xlsxSheet1"
         );
     }
 
@@ -6480,9 +6533,15 @@ mod tests {
         );
 
         assert_eq!(sheet, WorkbookScopedDefinedNameSheetInference::Failure);
-        assert!(warnings.count() > 0, "expected at least one warning to be attempted");
+        assert!(
+            warnings.count() > 0,
+            "expected at least one warning to be attempted"
+        );
         let stored = warnings.into_vec();
-        assert!(stored.is_empty(), "expected warnings to be suppressed, got: {stored:?}");
+        assert!(
+            stored.is_empty(),
+            "expected warnings to be suppressed, got: {stored:?}"
+        );
     }
 
     #[test]
@@ -6499,22 +6558,23 @@ mod tests {
             .map(|s| s.id)
             .expect("Sheet2");
         let sheet2 = workbook.sheet_mut(sheet2_id).expect("Sheet2 mut");
-         sheet2.auto_filter = Some(SheetAutoFilter {
-             range: Range::from_a1("A1:B3").unwrap(),
-             filter_columns: Vec::new(),
-             sort_state: None,
-             raw_xml: Vec::new(),
-         });
+        sheet2.auto_filter = Some(SheetAutoFilter {
+            range: Range::from_a1("A1:B3").unwrap(),
+            filter_columns: Vec::new(),
+            sort_state: None,
+            raw_xml: Vec::new(),
+        });
 
         let mut warnings = ImportWarnings::new();
         let mut suppressed = true;
-        let (sheet_name, inference_failed) = infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
-            &workbook,
-            XLNM_FILTER_DATABASE,
-            "='Sheet1$A$1:$B$3",
-            &mut warnings,
-            &mut suppressed,
-        );
+        let (sheet_name, inference_failed) =
+            infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
+                &workbook,
+                XLNM_FILTER_DATABASE,
+                "='Sheet1$A$1:$B$3",
+                &mut warnings,
+                &mut suppressed,
+            );
 
         assert!(inference_failed, "expected inference to fail");
         assert!(

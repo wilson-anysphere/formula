@@ -14,9 +14,18 @@ pub enum LowerError {
     Unsupported,
     /// External workbook reference that the bytecode lowering layer cannot represent.
     ///
-    /// This typically indicates an external workbook reference shape that the engine cannot
-    /// canonicalize into an [`ExternalValueProvider`](crate::ExternalValueProvider) sheet key (for
-    /// example, an external 3D sheet span like `[Book.xlsx]Sheet1:Sheet3!A1`).
+    /// This indicates an external workbook reference shape that the bytecode backend does not
+    /// currently implement.
+    ///
+    /// Notably, non-degenerate external 3D sheet spans like `[Book.xlsx]Sheet1:Sheet3!A1` require
+    /// expanding the span using external workbook tab order.
+    ///
+    /// The bytecode backend caches compiled programs by a normalized expression key. Encoding a
+    /// particular expansion into a cached bytecode program would become stale if the external
+    /// workbook's sheet order changes, unless we plumb sheet-order invalidation into the bytecode
+    /// cache key / recompilation path. The AST evaluator expands spans at evaluation time using
+    /// provider-supplied sheet order, so the engine intentionally falls back to AST for these
+    /// references to preserve correctness.
     #[error("unsupported external workbook reference")]
     ExternalReference,
     #[error("cross-sheet references are not supported")]
@@ -112,7 +121,8 @@ fn validate_prefix(
         // External workbook reference.
         // Validate that the canonical external sheet key is representable.
         // This rejects external 3D sheet spans (`[Book]Sheet1:Sheet3!A1`) which the engine cannot
-        // currently represent via `ExternalValueProvider`.
+        // currently lower into bytecode (the AST backend expands these spans using provider sheet
+        // order).
         let _ = external_sheet_id(prefix)?;
         return Ok(());
     }

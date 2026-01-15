@@ -492,173 +492,10 @@ fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn skip_ws(src: &str, mut i: usize) -> usize {
-    while i < src.len() {
-        let Some(ch) = src[i..].chars().next() else {
-            break;
-        };
-        if !ch.is_whitespace() {
-            break;
-        }
-        i += ch.len_utf8();
-    }
-    i
-}
-
-fn scan_quoted_sheet_name(src: &str, start: usize) -> Option<usize> {
-    // Quoted sheet names escape apostrophes by doubling them: `''` -> `'`.
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'\'') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b'\'' {
-            if bytes.get(i + 1) == Some(&b'\'') {
-                i += 2;
-                continue;
-            }
-            return Some(i + 1);
-        }
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-    None
-}
-
-fn scan_unquoted_sheet_name(src: &str, start: usize) -> Option<usize> {
-    // Match the engine's identifier lexer rules for unquoted sheet names.
-    let first = src[start..].chars().next()?;
-    if !is_ident_start_char(first) {
-        return None;
-    }
-    let mut i = start + first.len_utf8();
-    while i < src.len() {
-        let ch = src[i..].chars().next()?;
-        if is_ident_cont_char(ch) {
-            i += ch.len_utf8();
-            continue;
-        }
-        break;
-    }
-    Some(i)
-}
-
-fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
-    let i = skip_ws(src, start);
-    if i >= src.len() {
-        return None;
-    }
-    match src[i..].chars().next()? {
-        '\'' => scan_quoted_sheet_name(src, i),
-        _ => scan_unquoted_sheet_name(src, i),
-    }
-}
-
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
-    // Workbook prefixes are not nesting, but workbook ids can still contain `[` / `]` characters
-    // (e.g. `C:\[foo]\[Book.xlsx`). Some producers escape literal `]` as `]]`, while others emit
-    // bracketed path components like `[foo]` without escaping the inner `]`.
-    //
-    // To handle both forms, treat any unescaped `]` as a *candidate* delimiter and pick the first
-    // one that yields a valid sheet prefix (`[workbook]sheet!`) if present; otherwise, fall back
-    // to a workbook-scoped name/table prefix (`[workbook]Name`).
-    let bytes = src.as_bytes();
-    if bytes.get(start) != Some(&b'[') {
-        return None;
-    }
-
-    let mut i = start + 1;
-    let mut best_name_end: Option<usize> = None;
-
-    while i < bytes.len() {
-        if bytes[i] == b']' {
-            // Escaped literal `]` inside workbook ids: `]]` -> `]`.
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-
-            let end = i + 1;
-
-            // Heuristic: treat this as an external workbook prefix if it is immediately followed
-            // by a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`).
-            let after_end = skip_ws(src, end);
-            if let Some(mut sheet_end) = scan_sheet_name_token(src, after_end) {
-                sheet_end = skip_ws(src, sheet_end);
-
-                // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
-                if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
-                    sheet_end += 1;
-                    sheet_end = skip_ws(src, sheet_end);
-                    sheet_end = scan_sheet_name_token(src, sheet_end)?;
-                    sheet_end = skip_ws(src, sheet_end);
-                }
-
-                if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
-                    return Some(end);
-                }
-            }
-
-            // Workbook-scoped prefix `[Book.xlsx]Name` (external defined name or table name).
-            //
-            // This is ambiguous with nested brackets inside workbook ids (e.g. `C:\[foo]\Book.xlsx`)
-            // because the remainder after an inner `]` often starts with `\`. To avoid locking on a
-            // false delimiter when the workbook id continues with a bracketed path component
-            // (`\[Book.xlsx]Sheet1!A1`), only accept name candidates that are not obviously part of
-            // a larger bracketed workbook prefix.
-            let name_start = skip_ws(src, end);
-            if let Some(name_end) = scan_unquoted_sheet_name(src, name_start) {
-                let next = skip_ws(src, name_end);
-                // If the token after the candidate name is another `]`, we're still inside a larger
-                // bracketed segment, so this `]` was not the workbook delimiter.
-                if next < src.len() && src[next..].starts_with(']') {
-                    // keep scanning
-                } else if name_end == name_start + 1 && bytes.get(name_start) == Some(&b'\\') {
-                    // A lone path separator is not a meaningful defined name/table name; treat
-                    // this as an internal path bracket (e.g. `C:\[foo]\[Book.xlsx]...`).
-                } else if next < src.len() && src[next..].starts_with('[') {
-                    // If the next bracketed segment itself looks like an external workbook sheet
-                    // prefix (`[Book.xlsx]Sheet1!`), treat this as a false delimiter and keep
-                    // scanning for the real workbook end.
-                    if let Some(nested_end) =
-                        crate::external_refs::find_external_workbook_prefix_end(src, next)
-                    {
-                        let nested_after = skip_ws(src, nested_end);
-                        if let Some(mut nested_sheet_end) = scan_sheet_name_token(src, nested_after)
-                        {
-                            nested_sheet_end = skip_ws(src, nested_sheet_end);
-                            if nested_sheet_end < src.len()
-                                && src[nested_sheet_end..].starts_with('!')
-                            {
-                                // This looks like `\[Book.xlsx]Sheet!`; keep scanning.
-                            } else {
-                                best_name_end = Some(end);
-                            }
-                        } else {
-                            best_name_end = Some(end);
-                        }
-                    } else {
-                        best_name_end = Some(end);
-                    }
-                } else {
-                    best_name_end = Some(end);
-                }
-            }
-
-            // Keep scanning for a later `]` that yields a valid sheet prefix.
-            i += 1;
-            continue;
-        }
-
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = src[i..].chars().next()?;
-        i += ch.len_utf8();
-    }
-
-    best_name_end
+    formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+        src, start,
+    )
 }
 
 impl<'a> Lexer<'a> {
@@ -3987,72 +3824,22 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     // id so external sheet keys remain unique:
     // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
     if name.starts_with('[') {
-        // Canonical external sheet keys: `"[{workbook}]{sheet}"`.
-        //
-        // Use the last closing bracket so bracket pairs inside the workbook id (e.g. a path
-        // prefix containing bracketed directory names) don't prematurely terminate parsing.
-        let Some(end) = name.rfind(']') else {
+        let Some((workbook, sheet)) = crate::external_refs::split_external_sheet_key_parts(name)
+        else {
             return (None, name.to_string());
         };
-        let book = &name[1..end];
-        let sheet = &name[end + 1..];
-        if book.is_empty() || sheet.is_empty() {
-            return (None, name.to_string());
-        }
-        return (Some(book.to_string()), sheet.to_string());
-    }
-    let bytes = name.as_bytes();
-    let mut i = 0usize;
-    let mut best: Option<(usize, usize)> = None; // (start, end) where end is exclusive of the closing `]`
-
-    while i < bytes.len() {
-        if bytes[i] == b'[' {
-            if let Some(end) = crate::external_refs::find_external_workbook_prefix_end(name, i) {
-                // Only treat this as a workbook prefix if there is a remainder (sheet name) after
-                // the closing `]`.
-                if end < name.len() {
-                    best = match best {
-                        None => Some((i, end)),
-                        Some((best_start, best_end)) => {
-                            if end > best_end {
-                                Some((i, end))
-                            } else if end == best_end && i < best_start {
-                                Some((i, end))
-                            } else {
-                                Some((best_start, best_end))
-                            }
-                        }
-                    };
-                }
-
-                // Skip the entire bracketed segment to avoid misclassifying `[` characters inside
-                // the workbook name as the start of a new prefix.
-                i = end;
-                continue;
-            }
-        }
-        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
-        // inside multi-byte sequences as actual bracket characters.
-        let ch = name[i..].chars().next().expect("i always at char boundary");
-        i += ch.len_utf8();
+        return (Some(workbook.to_string()), sheet.to_string());
     }
 
-    let Some((open, end)) = best else {
+    // Path-qualified external workbook sheet refs can be lexed as a single quoted sheet name, e.g.
+    // `'C:\path\[Book.xlsx]Sheet1'!A1`. Find the bracketed workbook segment and fold any leading
+    // path prefix into the workbook id so the resulting key is unambiguous.
+    let Some((workbook, sheet)) =
+        formula_model::external_refs::parse_path_qualified_external_sheet_key(name)
+    else {
         return (None, name.to_string());
     };
-
-    // `end` is exclusive, so `end - 1` is the closing `]`.
-    let book = &name[open + 1..end - 1];
-    let sheet = &name[end..];
-    if book.is_empty() || sheet.is_empty() {
-        return (None, name.to_string());
-    }
-
-    let prefix = &name[..open];
-    let mut workbook = String::with_capacity(prefix.len().saturating_add(book.len()));
-    workbook.push_str(prefix);
-    workbook.push_str(book);
-    (Some(workbook), sheet.to_string())
+    (Some(workbook), sheet)
 }
 
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {

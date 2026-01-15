@@ -361,8 +361,9 @@ fn parse_unquoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str
 
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
     if first == '[' {
-        let (prefix, _) = crate::external_refs::split_external_workbook_prefix(&formula[start..])?;
-        i = start + prefix.len();
+        i = crate::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+            formula, start,
+        )?;
 
         if i >= bytes.len() {
             return None;
@@ -766,12 +767,9 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
         return formula.to_string();
     }
 
-    fn is_external_sheet_qualified_prefix(bytes: &[u8], bang: usize) -> bool {
+    fn is_external_sheet_qualified_prefix(formula: &str, bytes: &[u8], bang: usize) -> bool {
         // Determine whether the sheet reference immediately before `!` refers to an external
         // workbook (e.g. `[Book.xlsx]Sheet1!` or `'C:\path\[Book.xlsx]Sheet1'!`).
-        //
-        // Excel forbids `[` / `]` in local sheet names, so we treat the presence of `[` in the
-        // sheet token as indicating an external workbook reference.
         if bang == 0 {
             return false;
         }
@@ -791,7 +789,11 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
                     continue;
                 }
                 let start_quote = i;
-                return bytes[start_quote + 1..end_quote].contains(&b'[');
+                let token = &formula[start_quote + 1..end_quote];
+                return crate::external_refs::find_external_workbook_prefix_span_in_sheet_spec(
+                    token,
+                )
+                .is_some();
             }
             return false;
         }
@@ -812,7 +814,8 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
             }
             start -= 1;
         }
-        bytes[start..bang].contains(&b'[')
+        let token = &formula[start..bang];
+        crate::external_refs::find_external_workbook_prefix_span_in_sheet_spec(token).is_some()
     }
 
     let mut out = String::with_capacity(formula.len());
@@ -873,7 +876,9 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
                         // Workbook-only structured ref prefix: `"[Book.xlsx]Table1[...]"`
                         b']' => continue,
                         // Sheet-qualified: `"...!Table1[...]"`.
-                        b'!' if is_external_sheet_qualified_prefix(bytes, i - 1) => continue,
+                        b'!' if is_external_sheet_qualified_prefix(formula, bytes, i - 1) => {
+                            continue;
+                        }
                         _ => {}
                     }
                 }
@@ -1075,6 +1080,13 @@ mod tests {
         assert_eq!(
             rewrite_table_names_in_formula("=SUM('[Book.xlsx]Sheet1'!Table1[Amount])", &renames),
             "=SUM('[Book.xlsx]Sheet1'!Table1[Amount])"
+        );
+        assert_eq!(
+            rewrite_table_names_in_formula(
+                r"=SUM([C:\[foo]\Book.xlsx]Sheet1!Table1[Amount])",
+                &renames
+            ),
+            r"=SUM([C:\[foo]\Book.xlsx]Sheet1!Table1[Amount])"
         );
         assert_eq!(
             rewrite_table_names_in_formula("=SUM([Book.xlsx]Table1[Amount])", &renames),

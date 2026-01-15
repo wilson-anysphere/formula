@@ -429,3 +429,46 @@ fn bytecode_degenerate_external_3d_sheet_range_matches_endpoints_nfkc_case_insen
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
 }
+
+#[test]
+fn bytecode_non_degenerate_external_3d_sheet_range_falls_back_to_ast_and_evaluates() {
+    struct SpanProvider;
+
+    impl ExternalValueProvider for SpanProvider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            if addr != (CellAddr { row: 0, col: 0 }) {
+                return None;
+            }
+            match sheet {
+                "[Book.xlsx]Sheet1" => Some(Value::Number(1.0)),
+                "[Book.xlsx]Sheet2" => Some(Value::Number(2.0)),
+                "[Book.xlsx]Sheet3" => Some(Value::Number(3.0)),
+                _ => None,
+            }
+        }
+
+        fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+            (workbook == "Book.xlsx").then(|| {
+                vec![
+                    "Sheet1".to_string(),
+                    "Sheet2".to_string(),
+                    "Sheet3".to_string(),
+                ]
+            })
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(SpanProvider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    // The bytecode backend does not currently support expanding external 3D sheet spans, so this
+    // should not compile to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}

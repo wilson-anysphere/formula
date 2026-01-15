@@ -873,7 +873,8 @@ fn decode_rgce_impl(
                         payload.copy_from_slice(&rgce[core_start..core_end]);
                         i += payload_len;
 
-                        let decoded = decode_ptg_list_payload_best_effort(&payload, ctx_for_scoring);
+                        let decoded =
+                            decode_ptg_list_payload_best_effort(&payload, ctx_for_scoring);
 
                         // Interpret row/item flags. We intentionally accept unknown bits and
                         // continue decoding.
@@ -1647,7 +1648,11 @@ fn decode_rgce_impl(
                         // minimum argument count (common when older Excel versions encoded
                         // fixed-arity calls that later gained optional args).
                         let min = spec.min_args as usize;
-                        argc = if stack.len() < min { stack.len().min(1) } else { min };
+                        argc = if stack.len() < min {
+                            stack.len().min(1)
+                        } else {
+                            min
+                        };
                         spec.name
                     }
                     None => {
@@ -2644,12 +2649,14 @@ fn format_structured_ref(
     if matches!(item, Some(StructuredRefItem::ThisRow)) {
         match columns {
             StructuredColumns::Single(col) => {
-                return format!("[@{}]", escape_structured_ref_bracket_content(col));
+                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
+                return format!("[@{col}]");
             }
             StructuredColumns::All => return "[@]".to_string(),
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
+                let start =
+                    formula_model::external_refs::escape_bracketed_identifier_content(start);
+                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
                 return format!("[@[{start}]:[{end}]]");
             }
         }
@@ -2670,11 +2677,13 @@ fn format_structured_ref(
     if matches!(item, None | Some(StructuredRefItem::Data)) {
         match columns {
             StructuredColumns::Single(col) => {
-                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+                let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
+                return format!("{table}[{col}]");
             }
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
+                let start =
+                    formula_model::external_refs::escape_bracketed_identifier_content(start);
+                let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
                 return format!("{table}[[{start}]:[{end}]]");
             }
             StructuredColumns::All => {}
@@ -2685,12 +2694,12 @@ fn format_structured_ref(
     let item = item.expect("handled None above");
     match columns {
         StructuredColumns::Single(col) => {
-            let col = escape_structured_ref_bracket_content(col);
+            let col = formula_model::external_refs::escape_bracketed_identifier_content(col);
             format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
         }
         StructuredColumns::Range { start, end } => {
-            let start = escape_structured_ref_bracket_content(start);
-            let end = escape_structured_ref_bracket_content(end);
+            let start = formula_model::external_refs::escape_bracketed_identifier_content(start);
+            let end = formula_model::external_refs::escape_bracketed_identifier_content(end);
             format!(
                 "{table}[[{}],[{start}]:[{end}]]",
                 structured_ref_item_literal(item)
@@ -2708,13 +2717,6 @@ fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
         StructuredRefItem::Totals => "#Totals",
         StructuredRefItem::ThisRow => "#This Row",
     }
-}
-
-fn escape_structured_ref_bracket_content(s: &str) -> String {
-    if !s.contains(']') {
-        return s.to_string();
-    }
-    s.replace(']', "]]")
 }
 
 fn function_name(iftab: u16) -> Option<&'static str> {
@@ -3736,18 +3738,29 @@ mod encode_ast {
                     row_last_from_a,
                 )
             } else {
-                (
-                    a.row < b.row,
-                    a.col < b.col,
-                    a.row > b.row,
-                    a.col > b.col,
-                )
+                (a.row < b.row, a.col < b.col, a.row > b.row, a.col > b.col)
             };
 
-        let abs_row_first = if row_first_from_a { a.abs_row } else { b.abs_row };
-        let abs_col_first = if col_first_from_a { a.abs_col } else { b.abs_col };
-        let abs_row_last = if row_last_from_a { a.abs_row } else { b.abs_row };
-        let abs_col_last = if col_last_from_a { a.abs_col } else { b.abs_col };
+        let abs_row_first = if row_first_from_a {
+            a.abs_row
+        } else {
+            b.abs_row
+        };
+        let abs_col_first = if col_first_from_a {
+            a.abs_col
+        } else {
+            b.abs_col
+        };
+        let abs_row_last = if row_last_from_a {
+            a.abs_row
+        } else {
+            b.abs_row
+        };
+        let abs_col_last = if col_last_from_a {
+            a.abs_col
+        } else {
+            b.abs_col
+        };
 
         match sheet {
             SheetSpec::Current => {
@@ -4718,24 +4731,33 @@ fn emit_area_fields(a: &CellRef, b: &CellRef, out: &mut Vec<u8>) {
         } else {
             // General rectangle: rows/cols both differ, so each dimension can be resolved
             // independently.
-            (
-                a.row < b.row,
-                a.col < b.col,
-                a.row > b.row,
-                a.col > b.col,
-            )
+            (a.row < b.row, a.col < b.col, a.row > b.row, a.col > b.col)
         };
 
-    let abs_row_first = if row_first_from_a { a.abs_row } else { b.abs_row };
-    let abs_col_first = if col_first_from_a { a.abs_col } else { b.abs_col };
-    let abs_row_last = if row_last_from_a { a.abs_row } else { b.abs_row };
-    let abs_col_last = if col_last_from_a { a.abs_col } else { b.abs_col };
+    let abs_row_first = if row_first_from_a {
+        a.abs_row
+    } else {
+        b.abs_row
+    };
+    let abs_col_first = if col_first_from_a {
+        a.abs_col
+    } else {
+        b.abs_col
+    };
+    let abs_row_last = if row_last_from_a {
+        a.abs_row
+    } else {
+        b.abs_row
+    };
+    let abs_col_last = if col_last_from_a {
+        a.abs_col
+    } else {
+        b.abs_col
+    };
 
     out.extend_from_slice(&row_first.to_le_bytes());
     out.extend_from_slice(&row_last.to_le_bytes());
-    out.extend_from_slice(
-        &encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes(),
-    );
+    out.extend_from_slice(&encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes());
     out.extend_from_slice(&encode_col_field(col_last, abs_row_last, abs_col_last).to_le_bytes());
 }
 
@@ -5563,38 +5585,43 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse_external_sheet_name(&mut self) -> Result<Option<String>, String> {
-        if self.next_char() != Some('[') {
+        if self.peek_char() != Some('[') {
             return Ok(None);
         }
 
-        let mut book = String::new();
-        loop {
-            match self.next_char() {
-                Some(']') => {
-                    // Excel escapes literal `]` characters inside workbook prefixes by doubling
-                    // them (`]]`). Workbook prefixes are not nested, so treat `[` characters as
-                    // plain text.
-                    if self.peek_char() == Some(']') {
-                        self.next_char();
-                        book.push(']');
-                        book.push(']');
-                        continue;
-                    }
-                    break;
+        let start = self.pos;
+        let end = match formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
+            self.input,
+            start,
+        ) {
+            Some(end) => end,
+            None => {
+                // If we saw at least one unescaped `]` but none were followed by a plausible sheet
+                // name token, this is not an external workbook sheet prefix (it may be a structured
+                // ref like `[@Col]`).
+                if formula_model::external_refs::find_external_workbook_prefix_end(self.input, start)
+                    .is_some()
+                {
+                    return Ok(None);
                 }
-                Some(ch) => book.push(ch),
-                None => return Err("unterminated external workbook prefix".to_string()),
+                return Err("unterminated external workbook prefix".to_string());
             }
+        };
+        if start + 1 >= end {
+            return Ok(None);
         }
 
+        let book = &self.input[start + 1..end - 1];
+        self.pos = end;
         self.skip_ws();
+
         let sheet = match self.peek_char() {
             Some('\'') => Some(self.parse_quoted_sheet_name()?),
             Some(ch) if is_ident_start(ch) => self.parse_identifier()?,
             _ => None,
         };
-
         let Some(sheet) = sheet else {
+            self.pos = start;
             return Ok(None);
         };
 
@@ -5727,6 +5754,39 @@ fn is_ident_start(ch: char) -> bool {
 
 fn is_ident_continue(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sheet_name_accepts_canonical_external_workbook_with_bracketed_path_components() {
+        let mut parser = FormulaParser::new(r"[C:\[foo]\Book.xlsx]Sheet1");
+        let parsed = parser.parse_sheet_name().expect("parse");
+        assert_eq!(parsed, Some(r"[C:\[foo]\Book.xlsx]Sheet1".to_string()));
+    }
+
+    #[test]
+    fn parse_sheet_name_accepts_external_workbook_names_containing_lbracket() {
+        let mut parser = FormulaParser::new("[A1[Name.xlsx]Sheet1");
+        let parsed = parser.parse_sheet_name().expect("parse");
+        assert_eq!(parsed, Some("[A1[Name.xlsx]Sheet1".to_string()));
+    }
+
+    #[test]
+    fn parse_sheet_name_rejects_structured_refs_starting_with_bracket() {
+        let mut parser = FormulaParser::new("[@Col2]");
+        let parsed = parser.parse_sheet_name().expect("parse");
+        assert_eq!(parsed, None);
+    }
+
+    #[test]
+    fn parse_sheet_name_rejects_bracket_only_tokens() {
+        let mut parser = FormulaParser::new("[Book.xlsx]");
+        let parsed = parser.parse_sheet_name().expect("parse");
+        assert_eq!(parsed, None);
+    }
 }
 
 fn col_label_to_index(label: &str) -> Option<u32> {
