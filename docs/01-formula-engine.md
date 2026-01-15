@@ -162,6 +162,11 @@ The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, a
   * **Canonical external sheet key:** `"[workbook]sheet"`
     * Example: `"[Book.xlsx]Sheet1"`
     * Example (path-qualified): `"[C:\\path\\Book.xlsx]Sheet1"`
+    * Workbook identifiers follow Excel’s bracket escaping rules: a literal `]` inside the workbook
+      name is written as `]]` in formula text (e.g. `[Book]]Name.xlsx]Sheet1!A1`). The engine
+      preserves this escaping in the canonical key and in the `workbook` strings passed to external
+      workbook sheet-order APIs; hosts that want to match a filesystem name containing `]` should
+      unescape `]]` to `]` in their own layer.
     * The `sheet` portion is the worksheet display name with any formula quoting removed
       (e.g. `'Sheet 1'` in a formula becomes `Sheet 1` in the key).
     * The engine preserves the formula’s casing for single-sheet external keys; providers that want
@@ -325,6 +330,10 @@ Note: the canonical key format uses `[...]` as the workbook delimiter. The engin
 `"[workbook]sheet"` keys at the **last** `]`, so workbook identifiers may include bracket
 characters (e.g. a directory named `C:\[foo]\`). Sheet names are expected to follow Excel
 restrictions (notably: no `]`), so this split is unambiguous.
+
+In addition, workbook identifiers may contain literal `]` characters which Excel escapes as `]]`
+inside the bracketed workbook segment. That escaping is preserved in canonical keys; consumers that
+need the “display” workbook name should unescape `]]` to `]`.
 
 #### Current limitations / behavior notes
 
