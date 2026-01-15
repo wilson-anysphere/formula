@@ -4408,7 +4408,17 @@ pub fn parse_biff_sheet_merged_cells(
 }
 
 fn normalize_sheet_name_for_match(name: &str) -> String {
-    name.replace('\0', "").trim().to_lowercase()
+    // Excel compares sheet names case-insensitively across Unicode. Reuse the engine/model’s
+    // canonical casefold (NFKC + uppercasing) so `.xls` import behaviors match formula semantics.
+    //
+    // `.xls` producers can also embed NULs in BIFF strings; strip them before casefolding.
+    let trimmed = name.trim();
+    if !trimmed.contains('\0') {
+        return formula_model::sheet_name_casefold(trimmed);
+    }
+    let mut cleaned = trimmed.to_string();
+    cleaned.retain(|c| c != '\0');
+    formula_model::sheet_name_casefold(cleaned.trim())
 }
 
 fn reconcile_biff_sheet_mapping(
@@ -5496,6 +5506,38 @@ mod tests {
             strip_workbook_prefix_from_sheet_ref("[Book.xlsxSheet1"),
             "[Book.xlsxSheet1"
         );
+    }
+
+    #[test]
+    fn reconcile_biff_sheet_mapping_matches_unicode_case_insensitively_like_excel() {
+        // Ensure we match Unicode case-insensitively using the same semantics as the formula
+        // engine (`NFKC + uppercasing`), so names like `Straße` and `STRASSE` are treated as equal.
+        //
+        // This matters for mapping BIFF BoundSheet records onto calamine’s sheet list when
+        // producers differ in how they case sheet names.
+        let calamine_sheets = vec![
+            Sheet {
+                name: "Other".to_string(),
+                typ: SheetType::WorkSheet,
+                visible: SheetVisible::Visible,
+            },
+            Sheet {
+                name: "STRASSE".to_string(),
+                typ: SheetType::WorkSheet,
+                visible: SheetVisible::Visible,
+            },
+        ];
+        let biff_sheets = vec![biff::BoundSheetInfo {
+            name: "Straße".to_string(),
+            offset: 0,
+            hs_state: 0,
+            sheet_visibility: None,
+            dt: 0,
+            sheet_type: None,
+        }];
+
+        let (mapping, _warning) = reconcile_biff_sheet_mapping(&calamine_sheets, Some(&biff_sheets));
+        assert_eq!(mapping, vec![None, Some(0)]);
     }
 
     #[test]
