@@ -1,9 +1,13 @@
+use crate::errors::biff_error_literal;
 use crate::function_ids::{function_id_to_name, function_spec_from_id};
 use crate::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use crate::structured_refs::{
     format_structured_ref, structured_ref_is_single_cell, StructuredRefItem,
 };
 use formula_model::{push_column_label, CellRef};
+
+#[cfg(feature = "encode")]
+use crate::errors::biff_error_code_from_literal;
 
 /// Structured `rgce` decode failure with ptg id + offset.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -267,23 +271,7 @@ fn decode_array_constant(
                     }
                     let code = rgcb[i];
                     i += 1;
-                    let text = match code {
-                        0x00 => "#NULL!",
-                        0x07 => "#DIV/0!",
-                        0x0F => "#VALUE!",
-                        0x17 => "#REF!",
-                        0x1D => "#NAME?",
-                        0x24 => "#NUM!",
-                        0x2A => "#N/A",
-                        0x2B => "#GETTING_DATA",
-                        0x2C => "#SPILL!",
-                        0x2D => "#CALC!",
-                        0x2E => "#FIELD!",
-                        0x2F => "#CONNECT!",
-                        0x30 => "#BLOCKED!",
-                        0x31 => "#UNKNOWN!",
-                        _ => "#UNKNOWN!",
-                    };
+                    let text = biff_error_literal(code).unwrap_or("#UNKNOWN!");
                     col_texts.push(text.to_string());
                 }
                 _ => {
@@ -1095,24 +1083,8 @@ fn decode_rgce_impl(
                 }
                 let err = rgce[i];
                 i += 1;
-                let text = match err {
-                    0x00 => "#NULL!",
-                    0x07 => "#DIV/0!",
-                    0x0F => "#VALUE!",
-                    0x17 => "#REF!",
-                    0x1D => "#NAME?",
-                    0x24 => "#NUM!",
-                    0x2A => "#N/A",
-                    0x2B => "#GETTING_DATA",
-                    0x2C => "#SPILL!",
-                    0x2D => "#CALC!",
-                    0x2E => "#FIELD!",
-                    0x2F => "#CONNECT!",
-                    0x30 => "#BLOCKED!",
-                    0x31 => "#UNKNOWN!",
-                    // Best-effort forward-compatibility with newer Excel error codes.
-                    _ => "#UNKNOWN!",
-                };
+                // Best-effort forward-compatibility with newer Excel error codes.
+                let text = biff_error_literal(err).unwrap_or("#UNKNOWN!");
                 stack.push(ExprFragment::new(text.to_string()));
             }
             // Bool literal.
@@ -2068,22 +2040,8 @@ fn encode_expr(
             rgce.push(if *b { 1 } else { 0 });
         }
         Expr::Error(raw) => {
-            let code = match raw.to_ascii_uppercase().as_str() {
-                "#NULL!" => 0x00,
-                "#DIV/0!" => 0x07,
-                "#VALUE!" => 0x0F,
-                "#REF!" => 0x17,
-                "#NAME?" => 0x1D,
-                "#NUM!" => 0x24,
-                "#N/A" | "#N/A!" => 0x2A,
-                "#GETTING_DATA" => 0x2B,
-                "#SPILL!" => 0x2C,
-                "#CALC!" => 0x2D,
-                "#FIELD!" => 0x2E,
-                "#CONNECT!" => 0x2F,
-                "#BLOCKED!" => 0x30,
-                "#UNKNOWN!" => 0x31,
-                _ => return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone())),
+            let Some(code) = biff_error_code_from_literal(raw) else {
+                return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone()));
             };
             rgce.push(0x1C); // PtgErr
             rgce.push(code);
@@ -2396,22 +2354,8 @@ fn encode_array_constant(
                     rgcb.push(if *b { 1 } else { 0 });
                 }
                 Expr::Error(raw) => {
-                    let code = match raw.to_ascii_uppercase().as_str() {
-                        "#NULL!" => 0x00,
-                        "#DIV/0!" => 0x07,
-                        "#VALUE!" => 0x0F,
-                        "#REF!" => 0x17,
-                        "#NAME?" => 0x1D,
-                        "#NUM!" => 0x24,
-                        "#N/A" | "#N/A!" => 0x2A,
-                        "#GETTING_DATA" => 0x2B,
-                        "#SPILL!" => 0x2C,
-                        "#CALC!" => 0x2D,
-                        "#FIELD!" => 0x2E,
-                        "#CONNECT!" => 0x2F,
-                        "#BLOCKED!" => 0x30,
-                        "#UNKNOWN!" => 0x31,
-                        _ => return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone())),
+                    let Some(code) = biff_error_code_from_literal(raw) else {
+                        return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone()));
                     };
                     rgcb.push(0x10);
                     rgcb.push(code);

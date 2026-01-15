@@ -18,6 +18,7 @@
 
 mod ftab;
 mod function_ids;
+pub mod errors;
 mod rgce;
 pub mod ptg_list;
 pub mod structured_refs;

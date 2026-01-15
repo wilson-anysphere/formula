@@ -24,6 +24,7 @@ use super::{
     strings,
     supbook::{SupBookInfo, SupBookKind},
 };
+use formula_biff::errors::biff_error_literal;
 use formula_biff::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use formula_biff::structured_refs::{
     format_structured_ref, structured_columns_placeholder_from_ids,
@@ -733,25 +734,12 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
                 input = rest;
-                let text = match err {
-                    0x00 => "#NULL!",
-                    0x07 => "#DIV/0!",
-                    0x0F => "#VALUE!",
-                    0x17 => "#REF!",
-                    0x1D => "#NAME?",
-                    0x24 => "#NUM!",
-                    0x2A => "#N/A",
-                    0x2B => "#GETTING_DATA",
-                    0x2C => "#SPILL!",
-                    0x2D => "#CALC!",
-                    0x2E => "#FIELD!",
-                    0x2F => "#CONNECT!",
-                    0x30 => "#BLOCKED!",
-                    0x31 => "#UNKNOWN!",
-                    other => {
+                let text = match biff_error_literal(err) {
+                    Some(lit) => lit,
+                    None => {
                         push_warning(
                             &mut warnings,
-                            format!("unknown error literal 0x{other:02X} in rgce"),
+                            format!("unknown error literal 0x{err:02X} in rgce"),
                             &mut warnings_suppressed,
                         );
                         "#UNKNOWN!"
@@ -1735,22 +1723,9 @@ fn decode_array_constant(
                     }
                     let code = rgcb[i];
                     i += 1;
-                    let lit = match code {
-                        0x00 => "#NULL!",
-                        0x07 => "#DIV/0!",
-                        0x0F => "#VALUE!",
-                        0x17 => "#REF!",
-                        0x1D => "#NAME?",
-                        0x24 => "#NUM!",
-                        0x2A => "#N/A",
-                        0x2B => "#GETTING_DATA",
-                        0x2C => "#SPILL!",
-                        0x2D => "#CALC!",
-                        0x2E => "#FIELD!",
-                        0x2F => "#CONNECT!",
-                        0x30 => "#BLOCKED!",
-                        0x31 => "#UNKNOWN!",
-                        _ => {
+                    let lit = match biff_error_literal(code) {
+                        Some(lit) => lit,
+                        None => {
                             push_warning(
                                 warnings,
                                 format!("unknown error code 0x{code:02X} in array constant"),
