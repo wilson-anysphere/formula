@@ -32,7 +32,13 @@ impl WildcardPattern {
         // "straße" match "STRASSE" (ß uppercases to SS), but keep an ASCII fast-path to avoid
         // the overhead for the common case.
         let text: Vec<char> = if text.is_ascii() {
-            text.chars().map(|c| c.to_ascii_uppercase()).collect()
+            let mut out = Vec::with_capacity(text.len());
+            if !text.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                out.extend(text.chars());
+            } else {
+                out.extend(text.chars().map(|c| c.to_ascii_uppercase()));
+            }
+            out
         } else {
             text.chars().flat_map(|c| c.to_uppercase()).collect()
         };
@@ -95,14 +101,19 @@ struct FoldedUppercaseChars<'a> {
     chars: std::str::Chars<'a>,
     pending: Option<std::char::ToUppercase>,
     ascii_fast_path: bool,
+    ascii_needs_uppercasing: bool,
 }
 
 impl<'a> FoldedUppercaseChars<'a> {
     fn new(s: &'a str) -> Self {
+        let ascii_fast_path = s.is_ascii();
+        let ascii_needs_uppercasing =
+            ascii_fast_path && s.as_bytes().iter().any(|b| b.is_ascii_lowercase());
         Self {
             chars: s.chars(),
             pending: None,
-            ascii_fast_path: s.is_ascii(),
+            ascii_fast_path,
+            ascii_needs_uppercasing,
         }
     }
 }
@@ -121,7 +132,10 @@ impl Iterator for FoldedUppercaseChars<'_> {
 
             let ch = self.chars.next()?;
             if self.ascii_fast_path {
-                return Some(ch.to_ascii_uppercase());
+                if self.ascii_needs_uppercasing {
+                    return Some(ch.to_ascii_uppercase());
+                }
+                return Some(ch);
             }
             self.pending = Some(ch.to_uppercase());
         }

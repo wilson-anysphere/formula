@@ -925,18 +925,34 @@ fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -
         // Excel SEARCH is case-insensitive using Unicode-aware uppercasing (e.g. ß -> SS).
         // Fold both pattern and haystack into a comparable char stream.
         let needle_folded: Vec<char> = if needle.is_ascii() {
-            needle.chars().map(|c| c.to_ascii_uppercase()).collect()
+            let needs_uppercasing = needle.as_bytes().iter().any(|b| b.is_ascii_lowercase());
+            let mut out = Vec::with_capacity(needle.len());
+            if needs_uppercasing {
+                out.extend(needle.chars().map(|c| c.to_ascii_uppercase()));
+            } else {
+                out.extend(needle.chars());
+            }
+            out
         } else {
             needle.chars().flat_map(|c| c.to_uppercase()).collect()
         };
         let needle_tokens = parse_search_pattern(&needle_folded);
 
-        let mut hay_folded = Vec::new();
+        let hay_ascii_needs_uppercasing = haystack.is_ascii()
+            && haystack
+                .as_bytes()
+                .iter()
+                .any(|b| b.is_ascii_lowercase());
+        let mut hay_folded = Vec::with_capacity(hay_chars.len());
         let mut folded_starts = Vec::with_capacity(hay_chars.len());
         for ch in &hay_chars {
             folded_starts.push(hay_folded.len());
             if ch.is_ascii() {
-                hay_folded.push(ch.to_ascii_uppercase());
+                if hay_ascii_needs_uppercasing {
+                    hay_folded.push(ch.to_ascii_uppercase());
+                } else {
+                    hay_folded.push(*ch);
+                }
             } else {
                 hay_folded.extend(ch.to_uppercase());
             }
