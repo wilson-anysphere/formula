@@ -90,6 +90,14 @@ pub(crate) fn casefold_owned(mut s: String) -> String {
     s.chars().flat_map(|c| c.to_uppercase()).collect()
 }
 
+pub(crate) fn lowercase_owned(mut s: String) -> String {
+    if s.is_ascii() {
+        s.make_ascii_lowercase();
+        return s;
+    }
+    s.chars().flat_map(|c| c.to_lowercase()).collect()
+}
+
 #[inline]
 pub(crate) fn with_ascii_uppercased_key<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
     // Equivalent to `s.to_ascii_uppercase()`, but avoids allocating for common short strings by
@@ -865,6 +873,17 @@ mod tests {
     fn casefold_owned_matches_casefold() {
         for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
             assert_eq!(casefold_owned(s.to_string()), casefold(s), "input={s:?}");
+        }
+    }
+
+    #[test]
+    fn lowercase_owned_matches_to_lowercase() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            assert_eq!(
+                lowercase_owned(s.to_string()),
+                s.to_lowercase(),
+                "input={s:?}"
+            );
         }
     }
 }

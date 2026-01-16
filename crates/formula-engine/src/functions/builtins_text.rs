@@ -3,7 +3,7 @@ use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Value};
+use crate::value::{casefold_owned, lowercase_owned, Array, ErrorKind, Value};
 use std::collections::HashSet;
 
 const VAR_ARGS: usize = 255;
@@ -302,9 +302,9 @@ inventory::submit! {
 fn upper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(
-            text.coerce_to_string_with_ctx(ctx)?.to_uppercase(),
-        ))
+        Ok(Value::Text(casefold_owned(
+            text.coerce_to_string_with_ctx(ctx)?,
+        )))
     })
 }
 
@@ -325,9 +325,9 @@ inventory::submit! {
 fn lower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(
-            text.coerce_to_string_with_ctx(ctx)?.to_lowercase(),
-        ))
+        Ok(Value::Text(lowercase_owned(
+            text.coerce_to_string_with_ctx(ctx)?,
+        )))
     })
 }
 
