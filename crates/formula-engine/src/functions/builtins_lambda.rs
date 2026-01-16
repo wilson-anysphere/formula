@@ -5,7 +5,7 @@ use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
 use crate::functions::{
     ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
-use crate::value::{casefold, ErrorKind, Lambda, Value};
+use crate::value::{casefold, with_casefolded_key, ErrorKind, Lambda, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -46,7 +46,7 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let name_key = casefold(name.trim());
 
         let value = ctx.eval_arg(&pair[1]);
-        ctx.set_local(&name_key, value);
+        ctx.set_local_key(name_key, value);
     }
 
     ctx.eval_formula(&args[last])
@@ -115,7 +115,12 @@ fn isomitted_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     };
 
-    let key = format!("{LAMBDA_OMITTED_PREFIX}{}", casefold(name.trim()));
+    let key = with_casefolded_key(name.trim(), |folded| {
+        let mut key = String::with_capacity(LAMBDA_OMITTED_PREFIX.len() + folded.len());
+        key.push_str(LAMBDA_OMITTED_PREFIX);
+        key.push_str(folded);
+        key
+    });
     let env = ctx.capture_lexical_env();
     Value::Bool(matches!(env.get(&key), Some(Value::Bool(true))))
 }

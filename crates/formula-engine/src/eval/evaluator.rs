@@ -9,7 +9,10 @@ use crate::functions::{
     ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
 };
 use crate::locale::ValueLocaleConfig;
-use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
+use crate::value::{
+    casefold, casefold_owned, cmp_case_insensitive, with_casefolded_key, Array, ErrorKind, Lambda,
+    NumberLocale, Value,
+};
 use crate::LocaleConfig;
 use formula_model::HorizontalAlignment;
 use std::cell::{Cell, RefCell};
@@ -719,14 +722,16 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     }
 
     fn lookup_lexical_value(&self, name: &str) -> Option<Value> {
-        let key = casefold(name.trim());
         let scopes = self.lexical_scopes.borrow();
-        for scope in scopes.iter().rev() {
-            if let Some(value) = scope.get(&key) {
-                return Some(value.clone());
+        let name = name.trim();
+        with_casefolded_key(name, |key| {
+            for scope in scopes.iter().rev() {
+                if let Some(value) = scope.get(key) {
+                    return Some(value.clone());
+                }
             }
-        }
-        None
+            None
+        })
     }
 
     fn capture_lexical_env_map(&self) -> HashMap<String, Value> {
@@ -977,11 +982,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     };
 
-                    let sheet_key = explicit_sheet_key
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| {
-                            crate::external_refs::format_external_key(workbook, &table_sheet)
-                        });
+                    let sheet_key =
+                        explicit_sheet_key
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| {
+                                crate::external_refs::format_external_key(workbook, &table_sheet)
+                            });
 
                     let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
                         &table,
@@ -1157,7 +1163,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         if args.len() > crate::EXCEL_MAX_ARGS {
             return Value::Error(ErrorKind::Value);
         }
-        if let Some(spec) = crate::functions::lookup_function(name) {
+        if let Some(spec) = crate::functions::lookup_function_upper(name) {
             if args.len() < spec.min_args || args.len() > spec.max_args {
                 return Value::Error(ErrorKind::Value);
             }
@@ -1264,7 +1270,13 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         call_scope.insert(casefold(call_name.trim()), Value::Lambda(lambda.clone()));
         for (idx, param) in lambda.params.iter().enumerate() {
             let value = evaluated_args.get(idx).cloned().unwrap_or(Value::Blank);
-            let param_key = casefold(param.trim());
+            let param_key = if param.len() == param.trim().len() {
+                // `make_lambda` stores params in canonical (casefolded) form, so we can reuse
+                // them directly in the common case.
+                param.clone()
+            } else {
+                casefold(param.trim())
+            };
             call_scope.insert(param_key.clone(), value);
 
             if idx >= args.len() {
@@ -1880,7 +1892,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
         let mut scope = HashMap::with_capacity(bindings.len());
         for (k, v) in bindings {
-            scope.insert(casefold(k.trim()), v.clone());
+            let trimmed = k.trim();
+            let key = if trimmed.len() == k.len()
+                && k.is_ascii()
+                && !k.as_bytes().iter().any(|b| b.is_ascii_lowercase())
+            {
+                // Most callers already pass canonical (casefolded) ASCII keys; avoid re-folding.
+                k.clone()
+            } else {
+                casefold(trimmed)
+            };
+            scope.insert(key, v.clone());
         }
         let _guard = self.push_lexical_scope(scope);
         self.eval_formula(expr)
@@ -1982,8 +2004,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.lexical_scopes.borrow_mut().pop();
     }
 
-    fn set_local(&self, name: &str, value: FnArgValue) {
-        let key = casefold(name.trim());
+    fn set_local_key(&self, key: String, value: FnArgValue) {
         let mut scopes = self.lexical_scopes.borrow_mut();
         if scopes.is_empty() {
             scopes.push(HashMap::new());
@@ -1998,8 +2019,23 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         }
     }
 
+    fn set_local(&self, name: &str, value: FnArgValue) {
+        let key = casefold(name.trim());
+        self.set_local_key(key, value);
+    }
+
     fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value {
-        let params: Vec<String> = params.into_iter().map(|p| casefold(p.trim())).collect();
+        let params: Vec<String> = params
+            .into_iter()
+            .map(|p| {
+                let trimmed = p.trim();
+                if trimmed.len() == p.len() {
+                    casefold_owned(p)
+                } else {
+                    casefold(trimmed)
+                }
+            })
+            .collect();
 
         let mut env = self.capture_lexical_env_map();
         env.retain(|k, _| !k.starts_with(crate::eval::LAMBDA_OMITTED_PREFIX));
@@ -2058,14 +2094,20 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
                 FnArgValue::Reference(r) => Value::Reference(r),
                 FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
             };
-            let param_key = casefold(param.trim());
-            call_scope.insert(param_key.clone(), value);
-
+            let param_key = if param.len() == param.trim().len() {
+                param.clone()
+            } else {
+                casefold(param.trim())
+            };
             if idx >= args.len() {
-                call_scope.insert(
-                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param_key),
-                    Value::Bool(true),
-                );
+                call_scope.insert(param_key.clone(), value);
+                let mut omitted_key =
+                    String::with_capacity(crate::eval::LAMBDA_OMITTED_PREFIX.len() + param_key.len());
+                omitted_key.push_str(crate::eval::LAMBDA_OMITTED_PREFIX);
+                omitted_key.push_str(&param_key);
+                call_scope.insert(omitted_key, Value::Bool(true));
+            } else {
+                call_scope.insert(param_key, value);
             }
         }
 

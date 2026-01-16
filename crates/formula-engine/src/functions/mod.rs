@@ -519,6 +519,15 @@ pub trait FunctionContext {
     fn pop_local_scope(&self);
     fn set_local(&self, name: &str, value: ArgValue);
 
+    /// Bind a local name using an already-normalized key.
+    ///
+    /// This is used by `LET`/`LAMBDA` implementations that already case-fold identifiers. The
+    /// default forwards to `set_local`, preserving correctness for hosts that only implement the
+    /// stringly API.
+    fn set_local_key(&self, key: String, value: ArgValue) {
+        self.set_local(&key, value);
+    }
+
     fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value;
     fn eval_lambda(&self, lambda: &Lambda, args: Vec<ArgValue>) -> Value;
 
@@ -568,33 +577,86 @@ fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
 
         let mut map = HashMap::new();
         for spec in inventory::iter::<FunctionSpec> {
-            map.insert(spec.name.to_ascii_uppercase(), spec);
+            let mut key = spec.name.to_string();
+            if key.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                key.make_ascii_uppercase();
+            }
+            map.insert(key, spec);
         }
 
         // Internal synthetic functions used by expression lowering.
         map.insert(
-            builtins_rich_values::FIELDACCESS_SPEC
-                .name
-                .to_ascii_uppercase(),
+            {
+                let mut key = builtins_rich_values::FIELDACCESS_SPEC.name.to_string();
+                if key.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                    key.make_ascii_uppercase();
+                }
+                key
+            },
             &builtins_rich_values::FIELDACCESS_SPEC,
         );
         map
     })
 }
 
+/// Lookup a function by its already-normalized key.
+///
+/// `name_upper` must match the canonical function name representation used by the evaluator and
+/// bytecode compiler:
+/// - ASCII uppercased (`to_ascii_uppercase`)
+/// - optional Excel `_xlfn.` prefix removed
+///
+/// This avoids allocating in hot paths where names are already normalized by parsing/lowering.
+pub fn lookup_function_upper(name_upper: &str) -> Option<&'static FunctionSpec> {
+    registry().get(name_upper).copied()
+}
+
 pub fn lookup_function(name: &str) -> Option<&'static FunctionSpec> {
-    let upper = name.to_ascii_uppercase();
-    if let Some(spec) = registry().get(&upper).copied() {
+    // Excel stores newer functions in files with an `_xlfn.` prefix (e.g. `_xlfn.XLOOKUP`).
+    // For evaluation we treat these as aliases of the unprefixed built-in.
+    let stripped = strip_xlfn_prefix_ignore_case(name).unwrap_or(name);
+    if let Some(spec) = lookup_function_upper(stripped) {
         return Some(spec);
     }
 
-    // Excel stores newer functions in files with an `_xlfn.` prefix (e.g. `_xlfn.XLOOKUP`).
-    // For evaluation we treat these as aliases of the unprefixed built-in.
-    if let Some(stripped) = upper.strip_prefix("_XLFN.") {
-        return registry().get(stripped).copied();
+    crate::value::with_ascii_uppercased_key(stripped, |upper| lookup_function_upper(upper))
+}
+
+#[inline]
+fn strip_xlfn_prefix_ignore_case(name: &str) -> Option<&str> {
+    const XLFN: &[u8] = b"_XLFN.";
+    let bytes = name.as_bytes();
+    bytes
+        .get(..XLFN.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(XLFN))
+        .then(|| &name[XLFN.len()..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_function_upper_accepts_canonical_names() {
+        assert_eq!(lookup_function_upper("SUM").map(|s| s.name), Some("SUM"));
+        assert_eq!(
+            lookup_function_upper("XLOOKUP").map(|s| s.name),
+            Some("XLOOKUP")
+        );
     }
 
-    None
+    #[test]
+    fn lookup_function_normalizes_case_and_xlfn_prefix() {
+        assert_eq!(lookup_function("sum").map(|s| s.name), Some("SUM"));
+        assert_eq!(
+            lookup_function("_xlfn.xlookup").map(|s| s.name),
+            Some("XLOOKUP")
+        );
+        assert_eq!(
+            lookup_function("_XLFN.XLOOKUP").map(|s| s.name),
+            Some("XLOOKUP")
+        );
+    }
 }
 
 pub fn call_function(ctx: &dyn FunctionContext, name: &str, args: &[CompiledExpr]) -> Value {
