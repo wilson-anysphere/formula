@@ -1,4 +1,4 @@
-use formula_model::column_label_to_index;
+use formula_model::{parse_a1_endpoint, A1Endpoint, A1ParseError};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -41,49 +41,22 @@ pub fn parse_a1(input: &str) -> Result<CellAddr, AddressParseError> {
     if input.is_empty() {
         return Err(AddressParseError::InvalidA1(input.to_string()));
     }
+    let endpoint = parse_a1_endpoint(input).map_err(|e| match e {
+        A1ParseError::InvalidColumn => AddressParseError::ColumnOutOfRange,
+        A1ParseError::InvalidRow => AddressParseError::RowOutOfRange,
+        _ => AddressParseError::InvalidA1(input.to_string()),
+    })?;
 
-    let bytes = input.as_bytes();
-    let mut i = 0usize;
-
-    // Optional absolute marker.
-    if bytes.get(i) == Some(&b'$') {
-        i += 1;
-    }
-
-    let col_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-        i += 1;
-    }
-    if i == col_start {
+    let A1Endpoint::Cell(cell) = endpoint else {
         return Err(AddressParseError::InvalidA1(input.to_string()));
-    }
-    let col_str = &input[col_start..i];
+    };
 
-    // Optional absolute marker.
-    if bytes.get(i) == Some(&b'$') {
-        i += 1;
-    }
-
-    let row_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == row_start || i != bytes.len() {
-        return Err(AddressParseError::InvalidA1(input.to_string()));
-    }
-
-    let col0 = column_label_to_index(col_str).map_err(|_| AddressParseError::ColumnOutOfRange)?;
-    let row1: u32 = input[row_start..i]
-        .parse()
-        .map_err(|_| AddressParseError::RowOutOfRange)?;
-    if row1 == 0 || row1 > i32::MAX as u32 {
+    let row = cell.row;
+    if row >= i32::MAX as u32 {
         return Err(AddressParseError::RowOutOfRange);
     }
 
-    Ok(CellAddr {
-        row: row1 - 1,
-        col: col0,
-    })
+    Ok(CellAddr { row, col: cell.col })
 }
 
 #[cfg(test)]
