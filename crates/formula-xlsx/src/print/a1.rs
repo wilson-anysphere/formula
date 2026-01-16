@@ -1,4 +1,5 @@
 use super::PrintError;
+use core::fmt::Write as _;
 use formula_model::sheet_name_eq_case_insensitive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,37 +160,36 @@ pub fn parse_print_titles_defined_name(
 }
 
 pub fn format_print_area_defined_name(sheet_name: &str, ranges: &[CellRange]) -> String {
-    ranges
-        .iter()
-        .map(|r| {
-            format!(
-                "{sheet}!{ref_str}",
-                sheet = format_sheet_name(sheet_name),
-                ref_str = format_cell_range(*r)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",")
+    let sheet = format_sheet_name(sheet_name);
+    let mut out = String::new();
+    for (idx, range) in ranges.iter().copied().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str(&sheet);
+        out.push('!');
+        push_cell_range(&mut out, range);
+    }
+    out
 }
 
 pub fn format_print_titles_defined_name(sheet_name: &str, titles: &PrintTitles) -> String {
     let sheet = format_sheet_name(sheet_name);
-    let mut parts = Vec::new();
-
+    let mut out = String::new();
     if let Some(rows) = titles.repeat_rows {
-        parts.push(format!(
-            "{sheet}!{ref_str}",
-            ref_str = format_row_range(rows)
-        ));
+        out.push_str(&sheet);
+        out.push('!');
+        push_row_range(&mut out, rows);
     }
     if let Some(cols) = titles.repeat_cols {
-        parts.push(format!(
-            "{sheet}!{ref_str}",
-            ref_str = format_col_range(cols)
-        ));
+        if !out.is_empty() {
+            out.push(',');
+        }
+        out.push_str(&sheet);
+        out.push('!');
+        push_col_range(&mut out, cols);
     }
-
-    parts.join(",")
+    out
 }
 
 fn split_areas(formula: &str) -> Result<Vec<&str>, PrintError> {
@@ -334,124 +334,103 @@ enum Endpoint {
 }
 
 fn parse_endpoint(s: &str) -> Result<Endpoint, PrintError> {
-    let trimmed = s.trim().trim_matches('$');
-    if trimmed.is_empty() {
-        return Err(PrintError::InvalidA1("empty endpoint".to_string()));
-    }
+    let endpoint = formula_model::parse_a1_endpoint(s).map_err(|err| {
+        PrintError::InvalidA1(format!("invalid endpoint {s:?}: {err}"))
+    })?;
 
-    let mut letters = String::new();
-    let mut digits = String::new();
-
-    for ch in trimmed.chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() && digits.is_empty() {
-            letters.push(ch);
-        } else if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            return Err(PrintError::InvalidA1(format!(
-                "invalid character {ch:?} in endpoint {s:?}"
-            )));
-        }
-    }
-
-    match (letters.is_empty(), digits.is_empty()) {
-        (false, false) => Ok(Endpoint::Cell(CellRef {
-            col: letters_to_col(&letters)?,
-            row: digits.parse::<u32>().map_err(|_| {
-                PrintError::InvalidA1(format!("invalid row number in endpoint {s:?}"))
-            })?,
-        })),
-        (false, true) => Ok(Endpoint::Col(letters_to_col(&letters)?)),
-        (true, false) => Ok(Endpoint::Row(digits.parse::<u32>().map_err(|_| {
-            PrintError::InvalidA1(format!("invalid row number in endpoint {s:?}"))
-        })?)),
-        (true, true) => Err(PrintError::InvalidA1(format!("invalid endpoint {s:?}"))),
-    }
-}
-
-fn letters_to_col(letters: &str) -> Result<u32, PrintError> {
-    let mut col = 0u32;
-    for ch in letters.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return Err(PrintError::InvalidA1(format!(
-                "invalid column letters {letters:?}"
-            )));
-        }
-        let digit = (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
-        col = col
-            .checked_mul(26)
-            .and_then(|c| c.checked_add(digit))
-            .ok_or_else(|| {
-                PrintError::InvalidA1(format!("invalid column letters {letters:?}"))
+    match endpoint {
+        formula_model::A1Endpoint::Cell(cell) => {
+            let row = cell.row.checked_add(1).ok_or_else(|| {
+                PrintError::InvalidA1(format!("row out of range in endpoint {s:?}"))
             })?;
+            let col0 = cell.col.checked_add(1).ok_or_else(|| {
+                PrintError::InvalidA1(format!("col out of range in endpoint {s:?}"))
+            })?;
+            Ok(Endpoint::Cell(CellRef { row, col: col0 }))
+        }
+        formula_model::A1Endpoint::Row(row0) => {
+            let row = row0.checked_add(1).ok_or_else(|| {
+                PrintError::InvalidA1(format!("row out of range in endpoint {s:?}"))
+            })?;
+            Ok(Endpoint::Row(row))
+        }
+        formula_model::A1Endpoint::Col(col0) => {
+            let col = col0.checked_add(1).ok_or_else(|| {
+                PrintError::InvalidA1(format!("col out of range in endpoint {s:?}"))
+            })?;
+            Ok(Endpoint::Col(col))
+        }
     }
-
-    if col == 0 {
-        return Err(PrintError::InvalidA1(format!(
-            "invalid column letters {letters:?}"
-        )));
-    }
-    Ok(col)
-}
-
-fn col_to_letters(mut col: u32) -> String {
-    let mut chars = Vec::new();
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        chars.push((b'A' + rem) as char);
-        col = (col - 1) / 26;
-    }
-    chars.iter().rev().collect()
 }
 
 fn format_sheet_name(sheet_name: &str) -> String {
-    if sheet_name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    let mut out = String::new();
+    formula_model::push_sheet_name_a1(&mut out, sheet_name);
+    out
+}
+
+fn push_cell_ref(out: &mut String, row: u32, col: u32) {
+    if row == 0 || col == 0 {
+        // Best-effort fallback for malformed inputs.
+        out.push('$');
+        if col > 0 {
+            formula_model::push_column_label(col - 1, out);
+        }
+        out.push('$');
+        let _ = write!(out, "{row}");
+        return;
+    }
+
+    formula_model::push_a1_cell_ref_row1(u64::from(row), col - 1, true, true, out);
+}
+
+fn push_cell_range(out: &mut String, range: CellRange) {
+    let range = range.normalized();
+    if range.start_row == 0
+        || range.end_row == 0
+        || range.start_col == 0
+        || range.end_col == 0
     {
-        return sheet_name.to_string();
+        // Best-effort fallback for malformed inputs.
+        push_cell_ref(out, range.start_row, range.start_col);
+        out.push(':');
+        push_cell_ref(out, range.end_row, range.end_col);
+        return;
     }
 
-    let escaped = sheet_name.replace('\'', "''");
-    format!("'{escaped}'")
+    formula_model::push_a1_cell_range_row1(
+        u64::from(range.start_row),
+        range.start_col - 1,
+        u64::from(range.end_row),
+        range.end_col - 1,
+        true,
+        true,
+        out,
+    );
 }
 
-fn format_cell_ref(row: u32, col: u32) -> String {
-    format!("${col}${row}", col = col_to_letters(col), row = row)
-}
-
-fn format_cell_range(range: CellRange) -> String {
+fn push_row_range(out: &mut String, range: RowRange) {
     let range = range.normalized();
-    if range.start_row == range.end_row && range.start_col == range.end_col {
-        return format_cell_ref(range.start_row, range.start_col);
-    }
-
-    format!(
-        "{start}:{end}",
-        start = format_cell_ref(range.start_row, range.start_col),
-        end = format_cell_ref(range.end_row, range.end_col)
-    )
+    formula_model::push_a1_row_range_row1(u64::from(range.start), u64::from(range.end), true, out);
 }
 
-fn format_row_range(range: RowRange) -> String {
+fn push_col_range(out: &mut String, range: ColRange) {
     let range = range.normalized();
-    if range.start == range.end {
-        return format!("${row}:${row}", row = range.start);
+    if range.start == 0 || range.end == 0 {
+        // Best-effort fallback for malformed inputs.
+        out.push('$');
+        if range.start > 0 {
+            formula_model::push_column_label(range.start - 1, out);
+        }
+        out.push(':');
+        out.push('$');
+        if range.end > 0 {
+            formula_model::push_column_label(range.end - 1, out);
+        }
+        return;
     }
-    format!("${start}:${end}", start = range.start, end = range.end)
-}
 
-fn format_col_range(range: ColRange) -> String {
-    let range = range.normalized();
-    let start = col_to_letters(range.start);
-    let end = col_to_letters(range.end);
-    if range.start == range.end {
-        return format!("${col}:${col}", col = start);
-    }
-    format!("${start}:${end}")
+    formula_model::push_a1_col_range(range.start - 1, range.end - 1, true, out);
 }
 
 #[cfg(test)]
@@ -479,5 +458,28 @@ mod tests {
             .expect("should parse print titles with Unicode-aware sheet matching");
         assert_eq!(titles.repeat_rows, Some(RowRange { start: 1, end: 1 }));
         assert_eq!(titles.repeat_cols, Some(ColRange { start: 1, end: 1 }));
+    }
+
+    #[test]
+    fn format_print_defined_names_quote_sheet_names_that_look_like_tokens() {
+        let range = CellRange {
+            start_row: 1,
+            end_row: 1,
+            start_col: 1,
+            end_col: 1,
+        };
+
+        assert_eq!(
+            format_print_area_defined_name("A1", &[range]),
+            "'A1'!$A$1"
+        );
+        assert_eq!(
+            format_print_area_defined_name("TRUE", &[range]),
+            "'TRUE'!$A$1"
+        );
+        assert_eq!(
+            format_print_titles_defined_name("R1C1", &PrintTitles { repeat_rows: Some(RowRange { start: 1, end: 1 }), repeat_cols: None }),
+            "'R1C1'!$1:$1"
+        );
     }
 }

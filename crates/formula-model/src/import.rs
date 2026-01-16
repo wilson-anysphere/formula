@@ -1086,11 +1086,24 @@ fn parse_typed_value(
 }
 
 fn parse_bool(v: &str) -> Option<bool> {
-    match v.trim().to_ascii_lowercase().as_str() {
-        "true" | "t" | "yes" | "y" | "1" => Some(true),
-        "false" | "f" | "no" | "n" | "0" => Some(false),
-        _ => None,
+    let v = v.trim();
+    if v == "1"
+        || v.eq_ignore_ascii_case("true")
+        || v.eq_ignore_ascii_case("t")
+        || v.eq_ignore_ascii_case("yes")
+        || v.eq_ignore_ascii_case("y")
+    {
+        return Some(true);
     }
+    if v == "0"
+        || v.eq_ignore_ascii_case("false")
+        || v.eq_ignore_ascii_case("f")
+        || v.eq_ignore_ascii_case("no")
+        || v.eq_ignore_ascii_case("n")
+    {
+        return Some(false);
+    }
+    None
 }
 
 fn parse_currency(v: &str, scale: u8, options: &CsvOptions) -> Option<i64> {
@@ -1280,8 +1293,10 @@ fn infer_column_types(
             saw_value = true;
             match parse_bool(v) {
                 Some(_) => {
-                    let lowered = v.trim().to_ascii_lowercase();
-                    if lowered != "0" && lowered != "1" {
+                    // `parse_bool` accepts both numeric (`0`/`1`) and textual (`TRUE`/`FALSE`) booleans.
+                    // We only treat the column as "text-bool" when we see non-numeric forms.
+                    let trimmed = v.trim();
+                    if trimmed != "0" && trimmed != "1" {
                         saw_text_bool = true;
                     }
                 }

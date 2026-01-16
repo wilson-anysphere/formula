@@ -77,11 +77,9 @@ struct RangeMatch<'a, T> {
 
 fn format_range(range: (CellRef, CellRef)) -> String {
     let (start, end) = range;
-    if start == end {
-        start.to_a1()
-    } else {
-        format!("{}:{}", start.to_a1(), end.to_a1())
-    }
+    let mut out = String::new();
+    formula_model::push_a1_cell_range(start.row, start.col, end.row, end.col, false, false, &mut out);
+    out
 }
 
 fn format_cell_list(cells: &[CellRef]) -> String {
@@ -90,8 +88,14 @@ fn format_cell_list(cells: &[CellRef]) -> String {
         if i > 0 {
             out.push_str(", ");
         }
-        out.push_str(&cell.to_a1());
+        formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
     }
+    out
+}
+
+fn format_cell(cell: CellRef) -> String {
+    let mut out = String::new();
+    formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
     out
 }
 
@@ -185,7 +189,7 @@ fn select_ptgexp_backing_record<'a, T>(
                 warnings,
                 format!(
                     "ambiguous {kind} match for PtgExp in {} (masters: {}): {} records keyed by master; chose range {}",
-                    current_cell.to_a1(),
+                    format_cell(current_cell),
                     format_cell_list(master_candidates),
                     exact_len,
                     format_range(selected.range),
@@ -223,7 +227,7 @@ fn select_ptgexp_backing_record<'a, T>(
                 warnings,
                 format!(
                     "ambiguous {kind} match for PtgExp in {} (masters: {}): matched {} ranges; chose range {}",
-                    current_cell.to_a1(),
+                    format_cell(current_cell),
                     format_cell_list(master_candidates),
                     match_len,
                     format_range(selected.range),
@@ -260,7 +264,7 @@ fn select_ptgexp_backing_record<'a, T>(
         warnings,
         format!(
             "ambiguous {kind} match for PtgExp in {}: {} ranges contain the cell (no usable master); chose range {}",
-            current_cell.to_a1(),
+            format_cell(current_cell),
             match_len,
             format_range(selected.range),
         ),
@@ -296,7 +300,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 &mut warnings,
                 format!(
                 "skipping out-of-bounds PtgExp reference in {} -> ({base_row},{base_col})",
-                cell_ref.to_a1()
+                format_cell(cell_ref)
                 ),
             );
             continue;
@@ -350,8 +354,8 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                             &mut warnings,
                             format!(
                                 "failed to materialize shared formula at {} (base {}, range {}): {err}",
-                                cell.to_a1(),
-                                anchor.to_a1(),
+                                format_cell(cell),
+                                format_cell(anchor),
                                 format_range(selected.range),
                             ),
                         );
@@ -377,7 +381,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                     &mut warnings,
                     format!(
                         "failed to fully decode shared formula at {} (range {}): {w}",
-                        cell.to_a1(),
+                        format_cell(cell),
                         format_range(selected.range),
                     ),
                 );
@@ -413,7 +417,10 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 for w in decoded.warnings {
                     push_warning_bounded(
                         &mut warnings,
-                        format!("failed to fully decode array formula base {}: {w}", anchor.to_a1()),
+                        format!(
+                            "failed to fully decode array formula base {}: {w}",
+                            format_cell(anchor)
+                        ),
                     );
                 }
                 let text = decoded.text;
@@ -439,7 +446,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             &mut warnings,
             format!(
                 "unresolved PtgExp reference in {} -> {}",
-                cell.to_a1(),
+                format_cell(cell),
                 format_cell_list(&base_candidates)
             ),
         );
@@ -688,7 +695,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                             &mut warnings,
                             format!(
                                 "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
-                                cell_ref.to_a1(),
+                                format_cell(cell_ref),
                                 base_row,
                                 base_col
                             ),
@@ -731,8 +738,8 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     &mut warnings,
                     format!(
                         "failed to recover shared formula at {}: base cell {} stores PtgExp ({expected})",
-                        cell_ref.to_a1(),
-                        base_cell_ref.to_a1()
+                        format_cell(cell_ref),
+                        format_cell(base_cell_ref)
                     ),
                 );
                 continue;
@@ -757,7 +764,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                         &mut warnings,
                         format!(
                             "failed to fully decode recovered array formula at {}: {w}",
-                            CellRef::new(row, col).to_a1()
+                            format_cell(CellRef::new(row, col))
                         ),
                     );
                 }
@@ -768,7 +775,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     &mut warnings,
                     format!(
                         "failed to recover array formula at {}: decoded rgce produced empty text",
-                        CellRef::new(row, col).to_a1()
+                        format_cell(CellRef::new(row, col))
                     ),
                 );
                 continue;
@@ -785,8 +792,8 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 &mut warnings,
                 format!(
                     "failed to recover shared formula at {}: could not materialize base rgce from {} (unsupported or malformed tokens)",
-                    CellRef::new(row, col).to_a1(),
-                    CellRef::new(base_row, base_col).to_a1()
+                    format_cell(CellRef::new(row, col)),
+                    format_cell(CellRef::new(base_row, base_col))
                 ),
             );
             continue;
@@ -805,7 +812,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                     &mut warnings,
                     format!(
                         "failed to fully decode recovered shared formula at {}: {w}",
-                        CellRef::new(row, col).to_a1()
+                        format_cell(CellRef::new(row, col))
                     ),
                 );
             }
@@ -817,7 +824,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 &mut warnings,
                 format!(
                     "failed to recover shared formula at {}: decoded rgce produced empty text",
-                    CellRef::new(row, col).to_a1()
+                    format_cell(CellRef::new(row, col))
                 ),
             );
             continue;
@@ -890,7 +897,8 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
                 // Surface array-constant decode failures for better diagnostics.
                 for w in decoded.warnings {
                     if w.contains("PtgArray") {
-                        out.warnings.push(format!("cell {}: {w}", cell_ref.to_a1()));
+                        out.warnings
+                            .push(format!("cell {}: {w}", format_cell(cell_ref)));
                     }
                 }
             }
@@ -912,7 +920,8 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
         } else if has_ptgarray {
             for w in decoded.warnings {
                 if w.contains("PtgArray") {
-                    out.warnings.push(format!("cell {}: {w}", cell_ref.to_a1()));
+                    out.warnings
+                        .push(format!("cell {}: {w}", format_cell(cell_ref)));
                 }
             }
         }

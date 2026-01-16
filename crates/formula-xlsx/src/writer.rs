@@ -31,12 +31,9 @@ pub enum XlsxWriteError {
 
 pub fn write_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), XlsxWriteError> {
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let kind = WorkbookKind::from_extension(&ext).unwrap_or(WorkbookKind::Workbook);
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+    let ext = crate::ascii::normalize_extension_ascii_lowercase(ext);
+    let kind = WorkbookKind::from_extension(ext.as_ref()).unwrap_or(WorkbookKind::Workbook);
     atomic_write_with_path(path, |tmp_path| {
         let file = File::create(tmp_path)?;
         write_workbook_to_writer_with_kind(workbook, file, kind)
@@ -541,12 +538,19 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         sheet_index_by_id.insert(sheet.id, idx as u32);
     }
 
-    // Excel defined names are case-insensitive; normalize keys so we reliably suppress
-    // duplicate built-in print names regardless of casing in `workbook.defined_names`.
-    let print_keys: HashSet<(String, u32)> = print_defined_names
-        .iter()
-        .map(|(name, local_sheet_id, _)| (name.to_ascii_uppercase(), *local_sheet_id))
-        .collect();
+    // Excel defined names are case-insensitive; suppress duplicate built-in print names regardless
+    // of casing in `workbook.defined_names`.
+    //
+    // Avoid allocating uppercase copies of each candidate name: these built-ins are at most a
+    // couple entries per sheet, so we store per-sheet slices and compare with
+    // `eq_ignore_ascii_case` on lookup.
+    let mut print_keys_by_sheet: HashMap<u32, Vec<&str>> = HashMap::new();
+    for (name, local_sheet_id, _) in &print_defined_names {
+        print_keys_by_sheet
+            .entry(*local_sheet_id)
+            .or_default()
+            .push(name.as_str());
+    }
 
     let mut out = String::new();
     out.push_str("<definedNames>");
@@ -556,7 +560,10 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
             DefinedNameScope::Workbook => None,
         };
         if let Some(local_sheet_id) = local_sheet_id {
-            if print_keys.contains(&(defined.name.to_ascii_uppercase(), local_sheet_id)) {
+            if print_keys_by_sheet
+                .get(&local_sheet_id)
+                .is_some_and(|keys| keys.iter().any(|k| k.eq_ignore_ascii_case(&defined.name)))
+            {
                 // Avoid emitting duplicate built-in print names; `Workbook::print_settings`
                 // is the canonical representation for these.
                 continue;
@@ -791,11 +798,12 @@ fn pane_xml(pane: &SheetPane) -> Option<String> {
         if pane.frozen_rows > 0 {
             out.push_str(&format!(r#" ySplit="{}""#, pane.frozen_rows));
         }
-        let top_left = pane
-            .top_left_cell
-            .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols))
-            .to_a1();
-        out.push_str(&format!(r#" topLeftCell="{}""#, escape_xml(&top_left)));
+        let top_left =
+            pane.top_left_cell
+                .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols));
+        out.push_str(r#" topLeftCell=""#);
+        formula_model::push_a1_cell_ref(top_left.row, top_left.col, false, false, &mut out);
+        out.push('"');
 
         let active_pane = if pane.frozen_rows > 0 && pane.frozen_cols > 0 {
             "bottomRight"
@@ -815,7 +823,9 @@ fn pane_xml(pane: &SheetPane) -> Option<String> {
         out.push_str(&format!(r#" ySplit="{y}""#));
     }
     if let Some(cell) = pane.top_left_cell {
-        out.push_str(&format!(r#" topLeftCell="{}""#, escape_xml(&cell.to_a1())));
+        out.push_str(r#" topLeftCell=""#);
+        formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
+        out.push('"');
     }
     out.push_str("/>");
     Some(out)
@@ -823,11 +833,29 @@ fn pane_xml(pane: &SheetPane) -> Option<String> {
 
 fn selection_xml(selection: Option<&SheetSelection>) -> Option<String> {
     let selection = selection?;
-    Some(format!(
-        r#"<selection activeCell="{}" sqref="{}"/>"#,
-        escape_xml(&selection.active_cell.to_a1()),
-        escape_xml(&selection.sqref()),
-    ))
+    let mut out = String::new();
+    out.push_str(r#"<selection activeCell=""#);
+    formula_model::push_a1_cell_ref(
+        selection.active_cell.row,
+        selection.active_cell.col,
+        false,
+        false,
+        &mut out,
+    );
+    out.push_str(r#"" sqref=""#);
+    if selection.ranges.is_empty() {
+        formula_model::push_a1_cell_ref(
+            selection.active_cell.row,
+            selection.active_cell.col,
+            false,
+            false,
+            &mut out,
+        );
+    } else {
+        out.push_str(&formula_model::format_sqref(&selection.ranges));
+    }
+    out.push_str(r#""/>"#);
+    Some(out)
 }
 #[cfg(test)]
 mod sheet_format_pr_tests {
@@ -1988,8 +2016,10 @@ fn cell_xml(
     shared_strings: &SharedStrings,
     style_to_xf: &HashMap<u32, u32>,
 ) -> String {
-    let a1 = cell_ref.to_a1();
-    let mut attrs = format!(r#" r="{}""#, a1);
+    let mut attrs = String::new();
+    attrs.push_str(r#" r=""#);
+    formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut attrs);
+    attrs.push('"');
     let mut value_xml = String::new();
 
     if cell.style_id != 0 {
@@ -2091,8 +2121,10 @@ fn columnar_cell_xml(
     column_type: ColumnarType,
     shared_strings: &SharedStrings,
 ) -> Option<String> {
-    let a1 = cell_ref.to_a1();
-    let mut attrs = format!(r#" r="{}""#, a1);
+    let mut attrs = String::new();
+    attrs.push_str(r#" r=""#);
+    formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut attrs);
+    attrs.push('"');
     let mut value_xml = String::new();
 
     match value {

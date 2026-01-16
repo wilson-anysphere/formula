@@ -730,14 +730,18 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
             let key = attr.key.local_name();
             let key = key.as_ref();
             if key.eq_ignore_ascii_case(b"type") {
-                let raw_value = attr.unescape_value()?.to_string();
-                let value = raw_value.to_ascii_lowercase();
-                def.cache_source_type = match value.as_str() {
-                    "worksheet" => PivotCacheSourceType::Worksheet,
-                    "external" => PivotCacheSourceType::External,
-                    "consolidation" => PivotCacheSourceType::Consolidation,
-                    "scenario" => PivotCacheSourceType::Scenario,
-                    _ => PivotCacheSourceType::Unknown(raw_value),
+                let raw_value = attr.unescape_value()?.into_owned();
+                let trimmed = raw_value.trim();
+                def.cache_source_type = if trimmed.eq_ignore_ascii_case("worksheet") {
+                    PivotCacheSourceType::Worksheet
+                } else if trimmed.eq_ignore_ascii_case("external") {
+                    PivotCacheSourceType::External
+                } else if trimmed.eq_ignore_ascii_case("consolidation") {
+                    PivotCacheSourceType::Consolidation
+                } else if trimmed.eq_ignore_ascii_case("scenario") {
+                    PivotCacheSourceType::Scenario
+                } else {
+                    PivotCacheSourceType::Unknown(raw_value)
                 };
             } else if key.eq_ignore_ascii_case(b"connectionId") {
                 def.cache_source_connection_id =
@@ -832,14 +836,9 @@ pub(crate) fn split_sheet_ref(reference: &str) -> Option<(String, String)> {
     }
 
     let sheet_part = sheet_part.trim();
-    let sheet_part = if let Some(stripped) = sheet_part
-        .strip_prefix('\'')
-        .and_then(|s| s.strip_suffix('\''))
-    {
-        stripped.replace("''", "'")
-    } else {
-        sheet_part.to_string()
-    };
+    let sheet_part = formula_model::unquote_excel_single_quoted_identifier_lenient(sheet_part)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|| sheet_part.to_string());
 
     Some((sheet_part, ref_part.to_string()))
 }

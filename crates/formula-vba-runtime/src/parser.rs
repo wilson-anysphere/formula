@@ -226,18 +226,28 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(match name.to_ascii_lowercase().as_str() {
-            "integer" => VbaType::Integer,
-            "long" => VbaType::Long,
-            "double" => VbaType::Double,
-            "string" => VbaType::String,
-            "boolean" => VbaType::Boolean,
-            "date" => VbaType::Date,
-            // Best-effort: treat unknown types as Variant. This keeps the interpreter permissive
-            // for common declarations like `Dim ws As Worksheet` without needing a full type
-            // system.
-            _ => VbaType::Variant,
-        })
+        if name.eq_ignore_ascii_case("integer") {
+            return Ok(VbaType::Integer);
+        }
+        if name.eq_ignore_ascii_case("long") {
+            return Ok(VbaType::Long);
+        }
+        if name.eq_ignore_ascii_case("double") {
+            return Ok(VbaType::Double);
+        }
+        if name.eq_ignore_ascii_case("string") {
+            return Ok(VbaType::String);
+        }
+        if name.eq_ignore_ascii_case("boolean") {
+            return Ok(VbaType::Boolean);
+        }
+        if name.eq_ignore_ascii_case("date") {
+            return Ok(VbaType::Date);
+        }
+        // Best-effort: treat unknown types as Variant. This keeps the interpreter permissive
+        // for common declarations like `Dim ws As Worksheet` without needing a full type
+        // system.
+        Ok(VbaType::Variant)
     }
 
     fn parse_param_list(&mut self) -> Result<Vec<ParamDef>, VbaError> {

@@ -356,7 +356,11 @@ fn parse_biff_sheet_notes_with_record_cap(
                 &mut warnings,
                 format!(
                     "NOTE record for cell {} references missing TXO payload (obj_id={}, fallback_obj_id={})",
-                    note.cell.to_a1(),
+                    {
+                        let mut a1 = String::new();
+                        formula_model::push_a1_cell_ref(note.cell.row, note.cell.col, false, false, &mut a1);
+                        a1
+                    },
                     note.primary_obj_id,
                     note.secondary_obj_id
                 ),
@@ -376,9 +380,17 @@ fn parse_biff_sheet_notes_with_record_cap(
                 &mut warnings,
                 format!(
                     "duplicate NOTE record for object id {obj_id} (cell {}); overwriting previous NOTE at cell {}",
-                    resolved.cell.to_a1(),
+                    {
+                        let mut a1 = String::new();
+                        formula_model::push_a1_cell_ref(resolved.cell.row, resolved.cell.col, false, false, &mut a1);
+                        a1
+                    },
                     out.get(existing)
-                        .map(|note| note.cell.to_a1())
+                        .map(|note| {
+                            let mut a1 = String::new();
+                            formula_model::push_a1_cell_ref(note.cell.row, note.cell.col, false, false, &mut a1);
+                            a1
+                        })
                         .unwrap_or_else(|| "<unknown>".to_string())
                 ),
             );

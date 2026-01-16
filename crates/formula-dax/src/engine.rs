@@ -1043,7 +1043,21 @@ impl DaxEngine {
         row_ctx: &RowContext,
         env: &mut VarEnv,
     ) -> DaxResult<Value> {
-        match name.to_ascii_uppercase().as_str() {
+        let name = name.trim();
+        let mut buf = [0u8; 64];
+        let upper_owned: String;
+        let upper: &str = if name.len() <= buf.len() {
+            for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+                *dst = src.to_ascii_uppercase();
+            }
+            std::str::from_utf8(&buf[..name.len()])
+                .expect("ASCII uppercasing preserves UTF-8")
+        } else {
+            upper_owned = name.to_ascii_uppercase();
+            &upper_owned
+        };
+
+        match upper {
             "TRUE" => Ok(Value::Boolean(true)),
             "FALSE" => Ok(Value::Boolean(false)),
             "BLANK" => Ok(Value::Blank),
@@ -1530,7 +1544,21 @@ impl DaxEngine {
                             coerce_text(&v).into_owned()
                         }
                     };
-                    match order.to_ascii_uppercase().as_str() {
+                    let order = order.trim();
+                    let mut buf = [0u8; 16];
+                    let upper_owned: String;
+                    let upper: &str = if order.len() <= buf.len() {
+                        for (dst, src) in buf[..order.len()].iter_mut().zip(order.as_bytes()) {
+                            *dst = src.to_ascii_uppercase();
+                        }
+                        std::str::from_utf8(&buf[..order.len()])
+                            .expect("ASCII uppercasing preserves UTF-8")
+                    } else {
+                        upper_owned = order.to_ascii_uppercase();
+                        &upper_owned
+                    };
+
+                    match upper {
                         "ASC" => false,
                         "DESC" => true,
                         other => {
@@ -4227,7 +4255,7 @@ impl DaxEngine {
                 )))
             }
         };
-        let direction = direction.trim().to_ascii_uppercase();
+        let direction = direction.trim();
 
         let Some(rel_idx) =
             model.find_relationship_index(left_table, left_column, right_table, right_column)?
@@ -4273,28 +4301,33 @@ impl DaxEngine {
             )))
         };
 
-        let override_dir = match direction.as_str() {
-            "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
+        let override_dir = if direction.eq_ignore_ascii_case("BOTH") {
+            RelationshipOverride::Active(CrossFilterDirection::Both)
+        } else if direction.eq_ignore_ascii_case("ONEWAY")
+            || direction.eq_ignore_ascii_case("SINGLE")
+        {
             // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
-            "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
-            "NONE" => RelationshipOverride::Disabled,
-            "ONEWAY_LEFTFILTERSRIGHT" => resolve_one_way(
+            RelationshipOverride::Active(CrossFilterDirection::Single)
+        } else if direction.eq_ignore_ascii_case("NONE") {
+            RelationshipOverride::Disabled
+        } else if direction.eq_ignore_ascii_case("ONEWAY_LEFTFILTERSRIGHT") {
+            resolve_one_way(
                 left_table.as_str(),
                 left_column.as_str(),
                 right_table.as_str(),
                 right_column.as_str(),
-            )?,
-            "ONEWAY_RIGHTFILTERSLEFT" => resolve_one_way(
+            )?
+        } else if direction.eq_ignore_ascii_case("ONEWAY_RIGHTFILTERSLEFT") {
+            resolve_one_way(
                 right_table.as_str(),
                 right_column.as_str(),
                 left_table.as_str(),
                 left_column.as_str(),
-            )?,
-            other => {
-                return Err(DaxError::Eval(format!(
-                    "unsupported CROSSFILTER direction {other}"
-                )))
-            }
+            )?
+        } else {
+            return Err(DaxError::Eval(format!(
+                "unsupported CROSSFILTER direction {direction}"
+            )));
         };
 
         filter.cross_filter_overrides.insert(rel_idx, override_dir);
@@ -4561,7 +4594,22 @@ impl DaxEngine {
                     rows: out_rows,
                 })
             }
-            Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
+            Expr::Call { name, args } => {
+                let name = name.trim();
+                let mut buf = [0u8; 64];
+                let upper_owned: String;
+                let upper: &str = if name.len() <= buf.len() {
+                    for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+                        *dst = src.to_ascii_uppercase();
+                    }
+                    std::str::from_utf8(&buf[..name.len()])
+                        .expect("ASCII uppercasing preserves UTF-8")
+                } else {
+                    upper_owned = name.to_ascii_uppercase();
+                    &upper_owned
+                };
+
+                match upper {
                 "FILTER" => {
                     let [table_expr, predicate] = args.as_slice() else {
                         return Err(DaxError::Eval("FILTER expects 2 arguments".into()));
@@ -6217,7 +6265,8 @@ impl DaxEngine {
                 other => Err(DaxError::Eval(format!(
                     "unsupported table function {other}"
                 ))),
-            },
+                }
+            }
             other => Err(DaxError::Type(format!(
                 "expression {other:?} cannot be evaluated as a table"
             ))),

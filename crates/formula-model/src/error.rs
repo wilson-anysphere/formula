@@ -109,25 +109,50 @@ impl FromStr for ErrorValue {
     type Err = ParseErrorValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let normalized = s.trim().to_ascii_uppercase();
-        match normalized.as_str() {
-            "#NULL!" => Ok(ErrorValue::Null),
-            "#DIV/0!" => Ok(ErrorValue::Div0),
-            "#VALUE!" => Ok(ErrorValue::Value),
-            "#REF!" => Ok(ErrorValue::Ref),
-            "#NAME?" => Ok(ErrorValue::Name),
-            "#NUM!" => Ok(ErrorValue::Num),
-            "#N/A" => Ok(ErrorValue::NA),
-            "#N/A!" => Ok(ErrorValue::NA),
-            "#GETTING_DATA" => Ok(ErrorValue::GettingData),
-            "#SPILL!" => Ok(ErrorValue::Spill),
-            "#CALC!" => Ok(ErrorValue::Calc),
-            "#FIELD!" => Ok(ErrorValue::Field),
-            "#CONNECT!" => Ok(ErrorValue::Connect),
-            "#BLOCKED!" => Ok(ErrorValue::Blocked),
-            "#UNKNOWN!" => Ok(ErrorValue::Unknown),
-            _ => Err(ParseErrorValueError),
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("#NULL!") {
+            return Ok(ErrorValue::Null);
         }
+        if s.eq_ignore_ascii_case("#DIV/0!") {
+            return Ok(ErrorValue::Div0);
+        }
+        if s.eq_ignore_ascii_case("#VALUE!") {
+            return Ok(ErrorValue::Value);
+        }
+        if s.eq_ignore_ascii_case("#REF!") {
+            return Ok(ErrorValue::Ref);
+        }
+        if s.eq_ignore_ascii_case("#NAME?") {
+            return Ok(ErrorValue::Name);
+        }
+        if s.eq_ignore_ascii_case("#NUM!") {
+            return Ok(ErrorValue::Num);
+        }
+        if s.eq_ignore_ascii_case("#N/A") || s.eq_ignore_ascii_case("#N/A!") {
+            return Ok(ErrorValue::NA);
+        }
+        if s.eq_ignore_ascii_case("#GETTING_DATA") {
+            return Ok(ErrorValue::GettingData);
+        }
+        if s.eq_ignore_ascii_case("#SPILL!") {
+            return Ok(ErrorValue::Spill);
+        }
+        if s.eq_ignore_ascii_case("#CALC!") {
+            return Ok(ErrorValue::Calc);
+        }
+        if s.eq_ignore_ascii_case("#FIELD!") {
+            return Ok(ErrorValue::Field);
+        }
+        if s.eq_ignore_ascii_case("#CONNECT!") {
+            return Ok(ErrorValue::Connect);
+        }
+        if s.eq_ignore_ascii_case("#BLOCKED!") {
+            return Ok(ErrorValue::Blocked);
+        }
+        if s.eq_ignore_ascii_case("#UNKNOWN!") {
+            return Ok(ErrorValue::Unknown);
+        }
+        Err(ParseErrorValueError)
     }
 }
 
@@ -166,6 +191,17 @@ impl<'de> Deserialize<'de> for ErrorValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_value_from_str_is_case_insensitive_and_trims() {
+        assert_eq!("#ref!".parse::<ErrorValue>().unwrap(), ErrorValue::Ref);
+        assert_eq!("  #n/a  ".parse::<ErrorValue>().unwrap(), ErrorValue::NA);
+        assert_eq!(
+            "#getting_data".parse::<ErrorValue>().unwrap(),
+            ErrorValue::GettingData
+        );
+        assert!("nope".parse::<ErrorValue>().is_err());
+    }
 
     #[test]
     fn error_string_roundtrip() {

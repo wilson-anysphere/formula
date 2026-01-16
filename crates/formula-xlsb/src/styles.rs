@@ -198,8 +198,13 @@ fn looks_like_datetime(section: &str) -> bool {
                     }
                     content.push(c);
                 }
-                let lower = content.to_ascii_lowercase();
-                if matches!(lower.as_str(), "h" | "hh" | "m" | "mm" | "s" | "ss") {
+                if content.eq_ignore_ascii_case("h")
+                    || content.eq_ignore_ascii_case("hh")
+                    || content.eq_ignore_ascii_case("m")
+                    || content.eq_ignore_ascii_case("mm")
+                    || content.eq_ignore_ascii_case("s")
+                    || content.eq_ignore_ascii_case("ss")
+                {
                     return true;
                 }
             }
@@ -230,8 +235,13 @@ fn looks_like_datetime(section: &str) -> bool {
                         break;
                     }
                 }
-                let lower = probe.to_ascii_lowercase();
-                if lower.starts_with("am/pm") || lower.starts_with("a/p") {
+                if probe
+                    .get(.."am/pm".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("am/pm"))
+                    || probe
+                        .get(.."a/p".len())
+                        .is_some_and(|p| p.eq_ignore_ascii_case("a/p"))
+                {
                     return true;
                 }
             }

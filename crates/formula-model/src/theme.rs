@@ -389,24 +389,44 @@ pub fn parse_number_format_color_token(token: &str) -> Option<Color> {
         return None;
     }
 
-    match t.to_ascii_lowercase().as_str() {
-        "black" => Some(Color::Argb(0xFF000000)),
-        "blue" => Some(Color::Argb(0xFF0000FF)),
-        "cyan" => Some(Color::Argb(0xFF00FFFF)),
-        "green" => Some(Color::Argb(0xFF00FF00)),
-        "magenta" => Some(Color::Argb(0xFFFF00FF)),
-        "red" => Some(Color::Argb(0xFFFF0000)),
-        "white" => Some(Color::Argb(0xFFFFFFFF)),
-        "yellow" => Some(Color::Argb(0xFFFFFF00)),
-        other => {
-            let num = other.strip_prefix("color")?;
-            if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            let idx = num.parse::<u16>().ok()?;
-            Some(Color::Indexed(idx))
-        }
+    if t.eq_ignore_ascii_case("black") {
+        return Some(Color::Argb(0xFF000000));
     }
+    if t.eq_ignore_ascii_case("blue") {
+        return Some(Color::Argb(0xFF0000FF));
+    }
+    if t.eq_ignore_ascii_case("cyan") {
+        return Some(Color::Argb(0xFF00FFFF));
+    }
+    if t.eq_ignore_ascii_case("green") {
+        return Some(Color::Argb(0xFF00FF00));
+    }
+    if t.eq_ignore_ascii_case("magenta") {
+        return Some(Color::Argb(0xFFFF00FF));
+    }
+    if t.eq_ignore_ascii_case("red") {
+        return Some(Color::Argb(0xFFFF0000));
+    }
+    if t.eq_ignore_ascii_case("white") {
+        return Some(Color::Argb(0xFFFFFFFF));
+    }
+    if t.eq_ignore_ascii_case("yellow") {
+        return Some(Color::Argb(0xFFFFFF00));
+    }
+
+    let Some(prefix) = t.get(0..5) else {
+        return None;
+    };
+    if !prefix.eq_ignore_ascii_case("color") {
+        return None;
+    }
+
+    let num = &t[5..];
+    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let idx = num.parse::<u16>().ok()?;
+    Some(Color::Indexed(idx))
 }
 
 /// Extract the number format section color for a numeric value.
@@ -555,10 +575,15 @@ fn parse_number_format_section<'a>(raw: &'a str) -> NumberFormatSection<'a> {
             break;
         };
         let content = &stripped[..end];
-        let lower = content.to_ascii_lowercase();
 
         // Elapsed time tokens are part of the format pattern.
-        if matches!(lower.as_str(), "h" | "hh" | "m" | "mm" | "s" | "ss") {
+        if content.eq_ignore_ascii_case("h")
+            || content.eq_ignore_ascii_case("hh")
+            || content.eq_ignore_ascii_case("m")
+            || content.eq_ignore_ascii_case("mm")
+            || content.eq_ignore_ascii_case("s")
+            || content.eq_ignore_ascii_case("ss")
+        {
             break;
         }
 

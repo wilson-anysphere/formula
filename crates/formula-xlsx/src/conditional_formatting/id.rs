@@ -25,12 +25,22 @@ use formula_model::CfRule;
 /// To be defensive, this function checks for collisions within `rules` (case-insensitive) and
 /// retries with an incrementing counter until it finds an unused id.
 pub fn ensure_rule_ids(rules: &mut [CfRule], seed: u128) {
+    fn normalize_ascii_uppercase(s: &str) -> String {
+        // Fast path: if there are no ASCII lowercase letters, preserve the string verbatim.
+        if s.as_bytes().iter().all(|b| !b.is_ascii_lowercase()) {
+            return s.to_string();
+        }
+        let mut owned = s.to_string();
+        owned.make_ascii_uppercase();
+        owned
+    }
+
     // Use a normalized (uppercase) set for collision checks.
     let mut seen: HashSet<String> = rules
         .iter()
         .filter_map(|r| r.id.as_deref())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_ascii_uppercase())
+        .map(normalize_ascii_uppercase)
         .collect();
 
     for (idx, rule) in rules.iter_mut().enumerate() {
@@ -42,7 +52,9 @@ pub fn ensure_rule_ids(rules: &mut [CfRule], seed: u128) {
         let mut attempt: u32 = 0;
         loop {
             let id = rule_id_for_index_with_attempt(seed, idx, attempt);
-            if seen.insert(id.to_ascii_uppercase()) {
+            // `rule_id_for_index_with_attempt` returns an uppercase GUID; avoid allocating another
+            // uppercased copy just to insert into the already-normalized set.
+            if seen.insert(id.clone()) {
                 rule.id = Some(id);
                 break;
             }

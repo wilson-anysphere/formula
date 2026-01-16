@@ -32,11 +32,14 @@ pub(crate) fn should_attempt_primary_selection(
 }
 
 fn parse_primary_selection_override(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" => Some(true),
-        "0" | "false" | "no" => Some(false),
-        _ => None,
+    let value = value.trim();
+    if value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") {
+        return Some(true);
     }
+    if value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("no") {
+        return Some(false);
+    }
+    None
 }
 
 fn should_attempt_primary_selection_with_override(

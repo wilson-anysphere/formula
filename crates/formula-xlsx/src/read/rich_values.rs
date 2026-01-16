@@ -83,7 +83,7 @@ pub(crate) fn apply_rich_values_to_workbook(
 
         // Skip non-entity rich values (e.g. images-in-cell) for now.
         // Images typically use a type name like `com.microsoft.excel.image`.
-        if type_name.to_ascii_lowercase().contains("image") {
+        if crate::ascii::contains_ignore_case(type_name, "image") {
             continue;
         }
 
@@ -107,8 +107,7 @@ pub(crate) fn apply_rich_values_to_workbook(
             fields.insert(member.name.clone(), value);
         }
 
-        let type_name_lower = type_name.to_ascii_lowercase();
-        let new_value = if type_name_lower.contains("record") {
+        let new_value = if crate::ascii::contains_ignore_case(type_name, "record") {
             let display_field = fields.contains_key("display").then(|| "display".to_string());
             CellValue::Record(RecordValue {
                 fields,
@@ -184,18 +183,14 @@ fn rich_value_part_sort_key(part_name: &str) -> Option<(u8, u32, &str)> {
     }
 
     let file_name = part_name.rsplit('/').next()?;
-    let file_name_lower = file_name.to_ascii_lowercase();
-    if !file_name_lower.ends_with(".xml") {
-        return None;
-    }
-    let stem_lower = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+    let stem = crate::ascii::strip_suffix_ignore_case(file_name, ".xml")?;
 
     // Check the plural prefix first: `richvalues` starts with `richvalue`.
-    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+    let (family, suffix) = if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalues") {
         (0u8, rest)
-    } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+    } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalue") {
         (0u8, rest)
-    } else if let Some(rest) = stem_lower.strip_prefix("rdrichvalue") {
+    } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "rdrichvalue") {
         (1u8, rest)
     } else {
         return None;
@@ -203,7 +198,7 @@ fn rich_value_part_sort_key(part_name: &str) -> Option<(u8, u32, &str)> {
 
     let idx = if suffix.is_empty() {
         0
-    } else if suffix.chars().all(|c| c.is_ascii_digit()) {
+    } else if suffix.as_bytes().iter().all(u8::is_ascii_digit) {
         suffix.parse::<u32>().ok()?
     } else {
         return None;
@@ -257,30 +252,37 @@ fn parse_rich_value_part(
 
 fn rich_value_atom_to_cell_value(kind: Option<&str>, text: &str) -> CellValue {
     let kind = kind.unwrap_or("string");
-    match kind.to_ascii_lowercase().as_str() {
-        "string" => CellValue::String(text.to_string()),
-        "number" | "n" => text
-            .trim()
-            .parse::<f64>()
-            .map(CellValue::Number)
-            .unwrap_or_else(|_| CellValue::String(text.to_string())),
-        "bool" | "boolean" | "b" => {
-            let lowered = text.trim().to_ascii_lowercase();
-            let b = matches!(lowered.as_str(), "1" | "true");
-            CellValue::Boolean(b)
-        }
-        "error" | "e" => {
-            let err = text.trim().parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
-            CellValue::Error(err)
-        }
-        // Relationship indices (used by images) are stored as integers.
-        "rel" | "r" => text
-            .trim()
-            .parse::<f64>()
-            .map(CellValue::Number)
-            .unwrap_or_else(|_| CellValue::String(text.to_string())),
-        _ => CellValue::String(text.to_string()),
+    if kind.eq_ignore_ascii_case("string") {
+        return CellValue::String(text.to_string());
     }
+    if kind.eq_ignore_ascii_case("number") || kind.eq_ignore_ascii_case("n") {
+        return text
+            .trim()
+            .parse::<f64>()
+            .map(CellValue::Number)
+            .unwrap_or_else(|_| CellValue::String(text.to_string()));
+    }
+    if kind.eq_ignore_ascii_case("bool")
+        || kind.eq_ignore_ascii_case("boolean")
+        || kind.eq_ignore_ascii_case("b")
+    {
+        let trimmed = text.trim();
+        let b = trimmed == "1" || trimmed.eq_ignore_ascii_case("true");
+        return CellValue::Boolean(b);
+    }
+    if kind.eq_ignore_ascii_case("error") || kind.eq_ignore_ascii_case("e") {
+        let err = text.trim().parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
+        return CellValue::Error(err);
+    }
+    // Relationship indices (used by images) are stored as integers.
+    if kind.eq_ignore_ascii_case("rel") || kind.eq_ignore_ascii_case("r") {
+        return text
+            .trim()
+            .parse::<f64>()
+            .map(CellValue::Number)
+            .unwrap_or_else(|_| CellValue::String(text.to_string()));
+    }
+    CellValue::String(text.to_string())
 }
 
 fn cell_value_display_string(value: &CellValue) -> String {

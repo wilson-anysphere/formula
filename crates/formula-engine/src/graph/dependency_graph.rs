@@ -128,7 +128,11 @@ impl fmt::Display for CycleError {
                 write!(f, " -> ")?;
             }
             match node {
-                GraphNode::Cell(cell) => write!(f, "S{}!{}", cell.sheet_id, cell.cell.to_a1())?,
+                GraphNode::Cell(cell) => {
+                    let mut a1 = String::new();
+                    formula_model::push_a1_cell_ref(cell.cell.row, cell.cell.col, false, false, &mut a1);
+                    write!(f, "S{}!{}", cell.sheet_id, a1)?;
+                }
                 GraphNode::Range(id) => write!(f, "Range({id})")?,
             }
         }

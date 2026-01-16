@@ -742,7 +742,7 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains(KEY_ENCRYPTOR_URI_CERTIFICATE)
-                || msg.to_ascii_lowercase().contains("certificate"),
+                || crate::ascii::contains_ignore_case(&msg, "certificate"),
             "expected error message to mention certificate encryption; got: {msg}"
         );
     }

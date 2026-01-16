@@ -468,21 +468,46 @@ fn parse_month_name(token: &str) -> Option<u8> {
     if token.is_empty() {
         return None;
     }
-    match token.to_ascii_lowercase().as_str() {
-        "jan" | "january" => Some(1),
-        "feb" | "february" => Some(2),
-        "mar" | "march" => Some(3),
-        "apr" | "april" => Some(4),
-        "may" => Some(5),
-        "jun" | "june" => Some(6),
-        "jul" | "july" => Some(7),
-        "aug" | "august" => Some(8),
-        "sep" | "sept" | "september" => Some(9),
-        "oct" | "october" => Some(10),
-        "nov" | "november" => Some(11),
-        "dec" | "december" => Some(12),
-        _ => None,
+    if token.eq_ignore_ascii_case("jan") || token.eq_ignore_ascii_case("january") {
+        return Some(1);
     }
+    if token.eq_ignore_ascii_case("feb") || token.eq_ignore_ascii_case("february") {
+        return Some(2);
+    }
+    if token.eq_ignore_ascii_case("mar") || token.eq_ignore_ascii_case("march") {
+        return Some(3);
+    }
+    if token.eq_ignore_ascii_case("apr") || token.eq_ignore_ascii_case("april") {
+        return Some(4);
+    }
+    if token.eq_ignore_ascii_case("may") {
+        return Some(5);
+    }
+    if token.eq_ignore_ascii_case("jun") || token.eq_ignore_ascii_case("june") {
+        return Some(6);
+    }
+    if token.eq_ignore_ascii_case("jul") || token.eq_ignore_ascii_case("july") {
+        return Some(7);
+    }
+    if token.eq_ignore_ascii_case("aug") || token.eq_ignore_ascii_case("august") {
+        return Some(8);
+    }
+    if token.eq_ignore_ascii_case("sep")
+        || token.eq_ignore_ascii_case("sept")
+        || token.eq_ignore_ascii_case("september")
+    {
+        return Some(9);
+    }
+    if token.eq_ignore_ascii_case("oct") || token.eq_ignore_ascii_case("october") {
+        return Some(10);
+    }
+    if token.eq_ignore_ascii_case("nov") || token.eq_ignore_ascii_case("november") {
+        return Some(11);
+    }
+    if token.eq_ignore_ascii_case("dec") || token.eq_ignore_ascii_case("december") {
+        return Some(12);
+    }
+    None
 }
 
 fn parse_year_component(s: &str) -> ExcelResult<i32> {
@@ -553,26 +578,32 @@ fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
 }
 
 fn looks_like_ampm_suffix(token: &str) -> bool {
-    let upper = token.to_ascii_uppercase();
-    (upper.ends_with("AM") || upper.ends_with("PM")) && upper.chars().any(|c| c.is_ascii_digit())
+    let bytes = token.as_bytes();
+    if bytes.len() < 2 {
+        return false;
+    }
+    let suffix = &bytes[bytes.len() - 2..];
+    (suffix.eq_ignore_ascii_case(b"AM") || suffix.eq_ignore_ascii_case(b"PM"))
+        && bytes.iter().copied().any(|b| b.is_ascii_digit())
 }
 
 fn parse_time_candidate(candidate: &str) -> ExcelResult<f64> {
-    let mut s = candidate.trim().to_string();
+    let mut s = candidate.trim();
     if s.is_empty() {
         return Err(ExcelError::Value);
     }
 
     let mut ampm: Option<&str> = None;
-    let upper = s.to_ascii_uppercase();
-    if upper.ends_with("AM") {
-        ampm = Some("AM");
-        s.truncate(s.len().saturating_sub(2));
-        s = s.trim().to_string();
-    } else if upper.ends_with("PM") {
-        ampm = Some("PM");
-        s.truncate(s.len().saturating_sub(2));
-        s = s.trim().to_string();
+    if s.len() >= 2 {
+        let bytes = s.as_bytes();
+        let suffix = &bytes[bytes.len() - 2..];
+        if suffix.eq_ignore_ascii_case(b"AM") {
+            ampm = Some("AM");
+            s = s[..s.len() - 2].trim_end();
+        } else if suffix.eq_ignore_ascii_case(b"PM") {
+            ampm = Some("PM");
+            s = s[..s.len() - 2].trim_end();
+        }
     }
 
     if s.is_empty() {
@@ -580,7 +611,7 @@ fn parse_time_candidate(candidate: &str) -> ExcelResult<f64> {
     }
 
     let (mut hour, minute, second) = if s.contains(':') {
-        parse_colon_time(&s)?
+        parse_colon_time(s)?
     } else {
         if ampm.is_none() {
             return Err(ExcelError::Value);

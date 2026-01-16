@@ -903,12 +903,14 @@ mod tests {
 
     fn xl_unicode_string_unicode(s: &str) -> Vec<u8> {
         let mut out = Vec::new();
-        let units: Vec<u16> = s.encode_utf16().collect();
-        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        let utf16le: Vec<u8> = s
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
+        let cch: u16 = (utf16le.len() / 2).try_into().expect("test string fits in u16");
+        out.extend_from_slice(&cch.to_le_bytes());
         out.push(STR_FLAG_HIGH_BYTE); // flags (uncompressed/unicode)
-        for unit in units {
-            out.extend_from_slice(&unit.to_le_bytes());
-        }
+        out.extend_from_slice(&utf16le);
         out
     }
 

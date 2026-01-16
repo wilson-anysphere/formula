@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use formula_engine::{Engine, Value};
+use formula_model::cell_to_a1;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -199,20 +200,24 @@ fn encode_json_value(value: serde_json::Value) -> Result<Value> {
 fn coord_to_a1(row: u32, col: u32) -> String {
     // Prefer the shared A1 formatter so very large row/col indices (e.g. u32::MAX) do not
     // overflow when converting from 0-based internal coordinates to 1-based A1 notation.
-    formula_engine::eval::CellAddr { row, col }.to_a1()
+    cell_to_a1(row, col)
 }
 
 fn range_to_a1(
     start: formula_engine::eval::CellAddr,
     end: formula_engine::eval::CellAddr,
 ) -> String {
-    let start_a1 = start.to_a1();
-    let end_a1 = end.to_a1();
-    if start == end {
-        start_a1
-    } else {
-        format!("{start_a1}:{end_a1}")
-    }
+    let mut out = String::new();
+    formula_model::push_a1_cell_range(
+        start.row,
+        start.col,
+        end.row,
+        end.col,
+        false,
+        false,
+        &mut out,
+    );
+    out
 }
 
 fn main() -> Result<()> {

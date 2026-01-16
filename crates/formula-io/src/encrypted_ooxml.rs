@@ -934,8 +934,10 @@ fn parse_agile_encryption_info(xml: &str) -> Result<AgileEncryptionInfo, Decrypt
         .find(|n| {
             n.is_element()
                 && n.tag_name().name() == "keyEncryptor"
-                && n.attribute("uri")
-                    .is_some_and(|u| u.to_ascii_lowercase().contains("password"))
+                && n.attribute("uri").is_some_and(|u| {
+                    u.split(|ch: char| !ch.is_ascii_alphabetic())
+                        .any(|seg| seg.eq_ignore_ascii_case("password"))
+                })
         })
         .ok_or_else(|| DecryptError::InvalidInfo("missing keyEncryptor (password)".into()))?;
 

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "apps/desktop/src-tauri",
+  "crates/formula-ascii",
   "crates/formula-biff",
   "crates/formula-columnar",
   "crates/formula-dax",

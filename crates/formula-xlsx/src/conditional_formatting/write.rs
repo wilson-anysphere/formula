@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use formula_model::{
     CellIsOperator, CfRule, CfRuleKind, CfRuleSchema, Cfvo, CfvoType, Color, ColorScaleRule,
-    DataBarRule, IconSet, IconSetRule, Range, TopBottomKind, TopBottomRule, UniqueDuplicateRule,
+    DataBarRule, IconSet, IconSetRule, TopBottomKind, TopBottomRule, UniqueDuplicateRule,
 };
 
 use super::{normalize_cf_priorities, patch_cf_rule_priority};
@@ -31,7 +31,7 @@ pub fn write_conditional_formatting_xml(rules: &[CfRule]) -> String {
     let mut groups: BTreeMap<String, Vec<(usize, &CfRule)>> = BTreeMap::new();
     for (idx, rule) in rules.iter().enumerate() {
         groups
-            .entry(sqref_for_ranges(&rule.applies_to))
+            .entry(formula_model::format_sqref(&rule.applies_to))
             .or_default()
             .push((idx, rule));
     }
@@ -251,7 +251,7 @@ fn write_x14_ext_lst(rules: &[CfRule], priorities: &[u32]) -> Option<String> {
         s.push_str(r#"">"#);
         s.push_str(&write_x14_cf_rule(rule, priorities.get(idx).copied().unwrap_or(1)));
         s.push_str("<xm:sqref>");
-        s.push_str(&escape_xml(&sqref_for_ranges(&rule.applies_to)));
+        s.push_str(&escape_xml(&formula_model::format_sqref(&rule.applies_to)));
         s.push_str("</xm:sqref>");
         s.push_str("</x14:conditionalFormatting>");
     }
@@ -338,20 +338,6 @@ fn normalize_cf_formula(formula: &str) -> String {
     crate::formula_text::add_xlfn_prefixes(&normalized)
 }
 
-fn sqref_for_ranges(ranges: &[Range]) -> String {
-    if ranges.is_empty() {
-        return String::new();
-    }
-    let mut s = String::new();
-    for (idx, r) in ranges.iter().enumerate() {
-        if idx > 0 {
-            s.push(' ');
-        }
-        s.push_str(&r.to_string());
-    }
-    s
-}
-
 fn cell_is_operator_attr(op: CellIsOperator) -> &'static str {
     match op {
         CellIsOperator::GreaterThan => "greaterThan",
@@ -409,7 +395,7 @@ fn escape_xml(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_model::{CfRuleSchema, CfvoType};
+    use formula_model::{CfRuleSchema, CfvoType, Range};
 
     #[test]
     fn writes_xlfn_prefixes_in_conditional_formatting_formulas() {

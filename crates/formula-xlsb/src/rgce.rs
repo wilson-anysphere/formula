@@ -7,19 +7,20 @@
 //! round-trip common patterns while we build out full compatibility.
 
 use crate::errors::{xlsb_error_code_from_literal, xlsb_error_literal};
-use crate::format::push_column_label;
-use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
 use formula_biff::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use formula_biff::structured_refs::{
-    format_structured_ref, structured_columns_placeholder_from_ids,
-    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK,
-    StructuredColumns, StructuredRefItem,
+    estimated_structured_ref_len, push_structured_ref, structured_columns_placeholder_from_ids,
+    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK, StructuredColumns,
+    StructuredRefItem,
 };
 use formula_model::external_refs::{format_external_key, format_external_span_key};
 #[cfg(feature = "write")]
 use formula_model::external_refs::format_external_workbook_key;
-use formula_model::{push_escaped_excel_single_quotes, push_excel_single_quoted_identifier};
+use formula_model::{
+    push_escaped_excel_double_quote_char, push_escaped_excel_single_quotes,
+    push_excel_single_quoted_identifier, sheet_name_needs_quotes_a1,
+};
 use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
@@ -438,13 +439,7 @@ fn format_function_call(name: &str, args: Vec<ExprFragment>) -> ExprFragment {
 }
 
 fn fmt_sheet_name(out: &mut String, sheet: &str) {
-    // Based on `formula-engine`'s `fmt_sheet_name`: be conservative, because quoting is always
-    // accepted by Excel while the unquoted form is only valid for identifier-like names.
-    if sheet_name_needs_quotes(sheet) {
-        push_excel_single_quoted_identifier(out, sheet);
-    } else {
-        out.push_str(sheet);
-    }
+    formula_model::push_sheet_name_a1(out, sheet);
 }
 
 fn format_sheet_prefix(first: &str, last: &str) -> String {
@@ -480,7 +475,7 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         return out;
     }
 
-    if sheet_name_needs_quotes(first) {
+    if sheet_name_needs_quotes_a1(first) {
         let combined = format_external_key(book, first);
         let mut out = String::new();
         push_excel_single_quoted_identifier(&mut out, &combined);
@@ -491,109 +486,6 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         out.push('!');
         out
     }
-}
-
-fn sheet_name_needs_quotes(sheet: &str) -> bool {
-    if sheet.is_empty() {
-        return true;
-    }
-    if sheet
-        .chars()
-        .any(|c| c.is_whitespace() || matches!(c, '!' | '\''))
-    {
-        return true;
-    }
-    sheet_part_needs_quotes(sheet)
-}
-
-fn sheet_part_needs_quotes(sheet: &str) -> bool {
-    debug_assert!(!sheet.is_empty());
-
-    if sheet.eq_ignore_ascii_case("TRUE") || sheet.eq_ignore_ascii_case("FALSE") {
-        return true;
-    }
-
-    // Quote sheet names that look like cell refs (e.g. `A1`, `$B$2`).
-    if starts_like_a1_cell_ref(sheet) {
-        return true;
-    }
-
-    !is_valid_sheet_ident(sheet)
-}
-
-fn is_valid_sheet_ident(ident: &str) -> bool {
-    let mut chars = ident.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !matches!(first, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') {
-        return false;
-    }
-    chars.all(is_sheet_ident_cont_char)
-}
-
-fn is_sheet_ident_cont_char(c: char) -> bool {
-    matches!(
-        c,
-        '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
-    )
-}
-
-fn starts_like_a1_cell_ref(s: &str) -> bool {
-    let mut chars = s.chars().peekable();
-    if chars.peek() == Some(&'$') {
-        chars.next();
-    }
-
-    let mut col_letters = String::new();
-    while let Some(&ch) = chars.peek() {
-        if ch.is_ascii_alphabetic() {
-            col_letters.push(ch);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-    if col_letters.is_empty() {
-        return false;
-    }
-
-    if chars.peek() == Some(&'$') {
-        chars.next();
-    }
-
-    let mut row_digits = String::new();
-    while let Some(&ch) = chars.peek() {
-        if ch.is_ascii_digit() {
-            row_digits.push(ch);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-    if row_digits.is_empty() {
-        return false;
-    }
-
-    if col_from_a1(&col_letters).is_none() {
-        return false;
-    }
-    matches!(row_digits.parse::<u32>(), Ok(v) if v != 0)
-}
-
-fn col_from_a1(letters: &str) -> Option<u32> {
-    let mut col: u32 = 0;
-    for (i, ch) in letters.chars().enumerate() {
-        let v = (ch.to_ascii_uppercase() as u8).wrapping_sub(b'A') as u32;
-        if v >= 26 {
-            return None;
-        }
-        col = col * 26 + v + 1;
-        if i >= 3 {
-            return None;
-        }
-    }
-    Some(col - 1)
 }
 
 fn decode_rgce_impl(
@@ -624,6 +516,21 @@ fn decode_rgce_impl(
 
     let mut stack: Vec<ExprFragment> = Vec::new();
 
+    fn parenthesize(mut text: String) -> String {
+        text.reserve(2);
+        text.insert(0, '(');
+        text.push(')');
+        text
+    }
+
+    fn maybe_parenthesize(expr: ExprFragment, required_prec: u8) -> String {
+        if expr.precedence < required_prec && !expr.is_missing {
+            parenthesize(expr.text)
+        } else {
+            expr.text
+        }
+    }
+
     while i < rgce.len() {
         let ptg_offset = i;
         let ptg = rgce[i];
@@ -652,16 +559,9 @@ fn decode_rgce_impl(
                 let right = stack.pop().expect("len checked");
                 let left = stack.pop().expect("len checked");
 
-                let left_s = if left.precedence < prec && !left.is_missing {
-                    format!("({})", left.text)
-                } else {
-                    left.text
-                };
-                let right_s = if right.precedence < prec && !right.is_missing {
-                    format!("({})", right.text)
-                } else {
-                    right.text
-                };
+                let contains_union = left.contains_union || right.contains_union || ptg == 0x10;
+                let left_s = maybe_parenthesize(left, prec);
+                let right_s = maybe_parenthesize(right, prec);
 
                 let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
@@ -671,7 +571,7 @@ fn decode_rgce_impl(
                 stack.push(ExprFragment {
                     text,
                     precedence: prec,
-                    contains_union: left.contains_union || right.contains_union || ptg == 0x10,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -683,15 +583,15 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
                 let prec = 70;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let inner = maybe_parenthesize(expr, prec);
+                let mut text = String::with_capacity(op.len() + inner.len());
+                text.push_str(op);
+                text.push_str(&inner);
                 stack.push(ExprFragment {
-                    text: format!("{op}{inner}"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -702,15 +602,13 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
                 let prec = 60;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('%');
                 stack.push(ExprFragment {
-                    text: format!("{inner}%"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -721,15 +619,13 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
                 let prec = 60;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('#');
                 stack.push(ExprFragment {
-                    text: format!("{inner}#"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -740,7 +636,7 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
                 stack.push(ExprFragment {
-                    text: format!("({})", expr.text),
+                    text: parenthesize(expr.text),
                     precedence: 100,
                     contains_union: expr.contains_union,
                     is_missing: false,
@@ -774,18 +670,19 @@ fn decode_rgce_impl(
                 i += needed;
 
                 // Excel escapes embedded quotes by doubling them inside the literal.
-                let mut s = String::with_capacity(raw.len());
                 let iter = raw
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                let mut lit = String::with_capacity(cch.saturating_add(2));
+                lit.push('"');
                 for decoded in std::char::decode_utf16(iter) {
                     match decoded {
-                        Ok(ch) => s.push(ch),
-                        Err(_) => s.push('\u{FFFD}'),
+                        Ok(ch) => push_escaped_excel_double_quote_char(&mut lit, ch),
+                        Err(_) => push_escaped_excel_double_quote_char(&mut lit, '\u{FFFD}'),
                     }
                 }
-                let escaped = escape_excel_string_literal(&s);
-                stack.push(ExprFragment::new(format!("\"{escaped}\"")));
+                lit.push('"');
+                stack.push(ExprFragment::new(lit));
             }
             0x18 | 0x38 | 0x58 => {
                 // PtgExtend / PtgExtendV / PtgExtendA.
@@ -908,16 +805,20 @@ fn decode_rgce_impl(
                             _ => Some(table_name.as_str()),
                         };
 
-                        let mut out = format_structured_ref(display_table_name, item, &columns);
-
                         let mut prec = 100;
                         let is_value_class = ptg == 0x38;
-                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                        let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
+                        let mut out = String::with_capacity(
+                            estimated_structured_ref_len(display_table_name, item, &columns)
+                                .saturating_add(needs_at as usize),
+                        );
+                        if needs_at {
                             // Like value-class range/name tokens, Excel uses value-class list
                             // tokens to represent legacy implicit intersection.
-                            out = format!("@{out}");
                             prec = 70;
+                            out.push('@');
                         }
+                        push_structured_ref(display_table_name, item, &columns, &mut out);
 
                         stack.push(ExprFragment {
                             text: out,
@@ -1123,8 +1024,6 @@ fn decode_rgce_impl(
                 let col_last = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
                 i += 12;
 
-                let a = format_cell_ref_from_field(row_first0, col_first);
-                let b = format_cell_ref_from_field(row_last0, col_last);
                 let is_single_cell = row_first0 == row_last0
                     && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
                 let is_value_class = (ptg & 0x60) == 0x40;
@@ -1142,20 +1041,20 @@ fn decode_rgce_impl(
                 let col_last_idx = col_last & COL_INDEX_MASK;
                 if row_first0 == 0 && row_last0 == MAX_ROW {
                     // Column range: `A:C` / `A:A`.
-                    text.push_str(&format_col_ref_from_field(col_first));
+                    push_col_ref_from_field(&mut text, col_first);
                     text.push(':');
-                    text.push_str(&format_col_ref_from_field(col_last));
+                    push_col_ref_from_field(&mut text, col_last);
                 } else if col_first_idx == 0 && col_last_idx == COL_INDEX_MASK {
                     // Row range: `1:3` / `1:1`.
-                    text.push_str(&format_row_ref_from_field(row_first0, col_first));
+                    push_row_ref_from_field(&mut text, row_first0, col_first);
                     text.push(':');
-                    text.push_str(&format_row_ref_from_field(row_last0, col_last));
+                    push_row_ref_from_field(&mut text, row_last0, col_last);
                 } else if is_single_cell {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                 } else {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                     text.push(':');
-                    text.push_str(&b);
+                    push_cell_ref_from_field(&mut text, row_last0, col_last);
                 }
                 stack.push(ExprFragment {
                     text,
@@ -1307,11 +1206,6 @@ fn decode_rgce_impl(
                 {
                     stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
-                    let col_first = encode_col_field(abs_col_first as u32, false, false);
-                    let col_last = encode_col_field(abs_col_last as u32, false, false);
-                    let a = format_cell_ref_from_field(abs_row_first as u32, col_first);
-                    let b = format_cell_ref_from_field(abs_row_last as u32, col_last);
-
                     let is_single_cell =
                         abs_row_first == abs_row_last && abs_col_first == abs_col_last;
                     let is_value_class = (ptg & 0x60) == 0x40;
@@ -1323,11 +1217,23 @@ fn decode_rgce_impl(
                         prec = 70;
                     }
                     if is_single_cell {
-                        text.push_str(&a);
+                        push_cell_ref_from_field(
+                            &mut text,
+                            abs_row_first as u32,
+                            encode_col_field(abs_col_first as u32, false, false),
+                        );
                     } else {
-                        text.push_str(&a);
+                        push_cell_ref_from_field(
+                            &mut text,
+                            abs_row_first as u32,
+                            encode_col_field(abs_col_first as u32, false, false),
+                        );
                         text.push(':');
-                        text.push_str(&b);
+                        push_cell_ref_from_field(
+                            &mut text,
+                            abs_row_last as u32,
+                            encode_col_field(abs_col_last as u32, false, false),
+                        );
                     }
                     stack.push(ExprFragment {
                         text,
@@ -1370,8 +1276,9 @@ fn decode_rgce_impl(
                     None => format_sheet_prefix(first, last),
                     Some(book) => format_external_sheet_prefix(book, first, last),
                 };
-                let cell = format_cell_ref_from_field(row0, col_field);
-                stack.push(ExprFragment::new(format!("{prefix}{cell}")));
+                let mut text = prefix;
+                push_cell_ref_from_field(&mut text, row0, col_field);
+                stack.push(ExprFragment::new(text));
             }
             // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
@@ -1411,8 +1318,6 @@ fn decode_rgce_impl(
                     Some(book) => format_external_sheet_prefix(book, first, last),
                 };
 
-                let a = format_cell_ref_from_field(row_first0, col_first);
-                let b = format_cell_ref_from_field(row_last0, col_last);
                 let is_single_cell = row_first0 == row_last0
                     && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
                 let is_value_class = (ptg & 0x60) == 0x40;
@@ -1428,19 +1333,19 @@ fn decode_rgce_impl(
                 let col_first_idx = col_first & COL_INDEX_MASK;
                 let col_last_idx = col_last & COL_INDEX_MASK;
                 if row_first0 == 0 && row_last0 == MAX_ROW {
-                    text.push_str(&format_col_ref_from_field(col_first));
+                    push_col_ref_from_field(&mut text, col_first);
                     text.push(':');
-                    text.push_str(&format_col_ref_from_field(col_last));
+                    push_col_ref_from_field(&mut text, col_last);
                 } else if col_first_idx == 0 && col_last_idx == COL_INDEX_MASK {
-                    text.push_str(&format_row_ref_from_field(row_first0, col_first));
+                    push_row_ref_from_field(&mut text, row_first0, col_first);
                     text.push(':');
-                    text.push_str(&format_row_ref_from_field(row_last0, col_last));
+                    push_row_ref_from_field(&mut text, row_last0, col_last);
                 } else if is_single_cell {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                 } else {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                     text.push(':');
-                    text.push_str(&b);
+                    push_cell_ref_from_field(&mut text, row_last0, col_last);
                 }
                 stack.push(ExprFragment {
                     text,
@@ -1772,20 +1677,6 @@ fn decode_rgce_impl(
     }
 }
 
-fn escape_excel_string(value: &str) -> String {
-    // Excel escapes `"` inside a string literal by doubling it.
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch == '"' {
-            out.push('"');
-            out.push('"');
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
 fn decode_array_constant(
     rgcb: &[u8],
     pos: &mut usize,
@@ -1821,17 +1712,26 @@ fn decode_array_constant(
         return None;
     }
 
-    let mut row_texts = Vec::with_capacity(rows);
-    for _ in 0..rows {
-        let mut col_texts = Vec::with_capacity(cols);
-        for _ in 0..cols {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    out.push('{');
+
+    for row in 0..rows {
+        if row > 0 {
+            out.push(';');
+        }
+        for col in 0..cols {
+            if col > 0 {
+                out.push(',');
+            }
             if i >= rgcb.len() {
                 return None;
             }
             let ty = rgcb[i];
             i += 1;
             match ty {
-                0x00 => col_texts.push(String::new()),
+                0x00 => {}
                 0x01 => {
                     if rgcb.len().saturating_sub(i) < 8 {
                         return None;
@@ -1839,7 +1739,7 @@ fn decode_array_constant(
                     let mut bytes = [0u8; 8];
                     bytes.copy_from_slice(&rgcb[i..i + 8]);
                     i += 8;
-                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                    write!(&mut out, "{}", f64::from_le_bytes(bytes)).ok()?;
                 }
                 0x02 => {
                     if rgcb.len().saturating_sub(i) < 2 {
@@ -1853,18 +1753,17 @@ fn decode_array_constant(
                     }
                     let raw = &rgcb[i..i + byte_len];
                     i += byte_len;
-
-                    let mut s = String::with_capacity(raw.len());
+                    out.push('"');
                     let iter = raw
                         .chunks_exact(2)
                         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
                     for decoded in std::char::decode_utf16(iter) {
                         match decoded {
-                            Ok(ch) => s.push(ch),
-                            Err(_) => s.push('\u{FFFD}'),
+                            Ok(ch) => push_escaped_excel_double_quote_char(&mut out, ch),
+                            Err(_) => push_escaped_excel_double_quote_char(&mut out, '\u{FFFD}'),
                         }
                     }
-                    col_texts.push(format!("\"{}\"", escape_excel_string(&s)));
+                    out.push('"');
                 }
                 0x04 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -1872,7 +1771,7 @@ fn decode_array_constant(
                     }
                     let b = rgcb[i];
                     i += 1;
-                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                    out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
                 0x10 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -1882,7 +1781,7 @@ fn decode_array_constant(
                     let code = rgcb[i];
                     i += 1;
                     match xlsb_error_literal(code) {
-                        Some(lit) => col_texts.push(lit.to_string()),
+                        Some(lit) => out.push_str(lit),
                         None => {
                             if let Some(warnings) = warnings.as_deref_mut() {
                                 warnings.push(DecodeWarning::UnknownArrayErrorCode {
@@ -1890,18 +1789,18 @@ fn decode_array_constant(
                                     offset: code_offset,
                                 });
                             }
-                            col_texts.push("#UNKNOWN!".to_string());
+                            out.push_str("#UNKNOWN!");
                         }
                     }
                 }
                 _ => return None,
             }
         }
-        row_texts.push(col_texts.join(","));
     }
 
     *pos = i;
-    Some(format!("{{{}}}", row_texts.join(";")))
+    out.push('}');
+    Some(out)
 }
 
 /// Scan a nested BIFF12 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
@@ -2337,57 +2236,36 @@ fn consume_rgcb_arrays_in_subexpression(
 
 fn format_cell_ref(row1: u64, col: u32, flags: u8) -> String {
     let mut out = String::new();
-    if flags & 0x80 != 0x80 {
-        out.push('$');
-    }
-    push_column_label(col, &mut out);
-    if flags & 0x40 != 0x40 {
-        out.push('$');
-    }
-    out.push_str(&row1.to_string());
+    let abs_col = flags & 0x80 != 0x80;
+    let abs_row = flags & 0x40 != 0x40;
+    formula_model::push_a1_cell_ref_row1(row1, col, abs_col, abs_row, &mut out);
     out
 }
 
-fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
+fn push_cell_ref_from_field(out: &mut String, row0: u32, col_field: u16) {
     let row1 = (row0 as u64).saturating_add(1);
     let col = (col_field & 0x3FFF) as u32;
     let col_relative = (col_field & 0x8000) == 0x8000;
     let row_relative = (col_field & 0x4000) == 0x4000;
+    formula_model::push_a1_cell_ref_row1(row1, col, !col_relative, !row_relative, out);
+}
 
+fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
     let mut out = String::new();
-    if !col_relative {
-        out.push('$');
-    }
-    push_column_label(col, &mut out);
-    if !row_relative {
-        out.push('$');
-    }
-    out.push_str(&row1.to_string());
+    push_cell_ref_from_field(&mut out, row0, col_field);
     out
 }
 
-fn format_col_ref_from_field(col_field: u16) -> String {
+fn push_col_ref_from_field(out: &mut String, col_field: u16) {
     let col = (col_field & COL_INDEX_MASK) as u32;
     let col_relative = (col_field & COL_RELATIVE_MASK) == COL_RELATIVE_MASK;
-
-    let mut out = String::new();
-    if !col_relative {
-        out.push('$');
-    }
-    push_column_label(col, &mut out);
-    out
+    formula_model::push_a1_col_ref(col, !col_relative, out);
 }
 
-fn format_row_ref_from_field(row0: u32, col_field: u16) -> String {
+fn push_row_ref_from_field(out: &mut String, row0: u32, col_field: u16) {
     let row1 = (row0 as u64).saturating_add(1);
     let row_relative = (col_field & ROW_RELATIVE_MASK) == ROW_RELATIVE_MASK;
-
-    let mut out = String::new();
-    if !row_relative {
-        out.push('$');
-    }
-    out.push_str(&row1.to_string());
-    out
+    formula_model::push_a1_row_ref_row1(row1, !row_relative, out);
 }
 
 fn decode_ptg_list_payload_best_effort(
@@ -2599,6 +2477,7 @@ pub fn encode_rgce_with_context_ast_in_sheet(
 mod encode_ast {
     use super::{
         format_external_key, format_external_workbook_key,
+        push_utf16le_u16_len_with_rollback,
         ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError, EncodedRgce, PtgClass,
         WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA, PTG_AREA3D, PTG_FUNCVAR,
         PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UMINUS, PTG_UPLUS,
@@ -2608,7 +2487,7 @@ mod encode_ast {
 
     use formula_engine as fe;
     use fe::structured_refs::{parse_structured_ref, StructuredColumns, StructuredRefItem};
-    use formula_model::sheet_name_eq_case_insensitive;
+    use formula_model::{column_label_to_index, sheet_name_eq_case_insensitive};
 
     const PTG_ERR: u8 = 0x1C;
     const PTG_BOOL: u8 = 0x1D;
@@ -2704,16 +2583,9 @@ mod encode_ast {
                 emit_number(n, rgce);
             }
             fe::Expr::String(s) => {
+                let start_len = rgce.len();
                 rgce.push(PTG_STR);
-                let units: Vec<u16> = s.encode_utf16().collect();
-                let cch: u16 = units
-                    .len()
-                    .try_into()
-                    .map_err(|_| EncodeError::Parse("string literal too long".to_string()))?;
-                rgce.extend_from_slice(&cch.to_le_bytes());
-                for unit in units {
-                    rgce.extend_from_slice(&unit.to_le_bytes());
-                }
+                push_utf16le_u16_len_with_rollback(rgce, start_len, s, "string literal too long")?;
             }
             fe::Expr::Boolean(b) => {
                 rgce.push(PTG_BOOL);
@@ -3549,7 +3421,9 @@ mod encode_ast {
     ) -> Result<(), EncodeError> {
         let upper = name.name_upper.as_str();
 
-        if let Some(iftab) = formula_biff::function_name_to_id(upper).filter(|id| *id != 0x00FF) {
+        if let Some(iftab) =
+            formula_biff::function_name_to_id_uppercase(upper).filter(|id| *id != 0x00FF)
+        {
             let spec = formula_biff::function_spec_from_id(iftab)
                 .ok_or_else(|| EncodeError::Parse(format!("unknown function id: {iftab}")))?;
 
@@ -3640,55 +3514,46 @@ mod encode_ast {
         name: &fe::FunctionName,
     ) -> Result<Option<CellRefInfo>, EncodeError> {
         let s = name.name_upper.as_str();
+        let bytes = s.as_bytes();
+        let mut i = 0usize;
 
-        let mut chars = s.chars().peekable();
-        let abs_col = if chars.peek() == Some(&'$') {
-            chars.next();
+        let abs_col = if bytes.get(i) == Some(&b'$') {
+            i += 1;
             true
         } else {
             false
         };
-        let mut col_letters = String::new();
-        while let Some(&ch) = chars.peek() {
-            if ch.is_ascii_alphabetic() {
-                col_letters.push(ch);
-                chars.next();
-            } else {
-                break;
-            }
+
+        let col_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            i += 1;
         }
-        if col_letters.is_empty() {
+        if i == col_start {
             return Ok(None);
         }
+        let col_letters = &s[col_start..i];
 
-        let abs_row = if chars.peek() == Some(&'$') {
-            chars.next();
+        let abs_row = if bytes.get(i) == Some(&b'$') {
+            i += 1;
             true
         } else {
             false
         };
-        let mut row_digits = String::new();
-        while let Some(&ch) = chars.peek() {
-            if ch.is_ascii_digit() {
-                row_digits.push(ch);
-                chars.next();
-            } else {
-                break;
-            }
+
+        let row_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
         }
-        if row_digits.is_empty() {
-            return Ok(None);
-        }
-        if chars.next().is_some() {
-            // Trailing characters => not a plain A1 reference.
+        if i == row_start || i != bytes.len() {
+            // Not a plain A1 reference.
             return Ok(None);
         }
 
-        let col = match super::col_from_a1(&col_letters) {
-            Some(v) => v,
-            None => return Ok(None),
+        let col: u32 = match column_label_to_index(col_letters) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
         };
-        let row1: u32 = match row_digits.parse() {
+        let row1: u32 = match s[row_start..i].parse() {
             Ok(v) if v != 0 => v,
             _ => return Ok(None),
         };
@@ -3996,16 +3861,9 @@ fn emit_expr(
         Expr::Missing => rgce.push(PTG_MISSARG),
         Expr::Number(n) => emit_number(*n, rgce),
         Expr::String(s) => {
+            let start_len = rgce.len();
             rgce.push(PTG_STR);
-            let units: Vec<u16> = s.encode_utf16().collect();
-            let cch: u16 = units
-                .len()
-                .try_into()
-                .map_err(|_| EncodeError::Parse("string literal too long".to_string()))?;
-            rgce.extend_from_slice(&cch.to_le_bytes());
-            for unit in units {
-                rgce.extend_from_slice(&unit.to_le_bytes());
-            }
+            push_utf16le_u16_len_with_rollback(rgce, start_len, s, "string literal too long")?;
         }
         Expr::Bool(b) => {
             rgce.push(PTG_BOOL);
@@ -4101,6 +3959,28 @@ fn emit_array(
     encode_array_constant(array, rgcb)
 }
 
+fn push_utf16le_u16_len_with_rollback(
+    out: &mut Vec<u8>,
+    start_len: usize,
+    s: &str,
+    err_msg: &'static str,
+) -> Result<(), EncodeError> {
+    let len_pos = out.len();
+    out.extend_from_slice(&0u16.to_le_bytes()); // backpatched
+
+    let mut cch: u16 = 0;
+    for unit in s.encode_utf16() {
+        cch = cch.checked_add(1).ok_or_else(|| {
+            out.truncate(start_len);
+            EncodeError::Parse(err_msg.to_string())
+        })?;
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    out[len_pos..len_pos + 2].copy_from_slice(&cch.to_le_bytes());
+    Ok(())
+}
+
 fn encode_array_constant(array: &ArrayConst, rgcb: &mut Vec<u8>) -> Result<(), EncodeError> {
     let rows = array.rows.len();
     let cols = array.rows.first().map(|r| r.len()).unwrap_or(0);
@@ -4132,15 +4012,14 @@ fn encode_array_constant(array: &ArrayConst, rgcb: &mut Vec<u8>) -> Result<(), E
                     rgcb.extend_from_slice(&n.to_le_bytes());
                 }
                 ArrayElem::Str(s) => {
+                    let start_len = rgcb.len();
                     rgcb.push(0x02);
-                    let units: Vec<u16> = s.encode_utf16().collect();
-                    let len: u16 = units.len().try_into().map_err(|_| {
-                        EncodeError::Parse("array string literal is too long".to_string())
-                    })?;
-                    rgcb.extend_from_slice(&len.to_le_bytes());
-                    for u in units {
-                        rgcb.extend_from_slice(&u.to_le_bytes());
-                    }
+                    push_utf16le_u16_len_with_rollback(
+                        rgcb,
+                        start_len,
+                        s,
+                        "array string literal is too long",
+                    )?;
                 }
                 ArrayElem::Bool(b) => {
                     rgcb.push(0x04);
@@ -4162,14 +4041,28 @@ fn emit_func(
     ctx: &WorkbookContext,
     out: &mut Vec<u8>,
 ) -> Result<(), EncodeError> {
-    let upper = name.trim().to_ascii_uppercase();
+    let name = name.trim();
+    let mut buf = [0u8; 64];
+    let upper_owned: String;
+    let upper: &str = if name.len() <= buf.len() {
+        for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+            *dst = src.to_ascii_uppercase();
+        }
+        std::str::from_utf8(&buf[..name.len()])
+            .expect("ASCII uppercasing preserves UTF-8")
+    } else {
+        upper_owned = name.to_ascii_uppercase();
+        &upper_owned
+    };
 
     // Built-in functions.
     //
     // Note: Excel encodes "future" (forward-compatible) functions as user-defined calls (iftab=255)
     // paired with a name token. We do not currently support that encoding path, so we explicitly
     // avoid treating `iftab=0x00FF` as a built-in here.
-    if let Some(iftab) = formula_biff::function_name_to_id(&upper).filter(|id| *id != 0x00FF) {
+    if let Some(iftab) =
+        formula_biff::function_name_to_id_uppercase(upper).filter(|id| *id != 0x00FF)
+    {
         if argc > u8::MAX as usize {
             return Err(EncodeError::Parse(
                 "too many function arguments".to_string(),
@@ -4182,7 +4075,7 @@ fn emit_func(
     }
 
     // Add-in / UDF call pattern: args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
-    if let Some((ixti, name_index)) = ctx.namex_function_ref(&upper) {
+    if let Some((ixti, name_index)) = ctx.namex_function_ref(upper) {
         let argc_total = argc
             .checked_add(1)
             .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
@@ -4202,7 +4095,9 @@ fn emit_func(
         return Ok(());
     }
 
-    Err(EncodeError::UnknownFunction { name: upper })
+    Err(EncodeError::UnknownFunction {
+        name: upper.to_string(),
+    })
 }
 
 fn emit_name(
@@ -4318,14 +4213,16 @@ fn extern_sheet_range_index_with_fallback(
     let last_prefix = formula_model::external_refs::split_external_workbook_prefix(last);
 
     if let (Some((prefix, _)), None) = (first_prefix, last_prefix) {
-        let last_with_prefix = format!("{prefix}{last}");
+        let mut last_with_prefix = prefix.to_string();
+        last_with_prefix.push_str(last);
         if let Some(ixti) = ctx.extern_sheet_range_index(first, &last_with_prefix) {
             return Some(ixti);
         }
     }
 
     if let (None, Some((prefix, last_sheet))) = (first_prefix, last_prefix) {
-        let first_with_prefix = format!("{prefix}{first}");
+        let mut first_with_prefix = prefix.to_string();
+        first_with_prefix.push_str(first);
         if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last) {
             return Some(ixti);
         }
@@ -4810,10 +4707,12 @@ impl<'a> FormulaParser<'a> {
                 let ident = self
                     .parse_identifier()?
                     .ok_or_else(|| "expected identifier".to_string())?;
-                match ident.to_ascii_uppercase().as_str() {
-                    "TRUE" => Ok(ArrayElem::Bool(true)),
-                    "FALSE" => Ok(ArrayElem::Bool(false)),
-                    _ => Err(format!("unexpected identifier in array literal: {ident}")),
+                if ident.eq_ignore_ascii_case("TRUE") {
+                    Ok(ArrayElem::Bool(true))
+                } else if ident.eq_ignore_ascii_case("FALSE") {
+                    Ok(ArrayElem::Bool(false))
+                } else {
+                    Err(format!("unexpected identifier in array literal: {ident}"))
                 }
             }
             _ => Err("unexpected token in array literal".to_string()),
@@ -4906,13 +4805,15 @@ impl<'a> FormulaParser<'a> {
             self.next_char();
             Ok(Expr::Func { name: ident, args })
         } else {
-            match ident.to_ascii_uppercase().as_str() {
-                "TRUE" => Ok(Expr::Bool(true)),
-                "FALSE" => Ok(Expr::Bool(false)),
-                _ => Ok(Expr::Name(NameRef {
+            if ident.eq_ignore_ascii_case("TRUE") {
+                Ok(Expr::Bool(true))
+            } else if ident.eq_ignore_ascii_case("FALSE") {
+                Ok(Expr::Bool(false))
+            } else {
+                Ok(Expr::Name(NameRef {
                     sheet: None,
                     name: ident,
-                })),
+                }))
             }
         }
     }
@@ -5135,8 +5036,8 @@ impl<'a> FormulaParser<'a> {
             return Ok(None);
         }
 
-        let col =
-            col_label_to_index(col_label).ok_or_else(|| "invalid column label".to_string())?;
+        let col = formula_model::column_label_to_index_lenient(col_label)
+            .map_err(|_| "invalid column label".to_string())?;
         if col > COL_INDEX_MASK as u32 {
             self.pos = start;
             return Ok(None);
@@ -5211,8 +5112,8 @@ impl<'a> FormulaParser<'a> {
             return Ok(None);
         }
 
-        let col =
-            col_label_to_index(col_label).ok_or_else(|| "invalid column label".to_string())?;
+        let col = formula_model::column_label_to_index_lenient(col_label)
+            .map_err(|_| "invalid column label".to_string())?;
         let row1: u32 = row_str.parse().map_err(|_| "invalid row".to_string())?;
         if row1 == 0 {
             self.pos = start;
@@ -5455,17 +5356,5 @@ mod tests {
     }
 }
 
-fn col_label_to_index(label: &str) -> Option<u32> {
-    let mut col: u32 = 0;
-    for ch in label.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        let upper = ch.to_ascii_uppercase() as u32;
-        col = col * 26 + (upper - 'A' as u32 + 1);
-    }
-    if col == 0 {
-        return None;
-    }
-    Some(col - 1)
-}
+// Column-label parsing is centralized in `formula-model` to ensure consistent A1 grammar handling
+// and overflow safety.

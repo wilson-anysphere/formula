@@ -2569,7 +2569,20 @@ pub(crate) fn parse_biff8_sheet_formulas(
             for w in resolve_warnings {
                 push_warning_bounded(
                     &mut out.warnings,
-                    format!("cell {}: {}", cell.cell.to_a1(), w.message),
+                    {
+                        let mut msg = String::new();
+                        msg.push_str("cell ");
+                        formula_model::push_a1_cell_ref(
+                            cell.cell.row,
+                            cell.cell.col,
+                            false,
+                            false,
+                            &mut msg,
+                        );
+                        msg.push_str(": ");
+                        msg.push_str(&w.message);
+                        msg
+                    },
                 );
             }
 
@@ -2609,7 +2622,20 @@ pub(crate) fn parse_biff8_sheet_formulas(
         for warning in decoded.warnings {
             push_warning_bounded(
                 &mut out.warnings,
-                format!("cell {}: {warning}", cell.cell.to_a1()),
+                {
+                    let mut msg = String::new();
+                    msg.push_str("cell ");
+                    formula_model::push_a1_cell_ref(
+                        cell.cell.row,
+                        cell.cell.col,
+                        false,
+                        false,
+                        &mut msg,
+                    );
+                    msg.push_str(": ");
+                    msg.push_str(&warning);
+                    msg
+                },
             );
         }
         if !decoded.text.trim().is_empty() {
@@ -2637,7 +2663,11 @@ impl TableArg {
     fn render(self) -> String {
         match self {
             TableArg::Missing => String::new(),
-            TableArg::Ref(cell) => cell.to_a1(),
+            TableArg::Ref(cell) => {
+                let mut out = String::new();
+                formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
+                out
+            }
             TableArg::RefError => "#REF!".to_string(),
         }
     }
@@ -2982,7 +3012,17 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 format!(
                     "PtgTbl formula at offset {} (cell {}) references missing TABLE record (no matching base cell candidates); rendering TABLE()",
                     pending.offset,
-                    pending.cell.to_a1()
+                    {
+                        let mut a1 = String::new();
+                        formula_model::push_a1_cell_ref(
+                            pending.cell.row,
+                            pending.cell.col,
+                            false,
+                            false,
+                            &mut a1,
+                        );
+                        a1
+                    }
                 ),
             );
             out.formulas.insert(pending.cell, "TABLE()".to_string());
@@ -2995,7 +3035,17 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 format!(
                     "PtgTbl formula at offset {} (cell {}) has ambiguous wide payload; multiple TABLE record base-cell candidates matched; choosing row={base_row} col={base_col}",
                     pending.offset,
-                    pending.cell.to_a1()
+                    {
+                        let mut a1 = String::new();
+                        formula_model::push_a1_cell_ref(
+                            pending.cell.row,
+                            pending.cell.col,
+                            false,
+                            false,
+                            &mut a1,
+                        );
+                        a1
+                    }
                 ),
             );
         }
@@ -3008,7 +3058,17 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                     format!(
                         "PtgTbl formula at offset {} (cell {}) references missing TABLE record at row={base_row} col={base_col}; rendering TABLE()",
                         pending.offset,
-                        pending.cell.to_a1()
+                        {
+                            let mut a1 = String::new();
+                            formula_model::push_a1_cell_ref(
+                                pending.cell.row,
+                                pending.cell.col,
+                                false,
+                                false,
+                                &mut a1,
+                            );
+                            a1
+                        }
                     ),
                 );
                 "TABLE()".to_string()
@@ -3252,7 +3312,10 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
             }
         }
 
-        if uri.to_ascii_lowercase().starts_with("mailto:") {
+        if uri
+            .get(.."mailto:".len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("mailto:"))
+        {
             HyperlinkTarget::Email { uri }
         } else {
             HyperlinkTarget::ExternalUrl { uri }
@@ -3426,12 +3489,14 @@ fn percent_encode_uri_path(path: &str) -> String {
     }
 
     let mut out = String::with_capacity(path.len());
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for &b in path.as_bytes() {
         if is_allowed(b) {
             out.push(b as char);
         } else {
             out.push('%');
-            out.push_str(&format!("{:02X}", b));
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 0x0F) as usize] as char);
         }
     }
     out
@@ -3473,7 +3538,7 @@ fn file_path_to_uri(path: &str) -> String {
     }
 
     // Normalize separators to forward slashes and percent-encode unsafe characters.
-    let p = p.replace('\\', "/");
+    let p = if p.contains('\\') { p.replace('\\', "/") } else { p };
     let encoded = percent_encode_uri_path(&p);
 
     // UNC paths are stored as `\\server\share\...`, which becomes `//server/share/...` after
@@ -3645,7 +3710,7 @@ fn parse_internal_location(location: &str) -> Option<(String, CellRef)> {
     }
 
     let (sheet, cell) = loc.split_once('!')?;
-    let sheet = unquote_sheet_name(sheet.trim());
+    let sheet = formula_model::unquote_sheet_name_lenient(sheet);
 
     let cell_str = cell.trim();
     let cell_str = cell_str
@@ -3654,16 +3719,6 @@ fn parse_internal_location(location: &str) -> Option<(String, CellRef)> {
         .unwrap_or(cell_str);
     let cell = CellRef::from_a1(cell_str).ok()?;
     Some((sheet, cell))
-}
-
-fn unquote_sheet_name(name: &str) -> String {
-    // Excel quotes sheet names with single quotes; embedded quotes are doubled.
-    let mut s = name.trim();
-    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-        s = &s[1..s.len() - 1];
-        return s.replace("''", "'");
-    }
-    s.to_string()
 }
 
 #[cfg(test)]
@@ -3744,6 +3799,14 @@ mod tests {
             err.contains("implausible file moniker ANSI path length"),
             "expected implausible ANSI length error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn percent_encode_uri_path_encodes_non_ascii_and_spaces_per_byte() {
+        assert_eq!(percent_encode_uri_path("a b"), "a%20b");
+        assert_eq!(percent_encode_uri_path("a/b:c"), "a/b:c");
+        assert_eq!(percent_encode_uri_path("é"), "%C3%A9");
+        assert_eq!(percent_encode_uri_path("💩"), "%F0%9F%92%A9");
     }
 
     #[test]
@@ -5469,11 +5532,12 @@ mod tests {
             data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
 
             // HyperlinkString (u32 char count + UTF-16LE bytes).
-            let u16s: Vec<u16> = location.encode_utf16().collect();
-            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
-            for ch in u16s {
-                data.extend_from_slice(&ch.to_le_bytes());
-            }
+            let utf16le: Vec<u8> = location
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>();
+            data.extend_from_slice(&((utf16le.len() / 2) as u32).to_le_bytes());
+            data.extend_from_slice(&utf16le);
 
             data
         }
@@ -5525,11 +5589,12 @@ mod tests {
             data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
 
             // HyperlinkString (u32 char count + UTF-16LE bytes).
-            let u16s: Vec<u16> = location.encode_utf16().collect();
-            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
-            for ch in u16s {
-                data.extend_from_slice(&ch.to_le_bytes());
-            }
+            let utf16le: Vec<u8> = location
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>();
+            data.extend_from_slice(&((utf16le.len() / 2) as u32).to_le_bytes());
+            data.extend_from_slice(&utf16le);
 
             data
         }
@@ -5599,11 +5664,12 @@ mod tests {
             data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
 
             // HyperlinkString (u32 char count + UTF-16LE bytes).
-            let u16s: Vec<u16> = location.encode_utf16().collect();
-            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
-            for ch in u16s {
-                data.extend_from_slice(&ch.to_le_bytes());
-            }
+            let utf16le: Vec<u8> = location
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>();
+            data.extend_from_slice(&((utf16le.len() / 2) as u32).to_le_bytes());
+            data.extend_from_slice(&utf16le);
 
             data
         }
@@ -5654,11 +5720,12 @@ mod tests {
             data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
 
             // HyperlinkString (u32 char count + UTF-16LE bytes).
-            let u16s: Vec<u16> = location.encode_utf16().collect();
-            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
-            for ch in u16s {
-                data.extend_from_slice(&ch.to_le_bytes());
-            }
+            let utf16le: Vec<u8> = location
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>();
+            data.extend_from_slice(&((utf16le.len() / 2) as u32).to_le_bytes());
+            data.extend_from_slice(&utf16le);
 
             data
         }

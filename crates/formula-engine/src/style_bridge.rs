@@ -80,15 +80,26 @@ pub fn ui_style_to_model_style(value: &JsonValue) -> Style {
 }
 
 fn parse_horizontal_alignment(raw: &str) -> Option<HorizontalAlignment> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "general" => Some(HorizontalAlignment::General),
-        "left" => Some(HorizontalAlignment::Left),
-        "center" | "centre" => Some(HorizontalAlignment::Center),
-        "right" => Some(HorizontalAlignment::Right),
-        "fill" => Some(HorizontalAlignment::Fill),
-        "justify" => Some(HorizontalAlignment::Justify),
-        _ => None,
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("general") {
+        return Some(HorizontalAlignment::General);
     }
+    if raw.eq_ignore_ascii_case("left") {
+        return Some(HorizontalAlignment::Left);
+    }
+    if raw.eq_ignore_ascii_case("center") || raw.eq_ignore_ascii_case("centre") {
+        return Some(HorizontalAlignment::Center);
+    }
+    if raw.eq_ignore_ascii_case("right") {
+        return Some(HorizontalAlignment::Right);
+    }
+    if raw.eq_ignore_ascii_case("fill") {
+        return Some(HorizontalAlignment::Fill);
+    }
+    if raw.eq_ignore_ascii_case("justify") {
+        return Some(HorizontalAlignment::Justify);
+    }
+    None
 }
 
 #[cfg(test)]

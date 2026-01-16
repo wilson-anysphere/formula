@@ -31,6 +31,16 @@ mod encrypted_package_reader;
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
 
+#[inline]
+fn normalize_zip_entry_name_for_probe(name: &str) -> Cow<'_, str> {
+    let name = name.trim_start_matches('/');
+    if name.contains('\\') {
+        Cow::Owned(name.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
 pub(crate) fn parse_encrypted_package_size_prefix_bytes(prefix: [u8; 8], ciphertext_len: Option<u64>) -> u64 {
     // MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
     // `(u32 size, u32 reserved)` (often with `reserved = 0`). When the high DWORD is non-zero but
@@ -719,12 +729,8 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         let mut has_vba_project = false;
 
         for name in archive.file_names() {
-            let mut normalized = name.trim_start_matches('/');
-            let replaced;
-            if normalized.contains('\\') {
-                replaced = normalized.replace('\\', "/");
-                normalized = &replaced;
-            }
+            let normalized = normalize_zip_entry_name_for_probe(name);
+            let normalized = normalized.as_ref();
 
             if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
                 has_workbook_bin = true;
@@ -759,15 +765,11 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     })? {
         return Ok(WorkbookFormat::Csv);
     }
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if ext == "csv" {
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+    if ext.eq_ignore_ascii_case("csv") {
         return Ok(WorkbookFormat::Csv);
     }
-    if ext == "parquet" {
+    if ext.eq_ignore_ascii_case("parquet") {
         return Ok(WorkbookFormat::Parquet);
     }
 
@@ -929,23 +931,30 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
 
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
 
-    let ext_format = match ext.as_str() {
+    let ext_format = match ext {
         // `.xltx`/`.xltm`/`.xlam` are all OOXML ZIP containers and should be treated as XLSX
         // packages for extension-based fallback dispatch.
-        "xlsx" | "xltx" | "xltm" | "xlam" => Some(WorkbookFormat::Xlsx),
-        "xlsm" => Some(WorkbookFormat::Xlsm),
+        ext if ext.eq_ignore_ascii_case("xlsx")
+            || ext.eq_ignore_ascii_case("xltx")
+            || ext.eq_ignore_ascii_case("xltm")
+            || ext.eq_ignore_ascii_case("xlam") =>
+        {
+            Some(WorkbookFormat::Xlsx)
+        }
+        ext if ext.eq_ignore_ascii_case("xlsm") => Some(WorkbookFormat::Xlsm),
         // `.xlt`/`.xla` are legacy BIFF8 OLE compound files, so treat them like `.xls` for fallback
         // dispatch (when sniffing can't run due to an I/O error).
-        "xls" | "xlt" | "xla" => Some(WorkbookFormat::Xls),
-        "xlsb" => Some(WorkbookFormat::Xlsb),
-        "csv" => Some(WorkbookFormat::Csv),
-        "parquet" => Some(WorkbookFormat::Parquet),
+        ext if ext.eq_ignore_ascii_case("xls")
+            || ext.eq_ignore_ascii_case("xlt")
+            || ext.eq_ignore_ascii_case("xla") =>
+        {
+            Some(WorkbookFormat::Xls)
+        }
+        ext if ext.eq_ignore_ascii_case("xlsb") => Some(WorkbookFormat::Xlsb),
+        ext if ext.eq_ignore_ascii_case("csv") => Some(WorkbookFormat::Csv),
+        ext if ext.eq_ignore_ascii_case("parquet") => Some(WorkbookFormat::Parquet),
         _ => None,
     };
 
@@ -1007,7 +1016,7 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
                 }
                 return Err(Error::UnsupportedExtension {
                     path: path.to_path_buf(),
-                    extension: ext,
+                    extension: ext.to_string(),
                 });
             }
             // Some arbitrary OLE containers can contain a stream named `Workbook`/`Book`. Only
@@ -1022,7 +1031,7 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
                 }
                 return Err(Error::UnsupportedExtension {
                     path: path.to_path_buf(),
-                    extension: ext,
+                    extension: ext.to_string(),
                 });
             }
 
@@ -1064,12 +1073,8 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
             let mut has_vba_project = false;
 
             for name in zip.file_names() {
-                let mut normalized = name.trim_start_matches('/');
-                let replaced;
-                if normalized.contains('\\') {
-                    replaced = normalized.replace('\\', "/");
-                    normalized = &replaced;
-                }
+                let normalized = normalize_zip_entry_name_for_probe(name);
+                let normalized = normalized.as_ref();
 
                 if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
                     has_workbook_xml = true;
@@ -1104,7 +1109,7 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
             Some(fmt) => Ok(fmt),
             None => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
-                extension: ext,
+                extension: ext.to_string(),
             }),
         };
     }
@@ -1121,7 +1126,7 @@ fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<Workbo
         Some(fmt) => Ok(fmt),
         None => Err(Error::UnsupportedExtension {
             path: path.to_path_buf(),
-            extension: ext,
+            extension: ext.to_string(),
         }),
     }
 }
@@ -1168,11 +1173,7 @@ pub fn open_workbook_model_with_options(
     if let Some(err) = encrypted_ooxml_error_from_path(path, opts.password.as_deref()) {
         return Err(err);
     }
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
 
     let format = if opts.password.is_some() {
         workbook_format_allow_encrypted_xls(path)?
@@ -1297,11 +1298,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
     use std::io::BufReader;
 
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
 
     match workbook_format(path)? {
         WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
@@ -2898,12 +2895,8 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
     let mut has_vba_project = false;
 
     for name in archive.file_names() {
-        let mut normalized = name.trim_start_matches('/');
-        let replaced;
-        if normalized.contains('\\') {
-            replaced = normalized.replace('\\', "/");
-            normalized = &replaced;
-        }
+        let normalized = normalize_zip_entry_name_for_probe(name);
+        let normalized = normalized.as_ref();
 
         if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
             has_workbook_bin = true;
@@ -2948,12 +2941,8 @@ fn sniff_ooxml_zip_workbook_kind_from_reader<R: std::io::Read + std::io::Seek>(
     let mut has_vba_project = false;
 
     for name in archive.file_names() {
-        let mut normalized = name.trim_start_matches('/');
-        let replaced;
-        if normalized.contains('\\') {
-            replaced = normalized.replace('\\', "/");
-            normalized = &replaced;
-        }
+        let normalized = normalize_zip_entry_name_for_probe(name);
+        let normalized = normalized.as_ref();
 
         if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
             has_workbook_bin = true;
@@ -4183,12 +4172,8 @@ fn workbook_format_from_ooxml_zip_bytes(bytes: &[u8]) -> Option<WorkbookFormat> 
     let mut has_vba_project = false;
 
     for name in archive.file_names() {
-        let mut normalized = name.trim_start_matches('/');
-        let replaced;
-        if normalized.contains('\\') {
-            replaced = normalized.replace('\\', "/");
-            normalized = &replaced;
-        }
+        let normalized = normalize_zip_entry_name_for_probe(name);
+        let normalized = normalized.as_ref();
 
         if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
             has_workbook_bin = true;
@@ -4465,11 +4450,7 @@ fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::See
 /// - `.parquet` (via `formula-columnar`, requires the `formula-io` crate feature `parquet`)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
 
     match workbook_format(path)? {
         WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
@@ -4814,12 +4795,8 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         source: xlsx::XlsxError::Zip(source),
     })?;
     for name in archive.file_names() {
-        let mut normalized = name.trim_start_matches('/');
-        let replaced;
-        if normalized.contains('\\') {
-            replaced = normalized.replace('\\', "/");
-            normalized = &replaced;
-        }
+        let normalized = normalize_zip_entry_name_for_probe(name);
+        let normalized = normalized.as_ref();
         if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
             return Ok(None);
         }
@@ -4878,11 +4855,7 @@ pub fn open_workbook_with_options(
     {
         return open_workbook_from_decrypted_ooxml_zip_bytes(path, package_bytes);
     }
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
 
     let format = if opts.password.is_some() {
         workbook_format_allow_encrypted_xls(path)?
@@ -4982,6 +4955,13 @@ pub fn open_workbook_with_options(
     }
 }
 
+fn normalize_extension_ascii_lowercase(ext: &str) -> std::borrow::Cow<'_, str> {
+    if ext.as_bytes().iter().all(|b| !b.is_ascii_uppercase()) {
+        return std::borrow::Cow::Borrowed(ext);
+    }
+    std::borrow::Cow::Owned(ext.to_ascii_lowercase())
+}
+
 #[cfg(not(feature = "parquet"))]
 fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, Error> {
     Err(Error::ParquetSupportNotEnabled {
@@ -5071,15 +5051,12 @@ pub fn save_workbook_with_options(
     }
 
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+    let ext = normalize_extension_ascii_lowercase(ext);
 
     // Even if encrypted workbook support is disabled, preserve the existing explicit unsupported
     // extension error for legacy `.xls` output.
-    match ext.as_str() {
+    match ext.as_ref() {
         "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" | "xlsb" => {}
         other => {
             return Err(Error::UnsupportedExtension {
@@ -5088,10 +5065,10 @@ pub fn save_workbook_with_options(
             })
         }
     }
-    if ext == "xlsb" && !matches!(workbook, Workbook::Xlsb(_)) {
+    if ext.as_ref() == "xlsb" && !matches!(workbook, Workbook::Xlsb(_)) {
         return Err(Error::UnsupportedExtension {
             path: path.to_path_buf(),
-            extension: ext,
+            extension: ext.to_string(),
         });
     }
 
@@ -5113,17 +5090,14 @@ pub fn save_workbook_with_options(
 
 fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+    let ext = normalize_extension_ascii_lowercase(ext);
 
     match workbook {
-        Workbook::Xlsx(package) => match ext.as_str() {
+        Workbook::Xlsx(package) => match ext.as_ref() {
             "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
+                    .expect("handled by match arm above");
 
                 let mut out = package.clone();
 
@@ -5172,10 +5146,10 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
                 extension: other.to_string(),
             }),
         },
-        Workbook::Xls(result) => match ext.as_str() {
+        Workbook::Xls(result) => match ext.as_ref() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
+                    .expect("handled by match arm above");
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(&result.workbook, file, kind)
                 });
@@ -5196,7 +5170,7 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
                 extension: other.to_string(),
             }),
         },
-        Workbook::Xlsb(wb) => match ext.as_str() {
+        Workbook::Xlsb(wb) => match ext.as_ref() {
             "xlsb" => {
                 let res = atomic_write(path, |file| wb.save_as_to_writer(file));
                 match res {
@@ -5212,8 +5186,8 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
                 }
             }
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
+                    .expect("handled by match arm above");
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
@@ -5238,10 +5212,10 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
                 extension: other.to_string(),
             }),
         },
-        Workbook::Model(model) => match ext.as_str() {
+        Workbook::Model(model) => match ext.as_ref() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
+                    .expect("handled by match arm above");
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(model, file, kind)
                 });
@@ -5275,14 +5249,11 @@ fn save_workbook_office_encrypted_ooxml(
 ) -> Result<(), Error> {
     use std::io::Write as _;
 
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+    let ext = normalize_extension_ascii_lowercase(ext);
 
     // Serialize the workbook to an OOXML ZIP package in memory (avoid writing plaintext to disk).
-    let zip_bytes = workbook_to_ooxml_zip_bytes(workbook, path, &ext)?;
+    let zip_bytes = workbook_to_ooxml_zip_bytes(workbook, path, ext.as_ref())?;
 
     let ole_bytes = formula_office_crypto::encrypt_package_to_ole_with_entries(
         &zip_bytes,
@@ -5656,11 +5627,13 @@ mod tests {
     }
 
     fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
-        let units: Vec<u16> = s.encode_utf16().collect();
-        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
-        for u in units {
-            out.extend_from_slice(&u.to_le_bytes());
-        }
+        let utf16le: Vec<u8> = s
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
+        let cch: u32 = (utf16le.len() / 2) as u32;
+        out.extend_from_slice(&cch.to_le_bytes());
+        out.extend_from_slice(&utf16le);
     }
 
     fn build_minimal_xlsb_with_parts(sheet_bin: &[u8], shared_strings_bin: &[u8]) -> Vec<u8> {

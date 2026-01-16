@@ -49,11 +49,10 @@ pub fn arabic(text: &str) -> ExcelResult<i64> {
         return Ok(0);
     }
 
-    let upper = trimmed.to_ascii_uppercase();
-    let bytes = upper.as_bytes();
-    let mut values = Vec::with_capacity(bytes.len());
-    for &b in bytes {
-        let v = match b {
+    let mut total: i64 = 0;
+    let bytes = trimmed.as_bytes();
+    for i in 0..bytes.len() {
+        let v = match bytes[i].to_ascii_uppercase() {
             b'I' => 1,
             b'V' => 5,
             b'X' => 10,
@@ -63,13 +62,20 @@ pub fn arabic(text: &str) -> ExcelResult<i64> {
             b'M' => 1000,
             _ => return Err(ExcelError::Value),
         };
-        values.push(v);
-    }
-
-    let mut total: i64 = 0;
-    for i in 0..values.len() {
-        let v = values[i];
-        let next = values.get(i + 1).copied().unwrap_or(0);
+        let next = if let Some(&b) = bytes.get(i + 1) {
+            match b.to_ascii_uppercase() {
+                b'I' => 1,
+                b'V' => 5,
+                b'X' => 10,
+                b'L' => 50,
+                b'C' => 100,
+                b'D' => 500,
+                b'M' => 1000,
+                _ => return Err(ExcelError::Value),
+            }
+        } else {
+            0
+        };
         if v < next {
             total -= v as i64;
         } else {
@@ -84,7 +90,7 @@ pub fn arabic(text: &str) -> ExcelResult<i64> {
     // Validate that the input is a canonical Excel Roman numeral for at least one
     // supported form.
     for form in 0..=4 {
-        if roman(total, Some(form))? == upper {
+        if roman(total, Some(form))?.eq_ignore_ascii_case(trimmed) {
             return Ok(total);
         }
     }

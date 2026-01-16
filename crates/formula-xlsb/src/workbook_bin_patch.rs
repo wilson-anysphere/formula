@@ -326,11 +326,14 @@ fn read_xl_wide_string(data: &[u8], offset: &mut usize) -> Option<String> {
 }
 
 fn write_xl_wide_string(out: &mut Vec<u8>, s: &str) {
-    let units: Vec<u16> = s.encode_utf16().collect();
-    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
-    for u in units {
+    let len_pos = out.len();
+    out.extend_from_slice(&0u32.to_le_bytes()); // backpatched
+    let mut cch: u32 = 0;
+    for u in s.encode_utf16() {
+        cch = cch.checked_add(1).expect("UTF-16 unit count fits in u32");
         out.extend_from_slice(&u.to_le_bytes());
     }
+    out[len_pos..len_pos + 4].copy_from_slice(&cch.to_le_bytes());
 }
 
 fn write_record(out: &mut Vec<u8>, id: u32, payload: &[u8]) -> Result<(), Error> {

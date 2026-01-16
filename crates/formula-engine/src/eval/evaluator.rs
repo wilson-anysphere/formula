@@ -689,7 +689,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             date_system: self.date_system,
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
-            locale: self.locale.clone(),
+            locale: self.locale,
             text_codepage: self.text_codepage,
         }
     }
@@ -706,7 +706,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             date_system: self.date_system,
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
-            locale: self.locale.clone(),
+            locale: self.locale,
             text_codepage: self.text_codepage,
         }
     }
@@ -1963,7 +1963,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn locale_config(&self) -> LocaleConfig {
-        self.locale.clone()
+        self.locale
     }
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {

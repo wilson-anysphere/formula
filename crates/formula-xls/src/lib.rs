@@ -27,8 +27,11 @@
 //! be skipped).
 
 use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+
+use core::fmt::Write as _;
 
 use calamine::{Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
@@ -1620,20 +1623,50 @@ fn import_xls_with_biff_reader(
                             let mut seen_ids: HashSet<String> = HashSet::new();
                             for note in notes {
                                 let anchor = sheet.merged_regions.resolve_cell(note.cell);
-                                let candidate_id =
-                                    format!("xls-note:{}:{}", anchor.to_a1(), note.obj_id);
+                                let mut candidate_id = String::new();
+                                candidate_id.push_str("xls-note:");
+                                formula_model::push_a1_cell_ref(
+                                    anchor.row,
+                                    anchor.col,
+                                    false,
+                                    false,
+                                    &mut candidate_id,
+                                );
+                                candidate_id.push(':');
+                                let _ = write!(candidate_id, "{}", note.obj_id);
 
                                 let mut collision = false;
                                 if let Some(prev_cell) = seen_obj_ids.get(&note.obj_id).copied() {
                                     collision = true;
                                     push_import_warning(
                                         &mut warnings,
-                                        format!(
-                                            "duplicate `.xls` NOTE obj_id {} in sheet `{sheet_name}` (index {sheet_idx}) (cell {} already used at {}); generating random comment id",
-                                            note.obj_id,
-                                            anchor.to_a1(),
-                                            prev_cell.to_a1(),
-                                        ),
+                                        {
+                                            let mut msg = String::new();
+                                            msg.push_str("duplicate `.xls` NOTE obj_id ");
+                                            let _ = write!(msg, "{}", note.obj_id);
+                                            msg.push_str(" in sheet `");
+                                            msg.push_str(&sheet_name);
+                                            msg.push_str("` (index ");
+                                            let _ = write!(msg, "{}", sheet_idx);
+                                            msg.push_str(") (cell ");
+                                            formula_model::push_a1_cell_ref(
+                                                anchor.row,
+                                                anchor.col,
+                                                false,
+                                                false,
+                                                &mut msg,
+                                            );
+                                            msg.push_str(" already used at ");
+                                            formula_model::push_a1_cell_ref(
+                                                prev_cell.row,
+                                                prev_cell.col,
+                                                false,
+                                                false,
+                                                &mut msg,
+                                            );
+                                            msg.push_str("); generating random comment id");
+                                            msg
+                                        },
                                         &mut warnings_suppressed,
                                     );
                                 }
@@ -1681,20 +1714,48 @@ fn import_xls_with_biff_reader(
                                         if let Err(err) = sheet.add_comment(anchor, comment) {
                                             push_import_warning(
                                                 &mut warnings,
-                                                format!(
-                                                    "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                                    anchor.to_a1(),
-                                                ),
+                                                {
+                                                    let mut msg = String::new();
+                                                    msg.push_str("failed to import `.xls` note comment for sheet `");
+                                                    msg.push_str(&sheet_name);
+                                                    msg.push_str("` (index ");
+                                                    let _ = write!(msg, "{}", sheet_idx);
+                                                    msg.push_str(") at ");
+                                                    formula_model::push_a1_cell_ref(
+                                                        anchor.row,
+                                                        anchor.col,
+                                                        false,
+                                                        false,
+                                                        &mut msg,
+                                                    );
+                                                    msg.push_str(": ");
+                                                    let _ = write!(msg, "{err}");
+                                                    msg
+                                                },
                                                 &mut warnings_suppressed,
                                             );
                                         }
                                     }
                                     Err(err) => push_import_warning(
                                         &mut warnings,
-                                        format!(
-                                            "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                            anchor.to_a1(),
-                                        ),
+                                        {
+                                            let mut msg = String::new();
+                                            msg.push_str("failed to import `.xls` note comment for sheet `");
+                                            msg.push_str(&sheet_name);
+                                            msg.push_str("` (index ");
+                                            let _ = write!(msg, "{}", sheet_idx);
+                                            msg.push_str(") at ");
+                                            formula_model::push_a1_cell_ref(
+                                                anchor.row,
+                                                anchor.col,
+                                                false,
+                                                false,
+                                                &mut msg,
+                                            );
+                                            msg.push_str(": ");
+                                            let _ = write!(msg, "{err}");
+                                            msg
+                                        },
                                         &mut warnings_suppressed,
                                     ),
                                 }
@@ -1737,13 +1798,8 @@ fn import_xls_with_biff_reader(
                         // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes (notably
                         // defined-name references via `PtgName`). Strip them so the formula text is
                         // parseable and stable across import paths.
-                        let formula_clean;
-                        let formula = if formula.contains('\0') {
-                            formula_clean = formula.replace('\0', "");
-                            formula_clean.as_str()
-                        } else {
-                            formula
-                        };
+                        let formula = strip_embedded_nuls(formula);
+                        let formula = formula.as_ref();
 
                         let Some(normalized) = normalize_formula_text(formula) else {
                             continue;
@@ -2040,13 +2096,8 @@ fn import_xls_with_biff_reader(
                                 }
                                 // Strip NUL bytes so formula text is parseable/stable (matches the
                                 // calamine formula cleanup path).
-                                let formula_text_clean;
-                                let formula_text = if formula_text.contains('\0') {
-                                    formula_text_clean = formula_text.replace('\0', "");
-                                    formula_text_clean.as_str()
-                                } else {
-                                    formula_text.as_str()
-                                };
+                                let formula_text = strip_embedded_nuls(&formula_text);
+                                let formula_text = formula_text.as_ref();
 
                                 if let Some(normalized) = normalize_formula_text(formula_text) {
                                     sheet.set_formula(anchor, Some(normalized));
@@ -2223,7 +2274,17 @@ fn import_xls_with_biff_reader(
                                                             &mut warnings,
                                                             format!(
                                                                 "failed to materialize shared formula in sheet `{sheet_name}` at {}: {err}",
-                                                                cell_ref.to_a1()
+                                                                {
+                                                                    let mut a1 = String::new();
+                                                                    formula_model::push_a1_cell_ref(
+                                                                        cell_ref.row,
+                                                                        cell_ref.col,
+                                                                        false,
+                                                                        false,
+                                                                        &mut a1,
+                                                                    );
+                                                                    a1
+                                                                }
                                                             ),
                                                             &mut warnings_suppressed,
                                                         );
@@ -2254,7 +2315,17 @@ fn import_xls_with_biff_reader(
                                                 &mut warnings,
                                                 format!(
                                                     "failed to decode shared formula in sheet `{sheet_name}` at {}: {warning}",
-                                                    cell_ref.to_a1()
+                                                    {
+                                                        let mut a1 = String::new();
+                                                        formula_model::push_a1_cell_ref(
+                                                            cell_ref.row,
+                                                            cell_ref.col,
+                                                            false,
+                                                            false,
+                                                            &mut a1,
+                                                        );
+                                                        a1
+                                                    }
                                                 ),
                                                 &mut warnings_suppressed,
                                             );
@@ -2674,16 +2745,13 @@ fn import_xls_with_biff_reader(
     let mut skipped_count: usize = 0;
     for (name, refers_to) in calamine_defined_names {
         let name = normalize_calamine_defined_name_name(&name);
+        let name_str = name.as_ref();
         let refers_to = refers_to.trim();
         let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to);
         // Calamine can surface BIFF8 formula/Unicode strings with embedded NUL bytes (notably
         // defined-name references via `PtgName`). Strip them so the formula text is parseable and
         // stable across import paths.
-        let refers_to = if refers_to.contains('\0') {
-            refers_to.replace('\0', "")
-        } else {
-            refers_to.to_string()
-        };
+        let refers_to = strip_embedded_nuls(refers_to).into_owned();
 
         // Defined names can contain sheet references, and those can point at sheet names that were
         // later sanitized during import. Rewrite any sheet-qualified references using the same
@@ -2715,14 +2783,14 @@ fn import_xls_with_biff_reader(
             && out
                 .defined_names
                 .iter()
-                .any(|existing| existing.name.eq_ignore_ascii_case(&name))
+                .any(|existing| existing.name.eq_ignore_ascii_case(name_str))
         {
             continue;
         }
 
         match out.create_defined_name(
             DefinedNameScope::Workbook,
-            name.clone(),
+            name_str.to_string(),
             refers_to,
             None,
             false,
@@ -2733,7 +2801,9 @@ fn import_xls_with_biff_reader(
                 skipped_count = skipped_count.saturating_add(1);
                 push_import_warning(
                     &mut warnings,
-                    format!("skipping `.xls` defined name `{name}` from calamine fallback: {err}"),
+                    format!(
+                        "skipping `.xls` defined name `{name_str}` from calamine fallback: {err}"
+                    ),
                     &mut warnings_suppressed,
                 );
             }
@@ -3412,11 +3482,7 @@ fn convert_value(
         Data::Int(v) => Some((CellValue::Number(*v as f64), None)),
         Data::Float(v) => Some((CellValue::Number(*v), None)),
         Data::String(v) => {
-            let text = if v.contains('\0') {
-                v.replace('\0', "")
-            } else {
-                v.clone()
-            };
+            let text = strip_embedded_nuls(v).into_owned();
             Some((CellValue::String(text), None))
         }
         Data::Error(e) => Some((CellValue::Error(cell_error_to_error_value(e.clone())), None)),
@@ -3425,19 +3491,11 @@ fn convert_value(
             date_time_styles.map(|styles| styles.style_for_excel_datetime(v)),
         )),
         Data::DateTimeIso(v) => {
-            let text = if v.contains('\0') {
-                v.replace('\0', "")
-            } else {
-                v.clone()
-            };
+            let text = strip_embedded_nuls(v).into_owned();
             Some((CellValue::String(text), None))
         }
         Data::DurationIso(v) => {
-            let text = if v.contains('\0') {
-                v.replace('\0', "")
-            } else {
-                v.clone()
-            };
+            let text = strip_embedded_nuls(v).into_owned();
             Some((CellValue::String(text), None))
         }
     }
@@ -3644,10 +3702,28 @@ fn truncate_to_utf16_len(value: &str, max_len: usize) -> String {
     out
 }
 
-fn normalize_calamine_defined_name_name(name: &str) -> String {
+fn strip_embedded_nuls(value: &str) -> Cow<'_, str> {
+    if !value.contains('\0') {
+        return Cow::Borrowed(value);
+    }
+
+    let mut out = String::with_capacity(value.len());
+    let mut start = 0usize;
+    for (i, ch) in value.char_indices() {
+        if ch != '\0' {
+            continue;
+        }
+        out.push_str(&value[start..i]);
+        start = i + 1;
+    }
+    out.push_str(&value[start..]);
+    Cow::Owned(out)
+}
+
+fn normalize_calamine_defined_name_name(name: &str) -> Cow<'_, str> {
     // Calamine can surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
     // imported name matches Excel’s visible name semantics.
-    name.replace('\0', "")
+    strip_embedded_nuls(name)
 }
 
 fn is_filter_database_defined_name(name: &str) -> bool {
@@ -4247,67 +4323,14 @@ fn parse_print_name_range(ref_str: &str) -> Result<ParsedA1Range, String> {
 }
 
 fn parse_print_name_endpoint(s: &str) -> Result<ParsedEndpoint, String> {
-    let trimmed = s.trim().trim_matches('$');
-    if trimmed.is_empty() {
-        return Err("empty endpoint".to_string());
-    }
+    let endpoint = formula_model::parse_a1_endpoint(s)
+        .map_err(|err| format!("invalid endpoint {s:?}: {err}"))?;
 
-    let mut letters = String::new();
-    let mut digits = String::new();
-
-    for ch in trimmed.chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() && digits.is_empty() {
-            letters.push(ch);
-        } else if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            return Err(format!("invalid character {ch:?} in endpoint {s:?}"));
-        }
+    match endpoint {
+        formula_model::A1Endpoint::Cell(cell) => Ok(ParsedEndpoint::Cell(cell)),
+        formula_model::A1Endpoint::Row(row) => Ok(ParsedEndpoint::Row(row)),
+        formula_model::A1Endpoint::Col(col) => Ok(ParsedEndpoint::Col(col)),
     }
-
-    match (letters.is_empty(), digits.is_empty()) {
-        (false, false) => {
-            let cell_ref = format!("{letters}{digits}");
-            let cell = CellRef::from_a1(&cell_ref)
-                .map_err(|err| format!("invalid cell reference in endpoint {s:?}: {err}"))?;
-            Ok(ParsedEndpoint::Cell(cell))
-        }
-        (false, true) => {
-            let col = parse_col_letters_to_index(&letters)?;
-            Ok(ParsedEndpoint::Col(col))
-        }
-        (true, false) => {
-            let row_1_based: u32 = digits
-                .parse()
-                .map_err(|_| format!("invalid row number in endpoint {s:?}"))?;
-            if row_1_based == 0 {
-                return Err(format!("invalid row number in endpoint {s:?}"));
-            }
-            Ok(ParsedEndpoint::Row(row_1_based - 1))
-        }
-        (true, true) => Err(format!("invalid endpoint {s:?}")),
-    }
-}
-
-fn parse_col_letters_to_index(letters: &str) -> Result<u32, String> {
-    let mut col: u32 = 0;
-    for ch in letters.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return Err(format!("invalid column letters {letters:?}"));
-        }
-        let v = (ch.to_ascii_uppercase() as u8 - b'A') as u32 + 1;
-        col = col
-            .checked_mul(26)
-            .and_then(|c| c.checked_add(v))
-            .ok_or_else(|| format!("invalid column letters {letters:?}"))?;
-    }
-    if col == 0 {
-        return Err(format!("invalid column letters {letters:?}"));
-    }
-    Ok(col - 1)
 }
 
 fn sheet_name_taken(candidate: &str, existing_names: &[String]) -> bool {
@@ -4329,8 +4352,8 @@ pub fn sanitize_sheet_name(
     sheet_number: usize,
     existing_names: &[String],
 ) -> String {
-    let without_nuls = original.replace('\0', "");
-    let trimmed = without_nuls.trim();
+    let without_nuls = strip_embedded_nuls(original);
+    let trimmed = without_nuls.as_ref().trim();
 
     let mut cleaned = String::with_capacity(trimmed.len());
     for ch in trimmed.chars() {
@@ -4412,13 +4435,8 @@ fn normalize_sheet_name_for_match(name: &str) -> String {
     // canonical casefold (NFKC + uppercasing) so `.xls` import behaviors match formula semantics.
     //
     // `.xls` producers can also embed NULs in BIFF strings; strip them before casefolding.
-    let trimmed = name.trim();
-    if !trimmed.contains('\0') {
-        return formula_model::sheet_name_casefold(trimmed);
-    }
-    let mut cleaned = trimmed.to_string();
-    cleaned.retain(|c| c != '\0');
-    formula_model::sheet_name_casefold(cleaned.trim())
+    let cleaned = strip_embedded_nuls(name);
+    formula_model::sheet_name_casefold(cleaned.as_ref().trim())
 }
 
 fn reconcile_biff_sheet_mapping(
@@ -4762,7 +4780,17 @@ fn import_biff8_shared_formulas(
                             format!(
                                 "failed to import `.xls` shared formula in sheet `{}` at {}: unsupported or malformed shared rgce token stream",
                                 sheet.name,
-                                cell_ref.to_a1()
+                                {
+                                    let mut a1 = String::new();
+                                    formula_model::push_a1_cell_ref(
+                                        cell_ref.row,
+                                        cell_ref.col,
+                                        false,
+                                        false,
+                                        &mut a1,
+                                    );
+                                    a1
+                                }
                             ),
                             suppressed,
                         );
@@ -4784,7 +4812,17 @@ fn import_biff8_shared_formulas(
                     format!(
                         "failed to import `.xls` shared formula in sheet `{}` at {}: {warning}",
                         sheet.name,
-                        cell_ref.to_a1()
+                        {
+                            let mut a1 = String::new();
+                            formula_model::push_a1_cell_ref(
+                                cell_ref.row,
+                                cell_ref.col,
+                                false,
+                                false,
+                                &mut a1,
+                            );
+                            a1
+                        }
                     ),
                     suppressed,
                 );
@@ -6237,7 +6275,7 @@ mod tests {
         assert!(
             names
                 .iter()
-                .any(|n| normalize_calamine_defined_name_name(n) == "ABCDE"),
+                .any(|n| normalize_calamine_defined_name_name(n).as_ref() == "ABCDE"),
             "expected calamine to surface full name string; names={names:?}"
         );
     }

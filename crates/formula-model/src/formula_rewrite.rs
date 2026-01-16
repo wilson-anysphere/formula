@@ -720,12 +720,7 @@ fn is_name_char(b: u8) -> bool {
 }
 
 fn bytes_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter()
-        .zip(b.iter())
-        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+    a.eq_ignore_ascii_case(b)
 }
 
 /// Rewrite table names in structured references inside a formula.

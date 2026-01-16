@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::borrow::Cow;
 use std::fmt;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
@@ -185,9 +186,13 @@ impl XlsxLazyPackage {
     }
 
     fn canonicalize_part_name(name: &str) -> String {
-        let trimmed = name.trim_start_matches('/');
+        let trimmed = name.trim_start_matches(|c| c == '/' || c == '\\');
         // Normalize Windows-style separators.
-        trimmed.replace('\\', "/")
+        if trimmed.contains('\\') {
+            trimmed.replace('\\', "/")
+        } else {
+            trimmed.to_string()
+        }
     }
 
     /// Read a single part's bytes.
@@ -234,12 +239,13 @@ impl XlsxLazyPackage {
         };
 
         for name in self.effective_part_names() {
-            let lower = name.to_ascii_lowercase();
-            if lower == "xl/vbaproject.bin" {
+            let normalized = normalize_part_name_for_macro_match(name);
+            let name = normalized.as_ref();
+            if name.eq_ignore_ascii_case("xl/vbaProject.bin") {
                 presence.has_vba = true;
-            } else if lower.starts_with("xl/macrosheets/") {
+            } else if crate::ascii::starts_with_ignore_case(name, "xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
-            } else if lower.starts_with("xl/dialogsheets/") {
+            } else if crate::ascii::starts_with_ignore_case(name, "xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 
@@ -656,29 +662,29 @@ impl XlsxLazyPackage {
 }
 
 fn is_macro_part_name(name: &str) -> bool {
-    let name = name.strip_prefix('/').unwrap_or(name);
-    let lower = name.to_ascii_lowercase();
+    let normalized = normalize_part_name_for_macro_match(name);
+    let name = normalized.as_ref();
 
-    fn is_macro_surface_part(lower: &str) -> bool {
-        lower == "xl/vbaproject.bin"
-            || lower == "xl/vbadata.xml"
-            || lower == "xl/vbaprojectsignature.bin"
-            || lower.starts_with("xl/macrosheets/")
-            || lower.starts_with("xl/dialogsheets/")
-            || lower.starts_with("customui/")
-            || lower.starts_with("xl/activex/")
-            || lower.starts_with("xl/ctrlprops/")
-            || lower.starts_with("xl/controls/")
+    fn is_macro_surface_part(name: &str) -> bool {
+        name.eq_ignore_ascii_case("xl/vbaProject.bin")
+            || name.eq_ignore_ascii_case("xl/vbaData.xml")
+            || name.eq_ignore_ascii_case("xl/vbaProjectSignature.bin")
+            || crate::ascii::starts_with_ignore_case(name, "xl/macrosheets/")
+            || crate::ascii::starts_with_ignore_case(name, "xl/dialogsheets/")
+            || crate::ascii::starts_with_ignore_case(name, "customui/")
+            || crate::ascii::starts_with_ignore_case(name, "xl/activeX/")
+            || crate::ascii::starts_with_ignore_case(name, "xl/ctrlProps/")
+            || crate::ascii::starts_with_ignore_case(name, "xl/controls/")
     }
 
-    if is_macro_surface_part(&lower) {
+    if is_macro_surface_part(name) {
         return true;
     }
 
     // Relationship parts for deleted macro surfaces should also be deleted. For example, stripping
     // `xl/vbaProject.bin` also deletes `xl/_rels/vbaProject.bin.rels`.
-    if lower.ends_with(".rels") {
-        if let Some(source) = source_part_from_rels_part(&lower) {
+    if crate::ascii::ends_with_ignore_case(name, ".rels") {
+        if let Some(source) = source_part_from_rels_part(name) {
             if !source.is_empty() && is_macro_surface_part(&source) {
                 return true;
             }
@@ -762,28 +768,38 @@ fn content_types_override_is_macro_part(e: &BytesStart<'_>) -> Result<bool, Xlsx
         return Ok(false);
     };
 
-    let normalized = part_name.trim_start_matches('/').replace('\\', "/");
-    Ok(is_macro_part_name(&normalized))
+    Ok(is_macro_part_name(&part_name))
 }
 
 fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
     // Root relationships.
-    if rels_part == "_rels/.rels" {
+    if rels_part.eq_ignore_ascii_case("_rels/.rels") {
         return Some(String::new());
     }
 
-    if let Some(rels_file) = rels_part.strip_prefix("_rels/") {
-        let rels_file = rels_file.strip_suffix(".rels")?;
+    if let Some(rels_file) = crate::ascii::strip_prefix_ignore_case(rels_part, "_rels/") {
+        let rels_file = crate::ascii::strip_suffix_ignore_case(rels_file, ".rels")?;
         return Some(rels_file.to_string());
     }
 
-    let (dir, rels_file) = rels_part.rsplit_once("/_rels/")?;
-    let rels_file = rels_file.strip_suffix(".rels")?;
+    let idx = crate::ascii::rfind_ignore_case(rels_part, "/_rels/")?;
+    let dir = &rels_part[..idx];
+    let rels_file = &rels_part[idx + "/_rels/".len()..];
+    let rels_file = crate::ascii::strip_suffix_ignore_case(rels_file, ".rels")?;
     if dir.is_empty() {
         return Some(rels_file.to_string());
     }
 
     Some(format!("{dir}/{rels_file}"))
+}
+
+fn normalize_part_name_for_macro_match(name: &str) -> Cow<'_, str> {
+    let name = name.strip_prefix('/').unwrap_or(name);
+    if name.contains('\\') {
+        Cow::Owned(name.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(name)
+    }
 }
 
 fn list_part_names<R: Read + Seek>(mut reader: R) -> Result<Vec<String>, XlsxError> {
@@ -796,8 +812,12 @@ fn list_part_names<R: Read + Seek>(mut reader: R) -> Result<Vec<String>, XlsxErr
             continue;
         }
         let name = file.name();
-        let canonical = name.strip_prefix('/').unwrap_or(name).replace('\\', "/");
-        names.push(canonical);
+        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
+        if canonical.contains('\\') {
+            names.push(canonical.replace('\\', "/"));
+        } else {
+            names.push(canonical.to_string());
+        }
     }
     Ok(names)
 }

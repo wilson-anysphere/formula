@@ -21,19 +21,38 @@ enum InfoType {
 }
 
 fn parse_info_type(key: &str) -> Option<InfoType> {
-    match key.trim().to_ascii_lowercase().as_str() {
-        "recalc" => Some(InfoType::Recalc),
-        "system" => Some(InfoType::System),
-        "directory" => Some(InfoType::Directory),
-        "numfile" => Some(InfoType::NumFile),
-        "origin" => Some(InfoType::Origin),
-        "osversion" => Some(InfoType::OSVersion),
-        "release" => Some(InfoType::Release),
-        "version" => Some(InfoType::Version),
-        "memavail" => Some(InfoType::MemAvail),
-        "totmem" => Some(InfoType::TotMem),
-        _ => None,
+    let key = key.trim();
+    if key.eq_ignore_ascii_case("recalc") {
+        return Some(InfoType::Recalc);
     }
+    if key.eq_ignore_ascii_case("system") {
+        return Some(InfoType::System);
+    }
+    if key.eq_ignore_ascii_case("directory") {
+        return Some(InfoType::Directory);
+    }
+    if key.eq_ignore_ascii_case("numfile") {
+        return Some(InfoType::NumFile);
+    }
+    if key.eq_ignore_ascii_case("origin") {
+        return Some(InfoType::Origin);
+    }
+    if key.eq_ignore_ascii_case("osversion") {
+        return Some(InfoType::OSVersion);
+    }
+    if key.eq_ignore_ascii_case("release") {
+        return Some(InfoType::Release);
+    }
+    if key.eq_ignore_ascii_case("version") {
+        return Some(InfoType::Version);
+    }
+    if key.eq_ignore_ascii_case("memavail") {
+        return Some(InfoType::MemAvail);
+    }
+    if key.eq_ignore_ascii_case("totmem") {
+        return Some(InfoType::TotMem);
+    }
+    None
 }
 
 fn workbook_dir_for_excel(dir: &str) -> String {
@@ -162,72 +181,67 @@ enum CellInfoType {
 }
 
 fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
-    match key.trim().to_ascii_lowercase().as_str() {
-        "address" => Some(CellInfoType::Address),
-        "col" => Some(CellInfoType::Col),
-        "row" => Some(CellInfoType::Row),
-        "contents" => Some(CellInfoType::Contents),
-        "type" => Some(CellInfoType::Type),
-        "format" => Some(CellInfoType::Format),
-        "color" => Some(CellInfoType::Color),
-        "parentheses" => Some(CellInfoType::Parentheses),
-        "width" => Some(CellInfoType::Width),
-        "protect" => Some(CellInfoType::Protect),
-        "prefix" => Some(CellInfoType::Prefix),
-        // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
-        "filename" => Some(CellInfoType::Filename),
-        // Notes:
-        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43) and
-        //   encodes whether the width is explicitly set using Excel's `+0.1` convention.
-        // - `CELL("prefix")` consults the cell's effective horizontal alignment.
-        // - `CELL("protect")` consults the cell's effective protection formatting.
-        // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
-        //   cell number format string, but do not consider conditional formatting rules.
-        _ => None,
+    let key = key.trim();
+    if key.eq_ignore_ascii_case("address") {
+        return Some(CellInfoType::Address);
     }
-}
-
-fn is_ident_cont_char(c: char) -> bool {
-    matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+    if key.eq_ignore_ascii_case("col") {
+        return Some(CellInfoType::Col);
+    }
+    if key.eq_ignore_ascii_case("row") {
+        return Some(CellInfoType::Row);
+    }
+    if key.eq_ignore_ascii_case("contents") {
+        return Some(CellInfoType::Contents);
+    }
+    if key.eq_ignore_ascii_case("type") {
+        return Some(CellInfoType::Type);
+    }
+    if key.eq_ignore_ascii_case("format") {
+        return Some(CellInfoType::Format);
+    }
+    if key.eq_ignore_ascii_case("color") {
+        return Some(CellInfoType::Color);
+    }
+    if key.eq_ignore_ascii_case("parentheses") {
+        return Some(CellInfoType::Parentheses);
+    }
+    if key.eq_ignore_ascii_case("width") {
+        return Some(CellInfoType::Width);
+    }
+    if key.eq_ignore_ascii_case("protect") {
+        return Some(CellInfoType::Protect);
+    }
+    if key.eq_ignore_ascii_case("prefix") {
+        return Some(CellInfoType::Prefix);
+    }
+    // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
+    if key.eq_ignore_ascii_case("filename") {
+        return Some(CellInfoType::Filename);
+    }
+    // Notes:
+    // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43) and
+    //   encodes whether the width is explicitly set using Excel's `+0.1` convention.
+    // - `CELL("prefix")` consults the cell's effective horizontal alignment.
+    // - `CELL("protect")` consults the cell's effective protection formatting.
+    // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
+    //   cell number format string, but do not consider conditional formatting rules.
+    None
 }
 
 fn quote_sheet_name(name: &str) -> String {
     if name.is_empty() {
         return String::new();
     }
-
-    let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
-    let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
-        && matches!(name.chars().nth(1), Some('0'..='9' | '['));
-    // A1-style cell references are lexed as `Cell(...)` tokens unless the next character would
-    // continue an identifier. This means sheet names that *equal* a valid A1 ref (or start with one
-    // followed by `.`) must be quoted to avoid ambiguity.
-    let looks_like_a1 = parse_a1(name).is_ok()
-        || name
-            .split_once('.')
-            .is_some_and(|(prefix, _)| parse_a1(prefix).is_ok());
-    // The formula lexer treats TRUE/FALSE as booleans rather than identifiers; quoting is required
-    // to disambiguate sheet names that match those keywords.
-    let is_reserved = name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE");
-    let needs_quote = starts_like_number
-        || is_reserved
-        || starts_like_r1c1
-        || looks_like_a1
-        || name.chars().any(|c| !is_ident_cont_char(c));
-
-    if !needs_quote {
-        return name.to_string();
-    }
-
-    let escaped = name.replace('\'', "''");
-    format!("'{escaped}'")
+    let mut out = String::with_capacity(name.len().saturating_add(2));
+    formula_model::push_sheet_name_a1(&mut out, name);
+    out
 }
 
 fn abs_a1(addr: CellAddr) -> String {
-    let a1 = addr.to_a1();
-    let split = a1.find(|c: char| c.is_ascii_digit()).unwrap_or(a1.len());
-    let (col, row) = a1.split_at(split);
-    format!("${col}${row}")
+    let mut out = String::new();
+    formula_model::push_a1_cell_ref(addr.row, addr.col, true, true, &mut out);
+    out
 }
 
 fn cell_number_format<'a>(

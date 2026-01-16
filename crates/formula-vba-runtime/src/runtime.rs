@@ -498,9 +498,12 @@ impl<'a> Executor<'a> {
             resume: ResumeState::default(),
         };
 
+        let mut function_return_key: Option<String> = None;
+
         // VBA Functions return by assigning to the function name.
         if proc.kind == ProcedureKind::Function {
             let name = proc.name.to_ascii_lowercase();
+            function_return_key = Some(name.clone());
             let default = proc
                 .return_type
                 .map(default_value_for_type)
@@ -555,9 +558,9 @@ impl<'a> Executor<'a> {
 
         if proc.kind == ProcedureKind::Function {
             result.returned = Some(
-                frame
-                    .locals
-                    .get(&proc.name.to_ascii_lowercase())
+                function_return_key
+                    .as_ref()
+                    .and_then(|key| frame.locals.get(key))
                     .cloned()
                     .unwrap_or(VbaValue::Empty),
             );
@@ -1549,7 +1552,7 @@ impl<'a> Executor<'a> {
 
         let a = l.to_string_lossy();
         let b = r.to_string_lossy();
-        let cmp = a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase());
+        let cmp = ascii_lowercase_cmp(a.as_str(), b.as_str());
         let res = match op {
             BinOp::Eq => cmp == std::cmp::Ordering::Equal,
             BinOp::Ne => cmp != std::cmp::Ordering::Equal,
@@ -1568,9 +1571,8 @@ impl<'a> Executor<'a> {
         name: &str,
         args: &[crate::ast::CallArg],
     ) -> Result<VbaValue, VbaError> {
-        let name_lc = name.to_ascii_lowercase();
-        match name_lc.as_str() {
-            "range" => {
+        match () {
+            _ if name.eq_ignore_ascii_case("range") => {
                 if args.is_empty() {
                     return Err(VbaError::Runtime("Range() missing argument".to_string()));
                 }
@@ -1588,7 +1590,7 @@ impl<'a> Executor<'a> {
                 let range = self.eval_range_args(frame, sheet, args)?;
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
             }
-            "cells" => {
+            _ if name.eq_ignore_ascii_case("cells") => {
                 let sheet = self.sheet.active_sheet();
                 if args.is_empty() {
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
@@ -1612,7 +1614,7 @@ impl<'a> Executor<'a> {
                     },
                 ))))
             }
-            "rows" => {
+            _ if name.eq_ignore_ascii_case("rows") => {
                 if args.is_empty() {
                     let sheet = self.sheet.active_sheet();
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
@@ -1633,7 +1635,7 @@ impl<'a> Executor<'a> {
                 };
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
             }
-            "columns" => {
+            _ if name.eq_ignore_ascii_case("columns") => {
                 if args.is_empty() {
                     let sheet = self.sheet.active_sheet();
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
@@ -1654,7 +1656,7 @@ impl<'a> Executor<'a> {
                 };
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
             }
-            "msgbox" => {
+            _ if name.eq_ignore_ascii_case("msgbox") => {
                 let msg = self
                     .eval_expr(
                         frame,
@@ -1667,7 +1669,7 @@ impl<'a> Executor<'a> {
                 self.sheet.log(format!("MsgBox: {msg}"));
                 Ok(VbaValue::Double(0.0))
             }
-            "debugprint" => {
+            _ if name.eq_ignore_ascii_case("debugprint") => {
                 let mut parts = Vec::new();
                 for arg in args {
                     parts.push(self.eval_expr(frame, &arg.expr)?.to_string_lossy());
@@ -1675,7 +1677,7 @@ impl<'a> Executor<'a> {
                 self.sheet.log(format!("Debug.Print {}", parts.join(" ")));
                 Ok(VbaValue::Empty)
             }
-            "array" => {
+            _ if name.eq_ignore_ascii_case("array") => {
                 let mut values = Vec::new();
                 for arg in args {
                     values.push(self.eval_expr(frame, &arg.expr)?);
@@ -1684,7 +1686,7 @@ impl<'a> Executor<'a> {
                     VbaArray::new(0, values),
                 ))))
             }
-            "worksheets" | "sheets" => {
+            _ if name.eq_ignore_ascii_case("worksheets") || name.eq_ignore_ascii_case("sheets") => {
                 let arg = self.eval_expr(
                     frame,
                     &args
@@ -1717,7 +1719,7 @@ impl<'a> Executor<'a> {
                     sheet: idx,
                 })))
             }
-            "__new" => {
+            _ if name.eq_ignore_ascii_case("__new") => {
                 let class = self
                     .eval_expr(
                         frame,
@@ -1727,16 +1729,16 @@ impl<'a> Executor<'a> {
                             .expr,
                     )?
                     .to_string_lossy();
-                match class.to_ascii_lowercase().as_str() {
-                    "collection" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Collection {
+                if class.eq_ignore_ascii_case("collection") {
+                    return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Collection {
                         items: Vec::new(),
-                    }))),
-                    other => Err(VbaError::Runtime(format!(
-                        "Unsupported class in New: {other}"
-                    ))),
+                    })));
                 }
+                Err(VbaError::Runtime(format!(
+                    "Unsupported class in New: {class}"
+                )))
             }
-            "createobject" => {
+            _ if name.eq_ignore_ascii_case("createobject") => {
                 let progid = self
                     .eval_expr(
                         frame,
@@ -1764,47 +1766,50 @@ impl<'a> Executor<'a> {
                 )))
             }
             // ---- Conversions / string helpers ----
-            "cstr" => {
+            _ if name.eq_ignore_ascii_case("cstr") => {
                 let v = self.eval_required_arg(frame, args, 0, "CStr")?;
                 if matches!(v, VbaValue::Null) {
                     return Err(VbaError::Runtime("Invalid use of Null".to_string()));
                 }
                 Ok(VbaValue::String(v.to_string_lossy()))
             }
-            "clng" | "cint" | "cdbl" => {
+            _ if name.eq_ignore_ascii_case("clng")
+                || name.eq_ignore_ascii_case("cint")
+                || name.eq_ignore_ascii_case("cdbl") =>
+            {
                 let v = self.eval_required_arg(frame, args, 0, name)?;
                 if matches!(v, VbaValue::Null) {
                     return Err(VbaError::Runtime("Invalid use of Null".to_string()));
                 }
                 let n = self.coerce_to_f64(frame, v)?;
-                let out = if name_lc == "cdbl" {
+                let out = if name.eq_ignore_ascii_case("cdbl") {
                     n
                 } else {
                     vba_round_bankers(n) as f64
                 };
                 Ok(VbaValue::Double(out))
             }
-            "cbool" => {
+            _ if name.eq_ignore_ascii_case("cbool") => {
                 let v = self.eval_required_arg(frame, args, 0, "CBool")?;
                 Ok(VbaValue::Boolean(self.coerce_to_bool(frame, v)?))
             }
-            "cdate" => {
+            _ if name.eq_ignore_ascii_case("cdate") => {
                 let v = self.eval_required_arg(frame, args, 0, "CDate")?;
                 Ok(VbaValue::Date(self.coerce_to_date_serial(frame, v)?))
             }
-            "ucase" => {
+            _ if name.eq_ignore_ascii_case("ucase") => {
                 let s = self.eval_required_arg(frame, args, 0, "UCase")?.to_string_lossy();
                 Ok(VbaValue::String(s.to_uppercase()))
             }
-            "lcase" => {
+            _ if name.eq_ignore_ascii_case("lcase") => {
                 let s = self.eval_required_arg(frame, args, 0, "LCase")?.to_string_lossy();
                 Ok(VbaValue::String(s.to_lowercase()))
             }
-            "trim" => {
+            _ if name.eq_ignore_ascii_case("trim") => {
                 let s = self.eval_required_arg(frame, args, 0, "Trim")?.to_string_lossy();
                 Ok(VbaValue::String(s.trim().to_string()))
             }
-            "left" => {
+            _ if name.eq_ignore_ascii_case("left") => {
                 let s = self.eval_required_arg(frame, args, 0, "Left")?.to_string_lossy();
                 let n = self
                     .eval_required_arg(frame, args, 1, "Left")?
@@ -1812,7 +1817,7 @@ impl<'a> Executor<'a> {
                     .unwrap_or(0.0) as usize;
                 Ok(VbaValue::String(s.chars().take(n).collect()))
             }
-            "right" => {
+            _ if name.eq_ignore_ascii_case("right") => {
                 let s = self.eval_required_arg(frame, args, 0, "Right")?.to_string_lossy();
                 let n = self
                     .eval_required_arg(frame, args, 1, "Right")?
@@ -1821,7 +1826,7 @@ impl<'a> Executor<'a> {
                 let len = s.chars().count();
                 Ok(VbaValue::String(s.chars().skip(len.saturating_sub(n)).collect()))
             }
-            "mid" => {
+            _ if name.eq_ignore_ascii_case("mid") => {
                 let s = self.eval_required_arg(frame, args, 0, "Mid")?.to_string_lossy();
                 let start = self
                     .eval_required_arg(frame, args, 1, "Mid")?
@@ -1846,11 +1851,11 @@ impl<'a> Executor<'a> {
                 };
                 Ok(VbaValue::String(out))
             }
-            "len" => {
+            _ if name.eq_ignore_ascii_case("len") => {
                 let s = self.eval_required_arg(frame, args, 0, "Len")?.to_string_lossy();
                 Ok(VbaValue::Double(s.chars().count() as f64))
             }
-            "replace" => {
+            _ if name.eq_ignore_ascii_case("replace") => {
                 let expr = self.eval_required_arg(frame, args, 0, "Replace")?.to_string_lossy();
                 let find = self.eval_required_arg(frame, args, 1, "Replace")?.to_string_lossy();
                 let repl = self.eval_required_arg(frame, args, 2, "Replace")?.to_string_lossy();
@@ -1872,20 +1877,22 @@ impl<'a> Executor<'a> {
                 )))
             }
             // ---- Date/time ----
-            "now" => Ok(VbaValue::Date(datetime_to_ole_date(Local::now().naive_local()))),
-            "date" => {
+            _ if name.eq_ignore_ascii_case("now") => {
+                Ok(VbaValue::Date(datetime_to_ole_date(Local::now().naive_local())))
+            }
+            _ if name.eq_ignore_ascii_case("date") => {
                 let today = Local::now().date_naive();
                 Ok(VbaValue::Date(datetime_to_ole_date(
                     today.and_hms_opt(0, 0, 0).unwrap(),
                 )))
             }
-            "time" => {
+            _ if name.eq_ignore_ascii_case("time") => {
                 let now = Local::now().naive_local().time();
                 let secs = now.num_seconds_from_midnight() as f64
                     + (now.nanosecond() as f64) / 1_000_000_000.0;
                 Ok(VbaValue::Date(secs / 86_400.0))
             }
-            "dateadd" => {
+            _ if name.eq_ignore_ascii_case("dateadd") => {
                 let interval = self.eval_required_arg(frame, args, 0, "DateAdd")?.to_string_lossy();
                 let number = self
                     .eval_required_arg(frame, args, 1, "DateAdd")?
@@ -1897,7 +1904,7 @@ impl<'a> Executor<'a> {
                 let out = date_add(&interval, number, dt)?;
                 Ok(VbaValue::Date(datetime_to_ole_date(out)))
             }
-            "datediff" => {
+            _ if name.eq_ignore_ascii_case("datediff") => {
                 let interval = self.eval_required_arg(frame, args, 0, "DateDiff")?.to_string_lossy();
                 let d1 = self.eval_required_arg(frame, args, 1, "DateDiff")?;
                 let d2 = self.eval_required_arg(frame, args, 2, "DateDiff")?;
@@ -1905,7 +1912,7 @@ impl<'a> Executor<'a> {
                 let t2 = ole_date_to_datetime(self.coerce_to_date_serial(frame, d2)?);
                 Ok(VbaValue::Double(date_diff(&interval, t1, t2)? as f64))
             }
-            "format" => {
+            _ if name.eq_ignore_ascii_case("format") => {
                 let value = self.eval_required_arg(frame, args, 0, "Format")?;
                 let fmt = args
                     .get(1)
@@ -1916,6 +1923,7 @@ impl<'a> Executor<'a> {
             }
             _ => {
                 // Procedure call.
+                let name_lc = name.to_ascii_lowercase();
                 if let Some(proc) = self.program.get(&name_lc) {
                     let arg_vals = build_proc_args(frame, args, proc, self)?;
                     let res = self.call_procedure(proc, &arg_vals)?;
@@ -1949,18 +1957,17 @@ impl<'a> Executor<'a> {
         member: &str,
         args: &[crate::ast::CallArg],
     ) -> Result<VbaValue, VbaError> {
-        let member_lc = member.to_ascii_lowercase();
         let snapshot = obj.borrow().clone();
         match snapshot {
-            VbaObject::Worksheet { sheet } => match member_lc.as_str() {
-                "range" => {
+            VbaObject::Worksheet { sheet } => match () {
+                _ if member.eq_ignore_ascii_case("range") => {
                     if args.is_empty() {
                         return Err(VbaError::Runtime("Range() missing argument".to_string()));
                     }
                     let range_ref = self.eval_range_args(frame, sheet, args)?;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
-                "cells" => {
+                _ if member.eq_ignore_ascii_case("cells") => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
                             sheet_entire_range(self.sheet, sheet),
@@ -1983,7 +1990,7 @@ impl<'a> Executor<'a> {
                         },
                     ))))
                 }
-                "rows" => {
+                _ if member.eq_ignore_ascii_case("rows") => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
                             range: sheet_entire_range(self.sheet, sheet),
@@ -2002,7 +2009,7 @@ impl<'a> Executor<'a> {
                     };
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
                 }
-                "columns" => {
+                _ if member.eq_ignore_ascii_case("columns") => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
                             range: sheet_entire_range(self.sheet, sheet),
@@ -2021,7 +2028,9 @@ impl<'a> Executor<'a> {
                     };
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
                 }
-                "paste" | "pastespecial" => {
+                _ if member.eq_ignore_ascii_case("paste")
+                    || member.eq_ignore_ascii_case("pastespecial") =>
+                {
                     // Best-effort: paste clipboard at the current selection/active cell.
                     //
                     // Excel's recorder frequently emits `ActiveSheet.Paste` after selecting the
@@ -2093,7 +2102,9 @@ impl<'a> Executor<'a> {
                     }
                     Ok(VbaValue::Empty)
                 }
-                "activate" | "select" => {
+                _ if member.eq_ignore_ascii_case("activate")
+                    || member.eq_ignore_ascii_case("select") =>
+                {
                     self.sheet.set_active_sheet(sheet)?;
                     self.selection = None;
                     Ok(VbaValue::Empty)
@@ -2102,14 +2113,14 @@ impl<'a> Executor<'a> {
                     "Unknown Worksheet method `{member}`"
                 ))),
             },
-            VbaObject::Range(range) => match member_lc.as_str() {
-                "select" => {
+            VbaObject::Range(range) => match () {
+                _ if member.eq_ignore_ascii_case("select") => {
                     self.sheet.set_active_sheet(range.sheet)?;
                     self.sheet.set_active_cell(range.start_row, range.start_col)?;
                     self.selection = Some(range);
                     Ok(VbaValue::Empty)
                 }
-                "copy" => {
+                _ if member.eq_ignore_ascii_case("copy") => {
                     if args.is_empty() {
                         self.clipboard = Some(self.snapshot_range(range)?);
                         return Ok(VbaValue::Empty);
@@ -2132,7 +2143,7 @@ impl<'a> Executor<'a> {
                     self.copy_range(range, dest_range)?;
                     Ok(VbaValue::Empty)
                 }
-                "pastespecial" => {
+                _ if member.eq_ignore_ascii_case("pastespecial") => {
                     // Best-effort:
                     // - `PasteSpecial` with no args behaves like "paste everything" (values+formulas).
                     // - `PasteSpecial ...` (typically `Paste:=xlPasteValues`) pastes values only.
@@ -2163,7 +2174,7 @@ impl<'a> Executor<'a> {
                     }
                     Ok(VbaValue::Empty)
                 }
-                "autofill" => {
+                _ if member.eq_ignore_ascii_case("autofill") => {
                     let dest_arg = arg_named_or_pos(args, "destination", 0)
                         .ok_or_else(|| {
                             VbaError::Runtime("AutoFill() missing destination".to_string())
@@ -2183,7 +2194,7 @@ impl<'a> Executor<'a> {
                     self.copy_range(range, dest_range)?;
                     Ok(VbaValue::Empty)
                 }
-                "offset" => {
+                _ if member.eq_ignore_ascii_case("offset") => {
                     let row_off = args
                         .first()
                         .map(|a| self.eval_expr(frame, &a.expr))
@@ -2203,7 +2214,7 @@ impl<'a> Executor<'a> {
                         new,
                     ))))
                 }
-                "resize" => {
+                _ if member.eq_ignore_ascii_case("resize") => {
                     let rows = match args.first() {
                         None => None,
                         Some(arg) if matches!(arg.expr, Expr::Missing) => None,
@@ -2225,13 +2236,13 @@ impl<'a> Executor<'a> {
                         new,
                     ))))
                 }
-                "end" => {
+                _ if member.eq_ignore_ascii_case("end") => {
                     let dir = self.eval_required_arg(frame, args, 0, "End")?;
                     let dir = dir.to_f64().unwrap_or(0.0) as i64;
                     let end = self.range_end(range, dir)?;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(end))))
                 }
-                "clearcontents" => {
+                _ if member.eq_ignore_ascii_case("clearcontents") => {
                     if let Some(cells) = self.sheet.used_cells_in_range(range) {
                         for (r, c) in cells {
                             self.tick()?;
@@ -2247,7 +2258,7 @@ impl<'a> Executor<'a> {
                     }
                     Ok(VbaValue::Empty)
                 }
-                "clear" => {
+                _ if member.eq_ignore_ascii_case("clear") => {
                     // `Clear` clears contents + formatting. We only model contents for now.
                     self.call_object_method(frame, obj, "ClearContents", &[])?;
                     Ok(VbaValue::Empty)
@@ -2256,8 +2267,8 @@ impl<'a> Executor<'a> {
                     "Unknown Range method `{member}`"
                 ))),
             },
-            VbaObject::Application => match member_lc.as_str() {
-                "range" => {
+            VbaObject::Application => match () {
+                _ if member.eq_ignore_ascii_case("range") => {
                     if args.is_empty() {
                         return Err(VbaError::Runtime("Range() missing argument".to_string()));
                     }
@@ -2265,7 +2276,9 @@ impl<'a> Executor<'a> {
                     let range_ref = self.eval_range_args(frame, sheet, args)?;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
-                "worksheets" | "sheets" => {
+                _ if member.eq_ignore_ascii_case("worksheets")
+                    || member.eq_ignore_ascii_case("sheets") =>
+                {
                     let arg = self.eval_required_arg(frame, args, 0, "Worksheets")?;
                     let idx = match arg {
                         VbaValue::String(name) => self
@@ -2296,8 +2309,10 @@ impl<'a> Executor<'a> {
                     "Unknown Application method `{member}`"
                 ))),
             },
-            VbaObject::Workbook => match member_lc.as_str() {
-                "worksheets" | "sheets" => {
+            VbaObject::Workbook => match () {
+                _ if member.eq_ignore_ascii_case("worksheets")
+                    || member.eq_ignore_ascii_case("sheets") =>
+                {
                     let arg = self.eval_required_arg(frame, args, 0, "Worksheets")?;
                     let idx = match arg {
                         VbaValue::String(name) => self
@@ -2328,15 +2343,15 @@ impl<'a> Executor<'a> {
                     "Unknown Workbook method `{member}`"
                 ))),
             },
-            VbaObject::Collection { .. } => match member_lc.as_str() {
-                "add" => {
+            VbaObject::Collection { .. } => match () {
+                _ if member.eq_ignore_ascii_case("add") => {
                     let item = self.eval_required_arg(frame, args, 0, "Add")?;
                     if let VbaObject::Collection { items } = &mut *obj.borrow_mut() {
                         items.push(item);
                     }
                     Ok(VbaValue::Empty)
                 }
-                "item" => {
+                _ if member.eq_ignore_ascii_case("item") => {
                     let index = self
                         .eval_required_arg(frame, args, 0, "Item")?
                         .to_f64()
@@ -2355,8 +2370,8 @@ impl<'a> Executor<'a> {
                     "Unknown Collection method `{member}`"
                 ))),
             },
-            VbaObject::Dictionary { .. } => match member_lc.as_str() {
-                "add" => {
+            VbaObject::Dictionary { .. } => match () {
+                _ if member.eq_ignore_ascii_case("add") => {
                     let key = self.eval_required_arg(frame, args, 0, "Add")?.to_string_lossy();
                     let item = self.eval_required_arg(frame, args, 1, "Add")?;
                     if let VbaObject::Dictionary { items } = &mut *obj.borrow_mut() {
@@ -2364,7 +2379,7 @@ impl<'a> Executor<'a> {
                     }
                     Ok(VbaValue::Empty)
                 }
-                "exists" => {
+                _ if member.eq_ignore_ascii_case("exists") => {
                     let key = self
                         .eval_required_arg(frame, args, 0, "Exists")?
                         .to_string_lossy();
@@ -2374,7 +2389,7 @@ impl<'a> Executor<'a> {
                         Ok(VbaValue::Boolean(false))
                     }
                 }
-                "item" => {
+                _ if member.eq_ignore_ascii_case("item") => {
                     let key = self.eval_required_arg(frame, args, 0, "Item")?.to_string_lossy();
                     if let VbaObject::Dictionary { items } = &*obj.borrow() {
                         Ok(items.get(&key).cloned().unwrap_or(VbaValue::Empty))
@@ -2382,7 +2397,7 @@ impl<'a> Executor<'a> {
                         Ok(VbaValue::Empty)
                     }
                 }
-                "keys" => {
+                _ if member.eq_ignore_ascii_case("keys") => {
                     if let VbaObject::Dictionary { items } = &*obj.borrow() {
                         Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(
                             VbaArray::new(
@@ -2400,7 +2415,7 @@ impl<'a> Executor<'a> {
                         ))))
                     }
                 }
-                "remove" => {
+                _ if member.eq_ignore_ascii_case("remove") => {
                     let key = self
                         .eval_required_arg(frame, args, 0, "Remove")?
                         .to_string_lossy();
@@ -2409,7 +2424,7 @@ impl<'a> Executor<'a> {
                     }
                     Ok(VbaValue::Empty)
                 }
-                "removeall" => {
+                _ if member.eq_ignore_ascii_case("removeall") => {
                     if let VbaObject::Dictionary { items } = &mut *obj.borrow_mut() {
                         items.clear();
                     }
@@ -2419,8 +2434,8 @@ impl<'a> Executor<'a> {
                     "Unknown Dictionary method `{member}`"
                 ))),
             },
-            VbaObject::Err(_) => match member_lc.as_str() {
-                "clear" => {
+            VbaObject::Err(_) => match () {
+                _ if member.eq_ignore_ascii_case("clear") => {
                     self.clear_err();
                     Ok(VbaValue::Empty)
                 }
@@ -2508,13 +2523,14 @@ impl<'a> Executor<'a> {
     }
 
     fn get_object_member(&mut self, obj: VbaObjectRef, member: &str) -> Result<VbaValue, VbaError> {
-        let member_lc = member.to_ascii_lowercase();
         match &*obj.borrow() {
-            VbaObject::Application => match member_lc.as_str() {
-                "activesheet" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
+            VbaObject::Application => match () {
+                _ if member.eq_ignore_ascii_case("activesheet") => {
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                     sheet: self.sheet.active_sheet(),
-                }))),
-                "activecell" => {
+                    })))
+                }
+                _ if member.eq_ignore_ascii_case("activecell") => {
                     let (r, c) = self.sheet.active_cell();
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
                         VbaRangeRef {
@@ -2526,7 +2542,7 @@ impl<'a> Executor<'a> {
                         },
                     ))))
                 }
-                "selection" => {
+                _ if member.eq_ignore_ascii_case("selection") => {
                     let sel = self.selection.unwrap_or_else(|| {
                         let (r, c) = self.sheet.active_cell();
                         VbaRangeRef {
@@ -2539,88 +2555,97 @@ impl<'a> Executor<'a> {
                     });
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))))
                 }
-                "cutcopymode" => Ok(VbaValue::Boolean(self.clipboard.is_some())),
-                "activeworkbook" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Workbook))),
+                _ if member.eq_ignore_ascii_case("cutcopymode") => {
+                    Ok(VbaValue::Boolean(self.clipboard.is_some()))
+                }
+                _ if member.eq_ignore_ascii_case("activeworkbook") => {
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Workbook)))
+                }
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Application member `{member}`"
                 ))),
             },
-            VbaObject::Workbook => match member_lc.as_str() {
-                "activesheet" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
+            VbaObject::Workbook => match () {
+                _ if member.eq_ignore_ascii_case("activesheet") => {
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                     sheet: self.sheet.active_sheet(),
-                }))),
+                    })))
+                }
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Workbook member `{member}`"
                 ))),
             },
-            VbaObject::Worksheet { sheet } => match member_lc.as_str() {
-                "name" => Ok(VbaValue::String(
+            VbaObject::Worksheet { sheet } => match () {
+                _ if member.eq_ignore_ascii_case("name") => Ok(VbaValue::String(
                     self.sheet.sheet_name(*sheet).unwrap_or("").to_string(),
                 )),
-                "cells" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                _ if member.eq_ignore_ascii_case("cells") => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
                     sheet_entire_range(self.sheet, *sheet),
                 )))),
-                "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                _ if member.eq_ignore_ascii_case("rows") => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
                     range: sheet_entire_range(self.sheet, *sheet),
                 }))),
-                "columns" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                _ if member.eq_ignore_ascii_case("columns") => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
                     range: sheet_entire_range(self.sheet, *sheet),
                 }))),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Worksheet member `{member}`"
                 ))),
             },
-            VbaObject::Range(range) => match member_lc.as_str() {
-                "value" | "value2" => self.get_range_value(*range),
-                "formula" => self.get_range_formula(*range),
-                "formular1c1" => self.get_range_formula(*range),
-                "text" => Ok(self
+            VbaObject::Range(range) => match () {
+                _ if member.eq_ignore_ascii_case("value") || member.eq_ignore_ascii_case("value2") => {
+                    self.get_range_value(*range)
+                }
+                _ if member.eq_ignore_ascii_case("formula") || member.eq_ignore_ascii_case("formular1c1") => {
+                    self.get_range_formula(*range)
+                }
+                _ if member.eq_ignore_ascii_case("text") => Ok(self
                     .sheet
                     .get_cell_value(range.sheet, range.start_row, range.start_col)?
                     .to_string_lossy()
                     .into()),
-                "address" => Ok(VbaValue::String(range_address(*range)?)),
-                "row" => Ok(VbaValue::Double(range.start_row as f64)),
-                "column" => Ok(VbaValue::Double(range.start_col as f64)),
-                "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                _ if member.eq_ignore_ascii_case("address") => Ok(VbaValue::String(range_address(*range)?)),
+                _ if member.eq_ignore_ascii_case("row") => Ok(VbaValue::Double(range.start_row as f64)),
+                _ if member.eq_ignore_ascii_case("column") => Ok(VbaValue::Double(range.start_col as f64)),
+                _ if member.eq_ignore_ascii_case("rows") => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
                     range: *range,
                 }))),
-                "columns" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                _ if member.eq_ignore_ascii_case("columns") => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
                     range: *range,
                 }))),
                 _ => Err(VbaError::Runtime(format!("Unknown Range member `{member}`"))),
             },
-            VbaObject::RangeRows { range } => match member_lc.as_str() {
-                "count" => Ok(VbaValue::Double(
+            VbaObject::RangeRows { range } => match () {
+                _ if member.eq_ignore_ascii_case("count") => Ok(VbaValue::Double(
                     (range.end_row - range.start_row + 1) as f64,
                 )),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Rows member `{member}`"
                 ))),
             },
-            VbaObject::RangeColumns { range } => match member_lc.as_str() {
-                "count" => Ok(VbaValue::Double(
+            VbaObject::RangeColumns { range } => match () {
+                _ if member.eq_ignore_ascii_case("count") => Ok(VbaValue::Double(
                     (range.end_col - range.start_col + 1) as f64,
                 )),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Columns member `{member}`"
                 ))),
             },
-            VbaObject::Collection { items } => match member_lc.as_str() {
-                "count" => Ok(VbaValue::Double(items.len() as f64)),
+            VbaObject::Collection { items } => match () {
+                _ if member.eq_ignore_ascii_case("count") => Ok(VbaValue::Double(items.len() as f64)),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Collection member `{member}`"
                 ))),
             },
-            VbaObject::Dictionary { items } => match member_lc.as_str() {
-                "count" => Ok(VbaValue::Double(items.len() as f64)),
+            VbaObject::Dictionary { items } => match () {
+                _ if member.eq_ignore_ascii_case("count") => Ok(VbaValue::Double(items.len() as f64)),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Dictionary member `{member}`"
                 ))),
             },
-            VbaObject::Err(err) => match member_lc.as_str() {
-                "number" => Ok(VbaValue::Double(err.number as f64)),
-                "description" => Ok(VbaValue::String(err.description.clone())),
+            VbaObject::Err(err) => match () {
+                _ if member.eq_ignore_ascii_case("number") => Ok(VbaValue::Double(err.number as f64)),
+                _ if member.eq_ignore_ascii_case("description") => Ok(VbaValue::String(err.description.clone())),
                 _ => Err(VbaError::Runtime(format!("Unknown Err member `{member}`"))),
             },
         }
@@ -3416,6 +3441,37 @@ fn parse_vba_date_string(s: &str) -> Option<NaiveDateTime> {
     None
 }
 
+fn ascii_lowercase_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let min = a.len().min(b.len());
+    for i in 0..min {
+        let ca = a[i].to_ascii_lowercase();
+        let cb = b[i].to_ascii_lowercase();
+        if ca != cb {
+            return ca.cmp(&cb);
+        }
+    }
+    a.len().cmp(&b.len())
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    for start in 0..=haystack.len() - needle.len() {
+        if haystack[start..start + needle.len()].eq_ignore_ascii_case(needle) {
+            return true;
+        }
+    }
+    false
+}
+
 fn ole_base_datetime() -> NaiveDateTime {
     NaiveDate::from_ymd_opt(1899, 12, 30)
         .unwrap()
@@ -3436,35 +3492,55 @@ fn ole_date_to_datetime(serial: f64) -> NaiveDateTime {
 }
 
 fn date_add(interval: &str, number: i64, dt: NaiveDateTime) -> Result<NaiveDateTime, VbaError> {
-    let interval = interval.to_ascii_lowercase();
-    match interval.as_str() {
-        "d" | "dd" => Ok(dt + ChronoDuration::days(number)),
-        "h" | "hh" => Ok(dt + ChronoDuration::hours(number)),
-        "n" | "nn" => Ok(dt + ChronoDuration::minutes(number)),
-        "s" | "ss" => Ok(dt + ChronoDuration::seconds(number)),
-        "m" | "mm" => Ok(add_months(dt, number)),
-        "yyyy" => Ok(add_months(dt, number * 12)),
-        _ => Err(VbaError::Runtime(format!(
-            "DateAdd unsupported interval `{interval}`"
-        ))),
+    if interval.eq_ignore_ascii_case("d") || interval.eq_ignore_ascii_case("dd") {
+        return Ok(dt + ChronoDuration::days(number));
     }
+    if interval.eq_ignore_ascii_case("h") || interval.eq_ignore_ascii_case("hh") {
+        return Ok(dt + ChronoDuration::hours(number));
+    }
+    if interval.eq_ignore_ascii_case("n") || interval.eq_ignore_ascii_case("nn") {
+        return Ok(dt + ChronoDuration::minutes(number));
+    }
+    if interval.eq_ignore_ascii_case("s") || interval.eq_ignore_ascii_case("ss") {
+        return Ok(dt + ChronoDuration::seconds(number));
+    }
+    if interval.eq_ignore_ascii_case("m") || interval.eq_ignore_ascii_case("mm") {
+        return Ok(add_months(dt, number));
+    }
+    if interval.eq_ignore_ascii_case("yyyy") {
+        return Ok(add_months(dt, number * 12));
+    }
+    let interval = interval.to_ascii_lowercase();
+    Err(VbaError::Runtime(format!(
+        "DateAdd unsupported interval `{interval}`"
+    )))
 }
 
 fn date_diff(interval: &str, d1: NaiveDateTime, d2: NaiveDateTime) -> Result<i64, VbaError> {
-    let interval = interval.to_ascii_lowercase();
     let delta = d2 - d1;
-    match interval.as_str() {
-        "d" | "dd" => Ok(delta.num_days()),
-        "h" | "hh" => Ok(delta.num_hours()),
-        "n" | "nn" => Ok(delta.num_minutes()),
-        "s" | "ss" => Ok(delta.num_seconds()),
-        "m" | "mm" => Ok((d2.year() as i64 * 12 + d2.month() as i64)
-            - (d1.year() as i64 * 12 + d1.month() as i64)),
-        "yyyy" => Ok(d2.year() as i64 - d1.year() as i64),
-        _ => Err(VbaError::Runtime(format!(
-            "DateDiff unsupported interval `{interval}`"
-        ))),
+    if interval.eq_ignore_ascii_case("d") || interval.eq_ignore_ascii_case("dd") {
+        return Ok(delta.num_days());
     }
+    if interval.eq_ignore_ascii_case("h") || interval.eq_ignore_ascii_case("hh") {
+        return Ok(delta.num_hours());
+    }
+    if interval.eq_ignore_ascii_case("n") || interval.eq_ignore_ascii_case("nn") {
+        return Ok(delta.num_minutes());
+    }
+    if interval.eq_ignore_ascii_case("s") || interval.eq_ignore_ascii_case("ss") {
+        return Ok(delta.num_seconds());
+    }
+    if interval.eq_ignore_ascii_case("m") || interval.eq_ignore_ascii_case("mm") {
+        return Ok((d2.year() as i64 * 12 + d2.month() as i64)
+            - (d1.year() as i64 * 12 + d1.month() as i64));
+    }
+    if interval.eq_ignore_ascii_case("yyyy") {
+        return Ok(d2.year() as i64 - d1.year() as i64);
+    }
+    let interval = interval.to_ascii_lowercase();
+    Err(VbaError::Runtime(format!(
+        "DateDiff unsupported interval `{interval}`"
+    )))
 }
 
 fn add_months(dt: NaiveDateTime, months: i64) -> NaiveDateTime {
@@ -3521,8 +3597,7 @@ fn format_number_vba(n: f64, fmt: &str) -> String {
 }
 
 fn format_datetime_vba(dt: NaiveDateTime, fmt: &str) -> String {
-    let fmt_lower = fmt.to_ascii_lowercase();
-    let use_12h = fmt_lower.contains("am/pm");
+    let use_12h = contains_ignore_ascii_case(fmt, "am/pm");
 
     // Token replacement (best-effort). We intentionally keep this simple; it is not a full VBA
     // formatter.
@@ -3530,44 +3605,43 @@ fn format_datetime_vba(dt: NaiveDateTime, fmt: &str) -> String {
     let mut i = 0;
     while i < fmt.len() {
         let rest = &fmt[i..];
-        let rest_lower = &fmt_lower[i..];
-        if rest_lower.starts_with("yyyy") {
+        if rest.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("yyyy")) {
             out.push_str("%Y");
             i += 4;
-        } else if rest_lower.starts_with("yy") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("yy")) {
             out.push_str("%y");
             i += 2;
-        } else if rest_lower.starts_with("mmmm") {
+        } else if rest.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("mmmm")) {
             out.push_str("%B");
             i += 4;
-        } else if rest_lower.starts_with("mmm") {
+        } else if rest.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("mmm")) {
             out.push_str("%b");
             i += 3;
-        } else if rest_lower.starts_with("mm") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("mm")) {
             out.push_str("%m");
             i += 2;
-        } else if rest_lower.starts_with("m") {
+        } else if rest.get(..1).is_some_and(|p| p.eq_ignore_ascii_case("m")) {
             out.push_str("%-m");
             i += 1;
-        } else if rest_lower.starts_with("dd") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("dd")) {
             out.push_str("%d");
             i += 2;
-        } else if rest_lower.starts_with("d") {
+        } else if rest.get(..1).is_some_and(|p| p.eq_ignore_ascii_case("d")) {
             out.push_str("%-d");
             i += 1;
-        } else if rest_lower.starts_with("hh") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("hh")) {
             out.push_str(if use_12h { "%I" } else { "%H" });
             i += 2;
-        } else if rest_lower.starts_with("h") {
+        } else if rest.get(..1).is_some_and(|p| p.eq_ignore_ascii_case("h")) {
             out.push_str(if use_12h { "%-I" } else { "%-H" });
             i += 1;
-        } else if rest_lower.starts_with("nn") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("nn")) {
             out.push_str("%M");
             i += 2;
-        } else if rest_lower.starts_with("ss") {
+        } else if rest.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("ss")) {
             out.push_str("%S");
             i += 2;
-        } else if rest_lower.starts_with("am/pm") {
+        } else if rest.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("am/pm")) {
             out.push_str("%p");
             i += 5;
         } else {

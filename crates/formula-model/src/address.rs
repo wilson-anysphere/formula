@@ -1,4 +1,5 @@
 use core::fmt;
+use core::fmt::Write as _;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -41,7 +42,10 @@ impl CellRef {
         // 1,048,576 limit. Do row arithmetic in u64 so formatting is robust even for large
         // internal sentinel values (e.g. u32::MAX) without debug overflow panics.
         let row_1_based = u64::from(self.row) + 1;
-        format!("{}{}", col_to_name(self.col), row_1_based)
+        let mut out = String::new();
+        push_column_label(self.col, &mut out);
+        let _ = write!(out, "{row_1_based}");
+        out
     }
 
     /// Parse an Excel A1-style reference (e.g. `A1`, `$B$2`).
@@ -357,6 +361,99 @@ impl fmt::Display for A1ParseError {
 
 impl std::error::Error for A1ParseError {}
 
+/// A best-effort A1 endpoint used by print/defined-name parsing.
+///
+/// This accepts:
+/// - cell endpoints (e.g. `A1`, `$B$2`)
+/// - whole-row endpoints (e.g. `$1`)
+/// - whole-column endpoints (e.g. `$A`)
+///
+/// Rows and columns are 0-indexed in the returned values.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum A1Endpoint {
+    Cell(CellRef),
+    Row(u32),
+    Col(u32),
+}
+
+/// Parse an A1 endpoint (cell / whole row / whole column).
+///
+/// This is stricter than the formula lexer:
+/// - columns must be within Excel bounds (`A..=XFD`)
+/// - `0` row numbers are rejected
+/// - any non-ASCII letter/digit characters are rejected
+pub fn parse_a1_endpoint(s: &str) -> Result<A1Endpoint, A1ParseError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(A1ParseError::Empty);
+    }
+
+    let mut col_1_based: u32 = 0;
+    let mut col_len = 0usize;
+    let mut row_1_based: u32 = 0;
+    let mut row_len = 0usize;
+    let mut saw_digit = false;
+
+    for &b in s.as_bytes() {
+        if b == b'$' {
+            continue;
+        }
+
+        if b.is_ascii_alphabetic() {
+            if saw_digit {
+                return Err(A1ParseError::TrailingCharacters);
+            }
+            col_len += 1;
+            let v = (b.to_ascii_uppercase() - b'A') as u32 + 1;
+            col_1_based = col_1_based
+                .checked_mul(26)
+                .and_then(|c| c.checked_add(v))
+                .ok_or(A1ParseError::InvalidColumn)?;
+            continue;
+        }
+
+        if b.is_ascii_digit() {
+            saw_digit = true;
+            row_len += 1;
+            let v = (b - b'0') as u32;
+            row_1_based = row_1_based
+                .checked_mul(10)
+                .and_then(|r| r.checked_add(v))
+                .ok_or(A1ParseError::InvalidRow)?;
+            continue;
+        }
+
+        return Err(A1ParseError::TrailingCharacters);
+    }
+
+    if col_len == 0 && row_len == 0 {
+        return Err(A1ParseError::Empty);
+    }
+
+    if col_len > 0 {
+        let col0 = col_1_based.saturating_sub(1);
+        if col0 >= crate::cell::EXCEL_MAX_COLS {
+            return Err(A1ParseError::InvalidColumn);
+        }
+
+        if row_len == 0 {
+            return Ok(A1Endpoint::Col(col0));
+        }
+
+        if row_1_based == 0 {
+            return Err(A1ParseError::InvalidRow);
+        }
+
+        return Ok(A1Endpoint::Cell(CellRef::new(row_1_based - 1, col0)));
+    }
+
+    // Row-only endpoint.
+    if row_1_based == 0 {
+        return Err(A1ParseError::InvalidRow);
+    }
+    Ok(A1Endpoint::Row(row_1_based - 1))
+}
+
 /// Errors that can occur when parsing an A1 range.
 #[derive(Debug)]
 pub enum RangeParseError {
@@ -399,10 +496,150 @@ pub fn push_column_label(col: u32, out: &mut String) {
     }
 }
 
-fn col_to_name(col: u32) -> String {
-    let mut out = String::new();
-    push_column_label(col, &mut out);
-    out
+/// Append an A1-style cell reference (e.g. `A1`, `$B$2`) to `out`.
+///
+/// - `row1` is 1-based (Excel row numbering).
+/// - `col0` is 0-based (Excel column `A` is `0`).
+/// - `abs_col` / `abs_row` control whether `$` markers are included.
+pub fn push_a1_cell_ref_row1(row1: u64, col0: u32, abs_col: bool, abs_row: bool, out: &mut String) {
+    if abs_col {
+        out.push('$');
+    }
+    push_column_label(col0, out);
+    if abs_row {
+        out.push('$');
+    }
+    let _ = write!(out, "{row1}");
+}
+
+/// Append an A1-style cell reference (e.g. `A1`, `$B$2`) to `out`.
+///
+/// - `row0` is 0-based (Excel row `1` is `0`).
+/// - `col0` is 0-based (Excel column `A` is `0`).
+/// - `abs_col` / `abs_row` control whether `$` markers are included.
+pub fn push_a1_cell_ref(row0: u32, col0: u32, abs_col: bool, abs_row: bool, out: &mut String) {
+    push_a1_cell_ref_row1(u64::from(row0) + 1, col0, abs_col, abs_row, out);
+}
+
+/// Append an A1-style cell range (e.g. `A1:B2`, `$A$1:$B$2`) to `out`.
+///
+/// If the endpoints are identical, this emits a single-cell reference.
+///
+/// - `start_row1` / `end_row1` are 1-based (Excel row numbering).
+/// - `start_col0` / `end_col0` are 0-based (Excel column `A` is `0`).
+/// - `abs_col` / `abs_row` control whether `$` markers are included.
+pub fn push_a1_cell_range_row1(
+    start_row1: u64,
+    start_col0: u32,
+    end_row1: u64,
+    end_col0: u32,
+    abs_col: bool,
+    abs_row: bool,
+    out: &mut String,
+) {
+    push_a1_cell_ref_row1(start_row1, start_col0, abs_col, abs_row, out);
+    if start_row1 == end_row1 && start_col0 == end_col0 {
+        return;
+    }
+    out.push(':');
+    push_a1_cell_ref_row1(end_row1, end_col0, abs_col, abs_row, out);
+}
+
+/// Append an A1-style cell range (e.g. `A1:B2`, `$A$1:$B$2`) to `out`.
+///
+/// If the endpoints are identical, this emits a single-cell reference.
+///
+/// - `*_row0` are 0-based (Excel row `1` is `0`).
+/// - `*_col0` are 0-based (Excel column `A` is `0`).
+/// - `abs_col` / `abs_row` control whether `$` markers are included.
+pub fn push_a1_cell_range(
+    start_row0: u32,
+    start_col0: u32,
+    end_row0: u32,
+    end_col0: u32,
+    abs_col: bool,
+    abs_row: bool,
+    out: &mut String,
+) {
+    push_a1_cell_range_row1(
+        u64::from(start_row0) + 1,
+        start_col0,
+        u64::from(end_row0) + 1,
+        end_col0,
+        abs_col,
+        abs_row,
+        out,
+    );
+}
+
+/// Append an A1-style cell range (e.g. `A1:B2`, `$A1:B$2`) to `out`.
+///
+/// This is the low-level "area" formatter used by BIFF/XLS formula decoders where the absolute
+/// markers are stored per endpoint. If the endpoints are identical, this emits a single-cell
+/// reference using the first endpoint's absolute flags.
+///
+/// - `*_row1` are 1-based (Excel row numbering).
+/// - `*_col0` are 0-based (Excel column `A` is `0`).
+/// - `abs_*` control whether `$` markers are included.
+pub fn push_a1_cell_area_row1(
+    start_row1: u64,
+    start_col0: u32,
+    abs_start_col: bool,
+    abs_start_row: bool,
+    end_row1: u64,
+    end_col0: u32,
+    abs_end_col: bool,
+    abs_end_row: bool,
+    out: &mut String,
+) {
+    push_a1_cell_ref_row1(start_row1, start_col0, abs_start_col, abs_start_row, out);
+    if start_row1 == end_row1 && start_col0 == end_col0 {
+        return;
+    }
+    out.push(':');
+    push_a1_cell_ref_row1(end_row1, end_col0, abs_end_col, abs_end_row, out);
+}
+
+/// Append an A1-style whole-row reference (e.g. `$1`) to `out`.
+///
+/// - `row1` is 1-based (Excel row numbering).
+/// - `abs_row` controls whether the `$` marker is included.
+pub fn push_a1_row_ref_row1(row1: u64, abs_row: bool, out: &mut String) {
+    if abs_row {
+        out.push('$');
+    }
+    let _ = write!(out, "{row1}");
+}
+
+/// Append an A1-style whole-row range (e.g. `$1:$10`) to `out`.
+///
+/// - `start_row1` / `end_row1` are 1-based (Excel row numbering).
+/// - `abs_row` controls whether `$` markers are included on both endpoints.
+pub fn push_a1_row_range_row1(start_row1: u64, end_row1: u64, abs_row: bool, out: &mut String) {
+    push_a1_row_ref_row1(start_row1, abs_row, out);
+    out.push(':');
+    push_a1_row_ref_row1(end_row1, abs_row, out);
+}
+
+/// Append an A1-style whole-column reference (e.g. `$A`) to `out`.
+///
+/// - `col0` is 0-based (Excel column `A` is `0`).
+/// - `abs_col` controls whether the `$` marker is included.
+pub fn push_a1_col_ref(col0: u32, abs_col: bool, out: &mut String) {
+    if abs_col {
+        out.push('$');
+    }
+    push_column_label(col0, out);
+}
+
+/// Append an A1-style whole-column range (e.g. `$A:$D`) to `out`.
+///
+/// - `start_col0` / `end_col0` are 0-based (Excel column `A` is `0`).
+/// - `abs_col` controls whether `$` markers are included on both endpoints.
+pub fn push_a1_col_range(start_col0: u32, end_col0: u32, abs_col: bool, out: &mut String) {
+    push_a1_col_ref(start_col0, abs_col, out);
+    out.push(':');
+    push_a1_col_ref(end_col0, abs_col, out);
 }
 
 fn name_to_col(s: &str) -> Result<u32, A1ParseError> {
@@ -421,6 +658,36 @@ fn name_to_col(s: &str) -> Result<u32, A1ParseError> {
         return Err(A1ParseError::InvalidColumn);
     }
     Ok(col - 1)
+}
+
+/// Convert an Excel column label (e.g. `A`, `XFD`) into a 0-based column index.
+///
+/// This is a strict A1 helper:
+/// - Only ASCII letters are accepted.
+/// - The result must be within Excel's column bounds (`A..=XFD`).
+pub fn column_label_to_index(label: &str) -> Result<u32, A1ParseError> {
+    let col = name_to_col(label)?;
+    if col >= crate::cell::EXCEL_MAX_COLS {
+        return Err(A1ParseError::InvalidColumn);
+    }
+    Ok(col)
+}
+
+/// Convert an Excel column label (e.g. `A`, `XFE`) into a 0-based column index.
+///
+/// This is a **lenient** A1 helper:
+/// - Only ASCII letters are accepted.
+/// - The label must be 1-3 letters (Excel's A1 grammar).
+/// - The result is **not** restricted to Excel's `A..=XFD` column bound.
+///
+/// This is used by formula lexers/parsers that need to recognize out-of-bounds references like
+/// `XFE1` so they can be represented as references and later evaluate to `#REF!`, rather than
+/// being tokenized as identifiers.
+pub fn column_label_to_index_lenient(label: &str) -> Result<u32, A1ParseError> {
+    if label.is_empty() || label.len() > 3 {
+        return Err(A1ParseError::InvalidColumn);
+    }
+    name_to_col(label)
 }
 
 #[cfg(test)]
@@ -517,5 +784,142 @@ mod tests {
         assert_eq!(a.intersection(&b), Some(Range::from_a1("B2:C3").unwrap()));
         assert_eq!(a.bounding_box(&b), Range::from_a1("A1:D4").unwrap());
         assert_eq!(a.cell_count(), 9);
+    }
+
+    #[test]
+    fn push_a1_cell_ref_respects_absolute_flags() {
+        let mut out = String::new();
+        push_a1_cell_ref_row1(2, 1, true, true, &mut out);
+        assert_eq!(out, "$B$2");
+
+        let mut out = String::new();
+        push_a1_cell_ref_row1(2, 1, true, false, &mut out);
+        assert_eq!(out, "$B2");
+
+        let mut out = String::new();
+        push_a1_cell_ref_row1(2, 1, false, true, &mut out);
+        assert_eq!(out, "B$2");
+
+        let mut out = String::new();
+        push_a1_cell_ref_row1(2, 1, false, false, &mut out);
+        assert_eq!(out, "B2");
+
+        let mut out = String::new();
+        push_a1_cell_ref(0, 0, false, false, &mut out);
+        assert_eq!(out, "A1");
+    }
+
+    #[test]
+    fn push_a1_row_and_col_refs_respect_absolute_flags() {
+        let mut out = String::new();
+        push_a1_row_ref_row1(7, true, &mut out);
+        assert_eq!(out, "$7");
+
+        let mut out = String::new();
+        push_a1_row_ref_row1(7, false, &mut out);
+        assert_eq!(out, "7");
+
+        let mut out = String::new();
+        push_a1_col_ref(0, true, &mut out);
+        assert_eq!(out, "$A");
+
+        let mut out = String::new();
+        push_a1_col_ref(0, false, &mut out);
+        assert_eq!(out, "A");
+    }
+
+    #[test]
+    fn push_a1_row_and_col_ranges_respect_absolute_flags() {
+        let mut out = String::new();
+        push_a1_row_range_row1(1, 10, true, &mut out);
+        assert_eq!(out, "$1:$10");
+
+        let mut out = String::new();
+        push_a1_row_range_row1(1, 10, false, &mut out);
+        assert_eq!(out, "1:10");
+
+        let mut out = String::new();
+        push_a1_col_range(0, 3, true, &mut out);
+        assert_eq!(out, "$A:$D");
+
+        let mut out = String::new();
+        push_a1_col_range(0, 3, false, &mut out);
+        assert_eq!(out, "A:D");
+    }
+
+    #[test]
+    fn push_a1_cell_range_row1_omits_colon_for_single_cell() {
+        let mut out = String::new();
+        push_a1_cell_range_row1(1, 0, 1, 0, true, true, &mut out);
+        assert_eq!(out, "$A$1");
+    }
+
+    #[test]
+    fn push_a1_cell_range_uses_row0_and_formats_like_to_a1() {
+        let mut out = String::new();
+        push_a1_cell_range(0, 0, 0, 0, false, false, &mut out);
+        assert_eq!(out, "A1");
+
+        let mut out = String::new();
+        push_a1_cell_range(0, 0, 1, 1, false, false, &mut out);
+        assert_eq!(out, "A1:B2");
+    }
+
+    #[test]
+    fn push_a1_cell_range_row1_formats_two_cell_endpoints() {
+        let mut out = String::new();
+        push_a1_cell_range_row1(1, 0, 2, 1, true, true, &mut out);
+        assert_eq!(out, "$A$1:$B$2");
+    }
+
+    #[test]
+    fn push_a1_cell_area_row1_supports_per_endpoint_absolute_flags() {
+        let mut out = String::new();
+        push_a1_cell_area_row1(1, 0, true, false, 2, 1, false, true, &mut out);
+        assert_eq!(out, "$A1:B$2");
+    }
+
+    #[test]
+    fn column_label_to_index_accepts_excel_bounds() {
+        assert_eq!(column_label_to_index("A").unwrap(), 0);
+        assert_eq!(column_label_to_index("XFD").unwrap(), 16_383);
+        assert!(column_label_to_index("XFE").is_err());
+        assert!(column_label_to_index("").is_err());
+        assert!(column_label_to_index("A0").is_err());
+    }
+
+    #[test]
+    fn column_label_to_index_lenient_accepts_out_of_bounds_labels() {
+        assert_eq!(column_label_to_index_lenient("A").unwrap(), 0);
+        assert_eq!(column_label_to_index_lenient("XFD").unwrap(), 16_383);
+        assert_eq!(column_label_to_index_lenient("XFE").unwrap(), 16_384);
+        assert_eq!(column_label_to_index_lenient("ZZZ").unwrap(), 18_277);
+        assert!(column_label_to_index_lenient("AAAA").is_err());
+        assert!(column_label_to_index_lenient("").is_err());
+        assert!(column_label_to_index_lenient("A0").is_err());
+    }
+
+    #[test]
+    fn parse_a1_endpoint_parses_cell_row_and_col_refs() {
+        assert_eq!(
+            parse_a1_endpoint("A1").unwrap(),
+            A1Endpoint::Cell(CellRef::new(0, 0))
+        );
+        assert_eq!(
+            parse_a1_endpoint("$B$2").unwrap(),
+            A1Endpoint::Cell(CellRef::new(1, 1))
+        );
+        assert_eq!(parse_a1_endpoint("$A").unwrap(), A1Endpoint::Col(0));
+        assert_eq!(parse_a1_endpoint("1").unwrap(), A1Endpoint::Row(0));
+        assert_eq!(parse_a1_endpoint("$7").unwrap(), A1Endpoint::Row(6));
+    }
+
+    #[test]
+    fn parse_a1_endpoint_rejects_invalid_inputs() {
+        assert!(parse_a1_endpoint("").is_err());
+        assert!(parse_a1_endpoint("A0").is_err());
+        assert!(parse_a1_endpoint("XFE1").is_err());
+        assert!(parse_a1_endpoint("A1B").is_err());
+        assert!(parse_a1_endpoint("1A").is_err());
     }
 }

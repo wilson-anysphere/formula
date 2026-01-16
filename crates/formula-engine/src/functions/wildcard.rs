@@ -24,6 +24,10 @@ impl WildcardPattern {
     }
 
     pub(crate) fn matches(&self, text: &str) -> bool {
+        if !self.has_wildcards {
+            return literal_tokens_match_text_unicode_case_insensitive(&self.tokens, text);
+        }
+
         // Excel wildcard matching is case-insensitive. Use Unicode uppercasing so patterns like
         // "straße" match "STRASSE" (ß uppercases to SS), but keep an ASCII fast-path to avoid
         // the overhead for the common case.
@@ -87,6 +91,56 @@ fn tokenize_pattern(pattern: &str) -> Vec<Token> {
     tokens
 }
 
+struct FoldedUppercaseChars<'a> {
+    chars: std::str::Chars<'a>,
+    pending: Option<std::char::ToUppercase>,
+    ascii_fast_path: bool,
+}
+
+impl<'a> FoldedUppercaseChars<'a> {
+    fn new(s: &'a str) -> Self {
+        Self {
+            chars: s.chars(),
+            pending: None,
+            ascii_fast_path: s.is_ascii(),
+        }
+    }
+}
+
+impl Iterator for FoldedUppercaseChars<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        loop {
+            if let Some(pending) = &mut self.pending {
+                if let Some(ch) = pending.next() {
+                    return Some(ch);
+                }
+                self.pending = None;
+            }
+
+            let ch = self.chars.next()?;
+            if self.ascii_fast_path {
+                return Some(ch.to_ascii_uppercase());
+            }
+            self.pending = Some(ch.to_uppercase());
+        }
+    }
+}
+
+fn literal_tokens_match_text_unicode_case_insensitive(tokens: &[Token], text: &str) -> bool {
+    let mut ti = 0usize;
+    for folded in FoldedUppercaseChars::new(text) {
+        match tokens.get(ti) {
+            Some(Token::Literal(c)) if *c == folded => {
+                ti += 1;
+            }
+            _ => return false,
+        }
+    }
+    ti == tokens.len()
+}
+
 fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
     let mut pi = 0usize;
     let mut ti = 0usize;
@@ -130,4 +184,35 @@ fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
     }
 
     pi == pattern.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_literal_without_wildcards_case_insensitive() {
+        let pat = WildcardPattern::new("AbC");
+        assert!(!pat.has_wildcards());
+        assert!(pat.matches("abc"));
+        assert!(pat.matches("ABC"));
+        assert!(!pat.matches("abcd"));
+    }
+
+    #[test]
+    fn matches_literal_handles_unicode_uppercase_expansion() {
+        let pat = WildcardPattern::new("straße");
+        assert!(!pat.has_wildcards());
+        assert!(pat.matches("STRASSE"));
+        assert!(pat.matches("straße"));
+        assert!(!pat.matches("S"));
+    }
+
+    #[test]
+    fn matches_literal_respects_tilde_escapes() {
+        let pat = WildcardPattern::new("a~*b");
+        assert!(!pat.has_wildcards());
+        assert!(pat.matches("a*b"));
+        assert!(!pat.matches("ab"));
+    }
 }

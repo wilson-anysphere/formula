@@ -18,6 +18,7 @@ mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
 mod error;
+mod excel_string;
 pub mod external_refs;
 pub mod formula_rewrite;
 mod formula_text;
@@ -40,7 +41,13 @@ mod view;
 mod workbook;
 mod worksheet;
 
-pub use address::{push_column_label, A1ParseError, CellRef, Range, RangeIter, RangeParseError};
+pub use address::{
+    parse_a1_endpoint, push_a1_cell_area_row1, push_a1_cell_range, push_a1_cell_range_row1,
+    push_a1_cell_ref, push_a1_cell_ref_row1, push_a1_col_range, push_a1_col_ref,
+    push_a1_row_range_row1, push_a1_row_ref_row1,
+    push_column_label, A1Endpoint, A1ParseError, CellRef, Range, RangeIter, RangeParseError,
+    column_label_to_index, column_label_to_index_lenient,
+};
 pub use autofilter::{
     DateComparison, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
     OpaqueDynamicFilter, SheetAutoFilter, TextMatch, TextMatchKind,
@@ -55,6 +62,11 @@ pub use data_validation::*;
 pub use date_system::DateSystem;
 pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisplay};
 pub use error::ErrorValue;
+pub use excel_string::{
+    escape_excel_double_quotes, push_escaped_excel_double_quote_char, push_escaped_excel_double_quotes,
+    push_excel_double_quoted_string_literal, unescape_excel_double_quotes,
+    unescape_excel_double_quoted_string_literal,
+};
 pub use formula_rewrite::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
     rewrite_table_names_in_formula,
@@ -78,8 +90,12 @@ pub use protection::{
 };
 pub use sheet_name::{
     escape_excel_single_quotes, push_escaped_excel_single_quotes, push_excel_single_quoted_identifier,
-    sanitize_sheet_name, sheet_name_casefold, sheet_name_eq_case_insensitive, validate_sheet_name,
-    SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
+    push_sheet_name_a1, push_sheet_name_r1c1, push_sheet_range_name_a1, push_sheet_range_name_r1c1,
+    sanitize_sheet_name, sheet_name_casefold, sheet_name_eq_case_insensitive,
+    sheet_name_needs_quotes_a1, sheet_name_needs_quotes_r1c1, starts_like_a1_cell_ref,
+    starts_like_r1c1_ref, unescape_excel_single_quotes_lenient,
+    unquote_excel_single_quoted_identifier_lenient, validate_sheet_name, SheetNameError,
+    unquote_sheet_name_lenient, EXCEL_MAX_SHEET_NAME_LEN,
 };
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,

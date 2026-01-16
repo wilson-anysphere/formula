@@ -448,16 +448,11 @@ fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
         return None;
     }
     let file_name = part_path.rsplit('/').next()?;
-    let file_name_lower = file_name.to_ascii_lowercase();
-    if !file_name_lower.ends_with(".xml") {
-        return None;
-    }
-
-    let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+    let stem = crate::ascii::strip_suffix_ignore_case(file_name, ".xml")?;
     // Check the plural prefix first: `richvalues` starts with `richvalue`.
-    let suffix = if let Some(rest) = stem.strip_prefix("richvalues") {
+    let suffix = if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalues") {
         rest
-    } else if let Some(rest) = stem.strip_prefix("richvalue") {
+    } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalue") {
         rest
     } else {
         return None;
@@ -524,13 +519,8 @@ fn rich_value_rel_custom_suffix_index(part_path: &str) -> Option<u32> {
     }
 
     let file_name = part_path.rsplit('/').next()?;
-    let file_name_lower = file_name.to_ascii_lowercase();
-    if !file_name_lower.ends_with(".xml") {
-        return None;
-    }
-
-    let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
-    let idx = stem.rfind("richvaluerel")?;
+    let stem = crate::ascii::strip_suffix_ignore_case(file_name, ".xml")?;
+    let idx = crate::ascii::rfind_ignore_case(stem, "richvaluerel")?;
     let suffix = &stem[idx + "richvaluerel".len()..];
     if !suffix.chars().all(|c| c.is_ascii_digit()) {
         return None;

@@ -18,6 +18,7 @@ use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
 use formula_office_crypto as office_crypto;
+use formula_model::column_label_to_index_lenient;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
@@ -893,10 +894,18 @@ impl XlsbWorkbook {
                     fe::Expr::FunctionCall(call) => {
                         // Normalize `_xlfn.` prefix for stable ordering/dedup, but preserve the
                         // original name for the inserted ExternName so decoding round-trips.
-                        let mut key = call.name.original.to_ascii_uppercase();
-                        if let Some(stripped) = key.strip_prefix("_XLFN.") {
-                            key = stripped.to_string();
-                        }
+                        // Avoid double-allocating when `_xlfn.` is present: strip first (case-insensitive),
+                        // then upper-case the remaining identifier once for stable ordering/dedup.
+                        let original = call.name.original.as_str();
+                        let key_src = if original
+                            .get(.."_xlfn.".len())
+                            .is_some_and(|p| p.eq_ignore_ascii_case("_xlfn."))
+                        {
+                            &original["_xlfn.".len()..]
+                        } else {
+                            original
+                        };
+                        let key = key_src.to_ascii_uppercase();
 
                         wanted
                             .entry(key)
@@ -904,12 +913,9 @@ impl XlsbWorkbook {
                                 // Prefer a `_xlfn.`-prefixed spelling when the caller provided
                                 // one, matching Excel's forward-compat namespace.
                                 let existing_has_prefix =
-                                    existing.to_ascii_uppercase().starts_with("_XLFN.");
-                                let new_has_prefix = call
-                                    .name
-                                    .original
-                                    .to_ascii_uppercase()
-                                    .starts_with("_XLFN.");
+                                    starts_with_ignore_ascii_case(existing, "_XLFN.");
+                                let new_has_prefix =
+                                    starts_with_ignore_ascii_case(&call.name.original, "_XLFN.");
                                 if !existing_has_prefix && new_has_prefix {
                                     *existing = call.name.original.clone();
                                 }
@@ -958,7 +964,11 @@ impl XlsbWorkbook {
             }
             missing.push(original);
         }
-        missing.sort_by(|a, b| a.to_ascii_uppercase().cmp(&b.to_ascii_uppercase()));
+        missing.sort_by(|a, b| {
+            a.bytes()
+                .map(|b| b.to_ascii_uppercase())
+                .cmp(b.bytes().map(|b| b.to_ascii_uppercase()))
+        });
         missing.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
         let patched_workbook_bin = if missing.is_empty() {
@@ -2629,24 +2639,24 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
         DEFAULT_STYLES_PART,
     ]
     .into_iter()
-    .map(|name| normalize_zip_part_name(name).to_ascii_lowercase())
+    .map(normalize_zip_part_name_ascii_lowercase_key)
     .collect();
-    known_parts.insert(normalize_zip_part_name(&workbook_part).to_ascii_lowercase());
-    known_parts.insert(normalize_zip_part_name(&workbook_rels_part).to_ascii_lowercase());
+    known_parts.insert(normalize_zip_part_name_ascii_lowercase_key(&workbook_part));
+    known_parts.insert(normalize_zip_part_name_ascii_lowercase_key(&workbook_rels_part));
     if let Some(part) = &shared_strings_part {
-        known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
+        known_parts.insert(normalize_zip_part_name_ascii_lowercase_key(part));
     }
     if let Some(part) = &styles_part {
-        known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
+        known_parts.insert(normalize_zip_part_name_ascii_lowercase_key(part));
     }
 
     let worksheet_paths: HashSet<String> = sheets
         .iter()
-        .map(|s| normalize_zip_part_name(&s.part_path).to_ascii_lowercase())
+        .map(|s| normalize_zip_part_name_ascii_lowercase_key(&s.part_path))
         .collect();
     if options.preserve_unknown_parts {
         for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
-            let normalized = normalize_zip_part_name(&name).to_ascii_lowercase();
+            let normalized = normalize_zip_part_name_ascii_lowercase_key(&name);
             let is_known =
                 known_parts.contains(&normalized) || worksheet_paths.contains(&normalized);
             if is_known {
@@ -2775,12 +2785,14 @@ mod zip_guardrail_tests {
     }
 
     fn encode_utf16_string_payload(text: &str) -> Vec<u8> {
-        let units: Vec<u16> = text.encode_utf16().collect();
-        let mut out = Vec::with_capacity(4 + units.len() * 2);
-        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
-        for unit in units {
-            out.extend_from_slice(&unit.to_le_bytes());
-        }
+        let utf16le: Vec<u8> = text
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
+        let cch: u32 = (utf16le.len() / 2) as u32;
+        let mut out = Vec::with_capacity(4 + utf16le.len());
+        out.extend_from_slice(&cch.to_le_bytes());
+        out.extend_from_slice(&utf16le);
         out
     }
 
@@ -3529,7 +3541,7 @@ fn content_type_override_part_names(
 fn root_target_candidates(target: &str) -> Vec<String> {
     let target = normalize_zip_part_name(target);
     let mut candidates = vec![target.clone()];
-    if !target.to_ascii_lowercase().starts_with("xl/") {
+    if !starts_with_ignore_ascii_case(&target, "xl/") {
         candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
     }
     candidates
@@ -3538,8 +3550,12 @@ fn root_target_candidates(target: &str) -> Vec<String> {
 fn workbook_target_candidates(target: &str) -> Vec<String> {
     // workbook.bin is stored under `xl/`, so relationship targets are typically relative to `xl/`.
     // Some writers use absolute targets with a leading `/`.
-    let target = target.replace('\\', "/");
-    let target = target.trim_start_matches('/');
+    let replaced;
+    let mut target = target.trim_start_matches('/');
+    if target.contains('\\') {
+        replaced = target.replace('\\', "/");
+        target = &replaced;
+    }
 
     let mut candidates = Vec::new();
     candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
@@ -3551,10 +3567,14 @@ fn resolve_part_name_from_relationship(source_part: &str, target: &str) -> Strin
     let source_part = normalize_zip_part_name(source_part);
 
     // Relationship targets use `/` separators, but some writers use Windows-style `\`.
-    let mut target = target.replace('\\', "/");
     // Some writers use absolute targets with a leading `/`.
     let target_is_absolute = target.starts_with('/');
-    target = target.trim_start_matches('/').to_string();
+    let target = target.trim_start_matches('/');
+    let target = if target.contains('\\') {
+        target.replace('\\', "/")
+    } else {
+        target.to_string()
+    };
     // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.bin#bar`).
     // OPC part names do not include fragments, so strip them before resolving.
     let target = target
@@ -3596,7 +3616,12 @@ fn normalize_zip_part_name(part_name: &str) -> String {
         .split_once('#')
         .map(|(base, _)| base)
         .unwrap_or(part_name);
-    let part_name = part_name.replace('\\', "/");
+    let replaced;
+    let mut part_name = part_name;
+    if part_name.contains('\\') {
+        replaced = part_name.replace('\\', "/");
+        part_name = &replaced;
+    }
     let part_name = part_name.trim_start_matches('/');
     let mut out: Vec<&str> = Vec::new();
     for seg in part_name.split('/') {
@@ -3609,6 +3634,14 @@ fn normalize_zip_part_name(part_name: &str) -> String {
         }
     }
     out.join("/")
+}
+
+fn normalize_zip_part_name_ascii_lowercase_key(part_name: &str) -> String {
+    let mut normalized = normalize_zip_part_name(part_name);
+    if normalized.as_bytes().iter().any(|b| b.is_ascii_uppercase()) {
+        normalized.make_ascii_lowercase();
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -3639,7 +3672,12 @@ fn find_zip_entry_case_insensitive<R: Read + Seek>(
     zip: &ZipArchive<R>,
     name: &str,
 ) -> Option<String> {
-    let target = name.trim_start_matches('/').replace('\\', "/");
+    let replaced;
+    let mut target = name.trim_start_matches('/');
+    if target.contains('\\') {
+        replaced = target.replace('\\', "/");
+        target = &replaced;
+    }
 
     for candidate in zip.file_names() {
         let mut normalized = candidate.trim_start_matches('/');
@@ -3648,12 +3686,45 @@ fn find_zip_entry_case_insensitive<R: Read + Seek>(
             replaced = normalized.replace('\\', "/");
             normalized = &replaced;
         }
-        if normalized.eq_ignore_ascii_case(&target) {
+        if normalized.eq_ignore_ascii_case(target) {
             return Some(candidate.to_string());
         }
     }
 
     None
+}
+
+fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+    let s = s.as_bytes();
+    let prefix = prefix.as_bytes();
+    s.get(..prefix.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+}
+
+fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+    let s = s.as_bytes();
+    let suffix = suffix.as_bytes();
+    if s.len() < suffix.len() {
+        return false;
+    }
+    s[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+}
+
+fn contains_ignore_ascii_case(s: &str, needle: &str) -> bool {
+    let s = s.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if s.len() < needle.len() {
+        return false;
+    }
+    for start in 0..=s.len() - needle.len() {
+        if s[start..start + needle.len()].eq_ignore_ascii_case(needle) {
+            return true;
+        }
+    }
+    false
 }
 
 fn read_zip_entry<R: Read + Seek>(
@@ -3758,8 +3829,9 @@ fn load_table_definitions<R: Read + Seek>(
     let table_parts: Vec<String> = zip
         .file_names()
         .filter(|name| {
-            let normalized = normalize_zip_part_name(name).to_ascii_lowercase();
-            normalized.starts_with("xl/tables/") && normalized.ends_with(".xml")
+            let normalized = normalize_zip_part_name(name);
+            starts_with_ignore_ascii_case(&normalized, "xl/tables/")
+                && ends_with_ignore_ascii_case(&normalized, ".xml")
         })
         .map(str::to_string)
         .collect();
@@ -3932,9 +4004,6 @@ fn parse_a1_range_bounds(a1: &str) -> Option<(u32, u32, u32, u32)> {
     // prefix. Table `ref` attributes are typically unqualified.
     let a1 = a1.rsplit_once('!').map(|(_, tail)| tail).unwrap_or(a1);
 
-    // Strip absolute markers.
-    let a1 = a1.replace('$', "");
-
     let mut parts = a1.split(':');
     let start = parts.next()?.trim();
     let end = parts.next().unwrap_or(start).trim();
@@ -3959,22 +4028,39 @@ fn parse_a1_cell_ref(cell: &str) -> Option<(u32, u32)> {
 
     let bytes = cell.as_bytes();
     let mut i = 0usize;
+
+    // Optional absolute column marker.
+    if i < bytes.len() && bytes[i] == b'$' {
+        i += 1;
+    }
+
+    let col_start = i;
     while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
         i += 1;
     }
-    if i == 0 {
+    if i == col_start {
         return None;
     }
-    let col_label = &cell[..i];
-    let row_str = cell.get(i..)?.trim();
-    if row_str.is_empty() {
-        return None;
-    }
-    if !row_str.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+    let col_label = cell.get(col_start..i)?;
+
+    // Optional absolute row marker.
+    if i < bytes.len() && bytes[i] == b'$' {
+        i += 1;
     }
 
-    let col = a1_col_label_to_index(col_label)?;
+    let row_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == row_start {
+        return None;
+    }
+    if !bytes[i..].iter().all(u8::is_ascii_whitespace) {
+        return None;
+    }
+    let row_str = cell.get(row_start..i)?;
+
+    let col = column_label_to_index_lenient(col_label).ok()?;
     let row1: u32 = row_str.parse().ok()?;
     if row1 == 0 {
         return None;
@@ -3987,22 +4073,6 @@ fn parse_a1_cell_ref(cell: &str) -> Option<(u32, u32)> {
     }
 
     Some((row, col))
-}
-
-fn a1_col_label_to_index(label: &str) -> Option<u32> {
-    let mut col: u32 = 0;
-    for ch in label.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        let upper = ch.to_ascii_uppercase() as u32;
-        col = col.checked_mul(26)?;
-        col = col.checked_add(upper.checked_sub('A' as u32)?.checked_add(1)?)?;
-    }
-    if col == 0 {
-        return None;
-    }
-    Some(col - 1)
 }
 
 #[cfg(test)]
@@ -4453,14 +4523,19 @@ fn should_drop_workbook_rel_event<B: std::io::BufRead>(
     }
 
     if let Some(target) = xml_attr_value(e, reader, b"Target")? {
-        let normalized = target.replace('\\', "/");
-        if normalized.to_ascii_lowercase().ends_with("calcchain.bin") {
+        let replaced;
+        let mut normalized = target.as_str();
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+        if ends_with_ignore_ascii_case(normalized, "calcchain.bin") {
             return Ok(true);
         }
     }
 
     if let Some(ty) = xml_attr_value(e, reader, b"Type")? {
-        if ty.to_ascii_lowercase().contains("relationships/calcchain") {
+        if contains_ignore_ascii_case(&ty, "relationships/calcchain") {
             return Ok(true);
         }
     }

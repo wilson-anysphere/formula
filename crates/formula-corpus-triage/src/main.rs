@@ -749,8 +749,15 @@ fn looks_like_ooxml_workbook_zip(bytes: &[u8]) -> bool {
         if file.is_dir() {
             continue;
         }
-        let name = file.name().trim_start_matches('/').replace('\\', "/");
-        if name.eq_ignore_ascii_case("xl/workbook.xml") || name.eq_ignore_ascii_case("xl/workbook.bin") {
+        let name = file.name().trim_start_matches(|c| c == '/' || c == '\\');
+        let name = if name.contains('\\') {
+            Cow::Owned(name.replace('\\', "/"))
+        } else {
+            Cow::Borrowed(name)
+        };
+        if name.as_ref().eq_ignore_ascii_case("xl/workbook.xml")
+            || name.as_ref().eq_ignore_ascii_case("xl/workbook.bin")
+        {
             return true;
         }
     }
@@ -790,10 +797,11 @@ fn print_json(output: &TriageOutput) -> Result<()> {
 
 fn detect_workbook_format(input: &PathBuf, input_bytes: &[u8]) -> WorkbookFormat {
     if let Some(ext) = input.extension().and_then(|s| s.to_str()) {
-        match ext.to_ascii_lowercase().as_str() {
-            "xlsb" => return WorkbookFormat::Xlsb,
-            "xlsx" | "xlsm" => return WorkbookFormat::Xlsx,
-            _ => {}
+        if ext.eq_ignore_ascii_case("xlsb") {
+            return WorkbookFormat::Xlsb;
+        }
+        if ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm") {
+            return WorkbookFormat::Xlsx;
         }
     }
 
@@ -830,7 +838,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>
         }
         rules.push(xlsx_diff::IgnorePathRule {
             part: None,
-            path_substring: trimmed.replace('\\', "/"),
+            path_substring: if trimmed.contains('\\') {
+                trimmed.replace('\\', "/")
+            } else {
+                trimmed.to_string()
+            },
             kind: None,
         });
     }
@@ -862,7 +874,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>
 
         rules.push(xlsx_diff::IgnorePathRule {
             part: Some(part_glob),
-            path_substring: substring.replace('\\', "/"),
+            path_substring: if substring.contains('\\') {
+                substring.replace('\\', "/")
+            } else {
+                substring.to_string()
+            },
             kind: None,
         });
     }
@@ -886,7 +902,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>
         }
         rules.push(xlsx_diff::IgnorePathRule {
             part: None,
-            path_substring: substring.replace('\\', "/"),
+            path_substring: if substring.contains('\\') {
+                substring.replace('\\', "/")
+            } else {
+                substring.to_string()
+            },
             kind: Some(kind.to_string()),
         });
     }
@@ -920,7 +940,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>
 
         rules.push(xlsx_diff::IgnorePathRule {
             part: Some(part_glob),
-            path_substring: substring.replace('\\', "/"),
+            path_substring: if substring.contains('\\') {
+                substring.replace('\\', "/")
+            } else {
+                substring.to_string()
+            },
             kind: Some(kind.to_string()),
         });
     }
@@ -1146,57 +1170,92 @@ fn summarize_diffs_by_part(
 }
 
 fn part_group(part: &str) -> &'static str {
-    let part_lower = part.to_ascii_lowercase();
-    if part_lower == "[content_types].xml" {
+    fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+        s.get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+    }
+
+    fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+        if suffix.len() > s.len() {
+            return false;
+        }
+        s[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    }
+
+    fn contains_ignore_ascii_case(s: &str, needle: &str) -> bool {
+        let s = s.as_bytes();
+        let needle = needle.as_bytes();
+        if needle.is_empty() {
+            return true;
+        }
+        if needle.len() > s.len() {
+            return false;
+        }
+        for start in 0..=s.len() - needle.len() {
+            if s[start..start + needle.len()].eq_ignore_ascii_case(needle) {
+                return true;
+            }
+        }
+        false
+    }
+
+    if part.eq_ignore_ascii_case("[content_types].xml") {
         return "content_types";
     }
-    if part_lower.ends_with(".rels") || part_lower.contains("/_rels/") {
+    if ends_with_ignore_ascii_case(part, ".rels") || contains_ignore_ascii_case(part, "/_rels/") {
         return "rels";
     }
-    if part_lower == "xl/workbook.xml" || part_lower == "xl/workbook.bin" {
+    if part.eq_ignore_ascii_case("xl/workbook.xml") || part.eq_ignore_ascii_case("xl/workbook.bin")
+    {
         return "workbook";
     }
-    if part_lower == "xl/styles.xml" || part_lower == "xl/styles.bin" || part_lower.starts_with("xl/styles/") {
+    if part.eq_ignore_ascii_case("xl/styles.xml")
+        || part.eq_ignore_ascii_case("xl/styles.bin")
+        || starts_with_ignore_ascii_case(part, "xl/styles/")
+    {
         return "styles";
     }
-    if part_lower == "xl/sharedstrings.xml"
-        || part_lower == "xl/sharedstrings.bin"
-        || part_lower.ends_with("/sharedstrings.xml")
-        || part_lower.ends_with("/sharedstrings.bin")
+    if part.eq_ignore_ascii_case("xl/sharedstrings.xml")
+        || part.eq_ignore_ascii_case("xl/sharedstrings.bin")
+        || ends_with_ignore_ascii_case(part, "/sharedstrings.xml")
+        || ends_with_ignore_ascii_case(part, "/sharedstrings.bin")
     {
         return "shared_strings";
     }
-    if part_lower.starts_with("xl/worksheets/") {
-        if part_lower.ends_with(".bin") {
+    if starts_with_ignore_ascii_case(part, "xl/worksheets/") {
+        if ends_with_ignore_ascii_case(part, ".bin") {
             return "worksheet_bin";
         }
         return "worksheet_xml";
     }
-    if part_lower == "xl/calcchain.xml" || part_lower == "xl/calcchain.bin" {
+    if part.eq_ignore_ascii_case("xl/calcchain.xml") || part.eq_ignore_ascii_case("xl/calcchain.bin")
+    {
         return "calc_chain";
     }
-    if part_lower.starts_with("xl/theme/") {
+    if starts_with_ignore_ascii_case(part, "xl/theme/") {
         return "theme";
     }
-    if part_lower.starts_with("xl/pivottables/") || part_lower.starts_with("xl/pivotcache/") {
+    if starts_with_ignore_ascii_case(part, "xl/pivottables/")
+        || starts_with_ignore_ascii_case(part, "xl/pivotcache/")
+    {
         return "pivots";
     }
-    if part_lower.starts_with("xl/charts/") {
+    if starts_with_ignore_ascii_case(part, "xl/charts/") {
         return "charts";
     }
-    if part_lower.starts_with("xl/drawings/") {
+    if starts_with_ignore_ascii_case(part, "xl/drawings/") {
         return "drawings";
     }
-    if part_lower.starts_with("xl/tables/") {
+    if starts_with_ignore_ascii_case(part, "xl/tables/") {
         return "tables";
     }
-    if part_lower.starts_with("xl/externallinks/") {
+    if starts_with_ignore_ascii_case(part, "xl/externallinks/") {
         return "external_links";
     }
-    if part_lower.starts_with("xl/media/") {
+    if starts_with_ignore_ascii_case(part, "xl/media/") {
         return "media";
     }
-    if part_lower.starts_with("docprops/") {
+    if starts_with_ignore_ascii_case(part, "docprops/") {
         return "doc_props";
     }
     "other"
@@ -1209,7 +1268,11 @@ fn normalize_opc_part_name(part: &str) -> String {
 fn normalize_opc_path(path: &str) -> String {
     // Keep in sync with `xlsx-diff`'s internal normalization logic so ignore rules and part-level
     // stats remain stable and match the diff report semantics.
-    let normalized = path.replace('\\', "/");
+    let normalized: Cow<'_, str> = if path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
+    };
     let mut out: Vec<&str> = Vec::new();
     for segment in normalized.split('/') {
         match segment {
@@ -1225,8 +1288,12 @@ fn normalize_opc_path(path: &str) -> String {
 
 fn normalize_ignore_pattern(input: &str) -> String {
     let trimmed = input.trim();
-    let normalized = trimmed.replace('\\', "/");
-    normalized.trim_start_matches('/').to_string()
+    let trimmed = trimmed.trim_start_matches(|c| c == '/' || c == '\\');
+    if trimmed.contains('\\') {
+        trimmed.replace('\\', "/")
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn validate_ignore_globs(ignore_globs: &[String]) -> Result<()> {
@@ -1327,7 +1394,7 @@ fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<Reca
 
         let mut formulas: Vec<(String, String)> = Vec::new();
         for (cell_ref, cell) in cells {
-            let a1 = cell_ref.to_a1();
+            let a1 = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
             if let Some(formula) = &cell.formula {
                 formulas.push((a1, formula.clone()));
                 continue;
@@ -1356,7 +1423,7 @@ fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<Reca
         let mut mismatch_count = 0usize;
 
         for (cell_ref, baseline_value) in formula_cells {
-            let addr = cell_ref.to_a1();
+            let addr = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
             let computed_value = engine.get_cell_value(&sheet.name, &addr);
 
             // Hash baseline vs computed in a stable, typed encoding.

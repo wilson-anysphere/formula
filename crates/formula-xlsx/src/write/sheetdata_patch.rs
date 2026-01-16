@@ -952,7 +952,8 @@ fn write_updated_cell<W: Write>(
         }
     }
 
-    let a1 = cell_ref.to_a1();
+    let mut a1 = String::new();
+    formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
     // `CellMeta.vm` is captured from the original file to allow lossless round-trip (including
     // preserving formatting like leading zeros). For existing cells we *also* have access to the
@@ -1546,7 +1547,7 @@ fn extract_unknown_row_attr_segments(e: &BytesStart<'_>) -> Vec<Vec<u8>> {
     // without preserving unknown attrs).
     const MANAGED: [&[u8]; 6] = [b"r", b"ht", b"customHeight", b"hidden", b"s", b"customFormat"];
 
-    let raw = e.as_ref();
+    let raw: &[u8] = e.as_ref();
     let name_len = e.name().as_ref().len();
     if raw.len() < name_len {
         return Vec::new();

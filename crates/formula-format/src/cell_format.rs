@@ -736,8 +736,7 @@ fn tokenize_datetime_pattern(pattern: &str) -> Vec<DateTimeToken> {
                     }
                     content.push(c);
                 }
-                let lower = content.to_ascii_lowercase();
-                if let Some(tok) = parse_elapsed_time_token(&lower) {
+                if let Some(tok) = parse_elapsed_time_token(&content) {
                     flush_literal(&mut literal_buf, &mut tokens);
                     tokens.push(tok);
                 }
@@ -756,15 +755,20 @@ fn tokenize_datetime_pattern(pattern: &str) -> Vec<DateTimeToken> {
                     }
                 }
 
-                let lower = probe.to_ascii_lowercase();
-                if lower.starts_with("am/pm") {
+                if probe
+                    .get(.."am/pm".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("am/pm"))
+                {
                     // Consume `M/PM` (4 chars).
                     for _ in 0..4 {
                         chars.next();
                     }
                     flush_literal(&mut literal_buf, &mut tokens);
                     tokens.push(DateTimeToken::AmPmLong);
-                } else if lower.starts_with("a/p") {
+                } else if probe
+                    .get(.."a/p".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("a/p"))
+                {
                     // Consume `/P` (2 chars).
                     for _ in 0..2 {
                         chars.next();
@@ -826,18 +830,18 @@ fn tokenize_datetime_pattern(pattern: &str) -> Vec<DateTimeToken> {
     tokens
 }
 
-fn parse_elapsed_time_token(lower: &str) -> Option<DateTimeToken> {
-    if lower.is_empty() {
+fn parse_elapsed_time_token(token: &str) -> Option<DateTimeToken> {
+    if token.is_empty() {
         return None;
     }
-    let count = lower.chars().count();
-    if lower.chars().all(|c| c == 'h') {
+    let count = token.chars().count();
+    if token.chars().all(|c| matches!(c, 'h' | 'H')) {
         return Some(DateTimeToken::ElapsedHours(count));
     }
-    if lower.chars().all(|c| c == 'm') {
+    if token.chars().all(|c| matches!(c, 'm' | 'M')) {
         return Some(DateTimeToken::ElapsedMinutes(count));
     }
-    if lower.chars().all(|c| c == 's') {
+    if token.chars().all(|c| matches!(c, 's' | 'S')) {
         return Some(DateTimeToken::ElapsedSeconds(count));
     }
     None

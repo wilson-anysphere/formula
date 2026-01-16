@@ -2,9 +2,13 @@ use crate::errors::biff_error_literal;
 use crate::function_ids::{function_id_to_name, function_spec_from_id};
 use crate::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use crate::structured_refs::{
-    format_structured_ref, structured_ref_is_single_cell, StructuredRefItem,
+    estimated_structured_ref_len, push_structured_ref, structured_ref_is_single_cell, StructuredRefItem,
 };
-use formula_model::{push_column_label, push_excel_single_quoted_identifier, CellRef};
+use core::fmt::Write as _;
+use formula_model::{
+    push_a1_cell_area_row1, push_a1_cell_ref_row1, push_escaped_excel_double_quote_char,
+    push_excel_single_quoted_identifier,
+};
 
 #[cfg(feature = "encode")]
 use crate::errors::biff_error_code_from_literal;
@@ -182,10 +186,19 @@ fn decode_array_constant(
     let cols = cols_minus1.saturating_add(1);
     let rows = rows_minus1.saturating_add(1);
 
-    let mut row_texts = Vec::with_capacity(rows);
-    for _ in 0..rows {
-        let mut col_texts = Vec::with_capacity(cols);
-        for _ in 0..cols {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    out.push('{');
+
+    for row in 0..rows {
+        if row > 0 {
+            out.push(';');
+        }
+        for col in 0..cols {
+            if col > 0 {
+                out.push(',');
+            }
             if rgcb.len().saturating_sub(i) < 1 {
                 return Err(DecodeRgceError::UnexpectedEof {
                     offset: ptg_offset,
@@ -197,7 +210,7 @@ fn decode_array_constant(
             let ty = rgcb[i];
             i += 1;
             match ty {
-                0x00 => col_texts.push(String::new()),
+                0x00 => {}
                 0x01 => {
                     if rgcb.len().saturating_sub(i) < 8 {
                         return Err(DecodeRgceError::UnexpectedEof {
@@ -210,7 +223,8 @@ fn decode_array_constant(
                     let mut bytes = [0u8; 8];
                     bytes.copy_from_slice(&rgcb[i..i + 8]);
                     i += 8;
-                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                    write!(&mut out, "{}", f64::from_le_bytes(bytes))
+                        .expect("infallible write to String");
                 }
                 0x02 => {
                     if rgcb.len().saturating_sub(i) < 2 {
@@ -235,17 +249,22 @@ fn decode_array_constant(
                     let raw = &rgcb[i..i + byte_len];
                     i += byte_len;
 
-                    let mut units = Vec::with_capacity(cch);
-                    for chunk in raw.chunks_exact(2) {
-                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    out.push('"');
+                    let iter = raw
+                        .chunks_exact(2)
+                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                    for decoded in std::char::decode_utf16(iter) {
+                        match decoded {
+                            Ok(ch) => push_escaped_excel_double_quote_char(&mut out, ch),
+                            Err(_) => {
+                                return Err(DecodeRgceError::InvalidUtf16 {
+                                    offset: ptg_offset,
+                                    ptg,
+                                });
+                            }
+                        }
                     }
-                    let s =
-                        String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16 {
-                            offset: ptg_offset,
-                            ptg,
-                        })?;
-                    let escaped = s.replace('"', "\"\"");
-                    col_texts.push(format!("\"{escaped}\""));
+                    out.push('"');
                 }
                 0x04 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -258,7 +277,7 @@ fn decode_array_constant(
                     }
                     let b = rgcb[i];
                     i += 1;
-                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                    out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
                 0x10 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -272,7 +291,7 @@ fn decode_array_constant(
                     let code = rgcb[i];
                     i += 1;
                     let text = biff_error_literal(code).unwrap_or("#UNKNOWN!");
-                    col_texts.push(text.to_string());
+                    out.push_str(text);
                 }
                 _ => {
                     // Unknown array constant element type.
@@ -283,11 +302,11 @@ fn decode_array_constant(
                 }
             }
         }
-        row_texts.push(col_texts.join(","));
     }
 
     *pos = i;
-    Ok(format!("{{{}}}", row_texts.join(";")))
+    out.push('}');
+    Ok(out)
 }
 
 /// Scan a nested BIFF12 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
@@ -756,6 +775,21 @@ fn decode_rgce_impl(
     let mut last_ptg_offset = 0usize;
     let mut last_ptg = rgce[0];
 
+    fn parenthesize(mut text: String) -> String {
+        text.reserve(2);
+        text.insert(0, '(');
+        text.push(')');
+        text
+    }
+
+    fn maybe_parenthesize(expr: ExprFragment, required_prec: u8) -> String {
+        if expr.precedence < required_prec && !expr.is_missing {
+            parenthesize(expr.text)
+        } else {
+            expr.text
+        }
+    }
+
     while i < rgce.len() {
         let ptg_offset = i;
         let ptg = rgce[i];
@@ -786,16 +820,9 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
 
-                let left_s = if left.precedence < prec && !left.is_missing {
-                    format!("({})", left.text)
-                } else {
-                    left.text
-                };
-                let right_s = if right.precedence < prec && !right.is_missing {
-                    format!("({})", right.text)
-                } else {
-                    right.text
-                };
+                let contains_union = left.contains_union || right.contains_union || ptg == 0x10;
+                let left_s = maybe_parenthesize(left, prec);
+                let right_s = maybe_parenthesize(right, prec);
 
                 let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
@@ -805,7 +832,7 @@ fn decode_rgce_impl(
                 stack.push(ExprFragment {
                     text,
                     precedence: prec,
-                    contains_union: left.contains_union || right.contains_union || ptg == 0x10,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -817,15 +844,15 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                 })?;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let inner = maybe_parenthesize(expr, prec);
+                let mut text = String::with_capacity(op.len() + inner.len());
+                text.push_str(op);
+                text.push_str(&inner);
                 stack.push(ExprFragment {
-                    text: format!("{op}{inner}"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -836,15 +863,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                 })?;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('%');
                 stack.push(ExprFragment {
-                    text: format!("{inner}%"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -855,15 +880,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                 })?;
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('#');
                 stack.push(ExprFragment {
-                    text: format!("{inner}#"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -874,7 +897,7 @@ fn decode_rgce_impl(
                     ptg,
                 })?;
                 stack.push(ExprFragment {
-                    text: format!("({})", expr.text),
+                    text: parenthesize(expr.text),
                     precedence: 100,
                     contains_union: expr.contains_union,
                     is_missing: false,
@@ -908,16 +931,22 @@ fn decode_rgce_impl(
                 let raw = &rgce[i..i + byte_len];
                 i += byte_len;
 
-                let mut units = Vec::with_capacity(cch);
-                for chunk in raw.chunks_exact(2) {
-                    units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-                }
                 // BIFF strings are UTF-16LE, but real-world files can contain malformed UTF-16.
                 // Stay best-effort (matching `formula-xlsb`) by decoding lossily instead of
                 // aborting the entire formula decode.
-                let s = String::from_utf16_lossy(&units);
-                let escaped = s.replace('"', "\"\"");
-                stack.push(ExprFragment::new(format!("\"{escaped}\"")));
+                let mut lit = String::with_capacity(cch.saturating_add(2));
+                lit.push('"');
+                let iter = raw
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                for decoded in std::char::decode_utf16(iter) {
+                    match decoded {
+                        Ok(ch) => push_escaped_excel_double_quote_char(&mut lit, ch),
+                        Err(_) => push_escaped_excel_double_quote_char(&mut lit, '\u{FFFD}'),
+                    }
+                }
+                lit.push('"');
+                stack.push(ExprFragment::new(lit));
             }
             // PtgExtend / PtgExtendV / PtgExtendA.
             //
@@ -987,16 +1016,20 @@ fn decode_rgce_impl(
                             _ => Some(table_name.as_str()),
                         };
 
-                        let mut text = format_structured_ref(display_table_name, item, &columns);
-
                         let mut precedence = 100;
                         let is_value_class = ptg == 0x38;
-                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                        let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
+                        let mut text = String::with_capacity(
+                            estimated_structured_ref_len(display_table_name, item, &columns)
+                                .saturating_add(needs_at as usize),
+                        );
+                        if needs_at {
                             // Value-class list tokens represent legacy implicit intersection,
                             // mirroring PtgAreaV behavior.
-                            text = format!("@{text}");
                             precedence = 70;
+                            text.push('@');
                         }
+                        push_structured_ref(display_table_name, item, &columns, &mut text);
 
                         stack.push(ExprFragment {
                             text,
@@ -1348,7 +1381,7 @@ fn decode_rgce_impl(
                     text.push('@');
                     precedence = 70;
                 }
-                text.push_str(&format!("Name_{name_id}"));
+                let _ = write!(text, "Name_{name_id}");
 
                 stack.push(ExprFragment {
                     text,
@@ -1385,7 +1418,7 @@ fn decode_rgce_impl(
                     text.push('@');
                     precedence = 70;
                 }
-                text.push_str(&format!("ExternName_IXTI{ixti}_N{name_index}"));
+                let _ = write!(text, "ExternName_IXTI{ixti}_N{name_index}");
 
                 stack.push(ExprFragment {
                     text,
@@ -1411,15 +1444,10 @@ fn decode_rgce_impl(
                 let flags = rgce[i + 5];
                 i += 6;
 
+                let abs_col = flags & 0x80 == 0;
+                let abs_row = flags & 0x40 == 0;
                 let mut text = String::new();
-                if flags & 0x80 == 0 {
-                    text.push('$');
-                }
-                push_column_label(col, &mut text);
-                if flags & 0x40 == 0 {
-                    text.push('$');
-                }
-                text.push_str(&row.to_string());
+                push_a1_cell_ref_row1(row, col, abs_col, abs_row, &mut text);
                 stack.push(ExprFragment::new(text));
             }
             // PtgArea
@@ -1447,25 +1475,10 @@ fn decode_rgce_impl(
                 let flags2 = rgce[i + 11];
                 i += 12;
 
-                let mut start = String::new();
-                if flags1 & 0x80 == 0 {
-                    start.push('$');
-                }
-                push_column_label(col1, &mut start);
-                if flags1 & 0x40 == 0 {
-                    start.push('$');
-                }
-                start.push_str(&row1.to_string());
-
-                let mut end = String::new();
-                if flags2 & 0x80 == 0 {
-                    end.push('$');
-                }
-                push_column_label(col2, &mut end);
-                if flags2 & 0x40 == 0 {
-                    end.push('$');
-                }
-                end.push_str(&row2.to_string());
+                let abs_col1 = flags1 & 0x80 == 0;
+                let abs_row1 = flags1 & 0x40 == 0;
+                let abs_col2 = flags2 & 0x80 == 0;
+                let abs_row2 = flags2 & 0x40 == 0;
 
                 let is_single_cell = row1 == row2 && col1 == col2;
                 let is_value_class = (ptg & 0x60) == 0x40;
@@ -1475,13 +1488,17 @@ fn decode_rgce_impl(
                     // Preserve legacy implicit intersection semantics.
                     text.push('@');
                 }
-                if is_single_cell {
-                    text.push_str(&start);
-                } else {
-                    text.push_str(&start);
-                    text.push(':');
-                    text.push_str(&end);
-                }
+                push_a1_cell_area_row1(
+                    row1,
+                    col1,
+                    abs_col1,
+                    abs_row1,
+                    row2,
+                    col2,
+                    abs_col2,
+                    abs_row2,
+                    &mut text,
+                );
 
                 let mut frag = ExprFragment::new(text);
                 if is_value_class && !is_single_cell {
@@ -1582,10 +1599,9 @@ fn decode_rgce_impl(
                 if abs_row0 < 0 || abs_row0 > MAX_ROW0 || abs_col0 < 0 || abs_col0 > MAX_COL0 {
                     stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
-                    stack.push(ExprFragment::new(format_cell_ref_a1(
-                        abs_row0 as u32,
-                        abs_col0 as u32,
-                    )));
+                    let mut text = String::new();
+                    push_cell_ref_a1(&mut text, abs_row0 as u32, abs_col0 as u32);
+                    stack.push(ExprFragment::new(text));
                 }
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
@@ -1632,9 +1648,6 @@ fn decode_rgce_impl(
                 {
                     stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
-                    let start = format_cell_ref_a1(abs_row1 as u32, abs_col1 as u32);
-                    let end = format_cell_ref_a1(abs_row2 as u32, abs_col2 as u32);
-
                     let is_single_cell = abs_row1 == abs_row2 && abs_col1 == abs_col2;
                     let is_value_class = (ptg & 0x60) == 0x40;
 
@@ -1643,12 +1656,12 @@ fn decode_rgce_impl(
                         // Preserve legacy implicit intersection semantics.
                         text.push('@');
                     }
-                    if is_single_cell {
-                        text.push_str(&start);
-                    } else {
-                        text.push_str(&start);
+                    let (row1, col1) = (abs_row1 as u32, abs_col1 as u32);
+                    let (row2, col2) = (abs_row2 as u32, abs_col2 as u32);
+                    push_cell_ref_a1(&mut text, row1, col1);
+                    if !is_single_cell {
                         text.push(':');
-                        text.push_str(&end);
+                        push_cell_ref_a1(&mut text, row2, col2);
                     }
 
                     let mut frag = ExprFragment::new(text);
@@ -1675,8 +1688,9 @@ fn decode_rgce_impl(
                 i += 8;
 
                 let prefix = format_sheet_placeholder(ixti);
-                let cell = format_cell_ref_from_field(row0, col_field);
-                stack.push(ExprFragment::new(format!("{prefix}{cell}")));
+                let mut text = prefix;
+                push_cell_ref_from_field(&mut text, row0, col_field);
+                stack.push(ExprFragment::new(text));
             }
             // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
@@ -1698,8 +1712,6 @@ fn decode_rgce_impl(
                 i += 14;
 
                 let prefix = format_sheet_placeholder(ixti);
-                let a = format_cell_ref_from_field(row_first0, col_first);
-                let b = format_cell_ref_from_field(row_last0, col_last);
 
                 let is_single_cell =
                     row_first0 == row_last0 && (col_first & 0x3FFF) == (col_last & 0x3FFF);
@@ -1713,11 +1725,11 @@ fn decode_rgce_impl(
                 }
                 text.push_str(&prefix);
                 if is_single_cell {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                 } else {
-                    text.push_str(&a);
+                    push_cell_ref_from_field(&mut text, row_first0, col_first);
                     text.push(':');
-                    text.push_str(&b);
+                    push_cell_ref_from_field(&mut text, row_last0, col_last);
                 }
 
                 stack.push(ExprFragment {
@@ -1795,26 +1807,17 @@ fn format_sheet_placeholder(ixti: u16) -> String {
     out
 }
 
-fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
+fn push_cell_ref_from_field(out: &mut String, row0: u32, col_field: u16) {
     let row1 = (row0 as u64).saturating_add(1);
     let col = (col_field & 0x3FFF) as u32;
     let col_relative = (col_field & 0x8000) == 0x8000;
     let row_relative = (col_field & 0x4000) == 0x4000;
-
-    let mut out = String::new();
-    if !col_relative {
-        out.push('$');
-    }
-    push_column_label(col, &mut out);
-    if !row_relative {
-        out.push('$');
-    }
-    out.push_str(&row1.to_string());
-    out
+    push_a1_cell_ref_row1(row1, col, !col_relative, !row_relative, out);
 }
 
-fn format_cell_ref_a1(row0: u32, col0: u32) -> String {
-    CellRef::new(row0, col0).to_a1()
+fn push_cell_ref_a1(out: &mut String, row0: u32, col0: u32) {
+    // Best-effort absolute coordinates: no `$` markers.
+    push_a1_cell_ref_row1(u64::from(row0) + 1, col0, false, false, out);
 }
 
 fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
@@ -1994,6 +1997,29 @@ pub fn encode_rgce(formula: &str) -> Result<Vec<u8>, EncodeRgceError> {
 }
 
 #[cfg(feature = "encode")]
+fn push_utf16le_u16_len_with_rollback(
+    out: &mut Vec<u8>,
+    start_len: usize,
+    s: &str,
+    err_msg: &'static str,
+) -> Result<(), EncodeRgceError> {
+    let len_pos = out.len();
+    out.extend_from_slice(&0u16.to_le_bytes()); // backpatched
+
+    let mut cch: u16 = 0;
+    for unit in s.encode_utf16() {
+        cch = cch.checked_add(1).ok_or_else(|| {
+            out.truncate(start_len);
+            EncodeRgceError::Unsupported(err_msg)
+        })?;
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    out[len_pos..len_pos + 2].copy_from_slice(&cch.to_le_bytes());
+    Ok(())
+}
+
+#[cfg(feature = "encode")]
 fn encode_expr(
     expr: &formula_engine::Expr,
     rgce: &mut Vec<u8>,
@@ -2015,16 +2041,9 @@ fn encode_expr(
             }
         }
         Expr::String(s) => {
+            let start_len = rgce.len();
             rgce.push(0x17); // PtgStr
-            let units: Vec<u16> = s.encode_utf16().collect();
-            let cch: u16 = units
-                .len()
-                .try_into()
-                .map_err(|_| EncodeRgceError::Unsupported("string literal too long"))?;
-            rgce.extend_from_slice(&cch.to_le_bytes());
-            for u in units {
-                rgce.extend_from_slice(&u.to_le_bytes());
-            }
+            push_utf16le_u16_len_with_rollback(rgce, start_len, s, "string literal too long")?;
         }
         Expr::Boolean(b) => {
             rgce.push(0x1D); // PtgBool
@@ -2330,15 +2349,14 @@ fn encode_array_constant(
                     rgcb.extend_from_slice(&n.to_le_bytes());
                 }
                 Expr::String(s) => {
+                    let start_len = rgcb.len();
                     rgcb.push(0x02);
-                    let units: Vec<u16> = s.encode_utf16().collect();
-                    let cch: u16 = units.len().try_into().map_err(|_| {
-                        EncodeRgceError::Unsupported("array string literal too long")
-                    })?;
-                    rgcb.extend_from_slice(&cch.to_le_bytes());
-                    for u in units {
-                        rgcb.extend_from_slice(&u.to_le_bytes());
-                    }
+                    push_utf16le_u16_len_with_rollback(
+                        rgcb,
+                        start_len,
+                        s,
+                        "array string literal too long",
+                    )?;
                 }
                 Expr::Boolean(b) => {
                     rgcb.push(0x04);

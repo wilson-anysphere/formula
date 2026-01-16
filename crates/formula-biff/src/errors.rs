@@ -50,23 +50,50 @@ pub fn biff_error_literal(code: u8) -> Option<&'static str> {
 ///
 /// Returns `None` for unknown/unsupported literals.
 pub fn biff_error_code_from_literal(literal: &str) -> Option<u8> {
-  match literal.trim().to_ascii_uppercase().as_str() {
-    "#NULL!" => Some(0x00),
-    "#DIV/0!" => Some(0x07),
-    "#VALUE!" => Some(0x0F),
-    "#REF!" => Some(0x17),
-    "#NAME?" => Some(0x1D),
-    "#NUM!" => Some(0x24),
-    "#N/A" | "#N/A!" => Some(0x2A),
-    "#GETTING_DATA" => Some(0x2B),
-    "#SPILL!" => Some(0x2C),
-    "#CALC!" => Some(0x2D),
-    "#FIELD!" => Some(0x2E),
-    "#CONNECT!" => Some(0x2F),
-    "#BLOCKED!" => Some(0x30),
-    "#UNKNOWN!" => Some(0x31),
-    _ => None,
+  let lit = literal.trim();
+  if lit.eq_ignore_ascii_case("#NULL!") {
+    return Some(0x00);
   }
+  if lit.eq_ignore_ascii_case("#DIV/0!") {
+    return Some(0x07);
+  }
+  if lit.eq_ignore_ascii_case("#VALUE!") {
+    return Some(0x0F);
+  }
+  if lit.eq_ignore_ascii_case("#REF!") {
+    return Some(0x17);
+  }
+  if lit.eq_ignore_ascii_case("#NAME?") {
+    return Some(0x1D);
+  }
+  if lit.eq_ignore_ascii_case("#NUM!") {
+    return Some(0x24);
+  }
+  if lit.eq_ignore_ascii_case("#N/A") || lit.eq_ignore_ascii_case("#N/A!") {
+    return Some(0x2A);
+  }
+  if lit.eq_ignore_ascii_case("#GETTING_DATA") {
+    return Some(0x2B);
+  }
+  if lit.eq_ignore_ascii_case("#SPILL!") {
+    return Some(0x2C);
+  }
+  if lit.eq_ignore_ascii_case("#CALC!") {
+    return Some(0x2D);
+  }
+  if lit.eq_ignore_ascii_case("#FIELD!") {
+    return Some(0x2E);
+  }
+  if lit.eq_ignore_ascii_case("#CONNECT!") {
+    return Some(0x2F);
+  }
+  if lit.eq_ignore_ascii_case("#BLOCKED!") {
+    return Some(0x30);
+  }
+  if lit.eq_ignore_ascii_case("#UNKNOWN!") {
+    return Some(0x31);
+  }
+  None
 }
 
 #[cfg(test)]

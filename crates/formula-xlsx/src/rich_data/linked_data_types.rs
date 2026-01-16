@@ -261,12 +261,8 @@ fn parse_rich_value_store(pkg: &XlsxPackage) -> Result<Vec<RichValueScalarRecord
 }
 
 fn find_part_case_insensitive<'a>(pkg: &'a XlsxPackage, desired: &str) -> Option<&'a str> {
-    let desired = desired.strip_prefix('/').unwrap_or(desired);
-    let desired_lower = desired.to_ascii_lowercase();
-    pkg.part_names().find(|name| {
-        let normalized = name.strip_prefix('/').unwrap_or(name);
-        normalized.to_ascii_lowercase() == desired_lower
-    })
+    pkg.part_names()
+        .find(|name| crate::zip_util::zip_part_names_equivalent(name, desired))
 }
 
 fn find_rich_value_types_table(
@@ -305,7 +301,7 @@ fn find_rich_value_types_table(
     for part_name in pkg.part_names().filter(|name| {
         name.starts_with("xl/richData/")
             && !name.contains("/_rels/")
-            && name.to_ascii_lowercase().ends_with(".xml")
+            && crate::ascii::ends_with_ignore_case(name, ".xml")
     }) {
         let Some(bytes) = pkg.part(part_name) else {
             continue;
@@ -354,7 +350,7 @@ fn find_rich_value_structure_table(
     for part_name in pkg.part_names().filter(|name| {
         name.starts_with("xl/richData/")
             && !name.contains("/_rels/")
-            && name.to_ascii_lowercase().ends_with(".xml")
+            && crate::ascii::ends_with_ignore_case(name, ".xml")
     }) {
         let Some(bytes) = pkg.part(part_name) else {
             continue;

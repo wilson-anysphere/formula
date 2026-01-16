@@ -122,80 +122,82 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let lower = buf.to_ascii_lowercase();
-        // VBA keywords we care about. Use keyword token to simplify parsing.
-        let is_keyword = matches!(
-            lower.as_str(),
-            "sub"
-                | "function"
-                | "end"
-                | "if"
-                | "then"
-                | "else"
-                | "elseif"
-                | "for"
-                | "each"
-                | "in"
-                | "to"
-                | "step"
-                | "next"
-                | "dim"
-                | "const"
-                | "as"
-                | "integer"
-                | "long"
-                | "string"
-                | "date"
-                | "boolean"
-                | "is"
-                | "byval"
-                | "byref"
-                | "set"
-                | "on"
-                | "error"
-                | "resume"
-                | "goto"
-                | "exit"
-                | "do"
-                | "while"
-                | "loop"
-                | "until"
-                | "wend"
-                | "select"
-                | "case"
-                | "with"
-                | "call"
-                | "true"
-                | "false"
-                | "nothing"
-                | "and"
-                | "or"
-                | "mod"
-                | "not"
-                | "new"
-                | "rem"
-                | "private"
-                | "public"
-                | "option"
-                | "attribute"
-                | "explicit"
-                | "debug"
-                | "print"
-        );
-
-        if is_keyword {
-            Ok(Token {
-                kind: TokenKind::Keyword(lower),
-                line,
-                col,
-            })
-        } else {
-            Ok(Token {
-                kind: TokenKind::Identifier(buf),
-                line,
-                col,
-            })
+        // VBA keywords we care about. Use keyword tokens to simplify parsing.
+        //
+        // Avoid allocating a lowercased copy for all identifiers: only lower-case in place when we
+        // actually emit a keyword token.
+        fn is_keyword(s: &str) -> bool {
+            s.eq_ignore_ascii_case("sub")
+                || s.eq_ignore_ascii_case("function")
+                || s.eq_ignore_ascii_case("end")
+                || s.eq_ignore_ascii_case("if")
+                || s.eq_ignore_ascii_case("then")
+                || s.eq_ignore_ascii_case("else")
+                || s.eq_ignore_ascii_case("elseif")
+                || s.eq_ignore_ascii_case("for")
+                || s.eq_ignore_ascii_case("each")
+                || s.eq_ignore_ascii_case("in")
+                || s.eq_ignore_ascii_case("to")
+                || s.eq_ignore_ascii_case("step")
+                || s.eq_ignore_ascii_case("next")
+                || s.eq_ignore_ascii_case("dim")
+                || s.eq_ignore_ascii_case("const")
+                || s.eq_ignore_ascii_case("as")
+                || s.eq_ignore_ascii_case("integer")
+                || s.eq_ignore_ascii_case("long")
+                || s.eq_ignore_ascii_case("string")
+                || s.eq_ignore_ascii_case("date")
+                || s.eq_ignore_ascii_case("boolean")
+                || s.eq_ignore_ascii_case("is")
+                || s.eq_ignore_ascii_case("byval")
+                || s.eq_ignore_ascii_case("byref")
+                || s.eq_ignore_ascii_case("set")
+                || s.eq_ignore_ascii_case("on")
+                || s.eq_ignore_ascii_case("error")
+                || s.eq_ignore_ascii_case("resume")
+                || s.eq_ignore_ascii_case("goto")
+                || s.eq_ignore_ascii_case("exit")
+                || s.eq_ignore_ascii_case("do")
+                || s.eq_ignore_ascii_case("while")
+                || s.eq_ignore_ascii_case("loop")
+                || s.eq_ignore_ascii_case("until")
+                || s.eq_ignore_ascii_case("wend")
+                || s.eq_ignore_ascii_case("select")
+                || s.eq_ignore_ascii_case("case")
+                || s.eq_ignore_ascii_case("with")
+                || s.eq_ignore_ascii_case("call")
+                || s.eq_ignore_ascii_case("true")
+                || s.eq_ignore_ascii_case("false")
+                || s.eq_ignore_ascii_case("nothing")
+                || s.eq_ignore_ascii_case("and")
+                || s.eq_ignore_ascii_case("or")
+                || s.eq_ignore_ascii_case("mod")
+                || s.eq_ignore_ascii_case("not")
+                || s.eq_ignore_ascii_case("new")
+                || s.eq_ignore_ascii_case("rem")
+                || s.eq_ignore_ascii_case("private")
+                || s.eq_ignore_ascii_case("public")
+                || s.eq_ignore_ascii_case("option")
+                || s.eq_ignore_ascii_case("attribute")
+                || s.eq_ignore_ascii_case("explicit")
+                || s.eq_ignore_ascii_case("debug")
+                || s.eq_ignore_ascii_case("print")
         }
+
+        if is_keyword(&buf) {
+            buf.make_ascii_lowercase();
+            return Ok(Token {
+                kind: TokenKind::Keyword(buf),
+                line,
+                col,
+            });
+        }
+
+        Ok(Token {
+            kind: TokenKind::Identifier(buf),
+            line,
+            col,
+        })
     }
 
     fn lex_string(&mut self, line: usize, col: usize) -> Result<Token, VbaError> {

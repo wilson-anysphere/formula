@@ -510,6 +510,14 @@ pub fn function_name_to_id(name: &str) -> Option<u16> {
     crate::ftab::function_id_from_name(name)
 }
 
+/// Like [`function_name_to_id`], but assumes `name` is already ASCII-uppercase.
+///
+/// This exists to avoid redundant `to_ascii_uppercase()` allocations in hot paths where the
+/// caller already maintains an uppercase function name.
+pub fn function_name_to_id_uppercase(name: &str) -> Option<u16> {
+    crate::ftab::function_id_from_uppercase_name(name)
+}
+
 pub fn function_id_to_name(id: u16) -> Option<&'static str> {
     crate::ftab::function_name_from_id(id)
 }
@@ -530,17 +538,29 @@ pub fn function_spec_from_id(id: u16) -> Option<FunctionSpec> {
 
 #[cfg(feature = "encode")]
 pub(crate) fn function_spec_from_name(name: &str) -> Option<FunctionSpec> {
-    let upper = name.trim().to_ascii_uppercase();
-    if upper.is_empty() {
+    let name = name.trim();
+    if name.is_empty() {
         return None;
     }
+
+    let mut buf = [0u8; 64];
+    let upper_owned: String;
+    let upper: &str = if name.len() <= buf.len() {
+        for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+            *dst = src.to_ascii_uppercase();
+        }
+        std::str::from_utf8(&buf[..name.len()]).expect("ASCII uppercasing preserves UTF-8")
+    } else {
+        upper_owned = name.to_ascii_uppercase();
+        &upper_owned
+    };
 
     // Encode supports only true built-in FTAB entries. `function_id_from_name` also
     // returns `0x00FF` (USER) for forward-compat `_xlfn.` functions; reject those by
     // ensuring the canonical FTAB name matches the requested (possibly `_xlfn.`-stripped)
     // name.
-    let normalized = upper.strip_prefix("_XLFN.").unwrap_or(&upper);
-    let id = crate::ftab::function_id_from_name(&upper)?;
+    let normalized = upper.strip_prefix("_XLFN.").unwrap_or(upper);
+    let id = crate::ftab::function_id_from_uppercase_name(upper)?;
     let canonical = crate::ftab::function_name_from_id(id)?;
     if canonical != normalized {
         return None;

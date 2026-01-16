@@ -2088,7 +2088,8 @@ fn write_cell_patch(
     clear_cached_values_on_formula_change: bool,
 ) -> Result<bool, XlsxError> {
     let cell_ref = CellRef::new(row_num - 1, col);
-    let a1 = cell_ref.to_a1();
+    let mut a1 = String::new();
+    formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
 
     let vm_override = patch.vm_override();
     let cm_override = patch.cm_override();
@@ -2360,7 +2361,8 @@ fn patch_cell_element(
         c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
     }
     if !has_r {
-        let a1 = cell_ref.to_a1();
+        let mut a1 = String::new();
+        formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
         c.push_attribute(("r", a1.as_str()));
     }
 
@@ -3629,13 +3631,17 @@ fn parse_dimension_ref(ref_str: &str) -> Option<(u32, u32, u32, u32)> {
 }
 
 fn format_dimension(min_r: u32, min_c: u32, max_r: u32, max_c: u32) -> String {
-    let start = CellRef::new(min_r.saturating_sub(1), min_c.saturating_sub(1)).to_a1();
-    let end = CellRef::new(max_r.saturating_sub(1), max_c.saturating_sub(1)).to_a1();
-    if start == end {
-        start
-    } else {
-        format!("{start}:{end}")
-    }
+    let mut out = String::new();
+    formula_model::push_a1_cell_range(
+        min_r.saturating_sub(1),
+        min_c.saturating_sub(1),
+        max_r.saturating_sub(1),
+        max_c.saturating_sub(1),
+        false,
+        false,
+        &mut out,
+    );
+    out
 }
 
 #[cfg(test)]

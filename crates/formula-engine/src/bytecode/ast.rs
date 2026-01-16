@@ -1,4 +1,5 @@
 use super::value::{CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, Value};
+use formula_model::column_label_to_index_lenient;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -140,8 +141,22 @@ pub enum Function {
 
 impl Function {
     pub fn from_name(name: &str) -> Self {
+        let mut buf = [0u8; 64];
+        if name.len() <= buf.len() {
+            for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+                *dst = src.to_ascii_uppercase();
+            }
+            let upper = std::str::from_utf8(&buf[..name.len()])
+                .expect("ASCII uppercasing preserves UTF-8");
+            return Self::from_uppercase_name(upper);
+        }
+
         let upper = name.to_ascii_uppercase();
-        let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
+        Self::from_uppercase_name(&upper)
+    }
+
+    fn from_uppercase_name(upper: &str) -> Self {
+        let base = upper.strip_prefix("_XLFN.").unwrap_or(upper);
         match base {
             "_FIELDACCESS" => Function::FieldAccess,
             "LET" => Function::Let,
@@ -681,7 +696,9 @@ impl<'a> Parser<'a> {
     fn parse_string(&mut self) -> Result<Expr, ParseError> {
         debug_assert_eq!(self.peek_byte(), Some(b'"'));
         self.pos += 1;
-        let mut out = String::new();
+        // Keep bytes intact so UTF-8 content is preserved. We only interpret `"` (ASCII) for
+        // termination / `""` escaping.
+        let mut out: Vec<u8> = Vec::new();
         while let Some(b) = self.peek_byte() {
             self.pos += 1;
             match b {
@@ -689,12 +706,14 @@ impl<'a> Parser<'a> {
                     // Excel escapes quotes by doubling them.
                     if self.peek_byte() == Some(b'"') {
                         self.pos += 1;
-                        out.push('"');
+                        out.push(b'"');
                     } else {
-                        return Ok(Expr::Literal(Value::Text(Arc::from(out))));
+                        let text = String::from_utf8(out)
+                            .expect("string literal bytes come from valid UTF-8 input");
+                        return Ok(Expr::Literal(Value::Text(Arc::from(text))));
                     }
                 }
-                _ => out.push(b as char),
+                _ => out.push(b),
             }
         }
         Err(ParseError::UnterminatedString)
@@ -766,13 +785,15 @@ impl<'a> Parser<'a> {
             .map_err(|_| ParseError::UnexpectedToken(start))?;
         self.skip_ws();
 
-        let upper = ident.to_ascii_uppercase();
-        let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
-
         if self.peek_byte() == Some(b'(') {
             self.pos += 1;
             let mut args = self.parse_parenthesized_args()?;
-            if base == "LAMBDA" {
+            let base = if ident.len() >= 6 && ident[..6].eq_ignore_ascii_case("_xlfn.") {
+                &ident[6..]
+            } else {
+                ident
+            };
+            if base.eq_ignore_ascii_case("LAMBDA") {
                 if args.is_empty() {
                     return Err(ParseError::UnexpectedToken(start));
                 }
@@ -794,6 +815,8 @@ impl<'a> Parser<'a> {
             // If the name is not a known built-in function, interpret `name(args...)` as a call
             // expression on a lexical name reference (used for LET/LAMBDA invocation syntax).
             if matches!(func, Function::Unknown(_)) {
+                let mut upper = ident.to_string();
+                upper.make_ascii_uppercase();
                 return Ok(Expr::Call {
                     callee: Box::new(Expr::NameRef(Arc::from(upper))),
                     args,
@@ -803,13 +826,16 @@ impl<'a> Parser<'a> {
             return Ok(Expr::FuncCall { func, args });
         }
 
-        match upper.as_str() {
-            "TRUE" => return Ok(Expr::Literal(Value::Bool(true))),
-            "FALSE" => return Ok(Expr::Literal(Value::Bool(false))),
-            _ => {}
+        if ident.eq_ignore_ascii_case("TRUE") {
+            return Ok(Expr::Literal(Value::Bool(true)));
+        }
+        if ident.eq_ignore_ascii_case("FALSE") {
+            return Ok(Expr::Literal(Value::Bool(false)));
         }
 
         let Some(first) = parse_a1_ref(ident, self.origin) else {
+            let mut upper = ident.to_string();
+            upper.make_ascii_uppercase();
             return Ok(Expr::NameRef(Arc::from(upper)));
         };
         self.skip_ws();
@@ -935,16 +961,9 @@ fn parse_a1_ref(token: &str, origin: CellCoord) -> Option<Ref> {
 }
 
 fn col_letters_to_index(col: &str) -> Option<usize> {
-    let mut acc: usize = 0;
-    for b in col.bytes() {
-        let u = match b {
-            b'A'..=b'Z' => (b - b'A') as usize + 1,
-            b'a'..=b'z' => (b - b'a') as usize + 1,
-            _ => return None,
-        };
-        acc = acc.checked_mul(26)?.checked_add(u)?;
-    }
-    Some(acc - 1)
+    column_label_to_index_lenient(col)
+        .ok()
+        .and_then(|v| usize::try_from(v).ok())
 }
 
 #[cfg(test)]
@@ -1126,6 +1145,28 @@ mod tests {
                     Expr::Literal(Value::Text(Arc::from("c"))),
                 ],
             }
+        );
+    }
+
+    #[test]
+    fn parses_string_literals_with_utf8_content() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=\"é\"", origin).expect("parse"),
+            Expr::Literal(Value::Text(Arc::from("é")))
+        );
+        assert_eq!(
+            parse_formula("=\"π\"", origin).expect("parse"),
+            Expr::Literal(Value::Text(Arc::from("π")))
+        );
+        assert_eq!(
+            parse_formula("=\"💩\"", origin).expect("parse"),
+            Expr::Literal(Value::Text(Arc::from("💩")))
+        );
+        assert_eq!(
+            parse_formula("=\"a💩b\"", origin).expect("parse"),
+            Expr::Literal(Value::Text(Arc::from("a💩b")))
         );
     }
 

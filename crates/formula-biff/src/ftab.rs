@@ -560,14 +560,43 @@ pub fn function_name_from_id(id: u16) -> Option<&'static str> {
 /// - Returns [`FTAB_USER_DEFINED`] (255) for unknown `_xlfn.` names, as well as
 ///   known future-function names not present in `FTAB`.
 pub fn function_id_from_name(name: &str) -> Option<u16> {
-    let upper = name.trim().to_ascii_uppercase();
-    if upper.is_empty() {
+    let name = name.trim();
+    if name.is_empty() {
         return None;
     }
 
-    let (had_xlfn_prefix, normalized) = match upper.strip_prefix("_XLFN.") {
+    // Fast path: avoid heap allocation for typical (short) function names by uppercasing into a
+    // stack buffer. Uppercasing ASCII bytes preserves UTF-8 validity.
+    let mut buf = [0u8; 64];
+    if name.len() <= buf.len() {
+        for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
+            *dst = src.to_ascii_uppercase();
+        }
+        let upper = std::str::from_utf8(&buf[..name.len()]).expect("ASCII uppercasing preserves UTF-8");
+        return function_id_from_uppercase_name(upper);
+    }
+
+    let upper = name.to_ascii_uppercase();
+    function_id_from_uppercase_name(&upper)
+}
+
+/// Return the BIFF `iftab` id for an already-uppercase function name.
+///
+/// This avoids allocating a temporary `String` when the caller already has an uppercase name
+/// (e.g. during formula compilation).
+///
+/// Contract:
+/// - `name` should be ASCII-uppercase (and typically trimmed).
+/// - Lookup semantics match [`function_id_from_name`].
+pub fn function_id_from_uppercase_name(name: &str) -> Option<u16> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let (had_xlfn_prefix, normalized) = match name.strip_prefix("_XLFN.") {
         Some(stripped) => (true, stripped),
-        None => (false, upper.as_str()),
+        None => (false, name),
     };
 
     // Namespace-qualified functions (`_xlws.*`, `_xludf.*`) are encoded as future/UDF calls in
@@ -836,6 +865,19 @@ mod tests {
                 "missing FUTURE_UDF_FUNCTIONS entry for formula-engine function {name}"
             );
         }
+    }
+
+    #[test]
+    fn function_id_from_uppercase_name_matches_standard_lookup() {
+        assert_eq!(
+            super::function_id_from_uppercase_name("SUM"),
+            function_id_from_name("sum")
+        );
+        assert_eq!(
+            super::function_id_from_uppercase_name("_XLFN.CONCAT"),
+            function_id_from_name("_xlfn.concat")
+        );
+        assert_eq!(super::function_id_from_uppercase_name(""), None);
     }
 
     #[test]

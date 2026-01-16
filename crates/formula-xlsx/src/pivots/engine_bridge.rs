@@ -120,12 +120,12 @@ fn slicer_cache_field_idx_best_effort(
         }
 
         // Some producers differ in case; try a case-insensitive match.
-        let folded = field_name.trim().to_ascii_lowercase();
-        if !folded.is_empty() {
+        let trimmed = field_name.trim();
+        if !trimmed.is_empty() {
             if let Some(idx) = cache_def
                 .cache_fields
                 .iter()
-                .position(|f| f.name.to_ascii_lowercase() == folded)
+                .position(|f| f.name.eq_ignore_ascii_case(trimmed))
             {
                 return Some(idx);
             }
@@ -142,12 +142,12 @@ fn slicer_cache_field_idx_best_effort(
         }
 
         // Some producers differ in case; try a case-insensitive match.
-        let folded = source_name.trim().to_ascii_lowercase();
-        if !folded.is_empty() {
+        let trimmed = source_name.trim();
+        if !trimmed.is_empty() {
             if let Some(idx) = cache_def
                 .cache_fields
                 .iter()
-                .position(|f| f.name.to_ascii_lowercase() == folded)
+                .position(|f| f.name.eq_ignore_ascii_case(trimmed))
             {
                 return Some(idx);
             }
@@ -177,8 +177,14 @@ fn slicer_cache_field_idx_best_effort(
         };
 
     let items = item_iter
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            // We need an owned, lowercased key; `to_ascii_lowercase()` does this in one pass.
+            Some(trimmed.to_ascii_lowercase())
+        })
         .collect::<Vec<_>>();
     if items.is_empty() {
         return None;
@@ -194,7 +200,10 @@ fn slicer_cache_field_idx_best_effort(
 
         let mut value_strings = HashSet::with_capacity(values.len());
         for value in values {
-            value_strings.insert(value.to_key_part().display_string().to_ascii_lowercase());
+            // Avoid allocating twice: `display_string()` already produces an owned `String`.
+            let mut s = value.to_key_part().display_string();
+            s.make_ascii_lowercase();
+            value_strings.insert(s);
         }
 
         let mut match_count = 0usize;
@@ -237,12 +246,9 @@ fn timeline_cache_field_name_best_effort(
         if cache.unique_values.contains_key(field_name) {
             return Some(field_name.to_string());
         }
-        let folded = field_name.trim().to_ascii_lowercase();
-        if !folded.is_empty() {
-            if let Some(name) = cache
-                .unique_values
-                .keys()
-                .find(|k| k.to_ascii_lowercase() == folded)
+        let trimmed = field_name.trim();
+        if !trimmed.is_empty() {
+            if let Some(name) = cache.unique_values.keys().find(|k| k.eq_ignore_ascii_case(trimmed))
             {
                 return Some(name.clone());
             }
@@ -253,12 +259,9 @@ fn timeline_cache_field_name_best_effort(
         if cache.unique_values.contains_key(source_name) {
             return Some(source_name.to_string());
         }
-        let folded = source_name.trim().to_ascii_lowercase();
-        if !folded.is_empty() {
-            if let Some(name) = cache
-                .unique_values
-                .keys()
-                .find(|k| k.to_ascii_lowercase() == folded)
+        let trimmed = source_name.trim();
+        if !trimmed.is_empty() {
+            if let Some(name) = cache.unique_values.keys().find(|k| k.eq_ignore_ascii_case(trimmed))
             {
                 return Some(name.clone());
             }
@@ -271,16 +274,8 @@ fn timeline_cache_field_name_best_effort(
         return None;
     }
 
-    let cache_name_folded = timeline
-        .cache_name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let timeline_name_folded = timeline
-        .name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let cache_name = timeline.cache_name.as_deref().unwrap_or_default();
+    let timeline_name = timeline.name.as_deref().unwrap_or_default();
 
     let mut best: Option<(String, usize, bool, usize)> = None;
     for field in &cache_def.cache_fields {
@@ -309,10 +304,9 @@ fn timeline_cache_field_name_best_effort(
             in_range += 1;
         }
 
-        let field_folded = field.name.to_ascii_lowercase();
-        let name_hint = !field_folded.is_empty()
-            && (cache_name_folded.contains(&field_folded)
-                || timeline_name_folded.contains(&field_folded));
+        let name_hint = !field.name.is_empty()
+            && (crate::ascii::contains_ignore_case(cache_name, &field.name)
+                || crate::ascii::contains_ignore_case(timeline_name, &field.name));
 
         let score = in_range;
         let is_better = match &best {
@@ -694,11 +688,10 @@ fn pivot_table_field_to_engine(
 
     if let Some(table_field) = table_field {
         if let Some(sort_type) = table_field.sort_type.as_deref() {
-            match sort_type.to_ascii_lowercase().as_str() {
-                "descending" => field.sort_order = SortOrder::Descending,
-                "manual" => field.sort_order = SortOrder::Manual,
-                // Default: keep engine default (ascending).
-                _ => {}
+            if sort_type.eq_ignore_ascii_case("descending") {
+                field.sort_order = SortOrder::Descending;
+            } else if sort_type.eq_ignore_ascii_case("manual") {
+                field.sort_order = SortOrder::Manual;
             }
         }
 
@@ -740,20 +733,40 @@ fn map_subtotal(subtotal: Option<&str>) -> AggregationType {
         return AggregationType::Sum;
     };
 
-    match subtotal.to_ascii_lowercase().as_str() {
-        "sum" => AggregationType::Sum,
-        "count" => AggregationType::Count,
-        "average" | "avg" => AggregationType::Average,
-        "min" => AggregationType::Min,
-        "max" => AggregationType::Max,
-        "product" => AggregationType::Product,
-        "countnums" => AggregationType::CountNumbers,
-        "stddev" => AggregationType::StdDev,
-        "stddevp" => AggregationType::StdDevP,
-        "var" => AggregationType::Var,
-        "varp" => AggregationType::VarP,
-        _ => AggregationType::Sum,
+    if subtotal.eq_ignore_ascii_case("sum") {
+        return AggregationType::Sum;
     }
+    if subtotal.eq_ignore_ascii_case("count") {
+        return AggregationType::Count;
+    }
+    if subtotal.eq_ignore_ascii_case("average") || subtotal.eq_ignore_ascii_case("avg") {
+        return AggregationType::Average;
+    }
+    if subtotal.eq_ignore_ascii_case("min") {
+        return AggregationType::Min;
+    }
+    if subtotal.eq_ignore_ascii_case("max") {
+        return AggregationType::Max;
+    }
+    if subtotal.eq_ignore_ascii_case("product") {
+        return AggregationType::Product;
+    }
+    if subtotal.eq_ignore_ascii_case("countnums") {
+        return AggregationType::CountNumbers;
+    }
+    if subtotal.eq_ignore_ascii_case("stddev") {
+        return AggregationType::StdDev;
+    }
+    if subtotal.eq_ignore_ascii_case("stddevp") {
+        return AggregationType::StdDevP;
+    }
+    if subtotal.eq_ignore_ascii_case("var") {
+        return AggregationType::Var;
+    }
+    if subtotal.eq_ignore_ascii_case("varp") {
+        return AggregationType::VarP;
+    }
+    AggregationType::Sum
 }
 
 fn map_show_data_as(show_data_as: Option<&str>) -> Option<ShowAsType> {
@@ -762,18 +775,34 @@ fn map_show_data_as(show_data_as: Option<&str>) -> Option<ShowAsType> {
         return None;
     }
 
-    match show_data_as.to_ascii_lowercase().as_str() {
-        "normal" => Some(ShowAsType::Normal),
-        "percentofgrandtotal" => Some(ShowAsType::PercentOfGrandTotal),
-        "percentofrowtotal" => Some(ShowAsType::PercentOfRowTotal),
-        "percentofcolumntotal" => Some(ShowAsType::PercentOfColumnTotal),
-        "percentof" => Some(ShowAsType::PercentOf),
-        "percentdifferencefrom" => Some(ShowAsType::PercentDifferenceFrom),
-        "runningtotal" => Some(ShowAsType::RunningTotal),
-        "rankascending" => Some(ShowAsType::RankAscending),
-        "rankdescending" => Some(ShowAsType::RankDescending),
-        _ => None,
+    if show_data_as.eq_ignore_ascii_case("normal") {
+        return Some(ShowAsType::Normal);
     }
+    if show_data_as.eq_ignore_ascii_case("percentofgrandtotal") {
+        return Some(ShowAsType::PercentOfGrandTotal);
+    }
+    if show_data_as.eq_ignore_ascii_case("percentofrowtotal") {
+        return Some(ShowAsType::PercentOfRowTotal);
+    }
+    if show_data_as.eq_ignore_ascii_case("percentofcolumntotal") {
+        return Some(ShowAsType::PercentOfColumnTotal);
+    }
+    if show_data_as.eq_ignore_ascii_case("percentof") {
+        return Some(ShowAsType::PercentOf);
+    }
+    if show_data_as.eq_ignore_ascii_case("percentdifferencefrom") {
+        return Some(ShowAsType::PercentDifferenceFrom);
+    }
+    if show_data_as.eq_ignore_ascii_case("runningtotal") {
+        return Some(ShowAsType::RunningTotal);
+    }
+    if show_data_as.eq_ignore_ascii_case("rankascending") {
+        return Some(ShowAsType::RankAscending);
+    }
+    if show_data_as.eq_ignore_ascii_case("rankdescending") {
+        return Some(ShowAsType::RankDescending);
+    }
+    None
 }
 
 fn aggregation_display_name(agg: AggregationType) -> &'static str {

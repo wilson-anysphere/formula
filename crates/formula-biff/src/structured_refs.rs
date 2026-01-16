@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use formula_model::external_refs::escape_bracketed_identifier_content;
+use formula_model::external_refs::push_escaped_bracketed_identifier_content;
 
 pub const FLAG_ALL: u16 = 0x0001;
 pub const FLAG_HEADERS: u16 = 0x0002;
@@ -89,28 +87,92 @@ pub fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
     }
 }
 
-fn escape_structured_ref_bracket_content(raw: &str) -> Cow<'_, str> {
-    // Excel escapes `]` as `]]` within structured reference bracketed identifiers.
-    escape_bracketed_identifier_content(raw)
-}
-
 pub fn format_structured_ref(
     table_name: Option<&str>,
     item: Option<StructuredRefItem>,
     columns: &StructuredColumns,
 ) -> String {
+    let mut out = String::with_capacity(estimate_structured_ref_len(table_name, item, columns));
+    push_structured_ref(table_name, item, columns, &mut out);
+    out
+}
+
+fn escaped_bracket_content_len(raw: &str) -> usize {
+    // Excel escapes `]` within bracketed identifiers by doubling: `]` -> `]]`.
+    raw.len() + raw.as_bytes().iter().filter(|&&b| b == b']').count()
+}
+
+fn estimate_structured_ref_len(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> usize {
+    let table_len = table_name.unwrap_or("").len();
+    match (item, columns) {
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(col)) => {
+            3 + escaped_bracket_content_len(col)
+        }
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::All) => 3,
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Range { start, end }) => {
+            8 + escaped_bracket_content_len(start) + escaped_bracket_content_len(end)
+        }
+        (item, StructuredColumns::All) => match item {
+            None => table_len + 7, // `{table}[#Data]`
+            Some(item) => table_len + 2 + structured_ref_item_literal(item).len(), // `{table}[#Item]`
+        },
+        (None | Some(StructuredRefItem::Data), StructuredColumns::Single(col)) => {
+            table_len + 2 + escaped_bracket_content_len(col)
+        }
+        (None | Some(StructuredRefItem::Data), StructuredColumns::Range { start, end }) => {
+            table_len + 7 + escaped_bracket_content_len(start) + escaped_bracket_content_len(end)
+        }
+        (Some(item), StructuredColumns::Single(col)) => {
+            table_len + 7 + structured_ref_item_literal(item).len() + escaped_bracket_content_len(col)
+        }
+        (Some(item), StructuredColumns::Range { start, end }) => {
+            table_len
+                + 10
+                + structured_ref_item_literal(item).len()
+                + escaped_bracket_content_len(start)
+                + escaped_bracket_content_len(end)
+        }
+    }
+}
+
+pub fn estimated_structured_ref_len(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> usize {
+    estimate_structured_ref_len(table_name, item, columns)
+}
+
+pub fn push_structured_ref(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+    out: &mut String,
+) {
     // This-row shorthand: `[@Col]`, `[@]`, and `[@[Col1]:[Col2]]`.
     if matches!(item, Some(StructuredRefItem::ThisRow)) {
         match columns {
             StructuredColumns::Single(col) => {
-                let col = escape_structured_ref_bracket_content(col);
-                return format!("[@{col}]");
+                out.push_str("[@");
+                push_escaped_bracketed_identifier_content(col, out);
+                out.push(']');
+                return;
             }
-            StructuredColumns::All => return "[@]".to_string(),
+            StructuredColumns::All => {
+                out.push_str("[@]");
+                return;
+            }
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
-                return format!("[@[{start}]:[{end}]]");
+                out.push_str("[@[");
+                push_escaped_bracketed_identifier_content(start, out);
+                out.push_str("]:[");
+                push_escaped_bracketed_identifier_content(end, out);
+                out.push_str("]]");
+                return;
             }
         }
     }
@@ -119,28 +181,41 @@ pub fn format_structured_ref(
 
     // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
     if columns == &StructuredColumns::All {
-        return match item {
-            Some(item) => format!("{table}[{}]", structured_ref_item_literal(item)),
+        out.push_str(table);
+        out.push('[');
+        match item {
+            Some(item) => out.push_str(structured_ref_item_literal(item)),
             // Default row selector with no column selection: treat as `[#Data]`.
-            None => format!("{table}[#Data]"),
-        };
+            None => out.push_str("#Data"),
+        }
+        out.push(']');
+        return;
     }
 
     // Single-column selection with default/data item: `Table1[Col]` or `Table1[[Col1]:[Col2]]`.
     if matches!(item, None | Some(StructuredRefItem::Data)) {
-        return match columns {
+        match columns {
             StructuredColumns::Single(col) => {
-                let col = escape_structured_ref_bracket_content(col);
-                format!("{table}[{col}]")
+                out.push_str(table);
+                out.push('[');
+                push_escaped_bracketed_identifier_content(col, out);
+                out.push(']');
+                return;
             }
             StructuredColumns::Range { start, end } => {
-                let start = escape_structured_ref_bracket_content(start);
-                let end = escape_structured_ref_bracket_content(end);
-                format!("{table}[[{start}]:[{end}]]")
+                out.push_str(table);
+                out.push_str("[[");
+                push_escaped_bracketed_identifier_content(start, out);
+                out.push_str("]:[");
+                push_escaped_bracketed_identifier_content(end, out);
+                out.push_str("]]");
+                return;
             }
             StructuredColumns::All => {
                 // Covered by the `columns == All` early return above.
-                format!("{table}[#Data]")
+                out.push_str(table);
+                out.push_str("[#Data]");
+                return;
             }
         };
     }
@@ -149,20 +224,29 @@ pub fn format_structured_ref(
     let item = item.unwrap_or(StructuredRefItem::Data);
     match columns {
         StructuredColumns::Single(col) => {
-            let col = escape_structured_ref_bracket_content(col);
-            format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
+            out.push_str(table);
+            out.push_str("[[");
+            out.push_str(structured_ref_item_literal(item));
+            out.push_str("],[");
+            push_escaped_bracketed_identifier_content(col, out);
+            out.push_str("]]");
         }
         StructuredColumns::Range { start, end } => {
-            let start = escape_structured_ref_bracket_content(start);
-            let end = escape_structured_ref_bracket_content(end);
-            format!(
-                "{table}[[{}],[{start}]:[{end}]]",
-                structured_ref_item_literal(item)
-            )
+            out.push_str(table);
+            out.push_str("[[");
+            out.push_str(structured_ref_item_literal(item));
+            out.push_str("],[");
+            push_escaped_bracketed_identifier_content(start, out);
+            out.push_str("]:[");
+            push_escaped_bracketed_identifier_content(end, out);
+            out.push_str("]]");
         }
         StructuredColumns::All => {
             // Covered by the `columns == All` early return above.
-            format!("{table}[{}]", structured_ref_item_literal(item))
+            out.push_str(table);
+            out.push('[');
+            out.push_str(structured_ref_item_literal(item));
+            out.push(']');
         }
     }
 }

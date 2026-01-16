@@ -123,12 +123,17 @@ impl ValueResolver for FuzzResolver {
         if !self.sheet_exists(sheet_id) {
             return None;
         }
-        match name.trim().to_ascii_uppercase().as_str() {
-            "PI" => Some(ResolvedName::Constant(Value::Number(std::f64::consts::PI))),
-            "FOO" => Some(ResolvedName::Constant(Value::Number(42.0))),
-            "BAR" => Some(ResolvedName::Constant(Value::Text("bar".to_string()))),
-            _ => None,
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("PI") {
+            return Some(ResolvedName::Constant(Value::Number(std::f64::consts::PI)));
         }
+        if name.eq_ignore_ascii_case("FOO") {
+            return Some(ResolvedName::Constant(Value::Number(42.0)));
+        }
+        if name.eq_ignore_ascii_case("BAR") {
+            return Some(ResolvedName::Constant(Value::Text("bar".to_string())));
+        }
+        None
     }
 }
 

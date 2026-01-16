@@ -1533,8 +1533,13 @@ fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
     let mut out = HashSet::new();
     for sheet in sheets {
         for table in &sheet.tables {
-            out.insert(table.name.to_ascii_lowercase());
-            out.insert(table.display_name.to_ascii_lowercase());
+            let name_lc = table.name.to_ascii_lowercase();
+            out.insert(name_lc);
+            // `Table` validates both names as ASCII-only identifiers; avoid allocating a second
+            // lowercased copy when the display name matches.
+            if !table.display_name.eq_ignore_ascii_case(&table.name) {
+                out.insert(table.display_name.to_ascii_lowercase());
+            }
         }
     }
     out
@@ -1556,10 +1561,22 @@ fn next_table_id(sheets: &[Worksheet]) -> u32 {
 
 fn generate_duplicate_table_name(base: &str, used_names: &mut HashSet<String>) -> String {
     // Excel renames duplicated tables by appending `_1`, `_2`, … to the existing name.
+    //
+    // Table names are validated as ASCII-only identifiers, so case-insensitive matching is
+    // equivalent to ASCII-lowercasing.
+    use std::fmt::Write as _;
+    fn push_ascii_lowercase(out: &mut String, s: &str) {
+        for &b in s.as_bytes() {
+            out.push(b.to_ascii_lowercase() as char);
+        }
+    }
     for i in 1u32.. {
-        let candidate = format!("{base}_{i}");
-        if used_names.insert(candidate.to_ascii_lowercase()) {
-            return candidate;
+        let mut key = String::with_capacity(base.len() + 1 + 10);
+        push_ascii_lowercase(&mut key, base);
+        key.push('_');
+        let _ = write!(&mut key, "{i}");
+        if used_names.insert(key) {
+            return format!("{base}_{i}");
         }
     }
 

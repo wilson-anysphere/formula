@@ -1292,9 +1292,21 @@ fn is_end_attr_key(key: &[u8]) -> bool {
 }
 
 fn canonicalize_part_name_for_discovery(name: &str) -> String {
-    name.trim_start_matches(|c| c == '/' || c == '\\')
-        .replace('\\', "/")
-        .to_ascii_lowercase()
+    let trimmed = name.trim_start_matches(|c| c == '/' || c == '\\');
+    let bytes = trimmed.as_bytes();
+    let needs_normalization = bytes
+        .iter()
+        .any(|b| *b == b'\\' || b.is_ascii_uppercase());
+    if !needs_normalization {
+        return trimmed.to_string();
+    }
+
+    let mut out = String::with_capacity(trimmed.len());
+    for &b in bytes {
+        let b = if b == b'\\' { b'/' } else { b.to_ascii_lowercase() };
+        out.push(b as char);
+    }
+    out
 }
 
 impl XlsxDocument {

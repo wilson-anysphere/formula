@@ -5399,14 +5399,9 @@ fn resolve_cell_ref(
     let (sheet_name, addr) = match raw.split_once('!') {
         Some((sheet_raw, addr_raw)) => {
             let sheet_raw = sheet_raw.trim();
-            let sheet_name = if let Some(inner) = sheet_raw
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-            {
-                inner.replace("''", "'")
-            } else {
-                sheet_raw.to_string()
-            };
+            let sheet_name = formula_model::unquote_excel_single_quoted_identifier_lenient(sheet_raw)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|| sheet_raw.to_string());
             (sheet_name, addr_raw.trim().to_string())
         }
         None => (default_sheet_name.to_string(), raw.to_string()),
@@ -5442,7 +5437,7 @@ fn coord_to_a1(row: usize, col: usize) -> String {
     // debug overflow panics when converting 0-based coordinates to 1-based A1 notation
     // (e.g. `row == u32::MAX` on 32-bit targets).
     match (u32::try_from(row), u32::try_from(col)) {
-        (Ok(row), Ok(col)) => formula_model::CellRef::new(row, col).to_a1(),
+        (Ok(row), Ok(col)) => formula_model::cell_to_a1(row, col),
         _ => {
             let row_1_based = u64::try_from(row)
                 .unwrap_or(u64::MAX)

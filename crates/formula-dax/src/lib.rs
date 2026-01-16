@@ -74,3 +74,20 @@ pub use crate::model::CalculatedColumn;
 pub use crate::parser::{BinaryOp, Expr, UnaryOp};
 
 pub use crate::engine::DaxError;
+
+#[inline]
+pub(crate) fn with_ascii_uppercase<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
+    let s = s.trim();
+    let mut buf = [0u8; 64];
+    if s.len() <= buf.len() {
+        for (dst, src) in buf[..s.len()].iter_mut().zip(s.as_bytes()) {
+            *dst = src.to_ascii_uppercase();
+        }
+        let upper =
+            std::str::from_utf8(&buf[..s.len()]).expect("ASCII uppercasing preserves UTF-8");
+        return f(upper);
+    }
+
+    let upper = s.to_ascii_uppercase();
+    f(&upper)
+}

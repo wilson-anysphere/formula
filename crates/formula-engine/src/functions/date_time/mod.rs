@@ -238,14 +238,6 @@ fn full_months_between(
     i32::try_from(months).map_err(|_| ExcelError::Num)
 }
 
-fn normalize_unit(unit: &str) -> Option<String> {
-    let trimmed = unit.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_ascii_uppercase())
-}
-
 /// DATEDIF(start_date, end_date, unit)
 pub fn datedif(
     start_date: i32,
@@ -257,31 +249,43 @@ pub fn datedif(
         return Err(ExcelError::Num);
     }
 
-    let unit = normalize_unit(unit).ok_or(ExcelError::Num)?;
-
-    match unit.as_str() {
-        "D" => Ok(i64::from(end_date) - i64::from(start_date)),
-        "Y" | "M" | "YM" | "MD" | "YD" => {
-            let full_months = full_months_between(start_date, end_date, system)?;
-            let years = full_months / 12;
-
-            match unit.as_str() {
-                "Y" => Ok(i64::from(years)),
-                "M" => Ok(i64::from(full_months)),
-                "YM" => Ok(i64::from(full_months.rem_euclid(12))),
-                "MD" => {
-                    let anchor = edate(start_date, full_months, system)?;
-                    Ok(i64::from(end_date) - i64::from(anchor))
-                }
-                "YD" => {
-                    let anchor = edate(start_date, years.saturating_mul(12), system)?;
-                    Ok(i64::from(end_date) - i64::from(anchor))
-                }
-                _ => unreachable!(),
-            }
-        }
-        _ => Err(ExcelError::Num),
+    let unit = unit.trim();
+    if unit.is_empty() {
+        return Err(ExcelError::Num);
     }
+
+    if unit.eq_ignore_ascii_case("D") {
+        return Ok(i64::from(end_date) - i64::from(start_date));
+    }
+
+    if unit.eq_ignore_ascii_case("Y")
+        || unit.eq_ignore_ascii_case("M")
+        || unit.eq_ignore_ascii_case("YM")
+        || unit.eq_ignore_ascii_case("MD")
+        || unit.eq_ignore_ascii_case("YD")
+    {
+        let full_months = full_months_between(start_date, end_date, system)?;
+        let years = full_months / 12;
+
+        if unit.eq_ignore_ascii_case("Y") {
+            return Ok(i64::from(years));
+        }
+        if unit.eq_ignore_ascii_case("M") {
+            return Ok(i64::from(full_months));
+        }
+        if unit.eq_ignore_ascii_case("YM") {
+            return Ok(i64::from(full_months.rem_euclid(12)));
+        }
+        if unit.eq_ignore_ascii_case("MD") {
+            let anchor = edate(start_date, full_months, system)?;
+            return Ok(i64::from(end_date) - i64::from(anchor));
+        }
+        // `YD`
+        let anchor = edate(start_date, years.saturating_mul(12), system)?;
+        return Ok(i64::from(end_date) - i64::from(anchor));
+    }
+
+    Err(ExcelError::Num)
 }
 
 /// WEEKDAY(serial_number, [return_type])

@@ -41,8 +41,9 @@ pub(crate) fn parse_text_datetime(
         return None;
     }
 
-    let upper = s.to_ascii_uppercase();
-    let has_ampm = upper.ends_with("AM") || upper.ends_with("PM");
+    let has_ampm = s.as_bytes().len() >= 2
+        && (s.as_bytes()[s.len() - 2..].eq_ignore_ascii_case(b"AM")
+            || s.as_bytes()[s.len() - 2..].eq_ignore_ascii_case(b"PM"));
 
     // Common ISO-ish formats first.
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {

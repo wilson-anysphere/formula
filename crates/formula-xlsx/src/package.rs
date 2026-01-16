@@ -74,14 +74,22 @@ pub enum WorkbookKind {
 
 impl WorkbookKind {
     pub fn from_extension(ext: &str) -> Option<Self> {
-        match ext.to_ascii_lowercase().as_str() {
-            "xlsx" => Some(Self::Workbook),
-            "xlsm" => Some(Self::MacroEnabledWorkbook),
-            "xltx" => Some(Self::Template),
-            "xltm" => Some(Self::MacroEnabledTemplate),
-            "xlam" => Some(Self::MacroEnabledAddIn),
-            _ => None,
+        if ext.eq_ignore_ascii_case("xlsx") {
+            return Some(Self::Workbook);
         }
+        if ext.eq_ignore_ascii_case("xlsm") {
+            return Some(Self::MacroEnabledWorkbook);
+        }
+        if ext.eq_ignore_ascii_case("xltx") {
+            return Some(Self::Template);
+        }
+        if ext.eq_ignore_ascii_case("xltm") {
+            return Some(Self::MacroEnabledTemplate);
+        }
+        if ext.eq_ignore_ascii_case("xlam") {
+            return Some(Self::MacroEnabledAddIn);
+        }
+        None
     }
 
     pub fn workbook_content_type(self) -> &'static str {
@@ -646,9 +654,12 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
         // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name
-            .trim_start_matches(|c| c == '/' || c == '\\')
-            .replace('\\', "/");
+        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
+        let canonical = if canonical.contains('\\') {
+            canonical.replace('\\', "/")
+        } else {
+            canonical.to_string()
+        };
         part_names.insert(canonical.clone());
         part_name_keys
             .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
@@ -764,9 +775,12 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
         // producers that include it (or use `\`) by normalizing to canonical part names.
         let name = file.name();
-        let canonical = name
-            .trim_start_matches(|c| c == '/' || c == '\\')
-            .replace('\\', "/");
+        let canonical = name.trim_start_matches(|c| c == '/' || c == '\\');
+        let canonical = if canonical.contains('\\') {
+            canonical.replace('\\', "/")
+        } else {
+            canonical.to_string()
+        };
         part_names.insert(canonical.clone());
         part_name_keys
             .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
@@ -1096,30 +1110,30 @@ impl XlsxPackage {
         let mut needs_tif = false;
         let mut needs_tiff = false;
         let mut needs_webp = false;
+
         for name in parts.keys() {
             let name = name.strip_prefix('/').unwrap_or(name);
-            let lower = name.to_ascii_lowercase();
-            if lower.ends_with(".png") {
+            if crate::ascii::ends_with_ignore_case(name, ".png") {
                 needs_png = true;
-            } else if lower.ends_with(".jpg") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".jpg") {
                 needs_jpg = true;
-            } else if lower.ends_with(".jpeg") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".jpeg") {
                 needs_jpeg = true;
-            } else if lower.ends_with(".gif") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".gif") {
                 needs_gif = true;
-            } else if lower.ends_with(".bmp") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".bmp") {
                 needs_bmp = true;
-            } else if lower.ends_with(".emf") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".emf") {
                 needs_emf = true;
-            } else if lower.ends_with(".wmf") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".wmf") {
                 needs_wmf = true;
-            } else if lower.ends_with(".svg") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".svg") {
                 needs_svg = true;
-            } else if lower.ends_with(".tif") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".tif") {
                 needs_tif = true;
-            } else if lower.ends_with(".tiff") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".tiff") {
                 needs_tiff = true;
-            } else if lower.ends_with(".webp") {
+            } else if crate::ascii::ends_with_ignore_case(name, ".webp") {
                 needs_webp = true;
             }
         }
@@ -1761,7 +1775,8 @@ pub(crate) fn ensure_content_types_default(
         return Ok(());
     };
 
-    let normalized_ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    let normalized_ext = crate::ascii::normalize_extension_ascii_lowercase(ext.trim().trim_start_matches('.'));
+    let normalized_ext = normalized_ext.as_ref();
     if normalized_ext.is_empty() {
         return Ok(());
     }
@@ -1787,7 +1802,7 @@ pub(crate) fn ensure_content_types_default(
                     let attr = attr?;
                     if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Extension") {
                         let ext = attr.unescape_value()?.into_owned();
-                        if ext.trim().eq_ignore_ascii_case(normalized_ext.as_str()) {
+                        if ext.trim().eq_ignore_ascii_case(normalized_ext) {
                             found = true;
                             break;
                         }
@@ -1804,7 +1819,7 @@ pub(crate) fn ensure_content_types_default(
                     let attr = attr?;
                     if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Extension") {
                         let ext = attr.unescape_value()?.into_owned();
-                        if ext.trim().eq_ignore_ascii_case(normalized_ext.as_str()) {
+                        if ext.trim().eq_ignore_ascii_case(normalized_ext) {
                             found = true;
                             break;
                         }
@@ -1819,7 +1834,7 @@ pub(crate) fn ensure_content_types_default(
                         .clone()
                         .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Default"));
                     let mut default_el = BytesStart::new(default_tag_name.as_str());
-                    default_el.push_attribute(("Extension", normalized_ext.as_str()));
+                    default_el.push_attribute(("Extension", normalized_ext));
                     default_el.push_attribute(("ContentType", content_type));
                     writer.write_event(Event::Empty(default_el))?;
                 }
@@ -1838,7 +1853,7 @@ pub(crate) fn ensure_content_types_default(
                     writer.write_event(Event::Start(e))?;
 
                     let mut default_el = BytesStart::new(default_tag_name.as_str());
-                    default_el.push_attribute(("Extension", normalized_ext.as_str()));
+                    default_el.push_attribute(("Extension", normalized_ext));
                     default_el.push_attribute(("ContentType", content_type));
                     writer.write_event(Event::Empty(default_el))?;
 

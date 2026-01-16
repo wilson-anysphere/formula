@@ -243,10 +243,11 @@ fn is_rel_kind(node: &roxmltree::Node<'_, '_>) -> bool {
     for attr in node.attributes() {
         let name = attr.name();
         let local = name.rsplit(':').next().unwrap_or(name);
-        if matches!(
-            local.to_ascii_lowercase().as_str(),
-            "kind" | "k" | "t" | "type"
-        ) && (attr.value().eq_ignore_ascii_case("rel") || attr.value().eq_ignore_ascii_case("r"))
+        if (local.eq_ignore_ascii_case("kind")
+            || local.eq_ignore_ascii_case("k")
+            || local.eq_ignore_ascii_case("t")
+            || local.eq_ignore_ascii_case("type"))
+            && (attr.value().eq_ignore_ascii_case("rel") || attr.value().eq_ignore_ascii_case("r"))
         {
             return true;
         }
@@ -265,10 +266,13 @@ fn parse_int_payload(node: &roxmltree::Node<'_, '_>) -> Option<usize> {
     for attr in node.attributes() {
         let name = attr.name();
         let local = name.rsplit(':').next().unwrap_or(name);
-        if matches!(
-            local.to_ascii_lowercase().as_str(),
-            "v" | "val" | "value" | "i" | "idx" | "index"
-        ) {
+        if local.eq_ignore_ascii_case("v")
+            || local.eq_ignore_ascii_case("val")
+            || local.eq_ignore_ascii_case("value")
+            || local.eq_ignore_ascii_case("i")
+            || local.eq_ignore_ascii_case("idx")
+            || local.eq_ignore_ascii_case("index")
+        {
             if let Ok(v) = attr.value().trim().parse::<usize>() {
                 return Some(v);
             }

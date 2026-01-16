@@ -27,7 +27,7 @@ impl CellAddress {
             )));
         }
 
-        let sheet = unquote_sheet_name(sheet_part);
+        let sheet = formula_model::unquote_sheet_name_lenient(sheet_part);
         if sheet.is_empty() {
             return Err(SolverError::new(format!(
                 "invalid cell reference '{input}': missing sheet name"
@@ -39,14 +39,6 @@ impl CellAddress {
             addr: addr_part.to_string(),
         })
     }
-}
-
-fn unquote_sheet_name(name: &str) -> String {
-    let name = name.trim();
-    if name.starts_with('\'') && name.ends_with('\'') && name.len() >= 2 {
-        return name[1..name.len() - 1].replace("''", "'");
-    }
-    name.to_string()
 }
 
 /// Adapter that exposes a [`crate::Engine`] workbook as a [`SolverModel`].

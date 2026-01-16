@@ -2037,11 +2037,12 @@ fn render_pane_element(pane: &formula_model::SheetPane, prefix: Option<&str>) ->
             out.push_str(&format!(r#" ySplit="{}""#, pane.frozen_rows));
         }
 
-        let top_left = pane
-            .top_left_cell
-            .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols))
-            .to_a1();
-        out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
+        let top_left =
+            pane.top_left_cell
+                .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols));
+        out.push_str(r#" topLeftCell=""#);
+        formula_model::push_a1_cell_ref(top_left.row, top_left.col, false, false, &mut out);
+        out.push('"');
 
         let active_pane = if pane.frozen_rows > 0 && pane.frozen_cols > 0 {
             "bottomRight"
@@ -2065,7 +2066,9 @@ fn render_pane_element(pane: &formula_model::SheetPane, prefix: Option<&str>) ->
         out.push_str(&format!(r#" ySplit="{y}""#));
     }
     if let Some(cell) = pane.top_left_cell {
-        out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&cell.to_a1())));
+        out.push_str(r#" topLeftCell=""#);
+        formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
+        out.push('"');
     }
     out.push_str("/>");
     Some(out)
@@ -2081,11 +2084,27 @@ fn render_selection_element(
     let mut out = String::new();
     out.push('<');
     out.push_str(&selection_tag);
-    out.push_str(&format!(
-        r#" activeCell="{}""#,
-        escape_attr(&selection.active_cell.to_a1())
-    ));
-    out.push_str(&format!(r#" sqref="{}""#, escape_attr(&selection.sqref())));
+    out.push_str(r#" activeCell=""#);
+    formula_model::push_a1_cell_ref(
+        selection.active_cell.row,
+        selection.active_cell.col,
+        false,
+        false,
+        &mut out,
+    );
+    out.push_str(r#"" sqref=""#);
+    if selection.ranges.is_empty() {
+        formula_model::push_a1_cell_ref(
+            selection.active_cell.row,
+            selection.active_cell.col,
+            false,
+            false,
+            &mut out,
+        );
+    } else {
+        out.push_str(&formula_model::format_sqref(&selection.ranges));
+    }
+    out.push('"');
     out.push_str("/>");
     Some(out)
 }
@@ -2470,7 +2489,7 @@ fn patch_pane_start(
             v.to_string()
         })
     };
-    let desired_top_left_cell = desired.top_left_cell.map(|c| c.to_a1());
+    let desired_top_left_cell = desired.top_left_cell;
 
     let mut had_state = false;
     let mut kept_state = false;
@@ -2516,8 +2535,11 @@ fn patch_pane_start(
             }
             b"topLeftCell" => {
                 had_top_left_cell = true;
-                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
-                if parsed.as_deref() == desired_top_left_cell.as_deref() {
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .and_then(|v| CellRef::from_a1(v.as_ref().trim()).ok());
+                if parsed == desired_top_left_cell {
                     kept_top_left_cell = true;
                     out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
                 }
@@ -2545,8 +2567,10 @@ fn patch_pane_start(
         }
     }
     if !kept_top_left_cell && (had_top_left_cell || desired_top_left_cell.is_some()) {
-        if let Some(cell) = desired_top_left_cell.as_deref() {
-            out.push_attribute(("topLeftCell", cell));
+        if let Some(cell) = desired_top_left_cell {
+            let mut a1 = String::new();
+            formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut a1);
+            out.push_attribute(("topLeftCell", a1.as_str()));
         }
     }
 
@@ -2560,7 +2584,7 @@ fn patch_selection_start(
     let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
     let mut out = quick_xml::events::BytesStart::new(tag.as_str());
 
-    let desired_active = desired.active_cell.to_a1();
+    let desired_active = desired.active_cell;
     let desired_sqref = desired.sqref();
 
     let mut had_active = false;
@@ -2573,8 +2597,11 @@ fn patch_selection_start(
         match attr.key.as_ref() {
             b"activeCell" => {
                 had_active = true;
-                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
-                if parsed.as_deref() == Some(desired_active.as_str()) {
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .and_then(|v| CellRef::from_a1(v.as_ref().trim()).ok());
+                if parsed == Some(desired_active) {
                     kept_active = true;
                     out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
                 }
@@ -2592,7 +2619,9 @@ fn patch_selection_start(
     }
 
     if !kept_active && (had_active || true) {
-        out.push_attribute(("activeCell", desired_active.as_str()));
+        let mut a1 = String::new();
+        formula_model::push_a1_cell_ref(desired_active.row, desired_active.col, false, false, &mut a1);
+        out.push_attribute(("activeCell", a1.as_str()));
     }
     if !kept_sqref && (had_sqref || true) {
         out.push_attribute(("sqref", desired_sqref.as_str()));
@@ -7363,7 +7392,7 @@ fn append_cell_xml(
     changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) {
     out.push_str(r#"<c r=""#);
-    out.push_str(&cell_ref.to_a1());
+    formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, out);
     out.push('"');
 
     if cell.style_id != 0 {
@@ -8623,15 +8652,17 @@ fn ensure_drawing_part_content_types(
         let Some((_, ext)) = media_part.rsplit_once('.') else {
             continue;
         };
-        let ext = ext.trim().to_ascii_lowercase();
+        let ext = ext.trim();
+        let ext = crate::ascii::normalize_extension_ascii_lowercase(ext);
+        let ext = ext.as_ref();
         if ext.is_empty() {
             continue;
         }
-        let content_type = crate::drawings::content_type_for_extension(&ext);
+        let content_type = crate::drawings::content_type_for_extension(ext);
         if content_type == "application/octet-stream" {
             continue;
         }
-        ensure_content_types_default(parts, &ext, content_type)?;
+        ensure_content_types_default(parts, ext, content_type)?;
     }
 
     // Ensure chart parts referenced from this drawing have Overrides.

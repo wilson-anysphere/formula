@@ -30,6 +30,12 @@ pub(crate) const RECORD_ARRAY: u16 = 0x0221;
 pub(crate) const RECORD_SHRFMLA: u16 = 0x04BC;
 pub(crate) const RECORD_TABLE: u16 = 0x0236;
 
+fn format_cell(cell: CellRef) -> String {
+    let mut out = String::new();
+    formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut out);
+    out
+}
+
 /// BIFF8 `FORMULA.grbit` bitfield.
 ///
 /// We only decode the subset needed to disambiguate `PtgExp`/`PtgTbl` resolution.
@@ -868,7 +874,7 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
             warnings,
             format!(
                 "formula {} has grbit.fTbl set but rgce does not start with PtgTbl",
-                cell.cell.to_a1()
+                format_cell(cell.cell)
             ),
         ),
         (
@@ -879,14 +885,14 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
             warnings,
             format!(
                 "formula {} has grbit.fShrFmla set but rgce does not start with PtgExp",
-                cell.cell.to_a1()
+                format_cell(cell.cell)
             ),
         ),
         (Some(FormulaMembershipHint::Array), _) => warn(
             warnings,
             format!(
                 "formula {} has grbit.fArray set but rgce does not start with PtgExp",
-                cell.cell.to_a1()
+                format_cell(cell.cell)
             ),
         ),
         _ => {}
@@ -933,8 +939,8 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
                         warnings,
                         format!(
                             "formula {} indicates shared formula membership (grbit.fShrFmla), but no SHRFMLA record was found for base {}",
-                            cell.cell.to_a1(),
-                            base.to_a1()
+                            format_cell(cell.cell),
+                            format_cell(base)
                         ),
                     );
                 }
@@ -950,8 +956,8 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
                         warnings,
                         format!(
                             "formula {} indicates array formula membership (grbit.fArray), but no ARRAY record was found for base {}",
-                            cell.cell.to_a1(),
-                            base.to_a1()
+                            format_cell(cell.cell),
+                            format_cell(base)
                         ),
                     );
                 }
@@ -967,8 +973,8 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
                         warnings,
                         format!(
                             "formula {} indicates table formula membership (grbit.fTbl), but no TABLE record was found for base {}",
-                            cell.cell.to_a1(),
-                            base.to_a1()
+                            format_cell(cell.cell),
+                            format_cell(base)
                         ),
                     );
                 }
@@ -1957,7 +1963,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 &mut out.warnings,
                 format!(
                     "cell {}: {:?} token has no in-bounds coordinate candidates (payload_len={})",
-                    exp.cell.to_a1(),
+                    format_cell(exp.cell),
                     exp.kind,
                     exp.payload.len()
                 ),
@@ -1998,7 +2004,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 &mut out.warnings,
                 format!(
                     "cell {}: {:?} token base cell could not be resolved: candidates={candidates:?}",
-                    exp.cell.to_a1(),
+                    format_cell(exp.cell),
                     exp.kind
                 ),
             );
@@ -2010,7 +2016,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 &mut out.warnings,
                 format!(
                     "cell {}: {:?} token has multiple base-cell candidates that match definitions: {matches:?}; choosing ({base_row},{base_col})",
-                    exp.cell.to_a1(),
+                    format_cell(exp.cell),
                     exp.kind
                 ),
             );
@@ -2050,8 +2056,8 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Err(err) => {
                                 out.warnings.push(format!(
                                     "cell {}: failed to materialize shared formula base {}: {err}",
-                                    exp.cell.to_a1(),
-                                    anchor.to_a1()
+                                    format_cell(exp.cell),
+                                    format_cell(anchor)
                                 ));
                                 std::borrow::Cow::Borrowed(&def.rgce)
                             }
@@ -2095,7 +2101,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                         &mut out.warnings,
                         format!(
                             "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
-                            exp.cell.to_a1()
+                            format_cell(exp.cell)
                         ),
                     );
                     out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
@@ -2105,7 +2111,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                         &mut out.warnings,
                         format!(
                             "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
-                            exp.cell.to_a1(),
+                            format_cell(exp.cell),
                             exp.kind
                         ),
                     );
@@ -2119,7 +2125,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                         &mut out.warnings,
                         format!(
                             "cell {}: TABLE formula decoding is not supported; rendering #UNKNOWN!",
-                            exp.cell.to_a1()
+                            format_cell(exp.cell)
                         ),
                     );
                     out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
@@ -2167,7 +2173,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                         &mut out.warnings,
                         format!(
                             "cell {}: {:?} token resolution inconsistency: base=({base_row},{base_col}) candidates={candidates:?}",
-                            exp.cell.to_a1(),
+                            format_cell(exp.cell),
                             exp.kind
                         ),
                     );
@@ -2177,7 +2183,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         };
 
         for w in decoded.warnings {
-            warn_string(&mut out.warnings, format!("cell {}: {w}", exp.cell.to_a1()));
+            warn_string(&mut out.warnings, format!("cell {}: {w}", format_cell(exp.cell)));
         }
         out.formulas.insert(exp.cell, decoded.text);
     }
@@ -2381,15 +2387,16 @@ mod tests {
         // Ensure we also handle the non-zero continued-segment option flags (fHighByte=1) used when
         // an uncompressed UTF-16LE ShortXLUnicodeString is continued into a CONTINUE record.
         let literal = "ABCDE";
-        let utf16: Vec<u16> = literal.encode_utf16().collect();
+        let utf16le: Vec<u8> = literal
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
 
         let mut rgce_expected = Vec::new();
         rgce_expected.push(0x17); // PtgStr
-        rgce_expected.push(utf16.len() as u8); // cch
+        rgce_expected.push((utf16le.len() / 2) as u8); // cch
         rgce_expected.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
-        for unit in &utf16 {
-            rgce_expected.extend_from_slice(&unit.to_le_bytes());
-        }
+        rgce_expected.extend_from_slice(&utf16le);
 
         // Split after the first two UTF-16LE code units ("AB") => 4 bytes of character payload.
         let first_rgce_len = 3 + 4;

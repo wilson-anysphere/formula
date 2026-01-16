@@ -1172,12 +1172,12 @@ impl ParserImpl {
             return self.parse_dotted_identifier(span, id);
         }
 
-        match id.to_ascii_uppercase().as_str() {
-            "TRUE" => Ok(SpannedExpr {
+        match id {
+            s if s.eq_ignore_ascii_case("TRUE") => Ok(SpannedExpr {
                 span,
                 kind: SpannedExprKind::Bool(true),
             }),
-            "FALSE" => Ok(SpannedExpr {
+            s if s.eq_ignore_ascii_case("FALSE") => Ok(SpannedExpr {
                 span,
                 kind: SpannedExprKind::Bool(false),
             }),
@@ -1333,12 +1333,12 @@ impl ParserImpl {
         let base_end = span.start + base_raw.len();
         let base_span = Span::new(span.start, base_end);
 
-        let mut expr = match base_raw.to_ascii_uppercase().as_str() {
-            "TRUE" => SpannedExpr {
+        let mut expr = match base_raw {
+            s if s.eq_ignore_ascii_case("TRUE") => SpannedExpr {
                 span: base_span,
                 kind: SpannedExprKind::Bool(true),
             },
-            "FALSE" => SpannedExpr {
+            s if s.eq_ignore_ascii_case("FALSE") => SpannedExpr {
                 span: base_span,
                 kind: SpannedExprKind::Bool(false),
             },

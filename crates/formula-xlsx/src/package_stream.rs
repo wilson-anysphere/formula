@@ -347,6 +347,10 @@ impl StreamingXlsxPackage<std::fs::File> {
 fn canonical_part_name(name: &str) -> String {
     // Normalize separators first, then strip any leading `/` (including those produced by
     // converting leading `\\` to `/`).
-    let replaced = name.replace('\\', "/");
-    replaced.trim_start_matches('/').to_string()
+    let trimmed = name.trim_start_matches(|c| c == '/' || c == '\\');
+    if trimmed.contains('\\') {
+        trimmed.replace('\\', "/")
+    } else {
+        trimmed.to_string()
+    }
 }

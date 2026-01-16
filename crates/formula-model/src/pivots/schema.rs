@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
+use crate::external_refs::push_escaped_bracketed_identifier_content;
 
 /// Canonical reference to a field used by a pivot configuration.
 ///
@@ -42,20 +43,26 @@ impl PivotFieldRef {
             // We intentionally avoid quoting table names because pivot caches and UI layers often
             // store/display unquoted table captions.
             PivotFieldRef::DataModelColumn { table, column } => {
-                let column = escape_dax_bracket_identifier(column);
                 // If the table name itself contains `[`, emitting an unquoted `Table[Column]` shape
                 // becomes ambiguous (`My[Table][Col]` looks like a nested column ref). In that
                 // case, fall back to a quoted DAX-like identifier for the table name.
+                let mut out = String::with_capacity(table.len() + column.len() + 4);
                 if table.contains('[') {
-                    let table = quote_dax_identifier(table);
-                    Cow::Owned(format!("{table}[{column}]"))
+                    push_dax_single_quoted_identifier(table, &mut out);
                 } else {
-                    Cow::Owned(format!("{table}[{column}]"))
+                    out.push_str(table);
                 }
+                out.push('[');
+                push_escaped_bracketed_identifier_content(column, &mut out);
+                out.push(']');
+                Cow::Owned(out)
             }
             PivotFieldRef::DataModelMeasure(measure) => {
-                let measure = escape_dax_bracket_identifier(measure);
-                Cow::Owned(format!("[{measure}]"))
+                let mut out = String::with_capacity(measure.len() + 2);
+                out.push('[');
+                push_escaped_bracketed_identifier_content(measure, &mut out);
+                out.push(']');
+                Cow::Owned(out)
             }
         }
     }
@@ -83,17 +90,23 @@ impl PivotFieldRef {
             // spaces/punctuation (but quote table names containing `[` to avoid ambiguity). This is
             // friendlier for UI labels while still preserving the `{table,column}` structure.
             PivotFieldRef::DataModelColumn { table, column } => {
-                let column = escape_dax_bracket_identifier(column);
+                let mut out = String::with_capacity(table.len() + column.len() + 4);
                 if table.contains('[') {
-                    let table = quote_dax_identifier(table);
-                    format!("{table}[{column}]")
+                    push_dax_single_quoted_identifier(table, &mut out);
                 } else {
-                    format!("{table}[{column}]")
+                    out.push_str(table);
                 }
+                out.push('[');
+                push_escaped_bracketed_identifier_content(column, &mut out);
+                out.push(']');
+                out
             }
             PivotFieldRef::DataModelMeasure(name) => {
-                let name = escape_dax_bracket_identifier(name);
-                format!("[{name}]")
+                let mut out = String::with_capacity(name.len() + 2);
+                out.push('[');
+                push_escaped_bracketed_identifier_content(name, &mut out);
+                out.push(']');
+                out
             }
         }
     }
@@ -226,16 +239,20 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
 
 impl fmt::Display for PivotFieldRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use fmt::Write as _;
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
                 let table = format_dax_table_identifier(table);
-                let column = escape_dax_bracket_identifier(column);
-                write!(f, "{table}[{column}]")
+                f.write_str(table.as_ref())?;
+                f.write_char('[')?;
+                write_dax_bracket_identifier(column, f)?;
+                f.write_char(']')
             }
             PivotFieldRef::DataModelMeasure(name) => {
-                let name = escape_dax_bracket_identifier(name);
-                write!(f, "[{name}]")
+                f.write_char('[')?;
+                write_dax_bracket_identifier(name, f)?;
+                f.write_char(']')
             }
         }
     }
@@ -277,7 +294,10 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
 fn quote_dax_identifier(raw: &str) -> String {
     // DAX uses single quotes for quoting table identifiers. Single quotes inside the identifier
     // are escaped by doubling them (`''`).
-    format!("'{}'", raw.replace('\'', "''"))
+    let extra = raw.as_bytes().iter().filter(|&&b| b == b'\'').count();
+    let mut out = String::with_capacity(raw.len() + extra + 2);
+    push_dax_single_quoted_identifier(raw, &mut out);
+    out
 }
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let raw = raw.trim();
@@ -291,9 +311,34 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
-fn escape_dax_bracket_identifier(raw: &str) -> String {
-    // In DAX, `]` is escaped as `]]` within `[...]`.
-    raw.replace(']', "]]")
+fn push_dax_single_quoted_identifier(raw: &str, out: &mut String) {
+    out.push('\'');
+    let mut start = 0usize;
+    for (i, ch) in raw.char_indices() {
+        if ch != '\'' {
+            continue;
+        }
+
+        out.push_str(&raw[start..i]);
+        out.push_str("''");
+        start = i + 1; // `'` is a single-byte UTF-8 codepoint.
+    }
+    out.push_str(&raw[start..]);
+    out.push('\'');
+}
+
+fn write_dax_bracket_identifier(raw: &str, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut start = 0usize;
+    for (i, ch) in raw.char_indices() {
+        if ch != ']' {
+            continue;
+        }
+
+        out.write_str(&raw[start..i])?;
+        out.write_str("]]")?;
+        start = i + 1; // `]` is a single-byte UTF-8 codepoint.
+    }
+    out.write_str(&raw[start..])
 }
 
 fn unescape_dax_bracket_identifier(raw: &str) -> String {

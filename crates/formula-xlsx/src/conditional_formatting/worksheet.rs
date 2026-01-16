@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use formula_model::{
     CellIsOperator, CfRule, CfRuleKind, CfRuleSchema, Cfvo, CfvoType, ColorScaleRule,
-    DataBarDirection, DataBarRule, IconSet, IconSetRule, Range, TopBottomKind, UniqueDuplicateRule,
+    DataBarDirection, DataBarRule, IconSet, IconSetRule, TopBottomKind, UniqueDuplicateRule,
 };
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
@@ -376,7 +376,7 @@ fn write_x14_ext_entry<W: std::io::Write>(
     let mut groups: Vec<(String, Vec<(usize, &CfRule)>)> = Vec::new();
     let mut idx_by_sqref: HashMap<String, usize> = HashMap::new();
     for (rule_idx, rule) in rules.iter().enumerate().filter(|(_, r)| r.schema == CfRuleSchema::X14) {
-        let sqref = format_sqref(&rule.applies_to);
+        let sqref = formula_model::format_sqref(&rule.applies_to);
         let idx = *idx_by_sqref.entry(sqref.clone()).or_insert_with(|| {
             groups.push((sqref.clone(), Vec::new()));
             groups.len() - 1
@@ -489,7 +489,7 @@ fn write_conditional_formatting_blocks<W: std::io::Write>(
     let mut groups: Vec<(String, Vec<(usize, &CfRule)>)> = Vec::new();
     let mut idx_by_sqref: HashMap<String, usize> = HashMap::new();
     for (rule_idx, rule) in rules.iter().enumerate() {
-        let sqref = format_sqref(&rule.applies_to);
+        let sqref = formula_model::format_sqref(&rule.applies_to);
         let idx = *idx_by_sqref.entry(sqref.clone()).or_insert_with(|| {
             groups.push((sqref.clone(), Vec::new()));
             groups.len() - 1
@@ -738,14 +738,6 @@ fn write_cfvo<W: std::io::Write>(writer: &mut Writer<W>, tag: &str, cfvo: &Cfvo)
     }
     writer.write_event(Event::Empty(el))?;
     Ok(())
-}
-
-fn format_sqref(ranges: &[Range]) -> String {
-    ranges
-        .iter()
-        .map(|r| r.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn cell_is_operator_to_ooxml(op: CellIsOperator) -> &'static str {

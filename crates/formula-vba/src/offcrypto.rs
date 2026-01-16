@@ -660,6 +660,15 @@ mod tests {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    const PROJECT_NAME_WITH_NUL: &str = "VBAProject\0";
+
+    fn project_name_utf16le_bytes() -> Vec<u8> {
+        PROJECT_NAME_WITH_NUL
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
         // Keep the test self-contained: generate a deterministic PKCS#7 SignedData with an
@@ -720,16 +729,12 @@ mod tests {
         // Synthetic DigSigInfoSerialized-like stream:
         // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
         // [projectName UTF-16LE] [certStore bytes] [signature bytes]
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&cb_signature.to_le_bytes());
@@ -757,16 +762,12 @@ mod tests {
         // Synthetic DigSigInfoSerialized-like stream:
         // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
         // [projectName UTF-16LE] [certStore bytes] [signature bytes]
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&cb_signature.to_le_bytes());
@@ -790,16 +791,12 @@ mod tests {
         // [version, cbSignature, cbSigningCertStore, cchProjectName]
         let version = 1u32;
 
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&version.to_le_bytes());
@@ -827,11 +824,7 @@ mod tests {
         let version = 1u32;
         let reserved = 0u32;
 
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
@@ -863,17 +856,13 @@ mod tests {
         // project name and cert store. This is not part of the "common" layout, but some producers
         // appear to include extra fields. We should still be able to locate the PKCS#7 payload using
         // cbSignature (counting backwards from the end).
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let unknown = vec![0x11, 0x22, 0x33];
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&cb_signature.to_le_bytes());
@@ -899,16 +888,12 @@ mod tests {
         //
         // A permissive parser should still be able to find the PKCS#7 payload by counting back from
         // the end of the stream using cbSignature.
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = 0xFFFF_FFFFu32; // intentionally inconsistent
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&cb_signature.to_le_bytes());
@@ -931,19 +916,12 @@ mod tests {
         // Variant: cchProjectName is a UTF-16 code unit count *excluding* the terminating NUL, but
         // the stored project name bytes still include the NUL terminator. This requires the parser
         // to consider the `proj_len * 2 + 2` interpretation.
-        let project_name_utf16_with_nul: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let project_name_utf16_no_nul =
-            &project_name_utf16_with_nul[..project_name_utf16_with_nul.len() - 1];
-
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16_with_nul {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project_no_nul = project_name_utf16_no_nul.len() as u32;
+        let cch_project_no_nul = ((project_name_bytes.len() / 2) as u32).saturating_sub(1);
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&cb_signature.to_le_bytes());
@@ -963,16 +941,12 @@ mod tests {
     fn parses_digsig_info_serialized_when_signature_bytes_come_first() {
         let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
 
-        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let mut project_name_bytes = Vec::new();
-        for ch in &project_name_utf16 {
-            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
-        }
+        let project_name_bytes = project_name_utf16le_bytes();
         let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
 
         let cb_signature = pkcs7.len() as u32;
         let cb_cert_store = cert_store.len() as u32;
-        let cch_project = project_name_utf16.len() as u32;
+        let cch_project = (project_name_bytes.len() / 2) as u32;
 
         // Layout: header, signature, project name, cert store.
         let mut stream = Vec::new();

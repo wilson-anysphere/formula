@@ -272,17 +272,16 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
 
         // Do not strip elapsed time tokens `[h]`, `[m]`, `[s]` which are part of
         // date/time formatting.
-        let lower = content.to_ascii_lowercase();
-        if !lower.is_empty()
-            && (lower.chars().all(|c| c == 'h')
-                || lower.chars().all(|c| c == 'm')
-                || lower.chars().all(|c| c == 's'))
+        if !content.is_empty()
+            && (content.chars().all(|c| matches!(c, 'h' | 'H'))
+                || content.chars().all(|c| matches!(c, 'm' | 'M'))
+                || content.chars().all(|c| matches!(c, 's' | 'S')))
         {
             break;
         }
 
         if color.is_none() {
-            if let Some(parsed) = parse_color_token(&lower) {
+            if let Some(parsed) = parse_color_token(content) {
                 color = Some(parsed);
             }
         }
@@ -332,21 +331,30 @@ fn parse_condition(content: &str) -> Option<Condition> {
     Some(Condition { op, rhs })
 }
 
-fn parse_color_token(lower: &str) -> Option<ColorOverride> {
-    Some(match lower {
-        "black" => ColorOverride::Argb(0xFF000000),
-        "white" => ColorOverride::Argb(0xFFFFFFFF),
-        "red" => ColorOverride::Argb(0xFFFF0000),
-        "green" => ColorOverride::Argb(0xFF00FF00),
-        "blue" => ColorOverride::Argb(0xFF0000FF),
-        "cyan" => ColorOverride::Argb(0xFF00FFFF),
-        "magenta" => ColorOverride::Argb(0xFFFF00FF),
-        "yellow" => ColorOverride::Argb(0xFFFFFF00),
-        _ => {
-            let rest = lower.strip_prefix("color")?;
-            let idx: u8 = rest.trim().parse().ok()?;
-            ColorOverride::Indexed(idx)
-        }
+fn parse_color_token(content: &str) -> Option<ColorOverride> {
+    Some(if content.eq_ignore_ascii_case("black") {
+        ColorOverride::Argb(0xFF000000)
+    } else if content.eq_ignore_ascii_case("white") {
+        ColorOverride::Argb(0xFFFFFFFF)
+    } else if content.eq_ignore_ascii_case("red") {
+        ColorOverride::Argb(0xFFFF0000)
+    } else if content.eq_ignore_ascii_case("green") {
+        ColorOverride::Argb(0xFF00FF00)
+    } else if content.eq_ignore_ascii_case("blue") {
+        ColorOverride::Argb(0xFF0000FF)
+    } else if content.eq_ignore_ascii_case("cyan") {
+        ColorOverride::Argb(0xFF00FFFF)
+    } else if content.eq_ignore_ascii_case("magenta") {
+        ColorOverride::Argb(0xFFFF00FF)
+    } else if content.eq_ignore_ascii_case("yellow") {
+        ColorOverride::Argb(0xFFFFFF00)
+    } else {
+        let rest = content
+            .get(.."color".len())
+            .is_some_and(|p| p.eq_ignore_ascii_case("color"))
+            .then(|| &content["color".len()..])?;
+        let idx: u8 = rest.trim().parse().ok()?;
+        ColorOverride::Indexed(idx)
     })
 }
 

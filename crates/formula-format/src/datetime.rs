@@ -57,8 +57,7 @@ pub fn looks_like_datetime(section: &str) -> bool {
                     }
                     content.push(c);
                 }
-                let lower = content.to_ascii_lowercase();
-                if is_elapsed_time_token(&lower) {
+                if is_elapsed_time_token(&content) {
                     return true;
                 }
             }
@@ -76,8 +75,13 @@ pub fn looks_like_datetime(section: &str) -> bool {
                         break;
                     }
                 }
-                let lower = probe.to_ascii_lowercase();
-                if lower.starts_with("am/pm") || lower.starts_with("a/p") {
+                if probe
+                    .get(.."am/pm".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("am/pm"))
+                    || probe
+                        .get(.."a/p".len())
+                        .is_some_and(|p| p.eq_ignore_ascii_case("a/p"))
+                {
                     return true;
                 }
             }
@@ -92,7 +96,9 @@ fn is_elapsed_time_token(lower: &str) -> bool {
     if lower.is_empty() {
         return false;
     }
-    lower.chars().all(|c| c == 'h') || lower.chars().all(|c| c == 'm') || lower.chars().all(|c| c == 's')
+    lower.chars().all(|c| matches!(c, 'h' | 'H'))
+        || lower.chars().all(|c| matches!(c, 'm' | 'M'))
+        || lower.chars().all(|c| matches!(c, 's' | 'S'))
 }
 
 fn parse_elapsed_bracket_token(lower: &str) -> Option<Token> {
@@ -100,13 +106,13 @@ fn parse_elapsed_bracket_token(lower: &str) -> Option<Token> {
         return None;
     }
     let count = lower.chars().count();
-    if lower.chars().all(|c| c == 'h') {
+    if lower.chars().all(|c| matches!(c, 'h' | 'H')) {
         return Some(Token::ElapsedHours(count));
     }
-    if lower.chars().all(|c| c == 'm') {
+    if lower.chars().all(|c| matches!(c, 'm' | 'M')) {
         return Some(Token::ElapsedMinutes(count));
     }
-    if lower.chars().all(|c| c == 's') {
+    if lower.chars().all(|c| matches!(c, 's' | 'S')) {
         return Some(Token::ElapsedSeconds(count));
     }
     None
@@ -325,9 +331,8 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                     }
                     content.push(c);
                 }
-                let lower = content.to_ascii_lowercase();
                 flush_literal(&mut literal_buf, &mut tokens);
-                if let Some(token) = parse_elapsed_bracket_token(&lower) {
+                if let Some(token) = parse_elapsed_bracket_token(&content) {
                     tokens.push(token);
                 }
             }
@@ -344,15 +349,20 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                     }
                 }
 
-                let lower = probe.to_ascii_lowercase();
-                if lower.starts_with("am/pm") {
+                if probe
+                    .get(.."am/pm".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("am/pm"))
+                {
                     // Consume `M/PM` (4 chars) from the original iterator.
                     for _ in 0..4 {
                         chars.next();
                     }
                     flush_literal(&mut literal_buf, &mut tokens);
                     tokens.push(Token::AmPmLong);
-                } else if lower.starts_with("a/p") {
+                } else if probe
+                    .get(.."a/p".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("a/p"))
+                {
                     // Consume `/P` (2 chars).
                     for _ in 0..2 {
                         chars.next();

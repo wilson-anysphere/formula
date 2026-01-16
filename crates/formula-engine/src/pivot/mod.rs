@@ -35,6 +35,8 @@ pub use definition::{
     PivotDestination, PivotRefreshError, PivotRefreshOutput, PivotSource, PivotTableDefinition,
     PivotTableId,
 };
+
+use formula_model::external_refs::push_escaped_bracketed_identifier_content;
 pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
     // Prefer a user-facing label that matches common cache captions:
     // - Columns: `Table[Column]` (without quoting table names)
@@ -45,25 +47,58 @@ pub(crate) fn pivot_field_ref_name(field: &PivotFieldRef) -> Cow<'_, str> {
     }
 }
 
-fn escape_dax_bracket_identifier(raw: &str) -> Cow<'_, str> {
-    // In DAX, `]` is escaped as `]]` within `[...]`.
-    formula_model::external_refs::escape_bracketed_identifier_content(raw)
-}
+fn push_dax_quoted_table_identifier(raw: &str, out: &mut String) {
+    // In DAX, quoted table identifiers use single quotes, and embedded single quotes are escaped
+    // by doubling them: `O'Brien` => `'O''Brien'`.
+    out.push('\'');
+    let mut start = 0usize;
+    for (i, ch) in raw.char_indices() {
+        if ch != '\'' {
+            continue;
+        }
 
-fn dax_quoted_table_name(raw: &str) -> Cow<'_, str> {
-    // In DAX, table names that require quoting use single quotes, and embedded single quotes are
-    // escaped by doubling (e.g. `O'Brien` => `'O''Brien'`).
-    if raw.contains('\'') {
-        Cow::Owned(raw.replace('\'', "''"))
-    } else {
-        Cow::Borrowed(raw)
+        out.push_str(&raw[start..i]);
+        out.push_str("''");
+        start = i + 1; // `'` is a single-byte UTF-8 codepoint.
     }
+    out.push_str(&raw[start..]);
+    out.push('\'');
 }
 
 fn dax_quoted_column_ref(table: &str, column: &str) -> String {
-    let table = dax_quoted_table_name(table);
-    let column = escape_dax_bracket_identifier(column);
-    format!("'{table}'[{column}]")
+    let mut out = String::with_capacity(table.len() + column.len() + 6);
+    push_dax_quoted_table_identifier(table, &mut out);
+    out.push('[');
+    push_escaped_bracketed_identifier_content(column, &mut out);
+    out.push(']');
+    out
+}
+
+fn dax_quoted_unescaped_column_ref(table: &str, column: &str) -> String {
+    let mut out = String::with_capacity(table.len() + column.len() + 6);
+    push_dax_quoted_table_identifier(table, &mut out);
+    out.push('[');
+    out.push_str(column);
+    out.push(']');
+    out
+}
+
+fn dax_unquoted_column_ref(table: &str, column: &str) -> String {
+    let mut out = String::with_capacity(table.len() + column.len() + 4);
+    out.push_str(table);
+    out.push('[');
+    push_escaped_bracketed_identifier_content(column, &mut out);
+    out.push(']');
+    out
+}
+
+fn dax_unquoted_unescaped_column_ref(table: &str, column: &str) -> String {
+    let mut out = String::with_capacity(table.len() + column.len() + 4);
+    out.push_str(table);
+    out.push('[');
+    out.push_str(column);
+    out.push(']');
+    out
 }
 
 fn pivot_field_ref_caption(field: &PivotFieldRef) -> Cow<'_, str> {
@@ -321,23 +356,20 @@ impl PivotCache {
                 }
 
                 // Unquoted table name + escaped bracket identifier.
-                let escaped_column =
-                    formula_model::external_refs::escape_bracketed_identifier_content(column);
-                let unquoted = format!("{table}[{escaped_column}]");
+                let unquoted = dax_unquoted_column_ref(table, column);
                 if let Some(idx) = self.field_index(&unquoted) {
                     return Some(idx);
                 }
 
                 // Some caches store the raw column name without DAX escaping.
-                let unescaped = format!("{table}[{column}]");
+                let unescaped = dax_unquoted_unescaped_column_ref(table, column);
                 if unescaped != unquoted {
                     if let Some(idx) = self.field_index(&unescaped) {
                         return Some(idx);
                     }
                 }
                 // Rare: quoted table name but raw (unescaped) column name.
-                let quoted_table = dax_quoted_table_name(table);
-                let quoted_unescaped = format!("'{quoted_table}'[{column}]");
+                let quoted_unescaped = dax_quoted_unescaped_column_ref(table, column);
                 if quoted_unescaped != quoted {
                     if let Some(idx) = self.field_index(&quoted_unescaped) {
                         return Some(idx);
@@ -850,6 +882,10 @@ fn normalize_pivot_item_name(name: &str) -> String {
     fold_text_case_insensitive(name)
 }
 
+fn normalize_pivot_item_name_owned(name: String) -> String {
+    fold_text_case_insensitive_owned(name)
+}
+
 fn fold_text_case_insensitive(s: &str) -> String {
     if s.is_ascii() {
         s.to_ascii_uppercase()
@@ -858,6 +894,16 @@ fn fold_text_case_insensitive(s: &str) -> String {
         // non-ASCII text (e.g. ß -> SS).
         s.chars().flat_map(|c| c.to_uppercase()).collect()
     }
+}
+
+fn fold_text_case_insensitive_owned(mut s: String) -> String {
+    if s.is_ascii() {
+        s.make_ascii_uppercase();
+        return s;
+    }
+    // Use Unicode-aware uppercasing to approximate Excel-like case-insensitive matching for
+    // non-ASCII text (e.g. ß -> SS).
+    s.chars().flat_map(|c| c.to_uppercase()).collect()
 }
 
 #[derive(Debug, Clone)]
@@ -876,8 +922,9 @@ impl FieldItemResolver {
         if let Some(values) = cache.unique_values.get(field) {
             for value in values {
                 let part = value.to_key_part();
-                let display = part.display_string();
-                let normalized = normalize_pivot_item_name(&display);
+                // `display_string()` already returns an owned `String`; avoid allocating again when
+                // the display is ASCII by uppercasing in-place.
+                let normalized = normalize_pivot_item_name_owned(part.display_string());
 
                 if ambiguous.contains(&normalized) {
                     continue;
@@ -1123,25 +1170,29 @@ impl<'a> CalculatedItemParser<'a> {
             _ => return Err("expected '\"'".to_string()),
         }
 
-        let mut out = String::new();
+        // Preserve UTF-8 content; only treat `"` and `\` as special.
+        let mut out: Vec<u8> = Vec::new();
         while let Some(b) = self.consume() {
             match b {
-                b'"' => return Ok(out),
+                b'"' => {
+                    return Ok(String::from_utf8(out)
+                        .expect("string literal bytes come from valid UTF-8 input"))
+                }
                 b'\\' => {
                     let escaped = self
                         .consume()
                         .ok_or_else(|| "unterminated escape sequence".to_string())?;
                     match escaped {
-                        b'"' => out.push('"'),
-                        b'\\' => out.push('\\'),
-                        b'n' => out.push('\n'),
-                        b't' => out.push('\t'),
+                        b'"' => out.push(b'"'),
+                        b'\\' => out.push(b'\\'),
+                        b'n' => out.push(b'\n'),
+                        b't' => out.push(b'\t'),
                         other => {
-                            return Err(format!("unsupported escape sequence: \\{}", other as char))
+                            return Err(format!("unsupported escape sequence: \\x{other:02X}"))
                         }
                     }
                 }
-                other => out.push(other as char),
+                other => out.push(other),
             }
         }
 
@@ -3391,15 +3442,14 @@ impl FieldIndices {
                     }
                 }
                 PivotFieldRef::DataModelColumn { table, column } => {
-                    let column_escaped = escape_dax_bracket_identifier(column);
-                    let unquoted = format!("{table}[{column_escaped}]");
+                    let unquoted = dax_unquoted_column_ref(table, column);
                     if let Some(idx) = source.field_index(&unquoted) {
                         return Ok(idx);
                     }
 
                     // Some non-cache sources may store the raw column name without DAX escaping.
                     // Try that form before attempting quoted encodings.
-                    let unescaped = format!("{table}[{column}]");
+                    let unescaped = dax_unquoted_unescaped_column_ref(table, column);
                     if unescaped != unquoted {
                         if let Some(idx) = source.field_index(&unescaped) {
                             return Ok(idx);
@@ -3412,8 +3462,7 @@ impl FieldIndices {
                     }
 
                     // Rare: quoted table name but raw (unescaped) column name.
-                    let quoted_table = dax_quoted_table_name(table);
-                    let quoted_unescaped = format!("'{quoted_table}'[{column}]");
+                    let quoted_unescaped = dax_quoted_unescaped_column_ref(table, column);
                     if quoted_unescaped != quoted {
                         if let Some(idx) = source.field_index(&quoted_unescaped) {
                             return Ok(idx);
@@ -3719,6 +3768,26 @@ mod tests {
         let decoded: PivotConfig = serde_json::from_value(json_without).unwrap();
         assert!(decoded.calculated_fields.is_empty());
         assert!(decoded.calculated_items.is_empty());
+    }
+
+    #[test]
+    fn calculated_item_parser_preserves_utf8_item_names_and_escapes() {
+        assert_eq!(
+            CalculatedItemParser::parse(r#""é""#).unwrap(),
+            CalculatedItemExprRaw::Item("é".to_string())
+        );
+        assert_eq!(
+            CalculatedItemParser::parse(r#""💩""#).unwrap(),
+            CalculatedItemExprRaw::Item("💩".to_string())
+        );
+        assert_eq!(
+            CalculatedItemParser::parse(r#""a\n💩""#).unwrap(),
+            CalculatedItemExprRaw::Item("a\n💩".to_string())
+        );
+        assert_eq!(
+            CalculatedItemParser::parse(r#""a\"b""#).unwrap(),
+            CalculatedItemExprRaw::Item("a\"b".to_string())
+        );
     }
 
     #[test]

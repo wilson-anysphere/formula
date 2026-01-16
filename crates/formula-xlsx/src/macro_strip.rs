@@ -1039,15 +1039,15 @@ fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
     } else {
         std::borrow::Cow::Borrowed(rels_part)
     };
-    let rels_lower = rels_part.to_ascii_lowercase();
+    let rels_part = rels_part.as_ref();
 
-    if rels_lower == "_rels/.rels" {
+    if rels_part.eq_ignore_ascii_case("_rels/.rels") {
         return Some(String::new());
     }
 
-    if rels_lower.starts_with("_rels/") {
+    if crate::ascii::starts_with_ignore_case(rels_part, "_rels/") {
         let rest = &rels_part["_rels/".len()..];
-        if !rels_lower.ends_with(".rels") || rest.len() < ".rels".len() {
+        if rest.len() < ".rels".len() || !crate::ascii::ends_with_ignore_case(rest, ".rels") {
             return None;
         }
         let base_len = rest.len() - ".rels".len();
@@ -1055,10 +1055,10 @@ fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
     }
 
     let marker = "/_rels/";
-    let idx = rels_lower.rfind(marker)?;
+    let idx = crate::ascii::rfind_ignore_case(rels_part, marker)?;
     let dir = &rels_part[..idx];
     let rels_file = &rels_part[idx + marker.len()..];
-    if !rels_file.to_ascii_lowercase().ends_with(".rels") || rels_file.len() < ".rels".len() {
+    if rels_file.len() < ".rels".len() || !crate::ascii::ends_with_ignore_case(rels_file, ".rels") {
         return None;
     }
     let base_len = rels_file.len() - ".rels".len();

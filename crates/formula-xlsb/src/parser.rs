@@ -667,11 +667,13 @@ mod tests {
     }
 
     fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
-        let units: Vec<u16> = s.encode_utf16().collect();
-        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
-        for u in units {
-            out.extend_from_slice(&u.to_le_bytes());
-        }
+        let utf16le: Vec<u8> = s
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
+        let cch: u32 = (utf16le.len() / 2) as u32;
+        out.extend_from_slice(&cch.to_le_bytes());
+        out.extend_from_slice(&utf16le);
     }
 
     #[test]
@@ -2847,9 +2849,17 @@ fn normalize_sheet_target(target: &str) -> String {
     // - backslashes to `/`
     // - strip leading `/`
     // - avoid double-prefixing `xl/` when it is already present.
-    let target = target.replace('\\', "/");
-    let target = target.trim_start_matches('/');
-    if target.to_ascii_lowercase().starts_with("xl/") {
+    let target = target.trim_start_matches(|c| c == '/' || c == '\\');
+    let target = if target.contains('\\') {
+        std::borrow::Cow::Owned(target.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(target)
+    };
+    let target = target.as_ref();
+    if target
+        .get(.."xl/".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("xl/"))
+    {
         target.to_string()
     } else {
         format!("xl/{target}")
@@ -2961,6 +2971,28 @@ fn resolve_supbook_sheet_name(sheet_list: Option<&Vec<String>>, sheet_index: u32
             format!("Sheet{n}")
         })
 }
+
+const WORKBOOK_PATH_SUFFIXES: [&str; 11] = [
+    ".xls", ".xlt", ".xla", ".xlsx", ".xlsm", ".xltx", ".xltm", ".xlsb", ".xlam", ".xll",
+    // Legacy Excel 2-4 format extensions are uncommon but still appear in old workbooks.
+    ".xlw",
+];
+
+fn looks_like_workbook_path(value: &str) -> bool {
+    if value.contains(['/', '\\']) {
+        return true;
+    }
+    for suffix in WORKBOOK_PATH_SUFFIXES {
+        if value
+            .get(value.len().saturating_sub(suffix.len())..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn classify_supbook_name(raw_name: &str) -> SupBookKind {
     if raw_name.is_empty() {
         return SupBookKind::Internal;
@@ -2972,19 +3004,7 @@ fn classify_supbook_name(raw_name: &str) -> SupBookKind {
     // Heuristic: if the string looks like a file path or workbook filename, treat it as an
     // external workbook reference. Otherwise treat it as an internal SupBook (some producers
     // store the first sheet name here).
-    let name = raw_name.to_ascii_lowercase();
-    if name.contains(['/', '\\'])
-        || name.ends_with(".xls")
-        || name.ends_with(".xlt")
-        || name.ends_with(".xla")
-        || name.ends_with(".xlsx")
-        || name.ends_with(".xlsm")
-        || name.ends_with(".xltx")
-        || name.ends_with(".xltm")
-        || name.ends_with(".xlsb")
-        || name.ends_with(".xlam")
-        || name.ends_with(".xll")
-    {
+    if looks_like_workbook_path(raw_name) {
         SupBookKind::ExternalWorkbook
     } else {
         SupBookKind::Internal
@@ -2996,18 +3016,7 @@ fn supbook_is_plausible(supbook: &SupBook) -> bool {
         return true;
     }
 
-    let name = supbook.raw_name.to_ascii_lowercase();
-    name.contains(['/', '\\'])
-        || name.ends_with(".xls")
-        || name.ends_with(".xlt")
-        || name.ends_with(".xla")
-        || name.ends_with(".xlsx")
-        || name.ends_with(".xlsm")
-        || name.ends_with(".xltx")
-        || name.ends_with(".xltm")
-        || name.ends_with(".xlsb")
-        || name.ends_with(".xlam")
-        || name.ends_with(".xll")
+    looks_like_workbook_path(&supbook.raw_name)
 }
 
 fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {

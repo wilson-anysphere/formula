@@ -1,5 +1,6 @@
 use crate::eval::parse_a1;
 use crate::{Engine, EngineError, RecalcMode, Value};
+use std::borrow::Cow;
 
 use super::{CellRef, CellValue, WhatIfModel};
 
@@ -44,16 +45,16 @@ impl<'a> EngineWhatIfModel<'a> {
             let _ = parse_a1(addr)?;
 
             let sheet_raw = sheet_raw.trim();
-            let sheet = if let Some(inner) = sheet_raw
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
+            let sheet = if let Some(inner) =
+                formula_model::unquote_excel_single_quoted_identifier_lenient(sheet_raw)
             {
                 if inner.is_empty() {
                     SheetRef::Default(default_sheet)
-                } else if inner.contains("''") {
-                    SheetRef::Owned(inner.replace("''", "'"))
                 } else {
-                    SheetRef::Explicit(inner)
+                    match inner {
+                        Cow::Borrowed(s) => SheetRef::Explicit(s),
+                        Cow::Owned(s) => SheetRef::Owned(s),
+                    }
                 }
             } else if sheet_raw.is_empty() {
                 SheetRef::Default(default_sheet)

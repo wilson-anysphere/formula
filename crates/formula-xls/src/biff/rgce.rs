@@ -19,6 +19,8 @@
 //! base is known, the decoder defaults to `(0,0)` (A1) but still preserves `$` absolute/relative
 //! markers in the rendered A1 text.
 
+use std::borrow::Cow;
+
 use super::{
     externsheet::ExternSheetEntry,
     strings,
@@ -27,11 +29,14 @@ use super::{
 use formula_biff::errors::biff_error_literal;
 use formula_biff::ptg_list::{decode_ptg_list_payload_candidates, PtgListDecoded};
 use formula_biff::structured_refs::{
-    format_structured_ref, structured_columns_placeholder_from_ids,
-    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK,
-    StructuredRefItem,
+    estimated_structured_ref_len, push_structured_ref, structured_columns_placeholder_from_ids,
+    structured_ref_is_single_cell, structured_ref_item_from_flags, KNOWN_FLAGS_MASK, StructuredRefItem,
 };
-use formula_model::push_column_label;
+use formula_model::{
+    push_a1_cell_area_row1, push_a1_cell_ref_row1, push_a1_col_range, push_a1_col_ref,
+    push_a1_row_range_row1, push_a1_row_ref_row1,
+    push_escaped_excel_double_quote_char, push_escaped_excel_double_quotes,
+};
 use formula_model::external_refs::format_external_workbook_key;
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
@@ -362,6 +367,21 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
     let mut warnings_suppressed = false;
     let mut warned_default_base_for_relative = false;
 
+    fn parenthesize(mut text: String) -> String {
+        text.reserve(2);
+        text.insert(0, '(');
+        text.push(')');
+        text
+    }
+
+    fn maybe_parenthesize(expr: ExprFragment, required_prec: u8) -> String {
+        if expr.precedence < required_prec && !expr.is_missing {
+            parenthesize(expr.text)
+        } else {
+            expr.text
+        }
+    }
+
     while !input.is_empty() {
         let ptg = input[0];
         input = &input[1..];
@@ -428,16 +448,9 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     }
                 };
 
-                let left_s = if left.precedence < prec && !left.is_missing {
-                    format!("({})", left.text)
-                } else {
-                    left.text
-                };
-                let right_s = if right.precedence < prec && !right.is_missing {
-                    format!("({})", right.text)
-                } else {
-                    right.text
-                };
+                let contains_union = left.contains_union || right.contains_union || ptg == 0x10;
+                let left_s = maybe_parenthesize(left, prec);
+                let right_s = maybe_parenthesize(right, prec);
 
                 let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
@@ -447,7 +460,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 stack.push(ExprFragment {
                     text,
                     precedence: prec,
-                    contains_union: left.contains_union || right.contains_union || ptg == 0x10,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -466,15 +479,15 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let inner = maybe_parenthesize(expr, prec);
+                let mut text = String::with_capacity(op.len() + inner.len());
+                text.push_str(op);
+                text.push_str(&inner);
                 stack.push(ExprFragment {
-                    text: format!("{op}{inner}"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -492,15 +505,13 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('%');
                 stack.push(ExprFragment {
-                    text: format!("{inner}%"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -518,15 +529,13 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
                 };
-                let inner = if expr.precedence < prec && !expr.is_missing {
-                    format!("({})", expr.text)
-                } else {
-                    expr.text
-                };
+                let contains_union = expr.contains_union;
+                let mut text = maybe_parenthesize(expr, prec);
+                text.push('#');
                 stack.push(ExprFragment {
-                    text: format!("{inner}#"),
+                    text,
                     precedence: prec,
-                    contains_union: expr.contains_union,
+                    contains_union,
                     is_missing: false,
                 });
             }
@@ -544,7 +553,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     }
                 };
                 stack.push(ExprFragment {
-                    text: format!("({})", expr.text),
+                    text: parenthesize(expr.text),
                     precedence: 100,
                     contains_union: expr.contains_union,
                     is_missing: false,
@@ -558,8 +567,11 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
             0x17 => match strings::parse_biff8_short_string(input, ctx.codepage) {
                 Ok((s, consumed)) => {
                     input = input.get(consumed..).unwrap_or_default();
-                    let escaped = s.replace('"', "\"\"");
-                    stack.push(ExprFragment::new(format!("\"{escaped}\"")));
+                    let mut lit = String::with_capacity(s.len().saturating_add(2));
+                    lit.push('"');
+                    push_escaped_excel_double_quotes(&mut lit, &s);
+                    lit.push('"');
+                    stack.push(ExprFragment::new(lit));
                 }
                 Err(err) => {
                     push_warning(
@@ -636,16 +648,20 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                             _ => Some(table_name.as_str()),
                         };
 
-                        let mut out = format_structured_ref(display_table_name, item, &columns);
-
                         let mut prec = 100;
                         let is_value_class = ptg == 0x38;
-                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                        let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
+                        let mut out = String::with_capacity(
+                            estimated_structured_ref_len(display_table_name, item, &columns)
+                                .saturating_add(needs_at as usize),
+                        );
+                        if needs_at {
                             // Like value-class range/name tokens, Excel uses value-class list
                             // tokens to represent legacy implicit intersection.
-                            out = format!("@{out}");
                             prec = 70;
+                            out.push('@');
                         }
+                        push_structured_ref(display_table_name, item, &columns, &mut out);
 
                         stack.push(ExprFragment {
                             text: out,
@@ -1061,8 +1077,10 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     // Like value-class range tokens, a value-class name can require legacy implicit
                     // intersection (e.g. when the name refers to a multi-cell range). Emit an
                     // explicit `@` so the decoded text preserves scalar semantics.
+                    let mut text = text;
+                    text.insert(0, '@');
                     stack.push(ExprFragment {
-                        text: format!("@{text}"),
+                        text,
                         precedence: 70,
                         contains_union: false,
                         is_missing: false,
@@ -1105,8 +1123,10 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                             // Like value-class range/name tokens, a value-class NameX can represent
                             // legacy implicit intersection. Emit an explicit `@` to preserve scalar
                             // semantics.
+                            let mut txt = txt;
+                            txt.insert(0, '@');
                             stack.push(ExprFragment {
-                                text: format!("@{txt}"),
+                                text: txt,
                                 precedence: 70,
                                 contains_union: false,
                                 is_missing: false,
@@ -1183,8 +1203,10 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 if is_value_class && !is_single_cell {
                     // Legacy implicit intersection: Excel encodes this by using a value-class range
                     // token; modern formula text uses an explicit `@` operator.
+                    let mut area = area;
+                    area.insert(0, '@');
                     stack.push(ExprFragment {
-                        text: format!("@{area}"),
+                        text: area,
                         precedence: 70,
                         contains_union: false,
                         is_missing: false,
@@ -1351,8 +1373,10 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
 
                 let is_single_cell = !area.contains(':');
                 if is_value_class && !is_single_cell {
+                    let mut area = area;
+                    area.insert(0, '@');
                     stack.push(ExprFragment {
-                        text: format!("@{area}"),
+                        text: area,
                         precedence: 70,
                         contains_union: false,
                         is_missing: false,
@@ -1385,7 +1409,9 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     }
                 };
                 let cell = format_cell_ref(row, col);
-                stack.push(ExprFragment::new(format!("{sheet_prefix}{cell}")));
+                let mut text = sheet_prefix;
+                text.push_str(&cell);
+                stack.push(ExprFragment::new(text));
             }
             // PtgArea3d
             0x3B | 0x5B | 0x7B => {
@@ -1439,14 +1465,20 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 };
 
                 if is_value_class && !is_single_cell {
+                    let mut text = String::new();
+                    text.push('@');
+                    text.push_str(&sheet_prefix);
+                    text.push_str(&area);
                     stack.push(ExprFragment {
-                        text: format!("@{sheet_prefix}{area}"),
+                        text,
                         precedence: 70,
                         contains_union: false,
                         is_missing: false,
                     });
                 } else {
-                    stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+                    let mut text = sheet_prefix;
+                    text.push_str(&area);
+                    stack.push(ExprFragment::new(text));
                 }
             }
             // PtgRefErr3d: consume payload and emit `#REF!`.
@@ -1527,7 +1559,9 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         continue;
                     }
                 };
-                stack.push(ExprFragment::new(format!("{sheet_prefix}{cell}")));
+                let mut text = sheet_prefix;
+                text.push_str(&cell);
+                stack.push(ExprFragment::new(text));
             }
             // PtgAreaN3d (relative/absolute 3D area):
             // [ixti: u16][rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
@@ -1586,14 +1620,20 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 };
                 let is_single_cell = !area.contains(':');
                 if is_value_class && !is_single_cell {
+                    let mut text = String::new();
+                    text.push('@');
+                    text.push_str(&sheet_prefix);
+                    text.push_str(&area);
                     stack.push(ExprFragment {
-                        text: format!("@{sheet_prefix}{area}"),
+                        text,
                         precedence: 70,
                         contains_union: false,
                         is_missing: false,
                     });
                 } else {
-                    stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+                    let mut text = sheet_prefix;
+                    text.push_str(&area);
+                    stack.push(ExprFragment::new(text));
                 }
             }
             other => {
@@ -1668,17 +1708,26 @@ fn decode_array_constant(
         return None;
     }
 
-    let mut row_texts = Vec::with_capacity(rows);
-    for _ in 0..rows {
-        let mut col_texts = Vec::with_capacity(cols);
-        for _ in 0..cols {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    out.push('{');
+
+    for row in 0..rows {
+        if row > 0 {
+            out.push(';');
+        }
+        for col in 0..cols {
+            if col > 0 {
+                out.push(',');
+            }
             if i >= rgcb.len() {
                 return None;
             }
             let ty = rgcb[i];
             i += 1;
             match ty {
-                0x00 => col_texts.push(String::new()),
+                0x00 => {}
                 0x01 => {
                     if rgcb.len().saturating_sub(i) < 8 {
                         return None;
@@ -1686,7 +1735,7 @@ fn decode_array_constant(
                     let mut bytes = [0u8; 8];
                     bytes.copy_from_slice(&rgcb[i..i + 8]);
                     i += 8;
-                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                    write!(&mut out, "{}", f64::from_le_bytes(bytes)).ok()?;
                 }
                 0x02 => {
                     if rgcb.len().saturating_sub(i) < 2 {
@@ -1701,13 +1750,17 @@ fn decode_array_constant(
                     let raw = &rgcb[i..i + byte_len];
                     i += byte_len;
 
-                    let mut units = Vec::with_capacity(cch);
-                    for chunk in raw.chunks_exact(2) {
-                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    out.push('"');
+                    let iter = raw
+                        .chunks_exact(2)
+                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+                    for decoded in std::char::decode_utf16(iter) {
+                        match decoded {
+                            Ok(ch) => push_escaped_excel_double_quote_char(&mut out, ch),
+                            Err(_) => push_escaped_excel_double_quote_char(&mut out, '\u{FFFD}'),
+                        }
                     }
-                    let s = String::from_utf16_lossy(&units);
-                    let escaped = s.replace('"', "\"\"");
-                    col_texts.push(format!("\"{escaped}\""));
+                    out.push('"');
                 }
                 0x04 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -1715,7 +1768,7 @@ fn decode_array_constant(
                     }
                     let b = rgcb[i];
                     i += 1;
-                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                    out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
                 0x10 => {
                     if rgcb.len().saturating_sub(i) < 1 {
@@ -1734,7 +1787,7 @@ fn decode_array_constant(
                             "#UNKNOWN!"
                         }
                     };
-                    col_texts.push(lit.to_string());
+                    out.push_str(lit);
                 }
                 other => {
                     push_warning(
@@ -1746,11 +1799,11 @@ fn decode_array_constant(
                 }
             }
         }
-        row_texts.push(col_texts.join(","));
     }
 
     *pos = i;
-    Some(format!("{{{}}}", row_texts.join(";")))
+    out.push('}');
+    Some(out)
 }
 
 /// Scan a nested BIFF8 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
@@ -2994,9 +3047,10 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
 
 #[cfg(test)]
 fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
+    use core::fmt::Write as _;
     let mut out = String::new();
-    push_column_label(col0, &mut out);
-    out.push_str(&(row0 + 1).to_string());
+    formula_model::push_column_label(col0, &mut out);
+    let _ = write!(out, "{}", u64::from(row0) + 1);
     out
 }
 
@@ -3006,31 +3060,7 @@ fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
     let col = col_with_flags & COL_INDEX_MASK;
 
     let mut out = String::new();
-    if !col_rel {
-        out.push('$');
-    }
-    push_column_label(col as u32, &mut out);
-    if !row_rel {
-        out.push('$');
-    }
-    out.push_str(&(row as u32 + 1).to_string());
-    out
-}
-fn format_row_ref(row: u16, row_rel: bool) -> String {
-    let mut out = String::new();
-    if !row_rel {
-        out.push('$');
-    }
-    out.push_str(&(row as u32 + 1).to_string());
-    out
-}
-
-fn format_col_ref(col: u16, col_rel: bool) -> String {
-    let mut out = String::new();
-    if !col_rel {
-        out.push('$');
-    }
-    push_column_label(col as u32, &mut out);
+    push_a1_cell_ref_row1(u64::from(row) + 1, col as u32, !col_rel, !row_rel, &mut out);
     out
 }
 
@@ -3088,9 +3118,9 @@ fn format_area_ref_ptg_area(
             row1_rel
         };
 
-        let r = format_row_ref(row1, row_rel);
-        // Excel includes the `:` even for a single-row span.
-        return format!("{r}:{r}");
+        let mut out = String::new();
+        push_a1_row_range_row1(u64::from(row1) + 1, u64::from(row1) + 1, !row_rel, &mut out);
+        return out;
     }
 
     if is_whole_col {
@@ -3107,9 +3137,9 @@ fn format_area_ref_ptg_area(
             col1_rel
         };
 
-        let c = format_col_ref(col1_idx as u16, col_rel);
-        // Excel includes the `:` even for a single-column span.
-        return format!("{c}:{c}");
+        let mut out = String::new();
+        push_a1_col_range(col1_idx as u32, col1_idx as u32, !col_rel, &mut out);
+        return out;
     }
 
     format_area_ref(row1, col1, row2, col2)
@@ -3130,29 +3160,37 @@ fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
     // Whole-column references (`$A:$A`, `$A:$C`).
     if row1 == 0 && row2 == BIFF8_MAX_ROW && col1_idx <= BIFF8_MAX_COL && col2_idx <= BIFF8_MAX_COL
     {
-        let start = format_col_ref(col1_idx as u16, col1_rel);
-        let end = format_col_ref(col2_idx as u16, col2_rel);
-        // Excel canonical form includes the `:` even for single-column ranges.
-        return format!("{start}:{end}");
+        let mut out = String::new();
+        push_a1_col_ref(col1_idx as u32, !col1_rel, &mut out);
+        out.push(':');
+        push_a1_col_ref(col2_idx as u32, !col2_rel, &mut out);
+        return out;
     }
 
     // Whole-row references (`$1:$1`, `$1:$3`).
     // Some producers use `0x3FFF` as the "max column" sentinel (full 14-bit width); treat it as
     // full-width for whole-row formatting too.
     if col1_idx == 0 && (col2_idx == BIFF8_MAX_COL || col2_idx == 0x3FFF) {
-        let start = format_row_ref(row1, row1_rel);
-        let end = format_row_ref(row2, row2_rel);
-        // Excel canonical form includes the `:` even for single-row ranges.
-        return format!("{start}:{end}");
+        let mut out = String::new();
+        push_a1_row_ref_row1(u64::from(row1) + 1, !row1_rel, &mut out);
+        out.push(':');
+        push_a1_row_ref_row1(u64::from(row2) + 1, !row2_rel, &mut out);
+        return out;
     }
 
-    let start = format_cell_ref(row1, col1);
-    let end = format_cell_ref(row2, col2);
-    if start == end {
-        start
-    } else {
-        format!("{start}:{end}")
-    }
+    let mut out = String::new();
+    push_a1_cell_area_row1(
+        u64::from(row1) + 1,
+        col1_idx as u32,
+        !col1_rel,
+        !row1_rel,
+        u64::from(row2) + 1,
+        col2_idx as u32,
+        !col2_rel,
+        !row2_rel,
+        &mut out,
+    );
+    out
 }
 
 fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, String> {
@@ -3220,17 +3258,18 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
         ));
     };
 
-    let workbook = format_external_workbook_name(workbook_raw);
-    let start = format!("{workbook}{sheet_first}");
+    let mut start = format_external_workbook_name(workbook_raw);
+    start.push_str(sheet_first);
     if itab_first == itab_last {
-        Ok(format!("{}!", quote_sheet_name_if_needed(&start)))
+        let mut out = quote_sheet_name_if_needed(&start);
+        out.push('!');
+        Ok(out)
     } else {
         // External 3D sheet ranges only include the workbook prefix once:
         // `'[Book.xlsx]SheetA:SheetC'!A1`
-        Ok(format!(
-            "{}!",
-            quote_sheet_range_name_if_needed(&start, sheet_last)
-        ))
+        let mut out = quote_sheet_range_name_if_needed(&start, sheet_last);
+        out.push('!');
+        Ok(out)
     }
 }
 
@@ -3296,7 +3335,9 @@ fn format_namex_ref(
                             "PtgNameX external name `{extern_name}` cannot be rendered parseably after a sheet prefix (ixti={ixti}, iname={iname})"
                         ));
                     }
-                    return Ok(format!("{prefix}{extern_name}"));
+                    let mut out = prefix;
+                    out.push_str(extern_name);
+                    return Ok(out);
                 }
             }
             Ok(extern_name.clone())
@@ -3316,7 +3357,9 @@ fn format_namex_ref(
                             "PtgNameX external name `{extern_name}` cannot be rendered parseably after a sheet prefix (ixti={ixti}, iname={iname})"
                         ));
                     }
-                    return Ok(format!("{prefix}{extern_name}"));
+                    let mut out = prefix;
+                    out.push_str(extern_name);
+                    return Ok(out);
                 }
             }
 
@@ -3405,7 +3448,11 @@ fn format_external_workbook_name(workbook: &str) -> String {
     // Workbook names may contain literal `[` characters (non-nesting), and literal `]` characters
     // must be escaped in Excel formula text as `]]`. Ensure the formatted workbook prefix is both
     // parseable and round-trips through our formula engine.
-    let without_nuls = workbook.replace('\0', "");
+    let without_nuls: Cow<'_, str> = if workbook.contains('\0') {
+        Cow::Owned(workbook.replace('\0', ""))
+    } else {
+        Cow::Borrowed(workbook)
+    };
     let trimmed_full = without_nuls.trim();
     let has_wrapper_brackets = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');
 
@@ -3438,118 +3485,15 @@ fn format_external_workbook_name(workbook: &str) -> String {
 }
 
 fn quote_sheet_name_if_needed(name: &str) -> String {
-    if is_unquoted_sheet_name(name) {
-        return name.to_string();
-    }
-    let escaped = name.replace('\'', "''");
-    format!("'{escaped}'")
-}
-
-fn quote_sheet_range_name_if_needed(start: &str, end: &str) -> String {
-    // Excel represents 3D sheet ranges as:
-    // - `Sheet1:Sheet3!A1` for simple sheet identifiers
-    // - `'Sheet 1:Sheet3'!A1` when either side requires quoting.
-    //
-    // Note: quoting each side independently (`'Sheet 1':Sheet3!A1`) is not a valid 3D sheet range.
-    if is_unquoted_sheet_name(start) && is_unquoted_sheet_name(end) {
-        return format!("{start}:{end}");
-    }
-
     let mut out = String::new();
-    out.push('\'');
-    out.push_str(&start.replace('\'', "''"));
-    out.push(':');
-    out.push_str(&end.replace('\'', "''"));
-    out.push('\'');
+    formula_model::push_sheet_name_a1(&mut out, name);
     out
 }
 
-fn is_unquoted_sheet_name(name: &str) -> bool {
-    // Be conservative: quoting is always accepted by Excel, but the unquoted form is only valid
-    // for a subset of identifier-like sheet names. In particular, `TRUE` / `FALSE` and A1-style
-    // cell references must be quoted to avoid being tokenized as boolean/cell literals by our
-    // `formula-engine` lexer.
-    if name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE") {
-        return false;
-    }
-    if starts_like_a1_cell_ref(name) {
-        return false;
-    }
-
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    for ch in chars {
-        if !(ch.is_ascii_alphanumeric() || ch == '_') {
-            return false;
-        }
-    }
-    true
-}
-
-fn starts_like_a1_cell_ref(s: &str) -> bool {
-    let mut chars = s.chars().peekable();
-    if chars.peek() == Some(&'$') {
-        chars.next();
-    }
-
-    let mut col_letters = String::new();
-    while let Some(&ch) = chars.peek() {
-        if ch.is_ascii_alphabetic() {
-            col_letters.push(ch);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-    if col_letters.is_empty() {
-        return false;
-    }
-
-    if chars.peek() == Some(&'$') {
-        chars.next();
-    }
-
-    let mut row_digits = String::new();
-    while let Some(&ch) = chars.peek() {
-        if ch.is_ascii_digit() {
-            row_digits.push(ch);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-    if row_digits.is_empty() {
-        return false;
-    }
-
-    if col_from_a1(&col_letters).is_none() {
-        return false;
-    }
-    matches!(row_digits.parse::<u32>(), Ok(v) if v != 0)
-}
-
-fn col_from_a1(col: &str) -> Option<u32> {
-    let mut value: u32 = 0;
-    let mut count: usize = 0;
-    for ch in col.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        count += 1;
-        if count > 3 {
-            return None;
-        }
-        value = value * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
-    }
-    if value == 0 || value > 16_384 {
-        return None;
-    }
-    Some(value - 1)
+fn quote_sheet_range_name_if_needed(start: &str, end: &str) -> String {
+    let mut out = String::new();
+    formula_model::push_sheet_range_name_a1(&mut out, start, end);
+    out
 }
 
 fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
@@ -3671,49 +3615,6 @@ mod tests {
 
         assert_known_errors(&ast.expr);
     }
-
-    /*
-    // Legacy helpers retained for reference: originally `assert_parseable` only validated A1 ranges
-    // for print area / print titles style defined names.
-    fn is_row_range(s: &str) -> bool {
-        let Some((a, b)) = s.split_once(':') else {
-            return false;
-        };
-
-        let a = a.trim().replace('$', "");
-        let b = b.trim().replace('$', "");
-        if a.is_empty() || b.is_empty() {
-            return false;
-        }
-        if !a.chars().all(|c| c.is_ascii_digit()) || !b.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-        match (a.parse::<u32>(), b.parse::<u32>()) {
-            (Ok(a), Ok(b)) => a > 0 && b > 0,
-            _ => false,
-        }
-    }
-
-    fn is_col_range(s: &str) -> bool {
-        let Some((a, b)) = s.split_once(':') else {
-            return false;
-        };
-
-        let a = a.trim().replace('$', "");
-        let b = b.trim().replace('$', "");
-        if a.is_empty() || b.is_empty() {
-            return false;
-        }
-        if !a.chars().all(|c| c.is_ascii_alphabetic())
-            || !b.chars().all(|c| c.is_ascii_alphabetic())
-        {
-            return false;
-        }
-
-        col_from_a1(&a).is_some() && col_from_a1(&b).is_some()
-    }
-
-    */
 
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
         let mut warnings = crate::ImportWarnings::new();

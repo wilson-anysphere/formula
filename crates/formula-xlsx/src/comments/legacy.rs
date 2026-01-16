@@ -1,3 +1,5 @@
+use core::fmt::Write as _;
+
 use formula_model::{CellRef, Comment, CommentAuthor, CommentKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +50,11 @@ pub fn parse_comments_xml(bytes: &[u8]) -> Result<Vec<Comment>, LegacyParseError
             .collect::<Vec<_>>()
             .join("");
 
-        let id = format!("note:{}:{}", cell_ref.to_a1(), comments.len());
+        let mut id = String::new();
+        id.push_str("note:");
+        formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut id);
+        id.push(':');
+        let _ = write!(id, "{}", comments.len());
         comments.push(Comment {
             id,
             cell_ref,
@@ -107,7 +113,7 @@ pub fn write_comments_xml(comments: &[Comment]) -> Vec<u8> {
             .unwrap_or(0);
 
         xml.push_str("    <comment ref=\"");
-        xml.push_str(&xml_escape(&comment.cell_ref.to_a1()));
+        formula_model::push_a1_cell_ref(comment.cell_ref.row, comment.cell_ref.col, false, false, &mut xml);
         xml.push_str("\" authorId=\"");
         xml.push_str(&author_id.to_string());
         xml.push_str("\">\n");

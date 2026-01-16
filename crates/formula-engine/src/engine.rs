@@ -9624,7 +9624,9 @@ fn cell_addr_from_cell_ref(cell: CellRef) -> CellAddr {
 }
 
 fn cell_addr_to_a1(addr: CellAddr) -> String {
-    addr.to_a1()
+    let mut out = String::new();
+    formula_model::push_a1_cell_ref(addr.row, addr.col, false, false, &mut out);
+    out
 }
 
 fn ranges_overlap(a: Range, b: Range) -> bool {
@@ -9749,6 +9751,25 @@ fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
 /// column name (case-insensitive). This mirrors the behavior of
 /// [`formula_model::table::Table::set_range`].
 fn normalize_table_columns(table: &mut Table) {
+    fn parse_default_column_number(name: &str) -> Option<u32> {
+        let bytes = name.as_bytes();
+        let prefix = b"column";
+        if bytes.len() <= prefix.len() {
+            return None;
+        }
+        if !bytes
+            .get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+        {
+            return None;
+        }
+        let digits = &name[prefix.len()..];
+        if digits.is_empty() || !digits.as_bytes().iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        digits.parse().ok()
+    }
+
     let target = table.range.width() as usize;
     let current = table.columns.len();
     if current == target {
@@ -9759,20 +9780,23 @@ fn normalize_table_columns(table: &mut Table) {
         return;
     }
 
-    let mut used_names: HashSet<String> = table
+    // We only ever generate names of the form `Column{n}`. Track the `n` values that are already
+    // taken (case-insensitively) so we can pick the next available one without allocating a
+    // case-folded copy of every existing name.
+    let mut used_default_nums: HashSet<u32> = table
         .columns
         .iter()
-        .map(|c| c.name.to_ascii_lowercase())
+        .filter_map(|c| parse_default_column_number(&c.name))
         .collect();
     let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let mut next_default_num: u32 = 1;
 
     for _ in current..target {
         let name = loop {
-            let candidate = format!("Column{next_default_num}");
-            next_default_num += 1;
-            if used_names.insert(candidate.to_ascii_lowercase()) {
-                break candidate;
+            let n = next_default_num;
+            next_default_num = next_default_num.saturating_add(1);
+            if used_default_nums.insert(n) {
+                break format!("Column{n}");
             }
         };
         table.columns.push(TableColumn {
@@ -9786,14 +9810,33 @@ fn normalize_table_columns(table: &mut Table) {
 }
 
 fn insert_default_table_columns(table: &mut Table, insert_idx: usize, count: u32) {
+    fn parse_default_column_number(name: &str) -> Option<u32> {
+        let bytes = name.as_bytes();
+        let prefix = b"column";
+        if bytes.len() <= prefix.len() {
+            return None;
+        }
+        if !bytes
+            .get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+        {
+            return None;
+        }
+        let digits = &name[prefix.len()..];
+        if digits.is_empty() || !digits.as_bytes().iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        digits.parse().ok()
+    }
+
     if count == 0 {
         return;
     }
 
-    let mut used_names: HashSet<String> = table
+    let mut used_default_nums: HashSet<u32> = table
         .columns
         .iter()
-        .map(|c| c.name.to_ascii_lowercase())
+        .filter_map(|c| parse_default_column_number(&c.name))
         .collect();
     let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let mut next_default_num: u32 = 1;
@@ -9801,10 +9844,10 @@ fn insert_default_table_columns(table: &mut Table, insert_idx: usize, count: u32
     let mut inserted: Vec<TableColumn> = Vec::with_capacity(count as usize);
     for _ in 0..count {
         let name = loop {
-            let candidate = format!("Column{next_default_num}");
-            next_default_num += 1;
-            if used_names.insert(candidate.to_ascii_lowercase()) {
-                break candidate;
+            let n = next_default_num;
+            next_default_num = next_default_num.saturating_add(1);
+            if used_default_nums.insert(n) {
+                break format!("Column{n}");
             }
         };
         inserted.push(TableColumn {

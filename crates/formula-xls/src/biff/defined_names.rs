@@ -292,7 +292,11 @@ pub(super) fn parse_biff8_name_record(
         // Best-effort: BIFF Unicode strings can contain embedded NUL bytes in the wild; strip them
         // so the name matches Excel’s visible name semantics and can pass `formula_model` name
         // validation.
-        let stripped = raw_name.replace('\0', "");
+        let stripped = if raw_name.contains('\0') {
+            raw_name.replace('\0', "")
+        } else {
+            raw_name
+        };
         if stripped.is_empty() {
             return Err("NAME record has empty name after stripping NULs".to_string());
         }
@@ -316,7 +320,11 @@ pub(super) fn parse_biff8_name_record(
                 let raw = cursor.read_biff8_unicode_string_no_cch(cch_description, codepage)?;
                 // Best-effort: Excel UIs generally treat embedded NULs as invalid; strip them so the value
                 // is usable as `formula_model::DefinedName.comment`.
-                let stripped = raw.replace('\0', "");
+                let stripped = if raw.contains('\0') {
+                    raw.replace('\0', "")
+                } else {
+                    raw
+                };
                 (!stripped.is_empty()).then_some(stripped)
             } else {
                 None

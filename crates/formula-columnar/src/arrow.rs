@@ -218,32 +218,35 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
     // Prefer explicit metadata as it is required to disambiguate Int64 columns.
     let meta = field.metadata();
     if let Some(tag) = meta.get(META_COLUMN_TYPE) {
-        let tag = tag.to_ascii_lowercase();
-        let parsed = match tag.as_str() {
-            "number" => ColumnType::Number,
-            "string" => ColumnType::String,
-            "boolean" => ColumnType::Boolean,
-            "datetime" => ColumnType::DateTime,
-            "currency" => {
+        let parsed = if tag.eq_ignore_ascii_case("number") {
+            ColumnType::Number
+        } else if tag.eq_ignore_ascii_case("string") {
+            ColumnType::String
+        } else if tag.eq_ignore_ascii_case("boolean") {
+            ColumnType::Boolean
+        } else if tag.eq_ignore_ascii_case("datetime") {
+            ColumnType::DateTime
+        } else if tag.eq_ignore_ascii_case("currency") {
                 let scale = meta
                     .get(META_SCALE)
                     .and_then(|s| s.parse::<u8>().ok())
                     .unwrap_or(0);
-                ColumnType::Currency { scale }
-            }
-            "percentage" => {
+            ColumnType::Currency { scale }
+        } else if tag.eq_ignore_ascii_case("percentage") {
                 let scale = meta
                     .get(META_SCALE)
                     .and_then(|s| s.parse::<u8>().ok())
                     .unwrap_or(0);
-                ColumnType::Percentage { scale }
-            }
-            _ => {
-                return Err(ArrowInteropError::InvalidMetadata {
-                    key: META_COLUMN_TYPE,
-                    value: tag,
-                });
-            }
+            ColumnType::Percentage { scale }
+        } else {
+            // Keep the error payload stable and user-friendly: report the metadata value in a
+            // canonical ASCII-lowercased form.
+            let mut value = tag.to_string();
+            value.make_ascii_lowercase();
+            return Err(ArrowInteropError::InvalidMetadata {
+                key: META_COLUMN_TYPE,
+                value,
+            });
         };
         return Ok(parsed);
     }

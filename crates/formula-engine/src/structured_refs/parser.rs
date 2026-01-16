@@ -1,5 +1,6 @@
 use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
 use formula_model::external_refs::unescape_bracketed_identifier_content;
+use std::borrow::Cow;
 
 pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, usize)> {
     if pos >= input.len() {
@@ -7,7 +8,7 @@ pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, u
     }
 
     let bytes = input.as_bytes();
-    let (table_name, bracket_start) = if bytes[pos] == b'[' {
+    let (table_name_span, bracket_start) = if bytes[pos] == b'[' {
         (None, pos)
     } else {
         let mut i = pos;
@@ -28,11 +29,12 @@ pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, u
         if i >= input.len() || input.as_bytes()[i] != b'[' {
             return None;
         }
-        (Some(input[pos..i].to_string()), i)
+        (Some((pos, i)), i)
     };
 
     let (inner, end_pos) = parse_bracketed(input, bracket_start)?;
     let (items, columns) = parse_inner_spec(inner.trim())?;
+    let table_name = table_name_span.map(|(start, end)| input[start..end].to_string());
 
     Some((
         StructuredRef {
@@ -62,10 +64,11 @@ fn parse_bracketed(input: &str, start: usize) -> Option<(&str, usize)> {
     }
 
     let mut states: Vec<Vec<u32>> = vec![Vec::new(); len + 1];
-    states[start + 1].push(1);
+    let mut can_close: Vec<bool> = vec![false; len + 1];
+    push_depth(&mut states, &mut can_close, start + 1, 1);
 
     for pos in start + 1..len {
-        let depths = states[pos].clone();
+        let depths = std::mem::take(&mut states[pos]);
         if depths.is_empty() {
             continue;
         }
@@ -74,36 +77,39 @@ fn parse_bracketed(input: &str, start: usize) -> Option<(&str, usize)> {
                 continue;
             }
             match bytes[pos] {
-                b'[' => push_depth(&mut states, pos + 1, depth + 1),
+                b'[' => push_depth(&mut states, &mut can_close, pos + 1, depth + 1),
                 b']' => {
                     // Treat as closing bracket.
-                    push_depth(&mut states, pos + 1, depth.saturating_sub(1));
+                    push_depth(&mut states, &mut can_close, pos + 1, depth.saturating_sub(1));
                     // Treat as escaped literal `]`.
                     if bytes.get(pos + 1) == Some(&b']') {
-                        push_depth(&mut states, pos + 2, depth);
+                        push_depth(&mut states, &mut can_close, pos + 2, depth);
                     }
                 }
-                _ => push_depth(&mut states, pos + 1, depth),
+                _ => push_depth(&mut states, &mut can_close, pos + 1, depth),
             }
         }
     }
 
     // Choose the longest candidate end position that forms a valid structured-ref spec.
     for end_pos in (start + 1..=len).rev() {
-        if !states[end_pos].contains(&0) {
+        if !can_close[end_pos] {
             continue;
         }
         let inner = &input[start + 1..end_pos.saturating_sub(1)];
-        if parse_inner_spec(inner.trim()).is_some() {
+        if parse_inner_spec_raw(inner.trim()).is_some() {
             return Some((inner, end_pos));
         }
     }
     None
 }
 
-fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
+fn push_depth(states: &mut [Vec<u32>], can_close: &mut [bool], pos: usize, depth: u32) {
     if pos >= states.len() {
         return;
+    }
+    if depth == 0 && pos < can_close.len() {
+        can_close[pos] = true;
     }
     let entry = &mut states[pos];
     if !entry.contains(&depth) {
@@ -111,7 +117,55 @@ fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum StructuredColumnRaw<'a> {
+    Single(Cow<'a, str>),
+    Range {
+        start: Cow<'a, str>,
+        end: Cow<'a, str>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum StructuredColumnsRaw<'a> {
+    All,
+    Single(Cow<'a, str>),
+    Range {
+        start: Cow<'a, str>,
+        end: Cow<'a, str>,
+    },
+    Multi(Vec<StructuredColumnRaw<'a>>),
+}
+
+fn columns_raw_into_owned(columns: StructuredColumnsRaw<'_>) -> StructuredColumns {
+    match columns {
+        StructuredColumnsRaw::All => StructuredColumns::All,
+        StructuredColumnsRaw::Single(name) => StructuredColumns::Single(name.into_owned()),
+        StructuredColumnsRaw::Range { start, end } => StructuredColumns::Range {
+            start: start.into_owned(),
+            end: end.into_owned(),
+        },
+        StructuredColumnsRaw::Multi(parts) => StructuredColumns::Multi(
+            parts
+                .into_iter()
+                .map(|part| match part {
+                    StructuredColumnRaw::Single(name) => StructuredColumn::Single(name.into_owned()),
+                    StructuredColumnRaw::Range { start, end } => StructuredColumn::Range {
+                        start: start.into_owned(),
+                        end: end.into_owned(),
+                    },
+                })
+                .collect(),
+        ),
+    }
+}
+
 fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredColumns)> {
+    let (items, columns) = parse_inner_spec_raw(inner)?;
+    Some((items, columns_raw_into_owned(columns)))
+}
+
+fn parse_inner_spec_raw(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredColumnsRaw<'_>)> {
     if inner.is_empty() {
         return None;
     }
@@ -124,7 +178,7 @@ fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredCo
         }
 
         let mut items: Vec<StructuredRefItem> = Vec::new();
-        let mut columns: Vec<StructuredColumn> = Vec::new();
+        let mut columns: Vec<StructuredColumnRaw<'_>> = Vec::new();
         for part in parts.iter() {
             let (maybe_item, cols) = parse_bracket_group_or_range(part)?;
             if let Some(it) = maybe_item {
@@ -133,27 +187,26 @@ fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredCo
             }
 
             match cols {
-                StructuredColumns::Single(name) => columns.push(StructuredColumn::Single(name)),
-                StructuredColumns::Range { start, end } => {
-                    columns.push(StructuredColumn::Range { start, end });
+                StructuredColumnsRaw::Single(name) => columns.push(StructuredColumnRaw::Single(name)),
+                StructuredColumnsRaw::Range { start, end } => {
+                    columns.push(StructuredColumnRaw::Range { start, end });
                 }
-                StructuredColumns::All => {
+                StructuredColumnsRaw::All => {
                     return None;
                 }
-                StructuredColumns::Multi(_) => {
+                StructuredColumnsRaw::Multi(_) => {
                     return None;
                 }
             }
         }
 
-        let cols = match columns.as_slice() {
-            [] => StructuredColumns::All,
-            [StructuredColumn::Single(name)] => StructuredColumns::Single(name.clone()),
-            [StructuredColumn::Range { start, end }] => StructuredColumns::Range {
-                start: start.clone(),
-                end: end.clone(),
+        let cols = match columns.len() {
+            0 => StructuredColumnsRaw::All,
+            1 => match columns.pop()? {
+                StructuredColumnRaw::Single(name) => StructuredColumnsRaw::Single(name),
+                StructuredColumnRaw::Range { start, end } => StructuredColumnsRaw::Range { start, end },
             },
-            _ => StructuredColumns::Multi(columns),
+            _ => StructuredColumnsRaw::Multi(columns),
         };
 
         Some((items, cols))
@@ -163,7 +216,7 @@ fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredCo
         if let Some(stripped) = trimmed.strip_prefix('@') {
             let stripped = stripped.trim();
             if stripped.is_empty() {
-                return Some((vec![StructuredRefItem::ThisRow], StructuredColumns::All));
+                return Some((vec![StructuredRefItem::ThisRow], StructuredColumnsRaw::All));
             }
             if stripped.starts_with('[') {
                 let cols = parse_columns_only(stripped)?;
@@ -171,28 +224,28 @@ fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredCo
             }
             return Some((
                 vec![StructuredRefItem::ThisRow],
-                StructuredColumns::Single(unescape_column_name(stripped)),
+                StructuredColumnsRaw::Single(unescape_column_name(stripped)),
             ));
         }
 
         if let Some(item) = parse_item(trimmed) {
-            return Some((vec![item], StructuredColumns::All));
+            return Some((vec![item], StructuredColumnsRaw::All));
         }
 
         Some((
             Vec::new(),
-            StructuredColumns::Single(unescape_column_name(trimmed)),
+            StructuredColumnsRaw::Single(unescape_column_name(trimmed)),
         ))
     }
 }
 
-fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
+fn parse_columns_only(spec: &str) -> Option<StructuredColumnsRaw<'_>> {
     let spec = spec.trim();
     if spec.is_empty() {
-        return Some(StructuredColumns::All);
+        return Some(StructuredColumnsRaw::All);
     }
     if !spec.starts_with('[') {
-        return Some(StructuredColumns::Single(unescape_column_name(spec)));
+        return Some(StructuredColumnsRaw::Single(unescape_column_name(spec)));
     }
 
     let parts = split_top_level(spec, ',');
@@ -200,7 +253,7 @@ fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
         return None;
     }
 
-    let mut columns: Vec<StructuredColumn> = Vec::new();
+    let mut columns: Vec<StructuredColumnRaw<'_>> = Vec::new();
     for part in parts {
         let part = part.trim();
         if part.is_empty() {
@@ -211,7 +264,7 @@ fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
         if range_parts.len() == 2 {
             let start = strip_wrapping_brackets(range_parts[0])?;
             let end = strip_wrapping_brackets(range_parts[1])?;
-            columns.push(StructuredColumn::Range {
+            columns.push(StructuredColumnRaw::Range {
                 start: unescape_column_name(start),
                 end: unescape_column_name(end),
             });
@@ -219,24 +272,23 @@ fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
         }
 
         let inner = strip_wrapping_brackets(part)?;
-        columns.push(StructuredColumn::Single(unescape_column_name(inner)));
+        columns.push(StructuredColumnRaw::Single(unescape_column_name(inner)));
     }
 
-    let cols = match columns.as_slice() {
-        [] => StructuredColumns::All,
-        [StructuredColumn::Single(name)] => StructuredColumns::Single(name.clone()),
-        [StructuredColumn::Range { start, end }] => StructuredColumns::Range {
-            start: start.clone(),
-            end: end.clone(),
+    let cols = match columns.len() {
+        0 => StructuredColumnsRaw::All,
+        1 => match columns.pop()? {
+            StructuredColumnRaw::Single(name) => StructuredColumnsRaw::Single(name),
+            StructuredColumnRaw::Range { start, end } => StructuredColumnsRaw::Range { start, end },
         },
-        _ => StructuredColumns::Multi(columns),
+        _ => StructuredColumnsRaw::Multi(columns),
     };
 
     Some(cols)
 }
 fn parse_bracket_group_or_range(
     part: &str,
-) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {
+) -> Option<(Option<StructuredRefItem>, StructuredColumnsRaw<'_>)> {
     let part = part.trim();
     if part.is_empty() {
         return None;
@@ -249,7 +301,7 @@ fn parse_bracket_group_or_range(
         let end = strip_wrapping_brackets(range_parts[1])?;
         return Some((
             None,
-            StructuredColumns::Range {
+            StructuredColumnsRaw::Range {
                 start: unescape_column_name(start),
                 end: unescape_column_name(end),
             },
@@ -258,9 +310,9 @@ fn parse_bracket_group_or_range(
 
     let inner = strip_wrapping_brackets(part)?;
     if let Some(item) = parse_item(inner) {
-        return Some((Some(item), StructuredColumns::All));
+        return Some((Some(item), StructuredColumnsRaw::All));
     }
-    Some((None, StructuredColumns::Single(unescape_column_name(inner))))
+    Some((None, StructuredColumnsRaw::Single(unescape_column_name(inner))))
 }
 
 fn split_top_level(input: &str, delimiter: char) -> Vec<&str> {
@@ -312,27 +364,46 @@ fn strip_wrapping_brackets(s: &str) -> Option<&str> {
 }
 
 fn parse_item(item: &str) -> Option<StructuredRefItem> {
-    let item = item.trim();
-    let item = item.strip_prefix('#').unwrap_or(item);
-    let mut norm = String::new();
-    for ch in item.chars() {
-        if !ch.is_whitespace() {
-            norm.push(ch.to_ascii_lowercase());
+    fn matches_item_ignoring_ws_ascii_case(input: &str, expected_lower: &[u8]) -> bool {
+        let mut i = 0usize;
+        for ch in input.chars() {
+            if ch.is_whitespace() {
+                continue;
+            }
+
+            let lower = ch.to_ascii_lowercase();
+            if !lower.is_ascii() {
+                return false;
+            }
+            let b = lower as u8;
+            if expected_lower.get(i) != Some(&b) {
+                return false;
+            }
+            i += 1;
         }
+        i == expected_lower.len()
     }
-    match norm.as_str() {
-        "all" => Some(StructuredRefItem::All),
-        "data" => Some(StructuredRefItem::Data),
-        "headers" => Some(StructuredRefItem::Headers),
-        "totals" => Some(StructuredRefItem::Totals),
-        "thisrow" => Some(StructuredRefItem::ThisRow),
-        _ => None,
+
+    let item = item.trim();
+    let item = item.strip_prefix('#').unwrap_or(item).trim();
+    if matches_item_ignoring_ws_ascii_case(item, b"all") {
+        Some(StructuredRefItem::All)
+    } else if matches_item_ignoring_ws_ascii_case(item, b"data") {
+        Some(StructuredRefItem::Data)
+    } else if matches_item_ignoring_ws_ascii_case(item, b"headers") {
+        Some(StructuredRefItem::Headers)
+    } else if matches_item_ignoring_ws_ascii_case(item, b"totals") {
+        Some(StructuredRefItem::Totals)
+    } else if matches_item_ignoring_ws_ascii_case(item, b"thisrow") {
+        Some(StructuredRefItem::ThisRow)
+    } else {
+        None
     }
 }
 
-fn unescape_column_name(name: &str) -> String {
+fn unescape_column_name(name: &str) -> Cow<'_, str> {
     // Excel escapes ']' as ']]' in structured references.
-    unescape_bracketed_identifier_content(name.trim()).into_owned()
+    unescape_bracketed_identifier_content(name.trim())
 }
 
 fn is_name_start(ch: char) -> bool {

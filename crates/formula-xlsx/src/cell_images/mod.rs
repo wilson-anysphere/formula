@@ -119,7 +119,7 @@ impl CellImagesPart {
         // casing.
         let part_path = parts
             .keys()
-            .find(|p| p.to_ascii_lowercase() == "xl/cellimages.xml")
+            .find(|p| crate::zip_util::zip_part_names_equivalent(p.as_str(), "xl/cellimages.xml"))
             .cloned();
         let Some(part_path) = part_path else {
             return Ok(None);
@@ -134,14 +134,13 @@ fn is_cell_images_part(path: &str) -> bool {
     let Some(file_name) = rest.rsplit('/').next() else {
         return false;
     };
-    let lower = file_name.to_ascii_lowercase();
-    let Some(stem) = lower.strip_suffix(".xml") else {
+    let Some(stem) = crate::ascii::strip_suffix_ignore_case(file_name, ".xml") else {
         return false;
     };
-    let Some(suffix) = stem.strip_prefix("cellimages") else {
+    let Some(suffix) = crate::ascii::strip_prefix_ignore_case(stem, "cellimages") else {
         return false;
     };
-    suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit())
+    suffix.is_empty() || suffix.as_bytes().iter().all(u8::is_ascii_digit)
 }
 
 fn parse_cell_images_part(path: &str, parts: &BTreeMap<String, Vec<u8>>) -> Result<CellImagesPart> {

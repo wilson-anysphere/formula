@@ -96,17 +96,24 @@ impl HashAlgorithm {
 
     pub(crate) fn from_name(name: &str) -> Result<Self, OfficeCryptoError> {
         let raw = name.trim();
-        let upper = raw.to_ascii_uppercase();
-        match upper.as_str() {
-            "MD5" | "MD-5" => Ok(HashAlgorithm::Md5),
-            "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
-            "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
-            "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
-            "SHA512" | "SHA-512" => Ok(HashAlgorithm::Sha512),
-            _ => Err(OfficeCryptoError::UnsupportedEncryption(format!(
-                "unsupported hash algorithm {raw}"
-            ))),
+        if raw.eq_ignore_ascii_case("md5") || raw.eq_ignore_ascii_case("md-5") {
+            return Ok(HashAlgorithm::Md5);
         }
+        if raw.eq_ignore_ascii_case("sha1") || raw.eq_ignore_ascii_case("sha-1") {
+            return Ok(HashAlgorithm::Sha1);
+        }
+        if raw.eq_ignore_ascii_case("sha256") || raw.eq_ignore_ascii_case("sha-256") {
+            return Ok(HashAlgorithm::Sha256);
+        }
+        if raw.eq_ignore_ascii_case("sha384") || raw.eq_ignore_ascii_case("sha-384") {
+            return Ok(HashAlgorithm::Sha384);
+        }
+        if raw.eq_ignore_ascii_case("sha512") || raw.eq_ignore_ascii_case("sha-512") {
+            return Ok(HashAlgorithm::Sha512);
+        }
+        Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported hash algorithm {raw}"
+        )))
     }
 
     pub(crate) fn from_cryptoapi_alg_id_hash(alg_id: u32) -> Result<Self, OfficeCryptoError> {

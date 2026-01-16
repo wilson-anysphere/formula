@@ -198,11 +198,14 @@ pub fn find_external_workbook_prefix_end(src: &str, start: usize) -> Option<usiz
 /// bracketed identifier constructs in Excel formula text (notably structured references), so the
 /// API is intentionally generic.
 pub fn escape_bracketed_identifier_content(raw: &str) -> Cow<'_, str> {
-    if raw.contains(']') {
-        Cow::Owned(raw.replace(']', "]]"))
-    } else {
-        Cow::Borrowed(raw)
+    if !raw.contains(']') {
+        return Cow::Borrowed(raw);
     }
+
+    let extra = raw.as_bytes().iter().filter(|&&b| b == b']').count();
+    let mut out = String::with_capacity(raw.len() + extra);
+    push_escaped_bracketed_identifier_content(raw, &mut out);
+    Cow::Owned(out)
 }
 
 /// Unescape bracketed identifier content from Excel formula text.
@@ -211,11 +214,35 @@ pub fn escape_bracketed_identifier_content(raw: &str) -> Cow<'_, str> {
 /// them (`]]`). This helper performs the inverse mapping (`]]` -> `]`) and borrows when no
 /// unescaping is needed.
 pub fn unescape_bracketed_identifier_content(escaped: &str) -> Cow<'_, str> {
-    if escaped.contains("]]") {
-        Cow::Owned(escaped.replace("]]", "]"))
-    } else {
-        Cow::Borrowed(escaped)
+    if !escaped.contains("]]") {
+        return Cow::Borrowed(escaped);
     }
+
+    let mut out = String::with_capacity(escaped.len());
+    let mut chars = escaped.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ']' && chars.peek() == Some(&']') {
+            chars.next();
+            out.push(']');
+        } else {
+            out.push(ch);
+        }
+    }
+    Cow::Owned(out)
+}
+
+pub fn push_escaped_bracketed_identifier_content(raw: &str, out: &mut String) {
+    let mut start = 0usize;
+    for (i, ch) in raw.char_indices() {
+        if ch != ']' {
+            continue;
+        }
+
+        out.push_str(&raw[start..i]);
+        out.push_str("]]");
+        start = i + 1; // `]` is a single-byte UTF-8 codepoint.
+    }
+    out.push_str(&raw[start..]);
 }
 
 /// Escape a workbook identifier for use inside an Excel external workbook prefix.
@@ -485,17 +512,33 @@ pub fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
 
 /// Format a workbook-only canonical external key: `"[Book]"`.
 pub fn format_external_workbook_key(workbook: &str) -> String {
-    format!("[{workbook}]")
+    let mut out = String::with_capacity(workbook.len() + 2);
+    out.push('[');
+    out.push_str(workbook);
+    out.push(']');
+    out
 }
 
 /// Format a single-sheet canonical external key: `"[Book]Sheet"`.
 pub fn format_external_key(workbook: &str, sheet: &str) -> String {
-    format!("[{workbook}]{sheet}")
+    let mut out = String::with_capacity(workbook.len() + sheet.len() + 2);
+    out.push('[');
+    out.push_str(workbook);
+    out.push(']');
+    out.push_str(sheet);
+    out
 }
 
 /// Format a 3D-span canonical external key: `"[Book]Start:End"`.
 pub fn format_external_span_key(workbook: &str, start: &str, end: &str) -> String {
-    format!("[{workbook}]{start}:{end}")
+    let mut out = String::with_capacity(workbook.len() + start.len() + end.len() + 3);
+    out.push('[');
+    out.push_str(workbook);
+    out.push(']');
+    out.push_str(start);
+    out.push(':');
+    out.push_str(end);
+    out
 }
 
 /// Expand an external workbook 3D sheet span into per-sheet canonical external keys.

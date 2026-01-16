@@ -799,7 +799,12 @@ fn find_zip_entry_case_insensitive<R: Read + Seek>(
     zip: &ZipArchive<R>,
     name: &str,
 ) -> Option<String> {
-    let target = name.trim_start_matches('/').replace('\\', "/");
+    let target = name.trim_start_matches(|c| c == '/' || c == '\\');
+    let target = if target.contains('\\') {
+        std::borrow::Cow::Owned(target.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(target)
+    };
 
     for candidate in zip.file_names() {
         let mut normalized = candidate.trim_start_matches('/');
@@ -809,7 +814,7 @@ fn find_zip_entry_case_insensitive<R: Read + Seek>(
             normalized = &replaced;
         }
 
-        if normalized.eq_ignore_ascii_case(&target) {
+        if normalized.eq_ignore_ascii_case(target.as_ref()) {
             return Some(candidate.to_string());
         }
     }
@@ -921,9 +926,13 @@ fn list_procedures(modules: &[VbaModule]) -> Result<Vec<ProcedureSummary>, Strin
     let mut procedures = program
         .procedures
         .values()
-        .map(|p| ProcedureSummary {
-            name: p.name.clone(),
-            kind: format!("{:?}", p.kind).to_ascii_lowercase(),
+        .map(|p| {
+            let mut kind = format!("{:?}", p.kind);
+            kind.make_ascii_lowercase();
+            ProcedureSummary {
+                name: p.name.clone(),
+                kind,
+            }
         })
         .collect::<Vec<_>>();
     procedures.sort_by(|a, b| a.name.cmp(&b.name));

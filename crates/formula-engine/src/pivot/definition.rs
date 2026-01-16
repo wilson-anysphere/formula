@@ -486,7 +486,9 @@ fn rewrite_cell_ref_for_structural_edit(
     sheet: &str,
     edit: &StructuralEdit,
 ) -> Option<CellRef> {
-    let formula = format!("={}", cell.to_a1());
+    let mut formula = String::new();
+    formula.push('=');
+    formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut formula);
     let (out, _) = rewrite_formula_for_structural_edit(&formula, sheet, CellAddr::new(0, 0), edit);
     parse_a1_cell_from_formula(&out)
 }
@@ -506,7 +508,9 @@ fn rewrite_cell_ref_for_range_map_edit(
     sheet: &str,
     edit: &RangeMapEdit,
 ) -> Option<CellRef> {
-    let formula = format!("={}", cell.to_a1());
+    let mut formula = String::new();
+    formula.push('=');
+    formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut formula);
     let (out, _) = rewrite_formula_for_range_map(&formula, sheet, CellAddr::new(0, 0), edit);
     parse_a1_cell_from_formula(&out)
 }
@@ -589,8 +593,11 @@ pub(crate) trait PivotRefreshContext {
         sheet: &str,
         writes: &[(CellRef, u32)],
     ) -> Result<(), crate::EngineError> {
+        let mut addr = String::new();
         for (cell, style_id) in writes {
-            self.set_cell_style_id(sheet, &cell.to_a1(), *style_id)?;
+            addr.clear();
+            formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut addr);
+            self.set_cell_style_id(sheet, addr.as_str(), *style_id)?;
         }
         Ok(())
     }
@@ -613,13 +620,15 @@ pub(crate) trait PivotRefreshContext {
         range: Range,
     ) -> Result<PivotCache, PivotError> {
         let mut data: Vec<Vec<PivotValue>> = Vec::new();
+        let mut addr = String::new();
         for row in range.start.row..=range.end.row {
             let mut out_row = Vec::new();
             for col in range.start.col..=range.end.col {
-                let addr = CellRef::new(row, col).to_a1();
-                let value = self.read_cell(sheet, &addr);
+                addr.clear();
+                formula_model::push_a1_cell_ref(row, col, false, false, &mut addr);
+                let value = self.read_cell(sheet, addr.as_str());
                 let pivot_value = engine_value_to_pivot_value(value);
-                let number_format = self.read_cell_number_format(sheet, &addr);
+                let number_format = self.read_cell_number_format(sheet, addr.as_str());
                 out_row.push(coerce_pivot_value_with_number_format(
                     pivot_value,
                     number_format.as_deref(),
@@ -635,8 +644,11 @@ pub(crate) trait PivotRefreshContext {
     ///
     /// Default implementation falls back to per-cell [`PivotRefreshContext::clear_cell`] calls.
     fn clear_range(&mut self, sheet: &str, range: Range) -> Result<(), crate::EngineError> {
+        let mut addr = String::new();
         for cell in range.iter() {
-            self.clear_cell(sheet, &cell.to_a1())?;
+            addr.clear();
+            formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut addr);
+            self.clear_cell(sheet, addr.as_str())?;
         }
         Ok(())
     }
@@ -673,12 +685,14 @@ pub(crate) trait PivotRefreshContext {
             }
         }
 
+        let mut addr = String::new();
         for (r_off, row_values) in values.iter().enumerate() {
             let row = range.start.row + r_off as u32;
             for (c_off, value) in row_values.iter().enumerate() {
                 let col = range.start.col + c_off as u32;
-                let addr = CellRef::new(row, col).to_a1();
-                self.write_cell(sheet, &addr, value.clone())?;
+                addr.clear();
+                formula_model::push_a1_cell_ref(row, col, false, false, &mut addr);
+                self.write_cell(sheet, addr.as_str(), value.clone())?;
             }
         }
 

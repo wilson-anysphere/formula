@@ -408,8 +408,10 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
         // Collect element names that look like chart type containers. This helps debug cases where
         // producers omit explicit attributes but still include type-like nodes.
         let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
+        if crate::ascii::ends_with_ignore_case(name, "chart")
+            && !name.eq_ignore_ascii_case("chart")
+            && !name.eq_ignore_ascii_case("chartspace")
+        {
             let hint = format!("node={name}");
             if maybe_push(hint, &mut out, &mut seen) {
                 return finalize(out);
@@ -453,8 +455,9 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
             return false;
         }
         let name = n.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        lower.ends_with("chart") && lower != "chart" && lower != "chartspace"
+        crate::ascii::ends_with_ignore_case(name, "chart")
+            && !name.eq_ignore_ascii_case("chart")
+            && !name.eq_ignore_ascii_case("chartspace")
     })
 }
 
@@ -490,7 +493,10 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
 
     // Excel often uses camelCase identifiers, with some values sometimes ending
     // in `Chart` (e.g. `treemapChart`).
-    let base = if raw.len() >= 5 && raw.to_ascii_lowercase().ends_with("chart") {
+    let base = if raw
+        .get(raw.len().saturating_sub("chart".len())..)
+        .is_some_and(|tail| tail.eq_ignore_ascii_case("chart"))
+    {
         &raw[..raw.len() - 5]
     } else {
         raw

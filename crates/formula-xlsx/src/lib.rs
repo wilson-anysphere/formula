@@ -80,6 +80,7 @@ pub mod write;
 mod writer;
 mod xml;
 mod zip_util;
+mod ascii;
 
 pub use crate::macro_strip::validate_opc_relationships;
 
@@ -1052,16 +1053,11 @@ impl XlsxDocument {
                 return None;
             }
             let file_name = part_name.rsplit('/').next()?;
-            let file_name_lower = file_name.to_ascii_lowercase();
-            if !file_name_lower.ends_with(".xml") {
-                return None;
-            }
-
-            let stem_lower = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+            let stem = crate::ascii::strip_suffix_ignore_case(file_name, ".xml")?;
             // Check the plural prefix first: `richvalues` starts with `richvalue`.
-            let suffix = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+            let suffix = if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalues") {
                 rest
-            } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+            } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalue") {
                 rest
             } else {
                 return None;

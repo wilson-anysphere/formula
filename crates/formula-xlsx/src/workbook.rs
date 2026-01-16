@@ -255,32 +255,31 @@ impl XlsxPackage {
                             });
                             continue;
                         }
-                        let rel_type = rel.type_.to_ascii_lowercase();
-                        let rel_target = normalized_target.to_ascii_lowercase();
 
                         if chart_ex_part.is_none()
-                            && (rel_type.contains("chartex") || rel_target.contains("chartex"))
+                            && (crate::ascii::contains_ignore_case(&rel.type_, "chartex")
+                                || crate::ascii::contains_ignore_case(&normalized_target, "chartex"))
                         {
                             chart_ex_part = Some(target_path);
                             continue;
                         }
 
                         if style_part.is_none()
-                            && is_chart_style_relationship(&rel_type, &rel_target)
+                            && is_chart_style_relationship(&rel.type_, &normalized_target)
                         {
                             style_part = Some(target_path);
                             continue;
                         }
 
                         if colors_part.is_none()
-                            && is_chart_colors_relationship(&rel_type, &rel_target)
+                            && is_chart_colors_relationship(&rel.type_, &normalized_target)
                         {
                             colors_part = Some(target_path);
                             continue;
                         }
 
                         if user_shapes_part.is_none()
-                            && is_chart_user_shapes_relationship(&rel_type, &rel_target)
+                            && is_chart_user_shapes_relationship(&rel.type_, &normalized_target)
                         {
                             user_shapes_part = Some(target_path);
                             continue;
@@ -657,37 +656,38 @@ struct SheetInfo {
 }
 
 fn is_chart_style_relationship(rel_type: &str, rel_target: &str) -> bool {
-    if rel_type.contains("chartstyle") {
+    if crate::ascii::contains_ignore_case(rel_type, "chartstyle") {
         return true;
     }
     // Fallback to filename heuristic for producers that omit the relationship type.
-    rel_target.ends_with(".xml")
-        && rel_target.contains("style")
-        && !rel_target.ends_with("styles.xml")
+    crate::ascii::ends_with_ignore_case(rel_target, ".xml")
+        && crate::ascii::contains_ignore_case(rel_target, "style")
+        && !crate::ascii::ends_with_ignore_case(rel_target, "styles.xml")
 }
 
 fn is_chart_colors_relationship(rel_type: &str, rel_target: &str) -> bool {
-    if rel_type.contains("chartcolorstyle") {
+    if crate::ascii::contains_ignore_case(rel_type, "chartcolorstyle") {
         return true;
     }
-    rel_target.ends_with(".xml") && rel_target.contains("colors")
+    crate::ascii::ends_with_ignore_case(rel_target, ".xml")
+        && crate::ascii::contains_ignore_case(rel_target, "colors")
 }
 
 fn is_chart_user_shapes_relationship(rel_type: &str, rel_target: &str) -> bool {
-    if rel_type.contains("chartusershapes") {
+    if crate::ascii::contains_ignore_case(rel_type, "chartusershapes") {
         return true;
     }
     // Fallback to filename heuristic for producers that omit the relationship type.
-    if !rel_target.ends_with(".xml") {
+    if !crate::ascii::ends_with_ignore_case(rel_target, ".xml") {
         return false;
     }
-    if rel_target.contains("usershapes") {
+    if crate::ascii::contains_ignore_case(rel_target, "usershapes") {
         return true;
     }
     // Only consider the final path component so a directory like `../drawings/` doesn't cause us
     // to misclassify unrelated `*.xml` parts as userShapes.
     let file_name = rel_target.rsplit('/').next().unwrap_or(rel_target);
-    file_name.contains("drawing")
+    crate::ascii::contains_ignore_case(file_name, "drawing")
 }
 
 fn format_chart_space_error(err: &ChartSpaceParseError) -> String {
@@ -737,7 +737,10 @@ fn merge_chart_models(
             return None;
         }
 
-        let base = if raw.len() > 5 && raw.to_ascii_lowercase().ends_with("chart") {
+        let base = if raw
+            .get(raw.len().saturating_sub("chart".len())..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case("chart"))
+        {
             &raw[..raw.len() - 5]
         } else {
             raw

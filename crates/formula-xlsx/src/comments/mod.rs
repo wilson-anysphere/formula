@@ -124,28 +124,32 @@ pub fn render_comment_parts(parts: &CommentParts) -> BTreeMap<String, Vec<u8>> {
 fn normalize_part_path_for_match(path: &str) -> String {
     // XLSX part names are case-sensitive in the OPC spec, but in practice we want to be tolerant to
     // common producer mistakes (Windows separators, leading slashes, ASCII casing differences).
-    path.strip_prefix('/')
-        .unwrap_or(path)
-        .replace('\\', "/")
-        .to_ascii_lowercase()
+    let path = path.trim_start_matches(|c| c == '/' || c == '\\');
+    if path.contains('\\') {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    }
 }
 
 fn is_comment_related_part(path: &str) -> bool {
     let path = normalize_part_path_for_match(path);
-    path.starts_with("xl/comments")
-        || path.starts_with("xl/threadedcomments/")
-        || path.starts_with("xl/persons/")
-        || path.starts_with("xl/drawings/vmldrawing")
-        || path.starts_with("xl/drawings/commentsdrawing")
-        || path.contains("commentsext")
+    crate::ascii::starts_with_ignore_case(&path, "xl/comments")
+        || crate::ascii::starts_with_ignore_case(&path, "xl/threadedComments/")
+        || crate::ascii::starts_with_ignore_case(&path, "xl/persons/")
+        || crate::ascii::starts_with_ignore_case(&path, "xl/drawings/vmlDrawing")
+        || crate::ascii::starts_with_ignore_case(&path, "xl/drawings/commentsDrawing")
+        || crate::ascii::contains_ignore_case(&path, "commentsExt")
 }
 
 fn is_legacy_comments_xml(path: &str) -> bool {
     let path = normalize_part_path_for_match(path);
-    if !path.starts_with("xl/comments") || !path.ends_with(".xml") {
+    if !crate::ascii::starts_with_ignore_case(&path, "xl/comments")
+        || !crate::ascii::ends_with_ignore_case(&path, ".xml")
+    {
         return false;
     }
-    if path.contains("threaded") {
+    if crate::ascii::contains_ignore_case(&path, "threaded") {
         return false;
     }
     // Exclude other comment-related parts like `xl/commentsExt*.xml`.
@@ -170,12 +174,14 @@ fn is_legacy_comments_xml(path: &str) -> bool {
 
 fn is_threaded_comments_xml(path: &str) -> bool {
     let path = normalize_part_path_for_match(path);
-    path.starts_with("xl/threadedcomments/") && path.ends_with(".xml")
+    crate::ascii::starts_with_ignore_case(&path, "xl/threadedcomments/")
+        && crate::ascii::ends_with_ignore_case(&path, ".xml")
 }
 
 fn is_persons_xml(path: &str) -> bool {
     let path = normalize_part_path_for_match(path);
-    path.starts_with("xl/persons/") && path.ends_with(".xml")
+    crate::ascii::starts_with_ignore_case(&path, "xl/persons/")
+        && crate::ascii::ends_with_ignore_case(&path, ".xml")
 }
 
 fn decode_percent_byte(s: &str) -> Option<u8> {

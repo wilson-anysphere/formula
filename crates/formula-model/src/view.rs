@@ -184,7 +184,7 @@ impl SheetSelection {
     /// Excel `sqref` encoding (space-separated A1 ranges).
     pub fn sqref(&self) -> String {
         if self.ranges.is_empty() {
-            return self.active_cell.to_a1();
+            return cell_to_a1(self.active_cell.row, self.active_cell.col);
         }
         format_sqref(&self.ranges)
     }
@@ -201,7 +201,9 @@ impl SheetSelection {
 
 /// Convert 0-based model coordinates into Excel's A1 string (1-based rows, A..XFD columns).
 pub fn cell_to_a1(row: u32, col: u32) -> String {
-    CellRef::new(row, col).to_a1()
+    let mut out = String::new();
+    crate::push_a1_cell_ref(row, col, false, false, &mut out);
+    out
 }
 
 /// Parse an Excel A1 string (e.g. `B2`) into 0-based model coordinates.
@@ -212,11 +214,26 @@ pub fn a1_to_cell(a1: &str) -> Result<(u32, u32), A1ParseError> {
 
 /// Convert selection ranges into Excel's `sqref` payload (space-separated A1 ranges).
 pub fn format_sqref(ranges: &[Range]) -> String {
-    ranges
-        .iter()
-        .map(|r| r.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
+    if ranges.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for (idx, r) in ranges.iter().enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        crate::push_a1_cell_range(
+            r.start.row,
+            r.start.col,
+            r.end.row,
+            r.end.col,
+            false,
+            false,
+            &mut out,
+        );
+    }
+    out
 }
 
 /// Errors that can occur when parsing an Excel `sqref` selection range list.
@@ -263,4 +280,22 @@ pub fn parse_sqref(sqref: &str) -> Result<Vec<Range>, SqrefParseError> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_sqref_encodes_ranges_as_space_separated_a1() {
+        assert_eq!(format_sqref(&[]), "");
+        assert_eq!(format_sqref(&[Range::from_a1("A1").unwrap()]), "A1");
+        assert_eq!(
+            format_sqref(&[
+                Range::from_a1("A1").unwrap(),
+                Range::from_a1("B2:C3").unwrap()
+            ]),
+            "A1 B2:C3"
+        );
+    }
 }

@@ -339,16 +339,25 @@ impl HashAlgorithm {
     }
 
     fn parse_offcrypto_name(name: &str) -> Result<Self, OffcryptoError> {
-        match name.trim().to_ascii_uppercase().as_str() {
-            "MD5" => Ok(HashAlgorithm::Md5),
-            "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
-            "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
-            "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
-            "SHA512" | "SHA-512" => Ok(HashAlgorithm::Sha512),
-            _ => Err(OffcryptoError::InvalidEncryptionInfo {
-                context: "unsupported hashAlgorithm",
-            }),
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("MD5") {
+            return Ok(HashAlgorithm::Md5);
         }
+        if name.eq_ignore_ascii_case("SHA1") || name.eq_ignore_ascii_case("SHA-1") {
+            return Ok(HashAlgorithm::Sha1);
+        }
+        if name.eq_ignore_ascii_case("SHA256") || name.eq_ignore_ascii_case("SHA-256") {
+            return Ok(HashAlgorithm::Sha256);
+        }
+        if name.eq_ignore_ascii_case("SHA384") || name.eq_ignore_ascii_case("SHA-384") {
+            return Ok(HashAlgorithm::Sha384);
+        }
+        if name.eq_ignore_ascii_case("SHA512") || name.eq_ignore_ascii_case("SHA-512") {
+            return Ok(HashAlgorithm::Sha512);
+        }
+        Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "unsupported hashAlgorithm",
+        })
     }
 
     pub(crate) fn digest_len(self) -> usize {

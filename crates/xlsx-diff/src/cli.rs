@@ -382,6 +382,17 @@ pub fn run_with_args(args: Args) -> Result<()> {
                 outwrite!("{diff}");
             }
 
+            if !pipe_broken {
+                if let Err(err) = out.flush() {
+                    if err.kind() == io::ErrorKind::BrokenPipe {
+                        // Treat broken pipes as a clean early termination; exit status still
+                        // reflects the diff severity threshold.
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+            }
+
             if report.has_at_least(threshold) {
                 std::process::exit(1);
             }
@@ -462,6 +473,18 @@ pub fn run_with_args(args: Args) -> Result<()> {
             if !pipe_broken {
                 if let Err(err) = out.write_all(b"\n") {
                     if err.kind() == io::ErrorKind::BrokenPipe {
+                        pipe_broken = true;
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+            }
+
+            if !pipe_broken {
+                if let Err(err) = out.flush() {
+                    if err.kind() == io::ErrorKind::BrokenPipe {
+                        // Treat broken pipes as a clean early termination; exit status still
+                        // reflects the diff severity threshold.
                     } else {
                         return Err(err.into());
                     }
@@ -478,18 +501,26 @@ pub fn run_with_args(args: Args) -> Result<()> {
 }
 
 fn parse_severity(input: &str) -> Result<Severity> {
-    match input.to_ascii_lowercase().as_str() {
-        "critical" | "crit" => Ok(Severity::Critical),
-        "warning" | "warn" => Ok(Severity::Warning),
-        "info" => Ok(Severity::Info),
-        _ => anyhow::bail!("unknown severity '{input}' (expected: critical|warning|info)"),
+    if input.eq_ignore_ascii_case("critical") || input.eq_ignore_ascii_case("crit") {
+        return Ok(Severity::Critical);
     }
+    if input.eq_ignore_ascii_case("warning") || input.eq_ignore_ascii_case("warn") {
+        return Ok(Severity::Warning);
+    }
+    if input.eq_ignore_ascii_case("info") {
+        return Ok(Severity::Info);
+    }
+    anyhow::bail!("unknown severity '{input}' (expected: critical|warning|info)")
 }
 
 fn normalize_ignore_pattern(input: &str) -> String {
     let trimmed = input.trim();
-    let normalized = trimmed.replace('\\', "/");
-    normalized.trim_start_matches('/').to_string()
+    let trimmed = trimmed.trim_start_matches(|c| c == '/' || c == '\\');
+    if trimmed.contains('\\') {
+        trimmed.replace('\\', "/")
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn severity_label(severity: Severity) -> &'static str {
@@ -510,7 +541,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
         }
         rules.push(IgnorePathRule {
             part: None,
-            path_substring: trimmed.replace('\\', "/"),
+            path_substring: if trimmed.contains('\\') {
+                trimmed.replace('\\', "/")
+            } else {
+                trimmed.to_string()
+            },
             kind: None,
         });
     }
@@ -532,7 +567,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
         }
         rules.push(IgnorePathRule {
             part: Some(part),
-            path_substring: pattern.replace('\\', "/"),
+            path_substring: if pattern.contains('\\') {
+                pattern.replace('\\', "/")
+            } else {
+                pattern.to_string()
+            },
             kind: None,
         });
     }
@@ -554,7 +593,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
         }
         rules.push(IgnorePathRule {
             part: None,
-            path_substring: pattern.replace('\\', "/"),
+            path_substring: if pattern.contains('\\') {
+                pattern.replace('\\', "/")
+            } else {
+                pattern.to_string()
+            },
             kind: Some(kind.to_string()),
         });
     }
@@ -581,7 +624,11 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
         }
         rules.push(IgnorePathRule {
             part: Some(part),
-            path_substring: pattern.replace('\\', "/"),
+            path_substring: if pattern.contains('\\') {
+                pattern.replace('\\', "/")
+            } else {
+                pattern.to_string()
+            },
             kind: Some(kind.to_string()),
         });
     }

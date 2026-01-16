@@ -496,7 +496,11 @@ fn token_slice<'a>(src: &'a str, tok: &Token) -> Result<&'a str, FormulaParseErr
 
 fn map_lex_error(err: crate::ParseError) -> FormulaParseError {
     // The legacy translation API uses `FormulaParseError`; keep the mapping coarse.
-    if err.message.to_ascii_lowercase().contains("unterminated") {
+    if err
+        .message
+        .split(|ch: char| !ch.is_ascii_alphabetic())
+        .any(|seg| seg.eq_ignore_ascii_case("unterminated"))
+    {
         FormulaParseError::UnexpectedEof
     } else {
         FormulaParseError::UnexpectedToken(err.message)

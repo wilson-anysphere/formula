@@ -6,7 +6,8 @@ use crate::{
     PostfixExpr, PostfixOp, ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr,
     UnaryOp,
 };
-use formula_model::sheet_name_eq_case_insensitive;
+use formula_model::{column_label_to_index_lenient, sheet_name_eq_case_insensitive};
+use std::borrow::Cow;
 
 /// Excel formula limits enforced by this parser.
 ///
@@ -71,7 +72,7 @@ pub struct Token {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellToken {
     pub col: u32,
     pub row: u32,
@@ -79,18 +80,18 @@ pub struct CellToken {
     pub row_abs: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct R1C1CellToken {
     pub row: Coord,
     pub col: Coord,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct R1C1RowToken {
     pub row: Coord,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct R1C1ColToken {
     pub col: Coord,
 }
@@ -216,7 +217,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
         ast = ast.normalize_relative(origin);
     }
 
-    let context = parser.context();
+    let context = parser.take_context();
     let error = parser.first_error.map(|e| e.add_offset(span_offset));
 
     PartialParse {
@@ -227,7 +228,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
 }
 
 pub fn lex(formula: &str, opts: &ParseOptions) -> Result<Vec<Token>, ParseError> {
-    Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex()
+    Lexer::new(formula, opts.locale, opts.reference_style).lex()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +243,7 @@ pub struct PartialLex {
 /// - `tokens`: as many tokens as possible (always ending with [`TokenKind::Eof`])
 /// - `error`: the first lex error encountered (if any)
 pub fn lex_partial(formula: &str, opts: &ParseOptions) -> PartialLex {
-    Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex_partial()
+    Lexer::new(formula, opts.locale, opts.reference_style).lex_partial()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +260,55 @@ enum ParenContext {
     Group,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexMode {
+    Strict,
+    BestEffort,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrevSig {
+    Number,
+    String,
+    Boolean,
+    Error,
+    Cell,
+    R1C1Cell,
+    R1C1Row,
+    R1C1Col,
+    Ident,
+    QuotedIdent,
+    RParen,
+    RBrace,
+    RBracket,
+    Hash,
+    Percent,
+    Other,
+}
+
+impl PrevSig {
+    fn from_kind(kind: &TokenKind) -> Self {
+        match kind {
+            TokenKind::Number(_) => Self::Number,
+            TokenKind::String(_) => Self::String,
+            TokenKind::Boolean(_) => Self::Boolean,
+            TokenKind::Error(_) => Self::Error,
+            TokenKind::Cell(_) => Self::Cell,
+            TokenKind::R1C1Cell(_) => Self::R1C1Cell,
+            TokenKind::R1C1Row(_) => Self::R1C1Row,
+            TokenKind::R1C1Col(_) => Self::R1C1Col,
+            TokenKind::Ident(_) => Self::Ident,
+            TokenKind::QuotedIdent(_) => Self::QuotedIdent,
+            TokenKind::RParen => Self::RParen,
+            TokenKind::RBrace => Self::RBrace,
+            TokenKind::RBracket => Self::RBracket,
+            TokenKind::Hash => Self::Hash,
+            TokenKind::Percent => Self::Percent,
+            _ => Self::Other,
+        }
+    }
+}
+
 struct Lexer<'a> {
     src: &'a str,
     chars: std::str::Chars<'a>,
@@ -269,16 +319,74 @@ struct Lexer<'a> {
     paren_stack: Vec<ParenContext>,
     brace_depth: usize,
     bracket_depth: usize,
-    prev_sig: Option<TokenKind>,
+    prev_sig: Option<PrevSig>,
 }
 
-fn push_unique_u32(states: &mut [Vec<u32>], pos: usize, value: u32) {
-    if pos >= states.len() {
-        return;
+#[derive(Debug)]
+enum U32Set {
+    Inline { len: u8, data: [u32; 4] },
+    Heap(Vec<u32>),
+}
+
+impl U32Set {
+    fn new() -> Self {
+        Self::Inline { len: 0, data: [0; 4] }
     }
-    let entry = &mut states[pos];
-    if !entry.contains(&value) {
-        entry.push(value);
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Inline { len, .. } => *len == 0,
+            Self::Heap(v) => v.is_empty(),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::Inline { len, .. } => *len = 0,
+            Self::Heap(v) => v.clear(),
+        }
+    }
+
+    fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::new())
+    }
+
+    fn as_slice(&self) -> &[u32] {
+        match self {
+            Self::Inline { len, data } => &data[..usize::from(*len)],
+            Self::Heap(v) => v.as_slice(),
+        }
+    }
+
+    fn contains(&self, value: u32) -> bool {
+        self.as_slice().contains(&value)
+    }
+
+    fn push_unique(&mut self, value: u32) {
+        if self.contains(value) {
+            return;
+        }
+        match self {
+            Self::Inline { len, data } => {
+                let idx = usize::from(*len);
+                if idx < data.len() {
+                    data[idx] = value;
+                    *len += 1;
+                    return;
+                }
+                let mut v = Vec::with_capacity(data.len() * 2);
+                v.extend_from_slice(&data[..idx]);
+                v.push(value);
+                *self = Self::Heap(v);
+            }
+            Self::Heap(v) => v.push(value),
+        }
+    }
+}
+
+fn push_unique_u32(states: &mut [U32Set], pos: usize, value: u32) {
+    if let Some(entry) = states.get_mut(pos) {
+        entry.push_unique(value);
     }
 }
 
@@ -298,15 +406,8 @@ fn decode_mode(state: u32) -> u32 {
     state & 0b11
 }
 
-fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
+fn push_depth(states: &mut [U32Set], pos: usize, depth: u32) {
     push_unique_u32(states, pos, depth);
-}
-
-fn push_state(states: &mut [Vec<u32>], pos: usize, depth: u32, mode: u32) {
-    if mode != MODE_NORMAL && depth != 0 {
-        return;
-    }
-    push_unique_u32(states, pos, encode_state(depth, mode));
 }
 
 /// Find the end position (exclusive) for a bracketed segment starting at `start`.
@@ -317,13 +418,29 @@ fn push_state(states: &mut [Vec<u32>], pos: usize, depth: u32, mode: u32) {
 /// The scanner explores both interpretations and returns the earliest closing bracket that does
 /// not immediately leave a stray `]` outside the segment (which would be invalid formula syntax).
 fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
-    let mut positions = Vec::new();
-    let mut chars = Vec::new();
-    for (rel, ch) in src[start..].char_indices() {
-        positions.push(start + rel);
-        chars.push(ch);
+    let bytes = src.as_bytes().get(start..)?;
+    if bytes.first().copied() != Some(b'[') {
+        return None;
     }
-    if chars.first().copied() != Some('[') {
+
+    // Fast path: when the segment does not contain `]]`, the bracket nesting is unambiguous and
+    // we can return the first matching close without the full state-space exploration below.
+    //
+    // This is common for external workbook prefixes like `[Book.xlsx]Sheet1!A1`.
+    if !bytes.windows(2).any(|w| w == b"]]") {
+        let mut depth: u32 = 1;
+        for (i, &b) in bytes.iter().enumerate().skip(1) {
+            match b {
+                b'[' => depth += 1,
+                b']' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(start.saturating_add(i + 1).min(src.len()));
+                    }
+                }
+                _ => {}
+            }
+        }
         return None;
     }
 
@@ -334,27 +451,27 @@ fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
     // We choose the earliest closing bracket that can still lead to a globally valid parse of the
     // *remainder* of the formula (i.e. doesn't leave stray `]` tokens outside of any bracketed
     // segment).
-    let n = chars.len();
+    let n = bytes.len();
     if n < 2 {
         return None;
     }
 
-    let mut fwd: Vec<Vec<u32>> = vec![Vec::new(); n + 1];
-    fwd[1].push(1);
+    let mut fwd: Vec<U32Set> = std::iter::repeat_with(U32Set::new).take(n + 1).collect();
+    fwd[1].push_unique(1);
     for i in 1..n {
-        let depths = fwd[i].clone();
+        let depths = fwd[i].take();
         if depths.is_empty() {
             continue;
         }
-        for depth in depths {
+        for depth in depths.as_slice().iter().copied() {
             if depth == 0 {
                 continue;
             }
-            match chars[i] {
-                '[' => push_depth(&mut fwd, i + 1, depth + 1),
-                ']' => {
+            match bytes[i] {
+                b'[' => push_depth(&mut fwd, i + 1, depth + 1),
+                b']' => {
                     push_depth(&mut fwd, i + 1, depth - 1);
-                    if chars.get(i + 1) == Some(&']') {
+                    if bytes.get(i + 1) == Some(&b']') {
                         push_depth(&mut fwd, i + 2, depth);
                     }
                 }
@@ -363,130 +480,145 @@ fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
         }
     }
 
-    let mut bwd: Vec<Vec<u32>> = vec![Vec::new(); n + 1];
-    bwd[n].push(encode_state(0, MODE_NORMAL));
+    let mut bwd: Vec<U32Set> = std::iter::repeat_with(U32Set::new).take(n + 1).collect();
+    bwd[n].push_unique(encode_state(0, MODE_NORMAL));
     for i in (0..n).rev() {
-        match chars[i] {
-            '[' => {
-                for state in bwd[i + 1].clone() {
+        let (before, after) = bwd.split_at_mut(i + 1);
+        let states_before = &mut before[i];
+        states_before.clear();
+
+        let states_after_1 = after[0].as_slice();
+        let states_after_2 = after.get(1).map(|v| v.as_slice());
+
+        let mut push_state_into_before = |depth: u32, mode: u32| {
+            if mode != MODE_NORMAL && depth != 0 {
+                return;
+            }
+            let state = encode_state(depth, mode);
+            states_before.push_unique(state);
+        };
+
+        match bytes[i] {
+            b'[' => {
+                for &state in states_after_1 {
                     let depth_after = decode_depth(state);
                     let mode_after = decode_mode(state);
                     if mode_after != MODE_NORMAL {
-                        push_state(&mut bwd, i, 0, mode_after);
+                        push_state_into_before(0, mode_after);
                     } else if depth_after > 0 {
-                        push_state(&mut bwd, i, depth_after - 1, MODE_NORMAL);
+                        push_state_into_before(depth_after - 1, MODE_NORMAL);
                     }
                 }
             }
-            ']' => {
-                for state in bwd[i + 1].clone() {
+            b']' => {
+                for &state in states_after_1 {
                     let depth_after = decode_depth(state);
                     let mode_after = decode_mode(state);
                     if mode_after != MODE_NORMAL {
-                        push_state(&mut bwd, i, 0, mode_after);
+                        push_state_into_before(0, mode_after);
                     } else {
-                        push_state(&mut bwd, i, depth_after + 1, MODE_NORMAL);
+                        push_state_into_before(depth_after + 1, MODE_NORMAL);
                     }
                 }
 
                 // Escape transitions are only valid while inside brackets (depth > 0).
-                if chars.get(i + 1) == Some(&']') {
-                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                if bytes.get(i + 1) == Some(&b']') {
+                    for &state in states_after_2.unwrap_or_default() {
                         let depth_after = decode_depth(state);
                         let mode_after = decode_mode(state);
                         if mode_after == MODE_NORMAL && depth_after > 0 {
-                            push_state(&mut bwd, i, depth_after, MODE_NORMAL);
+                            push_state_into_before(depth_after, MODE_NORMAL);
                         }
                     }
                 }
             }
-            '"' => {
-                for state in bwd[i + 1].clone() {
+            b'"' => {
+                for &state in states_after_1 {
                     let depth_after = decode_depth(state);
                     let mode_after = decode_mode(state);
                     match mode_after {
                         MODE_STRING if depth_after == 0 => {
                             // Opening quote (`"`), entering string literal.
-                            push_state(&mut bwd, i, 0, MODE_NORMAL);
+                            push_state_into_before(0, MODE_NORMAL);
                         }
                         MODE_NORMAL => {
                             if depth_after > 0 {
                                 // Quotes are literal characters inside brackets.
-                                push_state(&mut bwd, i, depth_after, MODE_NORMAL);
-                            } else if chars.get(i + 1) != Some(&'"') {
+                                push_state_into_before(depth_after, MODE_NORMAL);
+                            } else if bytes.get(i + 1) != Some(&b'"') {
                                 // Closing quote (`"`), exiting string literal.
-                                push_state(&mut bwd, i, 0, MODE_STRING);
+                                push_state_into_before(0, MODE_STRING);
                             }
                         }
                         MODE_QUOTED_IDENT if depth_after == 0 => {
                             // Quotes are literal characters inside quoted identifiers.
-                            push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                            push_state_into_before(0, MODE_QUOTED_IDENT);
                         }
                         _ => {}
                     }
                 }
 
                 // Escaped quote (`""`) within a string literal.
-                if chars.get(i + 1) == Some(&'"') {
-                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    for &state in states_after_2.unwrap_or_default() {
                         let depth_after = decode_depth(state);
                         let mode_after = decode_mode(state);
                         if depth_after == 0 && mode_after == MODE_STRING {
-                            push_state(&mut bwd, i, 0, MODE_STRING);
+                            push_state_into_before(0, MODE_STRING);
                         }
                     }
                 }
             }
-            '\'' => {
-                for state in bwd[i + 1].clone() {
+            b'\'' => {
+                for &state in states_after_1 {
                     let depth_after = decode_depth(state);
                     let mode_after = decode_mode(state);
                     match mode_after {
                         MODE_QUOTED_IDENT if depth_after == 0 => {
                             // Opening quote (`'`), entering quoted identifier.
-                            push_state(&mut bwd, i, 0, MODE_NORMAL);
+                            push_state_into_before(0, MODE_NORMAL);
                         }
                         MODE_NORMAL => {
                             if depth_after > 0 {
                                 // Quotes are literal characters inside brackets.
-                                push_state(&mut bwd, i, depth_after, MODE_NORMAL);
-                            } else if chars.get(i + 1) != Some(&'\'') {
+                                push_state_into_before(depth_after, MODE_NORMAL);
+                            } else if bytes.get(i + 1) != Some(&b'\'') {
                                 // Closing quote (`'`), exiting quoted identifier.
-                                push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                                push_state_into_before(0, MODE_QUOTED_IDENT);
                             }
                         }
                         MODE_STRING if depth_after == 0 => {
                             // Quotes are literal characters inside string literals.
-                            push_state(&mut bwd, i, 0, MODE_STRING);
+                            push_state_into_before(0, MODE_STRING);
                         }
                         _ => {}
                     }
                 }
 
                 // Escaped quote (`''`) within a quoted identifier.
-                if chars.get(i + 1) == Some(&'\'') {
-                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                if bytes.get(i + 1) == Some(&b'\'') {
+                    for &state in states_after_2.unwrap_or_default() {
                         let depth_after = decode_depth(state);
                         let mode_after = decode_mode(state);
                         if depth_after == 0 && mode_after == MODE_QUOTED_IDENT {
-                            push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                            push_state_into_before(0, MODE_QUOTED_IDENT);
                         }
                     }
                 }
             }
             _ => {
-                for state in bwd[i + 1].clone() {
+                for &state in states_after_1 {
                     let depth_after = decode_depth(state);
                     let mode_after = decode_mode(state);
-                    push_state(&mut bwd, i, depth_after, mode_after);
+                    push_state_into_before(depth_after, mode_after);
                 }
             }
         }
     }
 
     for end_idx in 1..=n {
-        if fwd[end_idx].contains(&0) && bwd[end_idx].contains(&encode_state(0, MODE_NORMAL)) {
-            return Some(positions.get(end_idx).copied().unwrap_or(src.len()));
+        if fwd[end_idx].contains(0) && bwd[end_idx].contains(encode_state(0, MODE_NORMAL)) {
+            return Some(start.saturating_add(end_idx).min(src.len()));
         }
     }
     None
@@ -514,7 +646,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex(mut self) -> Result<Vec<Token>, ParseError> {
+    fn lex(self) -> Result<Vec<Token>, ParseError> {
+        let (tokens, _) = self.lex_with_mode(LexMode::Strict)?;
+        Ok(tokens)
+    }
+
+    fn lex_partial(self) -> PartialLex {
+        let (tokens, error) = self
+            .lex_with_mode(LexMode::BestEffort)
+            .expect("best-effort lexer should not return an error");
+        PartialLex { tokens, error }
+    }
+
+    fn lex_with_mode(
+        mut self,
+        mode: LexMode,
+    ) -> Result<(Vec<Token>, Option<ParseError>), ParseError> {
+        let mut first_error: Option<ParseError> = None;
+
+        let mut handle_error = |err: ParseError, stop_scanning: bool| -> Result<bool, ParseError> {
+            match mode {
+                LexMode::Strict => Err(err),
+                LexMode::BestEffort => {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                    Ok(stop_scanning)
+                }
+            }
+        };
+
         while let Some(ch) = self.peek_char() {
             let start = self.idx;
             if self.bracket_depth > 0 && !matches!(ch, '[' | ']') {
@@ -549,10 +710,14 @@ impl<'a> Lexer<'a> {
                                 value.push(c);
                             }
                             None => {
-                                return Err(ParseError::new(
+                                handle_error(
+                                    ParseError::new(
                                     "Unterminated string literal",
                                     Span::new(start, self.idx),
-                                ));
+                                    ),
+                                    false,
+                                )?;
+                                break;
                             }
                         }
                     }
@@ -578,10 +743,14 @@ impl<'a> Lexer<'a> {
                                 value.push(c);
                             }
                             None => {
-                                return Err(ParseError::new(
+                                handle_error(
+                                    ParseError::new(
                                     "Unterminated quoted identifier",
                                     Span::new(start, self.idx),
-                                ));
+                                    ),
+                                    false,
+                                )?;
+                                break;
                             }
                         }
                     }
@@ -600,11 +769,11 @@ impl<'a> Lexer<'a> {
                         && matches!(
                             self.prev_sig,
                             Some(
-                                TokenKind::Cell(_)
-                                    | TokenKind::Ident(_)
-                                    | TokenKind::QuotedIdent(_)
-                                    | TokenKind::RParen
-                                    | TokenKind::RBracket
+                                PrevSig::Cell
+                                    | PrevSig::Ident
+                                    | PrevSig::QuotedIdent
+                                    | PrevSig::RParen
+                                    | PrevSig::RBracket
                             )
                         );
 
@@ -628,13 +797,16 @@ impl<'a> Lexer<'a> {
                         .is_some_and(is_error_body_char)
                     {
                         self.bump(); // '#'
-                        let mut rest = self.take_while(is_error_body_char);
+                        let mut rest = String::from("#");
+                        self.take_while_into(is_error_body_char, &mut rest);
                         if matches!(self.peek_char(), Some('!' | '?')) {
-                            rest.push(self.bump().expect("peek_char ensured char exists"));
+                            if let Some(ch) = self.bump() {
+                                rest.push(ch);
+                            } else {
+                                debug_assert!(false, "peek_char ensured char exists");
+                            }
                         }
-                        let mut raw = String::from("#");
-                        raw.push_str(&rest);
-                        self.push(TokenKind::Error(raw), start, self.idx);
+                        self.push(TokenKind::Error(rest), start, self.idx);
                     } else {
                         // Standalone `#` is the spill-range reference postfix operator (e.g. `A1#`).
                         self.bump();
@@ -646,21 +818,21 @@ impl<'a> Lexer<'a> {
                     let is_func = matches!(
                         self.prev_sig,
                         Some(
-                            TokenKind::Number(_)
-                                | TokenKind::String(_)
-                                | TokenKind::Boolean(_)
-                                | TokenKind::Error(_)
-                                | TokenKind::Cell(_)
-                                | TokenKind::R1C1Cell(_)
-                                | TokenKind::R1C1Row(_)
-                                | TokenKind::R1C1Col(_)
-                                | TokenKind::Ident(_)
-                                | TokenKind::QuotedIdent(_)
-                                | TokenKind::RParen
-                                | TokenKind::RBrace
-                                | TokenKind::RBracket
-                                | TokenKind::Hash
-                                | TokenKind::Percent
+                            PrevSig::Number
+                                | PrevSig::String
+                                | PrevSig::Boolean
+                                | PrevSig::Error
+                                | PrevSig::Cell
+                                | PrevSig::R1C1Cell
+                                | PrevSig::R1C1Row
+                                | PrevSig::R1C1Col
+                                | PrevSig::Ident
+                                | PrevSig::QuotedIdent
+                                | PrevSig::RParen
+                                | PrevSig::RBrace
+                                | PrevSig::RBracket
+                                | PrevSig::Hash
+                                | PrevSig::Percent
                         )
                     );
                     self.paren_stack.push(if is_func {
@@ -702,8 +874,7 @@ impl<'a> Lexer<'a> {
                             let inner_end = end.saturating_sub(1);
                             if inner_end > inner_start {
                                 let raw = self.src[inner_start..inner_end].to_string();
-                                self.idx = inner_end;
-                                self.chars = self.src[self.idx..].chars();
+                                self.rollback_to(inner_end);
                                 self.push(TokenKind::Ident(raw), inner_start, inner_end);
                             }
 
@@ -860,461 +1031,78 @@ impl<'a> Lexer<'a> {
                         }
                     }
 
-                    if let Some(cell) = self.try_lex_cell_ref() {
-                        self.push(TokenKind::Cell(cell), start, self.idx);
-                    } else {
-                        let ident = self.lex_ident();
-                        let upper = ident.to_ascii_uppercase();
-                        if upper == "TRUE" || upper == "FALSE" {
-                            // Excel supports `TRUE` / `FALSE` as both boolean literals *and* zero-arg
-                            // functions (`TRUE()` / `FALSE()`). Lex `TRUE`/`FALSE` as booleans only
-                            // when they are standalone literals; if the next non-whitespace
-                            // character is `(`, treat them as identifiers so the parser produces a
-                            // `FunctionCall`.
-                            let next_non_ws = self.src[self.idx..]
-                                .chars()
-                                .find(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
-                            if next_non_ws == Some('(') {
-                                self.push(TokenKind::Ident(ident), start, self.idx);
-                            } else if upper == "TRUE" {
-                                self.push(TokenKind::Boolean(true), start, self.idx);
-                            } else {
-                                self.push(TokenKind::Boolean(false), start, self.idx);
-                            }
-                        } else {
-                            self.push(TokenKind::Ident(ident), start, self.idx);
+                    if self.may_be_a1_cell_ref() {
+                        if let Some(cell) = self.try_lex_cell_ref() {
+                            self.push(TokenKind::Cell(cell), start, self.idx);
+                            continue;
                         }
+                    }
+
+                    let ident = self.lex_ident();
+                    let is_true = ident.eq_ignore_ascii_case("TRUE");
+                    let is_false = ident.eq_ignore_ascii_case("FALSE");
+                    if is_true || is_false {
+                        // Excel supports `TRUE` / `FALSE` as both boolean literals *and* zero-arg
+                        // functions (`TRUE()` / `FALSE()`). Lex `TRUE`/`FALSE` as booleans only
+                        // when they are standalone literals; if the next non-whitespace
+                        // character is `(`, treat them as identifiers so the parser produces a
+                        // `FunctionCall`.
+                        let next_non_ws = self.src[self.idx..]
+                            .chars()
+                            .find(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
+                        if next_non_ws == Some('(') {
+                            self.push(TokenKind::Ident(ident), start, self.idx);
+                        } else if is_true {
+                            self.push(TokenKind::Boolean(true), start, self.idx);
+                        } else {
+                            self.push(TokenKind::Boolean(false), start, self.idx);
+                        }
+                    } else {
+                        self.push(TokenKind::Ident(ident), start, self.idx);
                     }
                 }
                 _ => {
-                    return Err(ParseError::new(
+                    if handle_error(
+                        ParseError::new(
                         format!("Unexpected character `{ch}`"),
                         Span::new(start, self.idx + ch.len_utf8()),
-                    ));
+                        ),
+                        true,
+                    )? {
+                        break;
+                    }
                 }
             }
         }
 
         self.push(TokenKind::Eof, self.idx, self.idx);
         self.post_process_intersections();
-        Ok(self.tokens)
-    }
-
-    fn lex_partial(mut self) -> PartialLex {
-        let mut first_error: Option<ParseError> = None;
-
-        'outer: while let Some(ch) = self.peek_char() {
-            let start = self.idx;
-            if self.bracket_depth > 0 && !matches!(ch, '[' | ']') {
-                // Inside workbook/structured reference brackets, treat everything as raw text so
-                // locale separators (e.g. `,` in `Table1[[#Headers],[Col]]`) don't get lexed as
-                // unions/arg separators and non-locale delimiters don't fail lexing.
-                let raw = self.take_while(|c| !matches!(c, '[' | ']'));
-                self.push(TokenKind::Ident(raw), start, self.idx);
-                continue;
-            }
-            match ch {
-                ' ' | '\t' | '\r' | '\n' => {
-                    let raw = self.take_while(|c| matches!(c, ' ' | '\t' | '\r' | '\n'));
-                    self.push(TokenKind::Whitespace(raw), start, self.idx);
-                }
-                '"' => {
-                    self.bump();
-                    let mut value = String::new();
-                    loop {
-                        match self.peek_char() {
-                            Some('"') => {
-                                self.bump();
-                                if self.peek_char() == Some('"') {
-                                    self.bump();
-                                    value.push('"');
-                                    continue;
-                                }
-                                break;
-                            }
-                            Some(c) => {
-                                self.bump();
-                                value.push(c);
-                            }
-                            None => {
-                                if first_error.is_none() {
-                                    first_error = Some(ParseError::new(
-                                        "Unterminated string literal",
-                                        Span::new(start, self.idx),
-                                    ));
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    self.push(TokenKind::String(value), start, self.idx);
-                }
-                '\'' => {
-                    // Quoted identifier, typically for sheet names.
-                    self.bump();
-                    let mut value = String::new();
-                    loop {
-                        match self.peek_char() {
-                            Some('\'') => {
-                                self.bump();
-                                if self.peek_char() == Some('\'') {
-                                    self.bump();
-                                    value.push('\'');
-                                    continue;
-                                }
-                                break;
-                            }
-                            Some(c) => {
-                                self.bump();
-                                value.push(c);
-                            }
-                            None => {
-                                if first_error.is_none() {
-                                    first_error = Some(ParseError::new(
-                                        "Unterminated quoted identifier",
-                                        Span::new(start, self.idx),
-                                    ));
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    self.push(TokenKind::QuotedIdent(value), start, self.idx);
-                }
-                '#' => {
-                    // Excel's spill-range reference operator (`#`) is postfix (e.g. `A1#`),
-                    // but error literals also start with `#` (e.g. `#REF!`).
-                    //
-                    // Treat `#` as a postfix operator only when it is *immediately* after an
-                    // expression-like token (no intervening whitespace).
-                    let is_immediate = self.tokens.last().is_some_and(|t| {
-                        t.span.end == start && !matches!(t.kind, TokenKind::Whitespace(_))
-                    });
-                    let is_postfix_spill = is_immediate
-                        && matches!(
-                            self.prev_sig,
-                            Some(
-                                TokenKind::Cell(_)
-                                    | TokenKind::Ident(_)
-                                    | TokenKind::QuotedIdent(_)
-                                    | TokenKind::RParen
-                                    | TokenKind::RBracket
-                            )
-                        );
-
-                    if is_postfix_spill {
-                        self.bump();
-                        self.push(TokenKind::Hash, start, self.idx);
-                        continue;
-                    }
-
-                    if let Some(len) = match_error_literal(&self.src[start..]) {
-                        let end = start + len;
-                        while self.idx < end {
-                            self.bump();
-                        }
-                        let raw = self.src[start..end].to_string();
-                        self.push(TokenKind::Error(raw), start, self.idx);
-                    } else if self
-                        .src
-                        .get(self.idx + 1..)
-                        .and_then(|s| s.chars().next())
-                        .is_some_and(is_error_body_char)
-                    {
-                        self.bump(); // '#'
-                        let mut rest = self.take_while(is_error_body_char);
-                        if matches!(self.peek_char(), Some('!' | '?')) {
-                            if let Some(ch) = self.bump() {
-                                rest.push(ch);
-                            }
-                        }
-                        let mut raw = String::from("#");
-                        raw.push_str(&rest);
-                        self.push(TokenKind::Error(raw), start, self.idx);
-                    } else {
-                        // Standalone `#` is the spill-range reference postfix operator (e.g. `A1#`).
-                        self.bump();
-                        self.push(TokenKind::Hash, start, self.idx);
-                    }
-                }
-                '(' => {
-                    self.bump();
-                    let is_func = matches!(
-                        self.prev_sig,
-                        Some(
-                            TokenKind::Number(_)
-                                | TokenKind::String(_)
-                                | TokenKind::Boolean(_)
-                                | TokenKind::Error(_)
-                                | TokenKind::Cell(_)
-                                | TokenKind::R1C1Cell(_)
-                                | TokenKind::R1C1Row(_)
-                                | TokenKind::R1C1Col(_)
-                                | TokenKind::Ident(_)
-                                | TokenKind::QuotedIdent(_)
-                                | TokenKind::RParen
-                                | TokenKind::RBrace
-                                | TokenKind::RBracket
-                                | TokenKind::Hash
-                                | TokenKind::Percent
-                        )
-                    );
-                    self.paren_stack.push(if is_func {
-                        ParenContext::FunctionCall {
-                            brace_depth: self.brace_depth,
-                        }
-                    } else {
-                        ParenContext::Group
-                    });
-                    self.push(TokenKind::LParen, start, self.idx);
-                }
-                ')' => {
-                    self.bump();
-                    self.paren_stack.pop();
-                    self.push(TokenKind::RParen, start, self.idx);
-                }
-                '{' => {
-                    self.bump();
-                    self.brace_depth += 1;
-                    self.push(TokenKind::LBrace, start, self.idx);
-                }
-                '}' => {
-                    self.bump();
-                    self.brace_depth = self.brace_depth.saturating_sub(1);
-                    self.push(TokenKind::RBrace, start, self.idx);
-                }
-                '[' => {
-                    if self.bracket_depth == 0 {
-                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start)
-                            .or_else(|| find_bracket_end(self.src, start))
-                        {
-                            self.bump();
-                            self.push(TokenKind::LBracket, start, self.idx);
-
-                            let inner_start = self.idx;
-                            let inner_end = end.saturating_sub(1);
-                            if inner_end > inner_start {
-                                let raw = self.src[inner_start..inner_end].to_string();
-                                self.idx = inner_end;
-                                self.chars = self.src[self.idx..].chars();
-                                self.push(TokenKind::Ident(raw), inner_start, inner_end);
-                            }
-
-                            let close_start = self.idx;
-                            self.bump();
-                            self.push(TokenKind::RBracket, close_start, self.idx);
-                            continue;
-                        }
-                    }
-
-                    self.bump();
-                    self.bracket_depth += 1;
-                    self.push(TokenKind::LBracket, start, self.idx);
-                }
-                ']' => {
-                    // Excel escapes `]` inside structured references as `]]`. At the outermost
-                    // bracket depth, treat a double `]]` as a literal `]` rather than the end of
-                    // the bracketed segment.
-                    if self.bracket_depth == 1 && self.src[self.idx..].starts_with("]]") {
-                        self.bump();
-                        self.push(TokenKind::RBracket, start, self.idx);
-                        let start2 = self.idx;
-                        self.bump();
-                        self.push(TokenKind::RBracket, start2, self.idx);
-                        continue;
-                    }
-                    self.bump();
-                    self.bracket_depth = self.bracket_depth.saturating_sub(1);
-                    self.push(TokenKind::RBracket, start, self.idx);
-                }
-                '!' => {
-                    self.bump();
-                    self.push(TokenKind::Bang, start, self.idx);
-                }
-                ':' => {
-                    self.bump();
-                    self.push(TokenKind::Colon, start, self.idx);
-                }
-                c if c == self.locale.arg_separator => {
-                    self.bump();
-                    let is_func_arg_sep = matches!(
-                        self.paren_stack.last(),
-                        Some(ParenContext::FunctionCall { brace_depth }) if *brace_depth == self.brace_depth
-                    );
-                    if self.brace_depth > 0 && !is_func_arg_sep {
-                        // In array literals, commas/semicolons map to array separators.
-                        if c == self.locale.array_row_separator {
-                            self.push(TokenKind::ArrayRowSep, start, self.idx);
-                        } else if c == self.locale.array_col_separator {
-                            self.push(TokenKind::ArrayColSep, start, self.idx);
-                        } else {
-                            self.push(TokenKind::ArrayColSep, start, self.idx);
-                        }
-                    } else if is_func_arg_sep {
-                        self.push(TokenKind::ArgSep, start, self.idx);
-                    } else {
-                        self.push(TokenKind::Union, start, self.idx);
-                    }
-                }
-                c if self.brace_depth > 0
-                    && (c == self.locale.array_row_separator
-                        || c == self.locale.array_col_separator) =>
-                {
-                    self.bump();
-                    if c == self.locale.array_row_separator {
-                        self.push(TokenKind::ArrayRowSep, start, self.idx);
-                    } else {
-                        self.push(TokenKind::ArrayColSep, start, self.idx);
-                    }
-                }
-                '+' => {
-                    self.bump();
-                    self.push(TokenKind::Plus, start, self.idx);
-                }
-                '-' => {
-                    self.bump();
-                    self.push(TokenKind::Minus, start, self.idx);
-                }
-                '*' => {
-                    self.bump();
-                    self.push(TokenKind::Star, start, self.idx);
-                }
-                '/' => {
-                    self.bump();
-                    self.push(TokenKind::Slash, start, self.idx);
-                }
-                '^' => {
-                    self.bump();
-                    self.push(TokenKind::Caret, start, self.idx);
-                }
-                '&' => {
-                    self.bump();
-                    self.push(TokenKind::Amp, start, self.idx);
-                }
-                '%' => {
-                    self.bump();
-                    self.push(TokenKind::Percent, start, self.idx);
-                }
-                '@' => {
-                    self.bump();
-                    self.push(TokenKind::At, start, self.idx);
-                }
-                '=' => {
-                    self.bump();
-                    self.push(TokenKind::Eq, start, self.idx);
-                }
-                '<' => {
-                    self.bump();
-                    match self.peek_char() {
-                        Some('=') => {
-                            self.bump();
-                            self.push(TokenKind::Le, start, self.idx);
-                        }
-                        Some('>') => {
-                            self.bump();
-                            self.push(TokenKind::Ne, start, self.idx);
-                        }
-                        _ => self.push(TokenKind::Lt, start, self.idx),
-                    }
-                }
-                '>' => {
-                    self.bump();
-                    if self.peek_char() == Some('=') {
-                        self.bump();
-                        self.push(TokenKind::Ge, start, self.idx);
-                    } else {
-                        self.push(TokenKind::Gt, start, self.idx);
-                    }
-                }
-                c if is_digit(c)
-                    || ((c == self.locale.decimal_separator || c == '.')
-                        && self.peek_next_is_digit()) =>
-                {
-                    let raw = self.lex_number();
-                    self.push(TokenKind::Number(raw), start, self.idx);
-                }
-                '.' => {
-                    self.bump();
-                    self.push(TokenKind::Dot, start, self.idx);
-                }
-                c if is_ident_start_char(c) => {
-                    if self.reference_style == ReferenceStyle::R1C1 {
-                        if let Some(cell) = self.try_lex_r1c1_cell_ref() {
-                            self.push(TokenKind::R1C1Cell(cell), start, self.idx);
-                            continue;
-                        }
-                        if let Some(row) = self.try_lex_r1c1_row_ref() {
-                            self.push(TokenKind::R1C1Row(row), start, self.idx);
-                            continue;
-                        }
-                        if let Some(col) = self.try_lex_r1c1_col_ref() {
-                            self.push(TokenKind::R1C1Col(col), start, self.idx);
-                            continue;
-                        }
-                    }
-
-                    if let Some(cell) = self.try_lex_cell_ref() {
-                        self.push(TokenKind::Cell(cell), start, self.idx);
-                    } else {
-                        let ident = self.lex_ident();
-                        let upper = ident.to_ascii_uppercase();
-                        if upper == "TRUE" || upper == "FALSE" {
-                            // Match `lex()` behavior: `TRUE`/`FALSE` can be used as both boolean
-                            // literals and zero-arg functions (`TRUE()` / `FALSE()`).
-                            //
-                            // Lex them as booleans only when they are standalone literals; if the
-                            // next non-whitespace character is `(`, treat them as identifiers.
-                            let next_non_ws = self.src[self.idx..]
-                                .chars()
-                                .find(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
-                            if next_non_ws == Some('(') {
-                                self.push(TokenKind::Ident(ident), start, self.idx);
-                            } else if upper == "TRUE" {
-                                self.push(TokenKind::Boolean(true), start, self.idx);
-                            } else {
-                                self.push(TokenKind::Boolean(false), start, self.idx);
-                            }
-                        } else {
-                            self.push(TokenKind::Ident(ident), start, self.idx);
-                        }
-                    }
-                }
-                _ => {
-                    if first_error.is_none() {
-                        first_error = Some(ParseError::new(
-                            format!("Unexpected character `{ch}`"),
-                            Span::new(start, self.idx + ch.len_utf8()),
-                        ));
-                    }
-                    // For now, stop scanning on unexpected characters. This keeps the token stream
-                    // deterministic and avoids getting stuck in error loops.
-                    break 'outer;
-                }
-            }
-        }
-
-        self.push(TokenKind::Eof, self.idx, self.idx);
-        self.post_process_intersections();
-        PartialLex {
-            tokens: self.tokens,
-            error: first_error,
-        }
+        Ok((self.tokens, first_error))
     }
 
     fn post_process_intersections(&mut self) {
         let mut i = 0;
         while i < self.tokens.len() {
-            if let TokenKind::Whitespace(raw) = &self.tokens[i].kind {
+            let should_intersect = if let TokenKind::Whitespace(raw) = &self.tokens[i].kind {
                 let prev = prev_significant(&self.tokens, i);
                 let next = next_significant(&self.tokens, i);
                 if let (Some(p), Some(n)) = (prev, next) {
-                    if is_intersect_operand(&self.tokens[p].kind)
+                    is_intersect_operand(&self.tokens[p].kind)
                         && is_intersect_operand(&self.tokens[n].kind)
                         && raw.chars().any(|c| c == ' ' || c == '\t')
-                    {
-                        self.tokens[i].kind = TokenKind::Intersect(raw.clone());
-                    }
+                } else {
+                    false
                 }
+            } else {
+                false
+            };
+
+            if should_intersect {
+                let raw = match &mut self.tokens[i].kind {
+                    TokenKind::Whitespace(raw) => std::mem::take(raw),
+                    _ => unreachable!("should_intersect requires Whitespace token"),
+                };
+                self.tokens[i].kind = TokenKind::Intersect(raw);
             }
             i += 1;
         }
@@ -1323,7 +1111,7 @@ impl<'a> Lexer<'a> {
     fn push(&mut self, kind: TokenKind, start: usize, end: usize) {
         let sig = !matches!(kind, TokenKind::Whitespace(_));
         if sig {
-            self.prev_sig = Some(kind.clone());
+            self.prev_sig = Some(PrevSig::from_kind(&kind));
         }
         self.tokens.push(Token {
             kind,
@@ -1337,21 +1125,34 @@ impl<'a> Lexer<'a> {
         Some(ch)
     }
 
+    fn rollback_to(&mut self, idx: usize) {
+        self.idx = idx;
+        self.chars = self.src[idx..].chars();
+    }
+
     fn peek_char(&self) -> Option<char> {
-        self.src[self.idx..].chars().next()
+        self.chars.clone().next()
     }
 
     fn peek_next_is_digit(&self) -> bool {
-        let mut iter = self.src[self.idx..].chars();
+        let mut iter = self.chars.clone();
         iter.next();
         matches!(iter.next(), Some(c) if is_digit(c))
     }
 
-    fn take_while<F>(&mut self, mut pred: F) -> String
+    fn take_while<F>(&mut self, pred: F) -> String
     where
         F: FnMut(char) -> bool,
     {
         let mut out = String::new();
+        self.take_while_into(pred, &mut out);
+        out
+    }
+
+    fn take_while_into<F>(&mut self, mut pred: F, out: &mut String)
+    where
+        F: FnMut(char) -> bool,
+    {
         while let Some(ch) = self.peek_char() {
             if !pred(ch) {
                 break;
@@ -1359,7 +1160,6 @@ impl<'a> Lexer<'a> {
             self.bump();
             out.push(ch);
         }
-        out
     }
 
     /// Determine which decimal separator (if any) should be used when lexing the current number.
@@ -1459,29 +1259,26 @@ impl<'a> Lexer<'a> {
         }
         if matches!(self.peek_char(), Some('E' | 'e')) {
             let save_idx = self.idx;
-            let save_chars = self.chars.clone();
+            let save_out_len = out.len();
             self.bump();
-            let mut exp = String::from("E");
+            out.push('E');
             if matches!(self.peek_char(), Some('+' | '-')) {
                 let sign = self.bump().unwrap();
-                exp.push(sign);
+                out.push(sign);
             }
-            let mut digits = String::new();
+            let digits_start_len = out.len();
             while let Some(ch) = self.peek_char() {
                 if is_digit(ch) {
                     self.bump();
-                    digits.push(ch);
+                    out.push(ch);
                 } else {
                     break;
                 }
             }
-            if digits.is_empty() {
+            if out.len() == digits_start_len {
                 // roll back: the 'E' was part of an identifier maybe.
-                self.idx = save_idx;
-                self.chars = save_chars;
-            } else {
-                exp.push_str(&digits);
-                out.push_str(&exp);
+                self.rollback_to(save_idx);
+                out.truncate(save_out_len);
             }
         }
         out
@@ -1491,27 +1288,55 @@ impl<'a> Lexer<'a> {
         self.take_while(is_ident_cont_char)
     }
 
+    fn may_be_a1_cell_ref(&self) -> bool {
+        let bytes = self.src.as_bytes();
+        let mut i = self.idx;
+        if i >= bytes.len() {
+            return false;
+        }
+
+        if bytes[i] == b'$' {
+            i += 1;
+        }
+
+        let mut letters = 0usize;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            letters += 1;
+            if letters > 3 {
+                return false;
+            }
+            i += 1;
+        }
+        if letters == 0 {
+            return false;
+        }
+
+        if i < bytes.len() && bytes[i] == b'$' {
+            i += 1;
+        }
+
+        i < bytes.len() && bytes[i].is_ascii_digit()
+    }
+
     fn try_lex_cell_ref(&mut self) -> Option<CellToken> {
         let save_idx = self.idx;
-        let save_chars = self.chars.clone();
 
         let mut col_abs = false;
         if self.peek_char() == Some('$') {
             col_abs = true;
             self.bump();
         }
-        let mut col_letters = String::new();
+        let col_start = self.idx;
         while let Some(ch) = self.peek_char() {
             if matches!(ch, 'A'..='Z' | 'a'..='z') {
                 self.bump();
-                col_letters.push(ch);
             } else {
                 break;
             }
         }
-        if col_letters.is_empty() {
-            self.idx = save_idx;
-            self.chars = save_chars;
+        let col_end = self.idx;
+        if col_start == col_end {
+            self.rollback_to(save_idx);
             return None;
         }
         let mut row_abs = false;
@@ -1519,18 +1344,17 @@ impl<'a> Lexer<'a> {
             row_abs = true;
             self.bump();
         }
-        let mut row_digits = String::new();
+        let row_start = self.idx;
         while let Some(ch) = self.peek_char() {
             if is_digit(ch) {
                 self.bump();
-                row_digits.push(ch);
             } else {
                 break;
             }
         }
-        if row_digits.is_empty() {
-            self.idx = save_idx;
-            self.chars = save_chars;
+        let row_end = self.idx;
+        if row_start == row_end {
+            self.rollback_to(save_idx);
             return None;
         }
 
@@ -1545,24 +1369,22 @@ impl<'a> Lexer<'a> {
         //
         // Special case: allow `.` so we can parse field access expressions like `A1.Price`.
         if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
 
-        let Some(col) = col_from_a1(&col_letters) else {
-            self.idx = save_idx;
-            self.chars = save_chars;
+        let col_letters = &self.src[col_start..col_end];
+        let Ok(col) = column_label_to_index_lenient(col_letters) else {
+            self.rollback_to(save_idx);
             return None;
         };
+        let row_digits = &self.src[row_start..row_end];
         let Some(row) = row_digits.parse::<u32>().ok() else {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         };
         if row == 0 {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
         Some(CellToken {
@@ -1574,22 +1396,21 @@ impl<'a> Lexer<'a> {
     }
 
     fn try_lex_r1c1_cell_ref(&mut self) -> Option<R1C1CellToken> {
-        let save_idx = self.idx;
-        let save_chars = self.chars.clone();
-
         let ch = self.peek_char()?;
         if !matches!(ch, 'R' | 'r') {
             return None;
         }
+        let save_idx = self.idx;
         self.bump(); // R
 
         let row = match self.peek_char() {
             Some('[') => {
-                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
-                    self.idx = save_idx;
-                    self.chars = save_chars.clone();
-                    None
-                })?;
+                let offset = self
+                    .lex_r1c1_offset_in_brackets()
+                    .or_else(|| {
+                        self.rollback_to(save_idx);
+                        None
+                    })?;
                 Coord::Offset(offset)
             }
             Some(c) if is_digit(c) => {
@@ -1597,14 +1418,12 @@ impl<'a> Lexer<'a> {
                 let row_1: u32 = match raw.parse().ok() {
                     Some(v) => v,
                     None => {
-                        self.idx = save_idx;
-                        self.chars = save_chars;
+                        self.rollback_to(save_idx);
                         return None;
                     }
                 };
                 if row_1 == 0 {
-                    self.idx = save_idx;
-                    self.chars = save_chars;
+                    self.rollback_to(save_idx);
                     return None;
                 }
                 Coord::A1 {
@@ -1616,24 +1435,23 @@ impl<'a> Lexer<'a> {
         };
 
         let Some(ch) = self.peek_char() else {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         };
         if !matches!(ch, 'C' | 'c') {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
         self.bump(); // C
 
         let col = match self.peek_char() {
             Some('[') => {
-                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
-                    self.idx = save_idx;
-                    self.chars = save_chars.clone();
-                    None
-                })?;
+                let offset = self
+                    .lex_r1c1_offset_in_brackets()
+                    .or_else(|| {
+                        self.rollback_to(save_idx);
+                        None
+                    })?;
                 Coord::Offset(offset)
             }
             Some(c) if is_digit(c) => {
@@ -1641,14 +1459,12 @@ impl<'a> Lexer<'a> {
                 let col_1: u32 = match raw.parse().ok() {
                     Some(v) => v,
                     None => {
-                        self.idx = save_idx;
-                        self.chars = save_chars;
+                        self.rollback_to(save_idx);
                         return None;
                     }
                 };
                 if col_1 == 0 {
-                    self.idx = save_idx;
-                    self.chars = save_chars;
+                    self.rollback_to(save_idx);
                     return None;
                 }
                 Coord::A1 {
@@ -1670,8 +1486,7 @@ impl<'a> Lexer<'a> {
         // Instead, reject the cell token when the next character would continue an identifier or
         // start a function call, so the full string is lexed as an identifier.
         if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
 
@@ -1679,30 +1494,28 @@ impl<'a> Lexer<'a> {
     }
 
     fn try_lex_r1c1_row_ref(&mut self) -> Option<R1C1RowToken> {
-        let save_idx = self.idx;
-        let save_chars = self.chars.clone();
-
         let ch = self.peek_char()?;
         if !matches!(ch, 'R' | 'r') {
             return None;
         }
+        let save_idx = self.idx;
         self.bump(); // R
 
         let row = match self.peek_char() {
             Some('[') => {
-                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
-                    self.idx = save_idx;
-                    self.chars = save_chars.clone();
-                    None
-                })?;
+                let offset = self
+                    .lex_r1c1_offset_in_brackets()
+                    .or_else(|| {
+                        self.rollback_to(save_idx);
+                        None
+                    })?;
                 Coord::Offset(offset)
             }
             Some(c) if is_digit(c) => {
                 let raw = self.take_while(is_digit);
                 let row_1: u32 = raw.parse().ok()?;
                 if row_1 == 0 {
-                    self.idx = save_idx;
-                    self.chars = save_chars;
+                    self.rollback_to(save_idx);
                     return None;
                 }
                 Coord::A1 {
@@ -1714,8 +1527,7 @@ impl<'a> Lexer<'a> {
         };
 
         if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
 
@@ -1723,30 +1535,28 @@ impl<'a> Lexer<'a> {
     }
 
     fn try_lex_r1c1_col_ref(&mut self) -> Option<R1C1ColToken> {
-        let save_idx = self.idx;
-        let save_chars = self.chars.clone();
-
         let ch = self.peek_char()?;
         if !matches!(ch, 'C' | 'c') {
             return None;
         }
+        let save_idx = self.idx;
         self.bump(); // C
 
         let col = match self.peek_char() {
             Some('[') => {
-                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
-                    self.idx = save_idx;
-                    self.chars = save_chars.clone();
-                    None
-                })?;
+                let offset = self
+                    .lex_r1c1_offset_in_brackets()
+                    .or_else(|| {
+                        self.rollback_to(save_idx);
+                        None
+                    })?;
                 Coord::Offset(offset)
             }
             Some(c) if is_digit(c) => {
                 let raw = self.take_while(is_digit);
                 let col_1: u32 = raw.parse().ok()?;
                 if col_1 == 0 {
-                    self.idx = save_idx;
-                    self.chars = save_chars;
+                    self.rollback_to(save_idx);
                     return None;
                 }
                 Coord::A1 {
@@ -1758,8 +1568,7 @@ impl<'a> Lexer<'a> {
         };
 
         if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
-            self.idx = save_idx;
-            self.chars = save_chars;
+            self.rollback_to(save_idx);
             return None;
         }
 
@@ -1913,21 +1722,6 @@ fn is_intersect_operand(kind: &TokenKind) -> bool {
     )
 }
 
-fn col_from_a1(letters: &str) -> Option<u32> {
-    let mut col: u32 = 0;
-    for (i, ch) in letters.chars().enumerate() {
-        let v = (ch.to_ascii_uppercase() as u8).wrapping_sub(b'A') as u32;
-        if v >= 26 {
-            return None;
-        }
-        col = col * 26 + v + 1;
-        if i >= 3 {
-            return None;
-        }
-    }
-    Some(col - 1)
-}
-
 struct Parser<'a> {
     src: &'a str,
     tokens: Vec<Token>,
@@ -2052,14 +1846,11 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn context(&self) -> ParseContext {
+    fn take_context(&mut self) -> ParseContext {
         let function = self
             .func_stack
-            .last()
-            .map(|(name, arg_index)| FunctionContext {
-                name: name.clone(),
-                arg_index: *arg_index,
-            });
+            .pop()
+            .map(|(name, arg_index)| FunctionContext { name, arg_index });
         ParseContext { function }
     }
 
@@ -2262,26 +2053,14 @@ impl<'a> Parser<'a> {
     fn parse_primary_best_effort(&mut self) -> Expr {
         self.skip_trivia();
         match self.peek_kind() {
-            TokenKind::Number(raw) => {
-                let raw = raw.clone();
-                self.next();
-                Expr::Number(raw)
-            }
-            TokenKind::String(value) => {
-                let value = value.clone();
-                self.next();
-                Expr::String(value)
-            }
+            TokenKind::Number(_) => Expr::Number(self.take_number_token_unchecked()),
+            TokenKind::String(_) => Expr::String(self.take_string_token_unchecked()),
             TokenKind::Boolean(v) => {
                 let v = *v;
                 self.next();
                 Expr::Boolean(v)
             }
-            TokenKind::Error(e) => {
-                let e = e.clone();
-                self.next();
-                Expr::Error(e)
-            }
+            TokenKind::Error(_) => Expr::Error(self.take_error_token_unchecked()),
             TokenKind::LParen => {
                 if self.group_depth >= EXCEL_MAX_NESTED_CALLS {
                     self.record_error(ParseError::new(
@@ -2343,37 +2122,54 @@ impl<'a> Parser<'a> {
         let save_pos = self.pos;
         let sheet_prefix = match self.peek_kind() {
             TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
-                let start_raw = match self.take_name_token() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        self.record_error(e);
-                        return Expr::Missing;
-                    }
-                };
+                if !self.looks_like_sheet_prefix(save_pos, true) {
+                    None
+                } else {
+                    let complete_prefix = self.looks_like_sheet_prefix(save_pos, false);
+
+                    let start_raw = if complete_prefix {
+                        self.take_name_token_unchecked()
+                    } else {
+                        match self.take_name_token() {
+                            Ok(s) => s,
+                            Err(e) => {
+                                self.record_error(e);
+                                return Expr::Missing;
+                            }
+                        }
+                    };
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::Colon) {
                     // Sheet span.
                     self.next();
                     self.skip_trivia();
-                    let end_raw = match self.take_name_token() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.record_error(e);
-                            self.pos = save_pos;
-                            return Expr::Missing;
+                    let end_raw = if complete_prefix {
+                        self.take_name_token_unchecked()
+                    } else {
+                        match self.take_name_token() {
+                            Ok(s) => s,
+                            Err(e) => {
+                                self.record_error(e);
+                                self.pos = save_pos;
+                                return Expr::Missing;
+                            }
                         }
                     };
                     self.skip_trivia();
                     if matches!(self.peek_kind(), TokenKind::Bang) {
                         self.next();
-                        let (workbook, start) = split_external_sheet_name(&start_raw);
-                        let (_wb2, end) = split_external_sheet_name(&end_raw);
-                        let sheet_ref = if sheet_name_eq_case_insensitive(&start, &end) {
-                            SheetRef::Sheet(start)
+                        let (workbook, start) = split_external_sheet_name_parts(&start_raw);
+                        let (_wb2, end) = split_external_sheet_name_parts(&end_raw);
+                        let sheet_ref = if sheet_name_eq_case_insensitive(start.as_ref(), end.as_ref())
+                        {
+                            SheetRef::Sheet(start.into_owned())
                         } else {
-                            SheetRef::SheetRange { start, end }
+                            SheetRef::SheetRange {
+                                start: start.into_owned(),
+                                end: end.into_owned(),
+                            }
                         };
-                        Some((workbook, sheet_ref))
+                        Some((workbook.map(Cow::into_owned), sheet_ref))
                     } else {
                         self.pos = save_pos;
                         None
@@ -2385,6 +2181,7 @@ impl<'a> Parser<'a> {
                 } else {
                     self.pos = save_pos;
                     None
+                }
                 }
             }
             _ => None,
@@ -2401,9 +2198,8 @@ impl<'a> Parser<'a> {
         }
 
         match self.peek_kind() {
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.next();
+            TokenKind::Ident(_) => {
+                let name = self.take_ident_token_unchecked();
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::LParen) {
                     self.parse_function_call_best_effort(name)
@@ -2424,7 +2220,7 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Expr::CellRef(CellRef {
                     workbook: None,
@@ -2440,7 +2236,7 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::R1C1Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Expr::CellRef(CellRef {
                     workbook: None,
@@ -2450,7 +2246,7 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::R1C1Row(row) => {
-                let row = row.clone();
+                let row = *row;
                 self.next();
                 Expr::RowRef(RowRef {
                     workbook: None,
@@ -2459,7 +2255,7 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::R1C1Col(col) => {
-                let col = col.clone();
+                let col = *col;
                 self.next();
                 Expr::ColRef(ColRef {
                     workbook: None,
@@ -2467,9 +2263,8 @@ impl<'a> Parser<'a> {
                     col: col.col,
                 })
             }
-            TokenKind::QuotedIdent(name) => {
-                let raw = name.clone();
-                self.next();
+            TokenKind::QuotedIdent(_name) => {
+                let raw = self.take_name_token_unchecked();
                 let (workbook, name) = split_external_sheet_name(&raw);
                 Expr::NameRef(NameRef {
                     workbook,
@@ -2506,15 +2301,16 @@ impl<'a> Parser<'a> {
         }
 
         self.call_depth += 1;
-        self.func_stack.push((name.clone(), 0));
+        self.func_stack.push((name, 0));
         let mut args = Vec::new();
+        let mut should_pop_stack = false;
 
         loop {
             self.skip_trivia();
             match self.peek_kind() {
                 TokenKind::RParen => {
                     self.next();
-                    self.func_stack.pop();
+                    should_pop_stack = true;
                     break;
                 }
                 TokenKind::Eof => {
@@ -2534,9 +2330,7 @@ impl<'a> Parser<'a> {
                     self.current_span(),
                 ));
                 let closed = self.consume_until_matching_rparen();
-                if closed {
-                    self.func_stack.pop();
-                }
+                should_pop_stack = closed;
                 break;
             }
 
@@ -2559,7 +2353,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::RParen => {
                     self.next();
-                    self.func_stack.pop();
+                    should_pop_stack = true;
                     break;
                 }
                 TokenKind::Eof => {
@@ -2582,6 +2376,18 @@ impl<'a> Parser<'a> {
             }
         }
 
+        let name = if should_pop_stack {
+            let (name, _) = self
+                .func_stack
+                .pop()
+                .expect("parse_function_call_best_effort should balance func_stack");
+            name
+        } else {
+            self.func_stack
+                .last()
+                .map(|(name, _idx)| name.clone())
+                .expect("parse_function_call_best_effort should push func_stack entry")
+        };
         let out = Expr::FunctionCall(FunctionCall {
             name: FunctionName::new(name),
             args,
@@ -2840,26 +2646,14 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         self.skip_trivia();
         match self.peek_kind() {
-            TokenKind::Number(raw) => {
-                let raw = raw.clone();
-                self.next();
-                Ok(Expr::Number(raw))
-            }
-            TokenKind::String(value) => {
-                let value = value.clone();
-                self.next();
-                Ok(Expr::String(value))
-            }
+            TokenKind::Number(_) => Ok(Expr::Number(self.take_number_token_unchecked())),
+            TokenKind::String(_) => Ok(Expr::String(self.take_string_token_unchecked())),
             TokenKind::Boolean(v) => {
                 let v = *v;
                 self.next();
                 Ok(Expr::Boolean(v))
             }
-            TokenKind::Error(e) => {
-                let e = e.clone();
-                self.next();
-                Ok(Expr::Error(e))
-            }
+            TokenKind::Error(_) => Ok(Expr::Error(self.take_error_token_unchecked())),
             TokenKind::LParen => {
                 if self.group_depth >= EXCEL_MAX_NESTED_CALLS {
                     return Err(ParseError::new(
@@ -2907,45 +2701,60 @@ impl<'a> Parser<'a> {
         let (workbook, sheet) = match self.peek_kind() {
             TokenKind::LBracket => unreachable!("handled elsewhere"),
             TokenKind::QuotedIdent(_) | TokenKind::Ident(_) => {
-                // Could be sheet prefix (if followed by Bang), or function/name.
-                let start_raw = self.take_name_token()?;
-                self.skip_trivia();
-
-                // Sheet span (3D ref) like `Sheet1:Sheet3!A1`.
-                if matches!(self.peek_kind(), TokenKind::Colon) {
-                    self.next();
-                    self.skip_trivia();
-                    if !matches!(
-                        self.peek_kind(),
-                        TokenKind::Ident(_) | TokenKind::QuotedIdent(_)
-                    ) {
-                        self.pos = save_pos;
-                        (None, None)
-                    } else {
-                        let end_raw = self.take_name_token()?;
+                // Could be sheet prefix (if followed by `!`), or a function/name.
+                //
+                // Important: many formulas start with an identifier that is *not* a sheet name
+                // (`SUM`, `LET`, a defined name, etc.). Avoid cloning the identifier string unless
+                // we can prove this is a sheet prefix (we previously cloned and then rewound).
+                if !self.looks_like_sheet_prefix(save_pos, false) {
+                    (None, None)
+                } else {
+                    let start_raw = self.take_name_token_unchecked();
                         self.skip_trivia();
-                        if !matches!(self.peek_kind(), TokenKind::Bang) {
+
+                        // Sheet span (3D ref) like `Sheet1:Sheet3!A1`.
+                        if matches!(self.peek_kind(), TokenKind::Colon) {
+                            self.next();
+                            self.skip_trivia();
+                            if !matches!(
+                                self.peek_kind(),
+                                TokenKind::Ident(_) | TokenKind::QuotedIdent(_)
+                            ) {
+                                self.pos = save_pos;
+                                (None, None)
+                            } else {
+                                let end_raw = self.take_name_token_unchecked();
+                                self.skip_trivia();
+                                if !matches!(self.peek_kind(), TokenKind::Bang) {
+                                    self.pos = save_pos;
+                                    (None, None)
+                                } else {
+                                    self.next();
+                                    let (workbook, start) =
+                                        split_external_sheet_name_parts(&start_raw);
+                                    let (_wb2, end) = split_external_sheet_name_parts(&end_raw);
+                                    let sheet_ref = if sheet_name_eq_case_insensitive(
+                                        start.as_ref(),
+                                        end.as_ref(),
+                                    ) {
+                                        SheetRef::Sheet(start.into_owned())
+                                    } else {
+                                        SheetRef::SheetRange {
+                                            start: start.into_owned(),
+                                            end: end.into_owned(),
+                                        }
+                                    };
+                                    (workbook.map(Cow::into_owned), Some(sheet_ref))
+                                }
+                            }
+                        } else if matches!(self.peek_kind(), TokenKind::Bang) {
+                            self.next();
+                            let (workbook, sheet_ref) = sheet_ref_from_raw_prefix(&start_raw);
+                            (workbook, Some(sheet_ref))
+                        } else {
                             self.pos = save_pos;
                             (None, None)
-                        } else {
-                            self.next();
-                            let (workbook, start) = split_external_sheet_name(&start_raw);
-                            let (_wb2, end) = split_external_sheet_name(&end_raw);
-                            let sheet_ref = if sheet_name_eq_case_insensitive(&start, &end) {
-                                SheetRef::Sheet(start)
-                            } else {
-                                SheetRef::SheetRange { start, end }
-                            };
-                            (workbook, Some(sheet_ref))
                         }
-                    }
-                } else if matches!(self.peek_kind(), TokenKind::Bang) {
-                    self.next();
-                    let (workbook, sheet_ref) = sheet_ref_from_raw_prefix(&start_raw);
-                    (workbook, Some(sheet_ref))
-                } else {
-                    self.pos = save_pos;
-                    (None, None)
                 }
             }
             _ => (None, None),
@@ -2958,9 +2767,8 @@ impl<'a> Parser<'a> {
 
         // No sheet prefix. Check function call.
         match self.peek_kind() {
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.next();
+            TokenKind::Ident(_) => {
+                let name = self.take_ident_token_unchecked();
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::LParen) {
                     self.parse_function_call(name)
@@ -2975,7 +2783,7 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Ok(Expr::CellRef(CellRef {
                     workbook: None,
@@ -2991,7 +2799,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Ok(Expr::CellRef(CellRef {
                     workbook: None,
@@ -3001,7 +2809,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Row(row) => {
-                let row = row.clone();
+                let row = *row;
                 self.next();
                 Ok(Expr::RowRef(RowRef {
                     workbook: None,
@@ -3010,7 +2818,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Col(col) => {
-                let col = col.clone();
+                let col = *col;
                 self.next();
                 Ok(Expr::ColRef(ColRef {
                     workbook: None,
@@ -3018,9 +2826,8 @@ impl<'a> Parser<'a> {
                     col: col.col,
                 }))
             }
-            TokenKind::QuotedIdent(name) => {
-                let raw = name.clone();
-                self.next();
+            TokenKind::QuotedIdent(_name) => {
+                let raw = self.take_name_token_unchecked();
                 let (workbook, name) = split_external_sheet_name(&raw);
                 Ok(Expr::NameRef(NameRef {
                     workbook,
@@ -3043,7 +2850,7 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
         match self.peek_kind() {
             TokenKind::Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Ok(Expr::CellRef(CellRef {
                     workbook,
@@ -3059,7 +2866,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Cell(cell) => {
-                let cell = cell.clone();
+                let cell = *cell;
                 self.next();
                 Ok(Expr::CellRef(CellRef {
                     workbook,
@@ -3069,7 +2876,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Row(row) => {
-                let row = row.clone();
+                let row = *row;
                 self.next();
                 Ok(Expr::RowRef(RowRef {
                     workbook,
@@ -3078,7 +2885,7 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::R1C1Col(col) => {
-                let col = col.clone();
+                let col = *col;
                 self.next();
                 Ok(Expr::ColRef(ColRef {
                     workbook,
@@ -3086,10 +2893,9 @@ impl<'a> Parser<'a> {
                     col: col.col,
                 }))
             }
-            TokenKind::Number(raw) => {
+            TokenKind::Number(_) => {
                 let span = self.current_span();
-                let raw = raw.clone();
-                self.next();
+                let raw = self.take_number_token_unchecked();
                 let Some(row) = parse_row_number_literal(&raw) else {
                     return Err(ParseError::new("Invalid row reference", span));
                 };
@@ -3102,9 +2908,8 @@ impl<'a> Parser<'a> {
                     },
                 }))
             }
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.next();
+            TokenKind::Ident(_) => {
+                let name = self.take_ident_token_unchecked();
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::LBracket) {
                     self.parse_structured_ref(workbook, sheet, Some(name))
@@ -3134,8 +2939,8 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LParen)?;
         self.call_depth += 1;
-        self.func_stack.push((name.clone(), 0));
-        let result = (|| {
+        self.func_stack.push((name, 0));
+        let result: Result<Vec<Expr>, ParseError> = (|| {
             let mut args = Vec::new();
             self.skip_trivia();
             if matches!(self.peek_kind(), TokenKind::RParen) {
@@ -3178,15 +2983,20 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            Ok(Expr::FunctionCall(FunctionCall {
-                name: FunctionName::new(name),
-                args,
-            }))
+            Ok(args)
         })();
 
-        self.func_stack.pop();
+        let (name, _) = self
+            .func_stack
+            .pop()
+            .expect("parse_function_call should balance func_stack");
         self.call_depth = self.call_depth.saturating_sub(1);
-        result
+        result.map(|args| {
+            Expr::FunctionCall(FunctionCall {
+                name: FunctionName::new(name),
+                args,
+            })
+        })
     }
 
     fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
@@ -3255,9 +3065,19 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
 
         match self.peek_kind() {
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.next();
+            TokenKind::Ident(_) => {
+                let name = self.take_ident_token_unchecked();
+
+                if name.is_empty() {
+                    return Err(ParseError::new("Expected field name", dot_span));
+                }
+
+                if !name.contains('.') {
+                    return Ok(Expr::FieldAccess(FieldAccessExpr {
+                        base: Box::new(base),
+                        field: name,
+                    }));
+                }
 
                 let mut expr = base;
                 for part in name.split('.') {
@@ -3273,10 +3093,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBracket => {
                 self.expect(TokenKind::LBracket)?;
-                let raw_inner = match self.peek_kind() {
-                    TokenKind::Ident(raw) => {
-                        let raw = raw.clone();
-                        self.next();
+                let raw_inner = match &mut self.tokens[self.pos].kind {
+                    TokenKind::Ident(s) => {
+                        let raw = std::mem::take(s);
+                        self.pos += 1;
                         raw
                     }
                     TokenKind::RBracket => String::new(),
@@ -3308,9 +3128,20 @@ impl<'a> Parser<'a> {
 
         self.skip_trivia();
         match self.peek_kind() {
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.next();
+            TokenKind::Ident(_) => {
+                let name = self.take_ident_token_unchecked();
+
+                if name.is_empty() {
+                    self.record_error(ParseError::new("Expected field name", dot_span));
+                    return base;
+                }
+
+                if !name.contains('.') {
+                    return Expr::FieldAccess(FieldAccessExpr {
+                        base: Box::new(base),
+                        field: name,
+                    });
+                }
 
                 let mut expr = base;
                 for part in name.split('.') {
@@ -3328,10 +3159,10 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => {
                 self.next(); // '['
 
-                let raw_inner = match self.peek_kind() {
-                    TokenKind::Ident(raw) => {
-                        let raw = raw.clone();
-                        self.next();
+                let raw_inner = match &mut self.tokens[self.pos].kind {
+                    TokenKind::Ident(s) => {
+                        let raw = std::mem::take(s);
+                        self.pos += 1;
                         raw
                     }
                     _ => String::new(),
@@ -3466,90 +3297,152 @@ impl<'a> Parser<'a> {
         // Workbook ids may include `]` (e.g. `C:\[foo]\Book.xlsx`), so the first `]` token is not
         // necessarily the workbook delimiter. Instead, treat any `]` as a *candidate* delimiter
         // and pick the one that yields a valid `[workbook]sheet!` prefix.
-        for close_idx in after_open..self.tokens.len() {
-            match self.tokens.get(close_idx).map(|t| &t.kind) {
-                Some(TokenKind::RBracket) => {}
-                Some(TokenKind::Eof) | None => break,
-                _ => continue,
-            }
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum ExternalPrefixKind {
+            SheetBang,
+            SheetSpanBang,
+            WorkbookNameOrStructured,
+        }
 
+        let mut chosen: Option<(usize, ExternalPrefixKind)> = None;
+        {
+            let tokens = &self.tokens;
+            let kind_at = |idx: usize| tokens.get(idx).map(|t| &t.kind);
+            let skip_ws = |mut idx: usize| {
+                while matches!(kind_at(idx), Some(TokenKind::Whitespace(_))) {
+                    idx += 1;
+                }
+                idx
+            };
+
+            for close_idx in after_open..tokens.len() {
+                match kind_at(close_idx) {
+                    Some(TokenKind::RBracket) => {}
+                    Some(TokenKind::Eof) | None => break,
+                    _ => continue,
+                }
+
+                let close_span = tokens[close_idx].span;
+                let workbook_start = open_span.end;
+                let workbook_end = close_span.start;
+                if workbook_end <= workbook_start {
+                    continue;
+                }
+
+                let start_idx = skip_ws(close_idx + 1);
+                if !matches!(
+                    kind_at(start_idx),
+                    Some(TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
+                ) {
+                    continue;
+                }
+                let idx = skip_ws(start_idx + 1);
+
+                match kind_at(idx) {
+                    Some(TokenKind::Bang) => {
+                        chosen = Some((close_idx, ExternalPrefixKind::SheetBang));
+                        break;
+                    }
+                    Some(TokenKind::Colon) => {
+                        let end_idx = skip_ws(idx + 1);
+                        if !matches!(
+                            kind_at(end_idx),
+                            Some(TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
+                        ) {
+                            continue;
+                        }
+                        let after_end = skip_ws(end_idx + 1);
+                        if !matches!(kind_at(after_end), Some(TokenKind::Bang)) {
+                            continue;
+                        }
+                        chosen = Some((close_idx, ExternalPrefixKind::SheetSpanBang));
+                        break;
+                    }
+                    _ => {
+                        // Reject candidates that are still inside a larger bracketed segment.
+                        if matches!(kind_at(idx), Some(TokenKind::RBracket)) {
+                            continue;
+                        }
+                        chosen = Some((close_idx, ExternalPrefixKind::WorkbookNameOrStructured));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some((close_idx, kind)) = chosen {
             let close_span = self.tokens[close_idx].span;
             let workbook_start = open_span.end;
             let workbook_end = close_span.start;
-            if workbook_end <= workbook_start {
-                continue;
-            }
+            let workbook = || self.src[workbook_start..workbook_end].to_string();
 
-            // Try parsing the sheet portion after this candidate `]`.
             self.pos = close_idx + 1;
             self.skip_trivia();
-            let Ok(start_sheet) = self.take_name_token() else {
-                continue;
-            };
+            let first = self.take_name_token_unchecked();
             self.skip_trivia();
 
-            let sheet_ref = if matches!(self.peek_kind(), TokenKind::Colon) {
-                // 3D sheet span with external workbook prefix: `[Book]Sheet1:Sheet3!A1`.
-                self.next();
-                self.skip_trivia();
-                let Ok(end_sheet) = self.take_name_token() else {
-                    continue;
-                };
-                self.skip_trivia();
-                if !matches!(self.peek_kind(), TokenKind::Bang) {
-                    continue;
+            match kind {
+                ExternalPrefixKind::SheetSpanBang => {
+                    self.next(); // colon
+                    self.skip_trivia();
+                    let end = self.take_name_token_unchecked();
+                    self.skip_trivia();
+                    self.next(); // bang
+
+                    let sheet_ref = if sheet_name_eq_case_insensitive(&first, &end) {
+                        SheetRef::Sheet(first)
+                    } else {
+                        SheetRef::SheetRange { start: first, end }
+                    };
+
+                    return self.parse_ref_after_prefix(Some(workbook()), Some(sheet_ref));
                 }
-                if sheet_name_eq_case_insensitive(&start_sheet, &end_sheet) {
-                    SheetRef::Sheet(start_sheet)
-                } else {
-                    SheetRef::SheetRange {
-                        start: start_sheet,
-                        end: end_sheet,
-                    }
+                ExternalPrefixKind::SheetBang => {
+                    self.next(); // bang
+
+                    let sheet_ref = match split_sheet_span_slices(&first) {
+                        None => SheetRef::Sheet(first),
+                        Some((start, _end)) => {
+                            // `split_sheet_span_slices` returns slices into `first` of the form
+                            // `{start}:{end}` (colon is ASCII and excluded from the slices). Reuse
+                            // `first` for the start segment to avoid an extra allocation.
+                            let start_len = start.len();
+                            let mut start_owned = first;
+                            let split_idx = start_len.saturating_add(1);
+                            let end_owned = start_owned.split_off(split_idx);
+                            start_owned.truncate(start_len);
+
+                            if sheet_name_eq_case_insensitive(&start_owned, &end_owned) {
+                                SheetRef::Sheet(start_owned)
+                            } else {
+                                SheetRef::SheetRange {
+                                    start: start_owned,
+                                    end: end_owned,
+                                }
+                            }
+                        }
+                    };
+
+                    return self.parse_ref_after_prefix(Some(workbook()), Some(sheet_ref));
                 }
-            } else {
-                if !matches!(self.peek_kind(), TokenKind::Bang) {
-                    // Workbook-scoped external defined name, e.g. `[Book.xlsx]MyName`.
-                    //
-                    // Note: `formula-xlsb`'s NameX decoder prefers emitting the fully-quoted form
-                    // (`'[Book.xlsx]MyName'`) to avoid the structured-ref ambiguity, but some producers
-                    // (and users) omit quotes. Support both.
-                    //
-                    // If the token after the candidate name is another `]`, we're still inside a
-                    // larger bracketed segment (meaning this `]` was not the workbook delimiter).
-                    // Reject this candidate and keep scanning for the real delimiter.
+                ExternalPrefixKind::WorkbookNameOrStructured => {
+                    // If the token after the candidate name is another `]`, we're still inside a larger
+                    // bracketed segment (meaning this `]` was not the workbook delimiter).
                     if matches!(self.peek_kind(), TokenKind::RBracket) {
-                        continue;
+                        // Fall through to structured-ref parsing below.
+                    } else {
+                        let workbook = workbook();
+                        if matches!(self.peek_kind(), TokenKind::LBracket) {
+                            return self.parse_structured_ref(Some(workbook), None, Some(first));
+                        }
+                        return Ok(Expr::NameRef(NameRef {
+                            workbook: Some(workbook),
+                            sheet: None,
+                            name: first,
+                        }));
                     }
-                    let workbook = self.src[workbook_start..workbook_end].to_string();
-                    // Workbook-scoped external structured reference, e.g. `[Book.xlsx]Table1[Col]`.
-                    //
-                    // This is ambiguous with workbook-scoped external defined names
-                    // (`[Book.xlsx]MyName`), so we only treat it as a structured reference when the
-                    // identifier is immediately followed by a structured-ref specifier (`[...]`).
-                    if matches!(self.peek_kind(), TokenKind::LBracket) {
-                        return self.parse_structured_ref(Some(workbook), None, Some(start_sheet));
-                    }
-                    return Ok(Expr::NameRef(NameRef {
-                        workbook: Some(workbook),
-                        sheet: None,
-                        name: start_sheet,
-                    }));
                 }
-
-                // Quoted sheet spans are emitted as a single token like `'Sheet1:Sheet3'!A1`.
-                match split_sheet_span_name(&start_sheet) {
-                    Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
-                        SheetRef::Sheet(start)
-                    }
-                    Some((start, end)) => SheetRef::SheetRange { start, end },
-                    None => SheetRef::Sheet(start_sheet),
-                }
-            };
-
-            self.next(); // bang
-            let workbook = self.src[workbook_start..workbook_end].to_string();
-            return self.parse_ref_after_prefix(Some(workbook), Some(sheet_ref));
+            }
         }
 
         // Not an external ref; rewind and parse as structured.
@@ -3639,6 +3532,61 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn take_ident_token_unchecked(&mut self) -> String {
+        match &mut self.tokens[self.pos].kind {
+            TokenKind::Ident(s) => {
+                let out = std::mem::take(s);
+                self.pos += 1;
+                out
+            }
+            _ => unreachable!("caller should guard with TokenKind::Ident"),
+        }
+    }
+
+    fn take_name_token_unchecked(&mut self) -> String {
+        match &mut self.tokens[self.pos].kind {
+            TokenKind::Ident(s) | TokenKind::QuotedIdent(s) => {
+                let out = std::mem::take(s);
+                self.pos += 1;
+                out
+            }
+            _ => unreachable!("caller should guard with TokenKind::Ident | TokenKind::QuotedIdent"),
+        }
+    }
+
+    fn take_number_token_unchecked(&mut self) -> String {
+        match &mut self.tokens[self.pos].kind {
+            TokenKind::Number(s) => {
+                let out = std::mem::take(s);
+                self.pos += 1;
+                out
+            }
+            _ => unreachable!("caller should guard with TokenKind::Number"),
+        }
+    }
+
+    fn take_string_token_unchecked(&mut self) -> String {
+        match &mut self.tokens[self.pos].kind {
+            TokenKind::String(s) => {
+                let out = std::mem::take(s);
+                self.pos += 1;
+                out
+            }
+            _ => unreachable!("caller should guard with TokenKind::String"),
+        }
+    }
+
+    fn take_error_token_unchecked(&mut self) -> String {
+        match &mut self.tokens[self.pos].kind {
+            TokenKind::Error(s) => {
+                let out = std::mem::take(s);
+                self.pos += 1;
+                out
+            }
+            _ => unreachable!("caller should guard with TokenKind::Error"),
+        }
+    }
+
     fn expect(&mut self, kind: TokenKind) -> Result<(), ParseError> {
         self.skip_trivia();
         if std::mem::discriminant(self.peek_kind()) == std::mem::discriminant(&kind) {
@@ -3655,6 +3603,47 @@ impl<'a> Parser<'a> {
     fn skip_trivia(&mut self) {
         while matches!(self.peek_kind(), TokenKind::Whitespace(_)) {
             self.pos += 1;
+        }
+    }
+
+    fn looks_like_sheet_prefix(&self, start_pos: usize, allow_incomplete_span: bool) -> bool {
+        let kind_at = |pos: usize| self.tokens.get(pos).map(|t| &t.kind);
+
+        let mut pos = start_pos;
+        while matches!(kind_at(pos), Some(TokenKind::Whitespace(_))) {
+            pos += 1;
+        }
+        if !matches!(
+            kind_at(pos),
+            Some(TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
+        ) {
+            return false;
+        }
+        pos += 1;
+        while matches!(kind_at(pos), Some(TokenKind::Whitespace(_))) {
+            pos += 1;
+        }
+
+        match kind_at(pos) {
+            Some(TokenKind::Bang) => true,
+            Some(TokenKind::Colon) => {
+                pos += 1;
+                while matches!(kind_at(pos), Some(TokenKind::Whitespace(_))) {
+                    pos += 1;
+                }
+                if !matches!(
+                    kind_at(pos),
+                    Some(TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
+                ) {
+                    return allow_incomplete_span;
+                }
+                pos += 1;
+                while matches!(kind_at(pos), Some(TokenKind::Whitespace(_))) {
+                    pos += 1;
+                }
+                matches!(kind_at(pos), Some(TokenKind::Bang))
+            }
+            _ => false,
         }
     }
 
@@ -3680,29 +3669,10 @@ fn parse_field_selector_from_brackets(raw_inner: &str, span: Span) -> Result<Str
     let trimmed = raw_inner.trim();
     if trimmed.starts_with('"') && trimmed.ends_with('"') {
         // Excel string literal escaping: `""` within the quoted string represents a literal `"`.
-        return unescape_excel_string_literal(trimmed)
+        return formula_model::unescape_excel_double_quoted_string_literal(trimmed)
             .ok_or_else(|| ParseError::new("Invalid string literal", span));
     }
     Ok(trimmed.to_string())
-}
-
-fn unescape_excel_string_literal(raw: &str) -> Option<String> {
-    let inner = raw.strip_prefix('"')?.strip_suffix('"')?;
-    let mut out = String::new();
-    let mut chars = inner.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            if chars.peek() == Some(&'"') {
-                chars.next();
-                out.push('"');
-            } else {
-                return None;
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    Some(out)
 }
 
 fn infix_binding_power(op: BinaryOp) -> (u8, u8) {
@@ -3721,54 +3691,87 @@ fn infix_binding_power(op: BinaryOp) -> (u8, u8) {
 }
 
 fn coerce_range_operands(left: Expr, right: Expr) -> (Expr, Expr) {
-    if let (Some(left), Some(right)) = (col_ref_from_expr(&left), col_ref_from_expr(&right)) {
-        return (Expr::ColRef(left), Expr::ColRef(right));
+    enum ColCoerce {
+        Existing,
+        FromName { col: u32, abs: bool },
     }
-    if let (Some(left), Some(right)) = (row_ref_from_expr(&left), row_ref_from_expr(&right)) {
-        return (Expr::RowRef(left), Expr::RowRef(right));
-    }
-    (left, right)
-}
 
-fn col_ref_from_expr(expr: &Expr) -> Option<ColRef> {
-    match expr {
-        Expr::ColRef(r) => Some(r.clone()),
-        Expr::NameRef(n) => {
-            let (col, abs) = parse_col_ref_name(&n.name)?;
-            Some(ColRef {
-                workbook: n.workbook.clone(),
-                sheet: n.sheet.clone(),
+    enum RowCoerce {
+        Existing,
+        FromName { row: u32, abs: bool },
+        FromNumber { row: u32 },
+    }
+
+    fn col_coerce(expr: &Expr) -> Option<ColCoerce> {
+        match expr {
+            Expr::ColRef(_) => Some(ColCoerce::Existing),
+            Expr::NameRef(n) => parse_col_ref_name(&n.name).map(|(col, abs)| ColCoerce::FromName {
+                col,
+                abs,
+            }),
+            _ => None,
+        }
+    }
+
+    fn row_coerce(expr: &Expr) -> Option<RowCoerce> {
+        match expr {
+            Expr::RowRef(_) => Some(RowCoerce::Existing),
+            Expr::NameRef(n) => parse_row_ref_name(&n.name).map(|(row, abs)| RowCoerce::FromName {
+                row,
+                abs,
+            }),
+            Expr::Number(raw) => parse_row_number_literal(raw).map(|row| RowCoerce::FromNumber { row }),
+            _ => None,
+        }
+    }
+
+    fn into_col_ref(expr: Expr, coerce: ColCoerce) -> ColRef {
+        match (expr, coerce) {
+            (Expr::ColRef(r), ColCoerce::Existing) => r,
+            (Expr::NameRef(n), ColCoerce::FromName { col, abs }) => ColRef {
+                workbook: n.workbook,
+                sheet: n.sheet,
                 col: Coord::A1 { index: col, abs },
-            })
+            },
+            _ => unreachable!("col_coerce should be checked before calling into_col_ref"),
         }
-        _ => None,
     }
-}
 
-fn row_ref_from_expr(expr: &Expr) -> Option<RowRef> {
-    match expr {
-        Expr::RowRef(r) => Some(r.clone()),
-        Expr::NameRef(n) => {
-            let (row, abs) = parse_row_ref_name(&n.name)?;
-            Some(RowRef {
-                workbook: n.workbook.clone(),
-                sheet: n.sheet.clone(),
+    fn into_row_ref(expr: Expr, coerce: RowCoerce) -> RowRef {
+        match (expr, coerce) {
+            (Expr::RowRef(r), RowCoerce::Existing) => r,
+            (Expr::NameRef(n), RowCoerce::FromName { row, abs }) => RowRef {
+                workbook: n.workbook,
+                sheet: n.sheet,
                 row: Coord::A1 { index: row, abs },
-            })
-        }
-        Expr::Number(raw) => {
-            let row = parse_row_number_literal(raw)?;
-            Some(RowRef {
+            },
+            (Expr::Number(_), RowCoerce::FromNumber { row }) => RowRef {
                 workbook: None,
                 sheet: None,
                 row: Coord::A1 {
                     index: row,
                     abs: false,
                 },
-            })
+            },
+            _ => unreachable!("row_coerce should be checked before calling into_row_ref"),
         }
-        _ => None,
     }
+
+    if let (Some(left_coerce), Some(right_coerce)) = (col_coerce(&left), col_coerce(&right)) {
+        return (
+            Expr::ColRef(into_col_ref(left, left_coerce)),
+            Expr::ColRef(into_col_ref(right, right_coerce)),
+        );
+    }
+
+    if let (Some(left_coerce), Some(right_coerce)) = (row_coerce(&left), row_coerce(&right)) {
+        return (
+            Expr::RowRef(into_row_ref(left, left_coerce)),
+            Expr::RowRef(into_row_ref(right, right_coerce)),
+        );
+    }
+
+    (left, right)
 }
 
 fn parse_col_ref_name(raw: &str) -> Option<(u32, bool)> {
@@ -3776,10 +3779,7 @@ fn parse_col_ref_name(raw: &str) -> Option<(u32, bool)> {
         .strip_prefix('$')
         .map(|rest| (true, rest))
         .unwrap_or((false, raw));
-    if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_alphabetic()) {
-        return None;
-    }
-    let col = col_from_a1(letters)?;
+    let col = column_label_to_index_lenient(letters).ok()?;
     Some((col, abs))
 }
 
@@ -3806,7 +3806,7 @@ fn parse_row_number_literal(raw: &str) -> Option<u32> {
     Some(row - 1)
 }
 
-fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
+fn split_external_sheet_name_parts(name: &str) -> (Option<Cow<'_, str>>, Cow<'_, str>) {
     // Canonical external sheet keys are encoded as `"[{workbook}]{sheet}"`. Workbook ids can
     // include path prefixes from quoted external references (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`)
     // and those prefixes may themselves contain `[` / `]`. To avoid ambiguity, we split workbook
@@ -3826,9 +3826,9 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     if name.starts_with('[') {
         let Some((workbook, sheet)) = crate::external_refs::split_external_sheet_key_parts(name)
         else {
-            return (None, name.to_string());
+            return (None, Cow::Borrowed(name));
         };
-        return (Some(workbook.to_string()), sheet.to_string());
+        return (Some(Cow::Borrowed(workbook)), Cow::Borrowed(sheet));
     }
 
     // Path-qualified external workbook sheet refs can be lexed as a single quoted sheet name, e.g.
@@ -3837,29 +3837,37 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     let Some((workbook, sheet)) =
         formula_model::external_refs::parse_path_qualified_external_sheet_key(name)
     else {
-        return (None, name.to_string());
+        return (None, Cow::Borrowed(name));
     };
-    (Some(workbook), sheet)
+    (Some(Cow::Owned(workbook)), Cow::Owned(sheet))
+}
+
+fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
+    let (workbook, sheet) = split_external_sheet_name_parts(name);
+    (workbook.map(Cow::into_owned), sheet.into_owned())
 }
 
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
     let (workbook, sheet) = split_external_sheet_name(raw);
-    let sheet_ref = match split_sheet_span_name(&sheet) {
-        Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
-            SheetRef::Sheet(start)
+    let sheet_ref = match split_sheet_span_slices(&sheet) {
+        Some((start, end)) if sheet_name_eq_case_insensitive(start, end) => {
+            SheetRef::Sheet(start.to_string())
         }
-        Some((start, end)) => SheetRef::SheetRange { start, end },
+        Some((start, end)) => SheetRef::SheetRange {
+            start: start.to_string(),
+            end: end.to_string(),
+        },
         None => SheetRef::Sheet(sheet),
     };
     (workbook, sheet_ref)
 }
 
-fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
+fn split_sheet_span_slices(name: &str) -> Option<(&str, &str)> {
     let (start, end) = name.split_once(':')?;
     if start.is_empty() || end.is_empty() {
         return None;
     }
-    Some((start.to_string(), end.to_string()))
+    Some((start, end))
 }
 
 fn estimate_tokenized_bytes(expr: &Expr) -> usize {
@@ -4114,6 +4122,47 @@ mod tests {
                 TokenKind::Eof
             ]
         );
+    }
+
+    #[test]
+    fn a1_cell_ref_followed_by_ident_char_lexes_as_single_ident() {
+        // Regression test: avoid tokenizing `A1FOO` as `A1` + `FOO`, since Excel allows defined
+        // names like `A1FOO` (it is not a complete A1 reference).
+        let opts = ParseOptions::default();
+        let tokens = lex("A1FOO", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![TokenKind::Ident("A1FOO".to_string()), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn out_of_bounds_a1_cell_ref_lexes_as_cell_token() {
+        // Out-of-bounds column labels should still be lexed as cell references so they can
+        // later evaluate to `#REF!` (rather than being treated as names).
+        let opts = ParseOptions::default();
+        let tokens = lex("XFE1", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Cell(CellToken {
+                    col: 16_384,
+                    row: 0,
+                    col_abs: false,
+                    row_abs: false
+                }),
+                TokenKind::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn too_long_a1_column_label_lexes_as_ident() {
+        // Excel A1 column labels are at most 3 letters. Longer "A1-looking" prefixes should be
+        // treated as identifiers.
+        let opts = ParseOptions::default();
+        let tokens = lex("AAAA1", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![TokenKind::Ident("AAAA1".to_string()), TokenKind::Eof]);
     }
 
     #[test]

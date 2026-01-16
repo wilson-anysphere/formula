@@ -6,6 +6,7 @@
 //! timestamp metadata while still catching fidelity regressions.
 
 pub mod cli;
+mod ascii;
 mod part_kind;
 mod presets;
 mod rels;
@@ -956,8 +957,13 @@ impl IgnoreMatcher {
             if pattern.is_empty() {
                 continue;
             }
-            let pattern = pattern.replace('\\', "/");
-            let pattern = pattern.trim_start_matches('/');
+            let pattern = pattern.trim_start_matches(|c| c == '/' || c == '\\');
+            let pattern: Cow<'_, str> = if pattern.contains('\\') {
+                Cow::Owned(pattern.replace('\\', "/"))
+            } else {
+                Cow::Borrowed(pattern)
+            };
+            let pattern = pattern.as_ref();
             if pattern.is_empty() {
                 continue;
             }
@@ -1006,7 +1012,11 @@ fn normalize_ignore_path_substring(raw: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let normalized = trimmed.replace('\\', "/");
+    let normalized: Cow<'_, str> = if trimmed.contains('\\') {
+        Cow::Owned(trimmed.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(trimmed)
+    };
     let normalized = normalized.trim();
     if normalized.is_empty() {
         return String::new();
@@ -1076,8 +1086,14 @@ impl IgnorePathMatcher {
 
             let mut part = None;
             if let Some(pattern) = rule.part.as_ref() {
-                let normalized = pattern.trim().replace('\\', "/");
-                let normalized = normalized.trim_start_matches('/');
+                let normalized = pattern.trim();
+                let normalized = normalized.trim_start_matches(|c| c == '/' || c == '\\');
+                let normalized: Cow<'_, str> = if normalized.contains('\\') {
+                    Cow::Owned(normalized.replace('\\', "/"))
+                } else {
+                    Cow::Borrowed(normalized)
+                };
+                let normalized = normalized.as_ref();
                 if normalized.is_empty() {
                     part = None;
                 } else if !normalized.contains('*') && !normalized.contains('?') {
@@ -1172,7 +1188,11 @@ fn normalize_opc_part_name(part_name: &str) -> String {
 }
 
 fn normalize_opc_path(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
+    let normalized: Cow<'_, str> = if path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
+    };
     let mut out: Vec<&str> = Vec::new();
     for segment in normalized.split('/') {
         match segment {
@@ -1212,7 +1232,13 @@ fn relationship_target_ignore_map(
         };
         let target = node.attribute("Target").unwrap_or_default();
         let resolved = match node.attribute("TargetMode") {
-            Some(mode) if mode.eq_ignore_ascii_case("External") => target.replace('\\', "/"),
+            Some(mode) if mode.eq_ignore_ascii_case("External") => {
+                if target.contains('\\') {
+                    target.replace('\\', "/")
+                } else {
+                    target.to_string()
+                }
+            }
             _ => resolve_relationship_target(rels_part, target),
         };
         ids.insert(id.to_string(), ignore.matches(&resolved));
@@ -1222,10 +1248,14 @@ fn relationship_target_ignore_map(
 }
 
 fn resolve_relationship_target(rels_part: &str, target: &str) -> String {
-    let target = target.replace('\\', "/");
+    let target: Cow<'_, str> = if target.contains('\\') {
+        Cow::Owned(target.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(target)
+    };
     // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.xml#bar`).
     // OPC part names do not include fragments, so strip them before resolving.
-    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(&target);
+    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(target.as_ref());
     if target.is_empty() {
         // A target of just `#fragment` refers to the relationship source part itself.
         return source_part_from_rels_part(rels_part);
@@ -1390,7 +1420,7 @@ fn adjust_xml_diff_severity(
 }
 
 fn mentions_calc_chain(value: &str) -> bool {
-    value.to_ascii_lowercase().contains("calcchain")
+    crate::ascii::contains_ignore_case(value, "calcchain")
 }
 
 fn relationship_id_from_path(path: &str) -> Option<&str> {
@@ -1426,12 +1456,14 @@ fn calc_chain_relationship_ids(part_name: &str, bytes: &[u8]) -> Result<BTreeSet
 }
 
 fn is_calc_chain_relationship(ty: &str, target: &str) -> bool {
-    let target = target.replace('\\', "/").to_ascii_lowercase();
-    if target.ends_with("calcchain.xml") || target.ends_with("calcchain.bin") {
+    let target = target.trim();
+    if crate::ascii::ends_with_ignore_case(target, "calcchain.xml")
+        || crate::ascii::ends_with_ignore_case(target, "calcchain.bin")
+    {
         return true;
     }
 
-    ty.to_ascii_lowercase().contains("relationships/calcchain")
+    crate::ascii::contains_ignore_case(ty.trim(), "relationships/calcchain")
 }
 
 fn binary_diff_summary(expected: &[u8], actual: &[u8]) -> (String, String) {

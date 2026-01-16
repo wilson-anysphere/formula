@@ -1940,6 +1940,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-ascii"
+version = "0.1.0"
+
+[[package]]
 name = "formula-biff"
 version = "0.1.0"
 dependencies = [
@@ -2110,6 +2114,7 @@ dependencies = [
  "anyhow",
  "clap",
  "formula-engine",
+ "formula-model",
  "serde",
  "serde_json",
  "sha2",
@@ -2313,7 +2318,6 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "unicode-normalization",
  "wasm-bindgen",
  "wasm-bindgen-test",
  "zip 2.4.2",
@@ -2377,6 +2381,7 @@ dependencies = [
  "chrono",
  "cipher",
  "digest",
+ "formula-ascii",
  "formula-columnar",
  "formula-engine",
  "formula-format",
@@ -8697,6 +8702,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "formula-ascii",
  "formula-office-crypto",
  "formula-xlsx",
  "globset",

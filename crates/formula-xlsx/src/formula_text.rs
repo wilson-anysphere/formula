@@ -226,10 +226,7 @@ fn has_xlfn_prefix_at(bytes: &[u8], i: usize) -> bool {
     if i.saturating_add(prefix_len) > bytes.len() {
         return false;
     }
-    bytes[i..i + prefix_len]
-        .iter()
-        .zip(XL_FN_PREFIX_BYTES)
-        .all(|(&b, &p)| b.to_ascii_lowercase() == p)
+    bytes[i..i + prefix_len].eq_ignore_ascii_case(XL_FN_PREFIX_BYTES)
 }
 
 pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {

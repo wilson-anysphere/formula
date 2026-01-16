@@ -65,24 +65,37 @@ fn preset_to_argb(preset: &str) -> Option<u32> {
     // We only map the most common names used by Excel charts/shapes.
     //
     // Spec reference: ECMA-376 5th ed. Part 1, §20.1.2.3.30 (PresetColorVal).
-    let key = preset.trim().to_ascii_lowercase();
-    Some(match key.as_str() {
-        "black" => 0xFF000000,
-        "white" => 0xFFFFFFFF,
-        "red" => 0xFFFF0000,
-        "green" => 0xFF00FF00,
-        "blue" => 0xFF0000FF,
-        "yellow" => 0xFFFFFF00,
-        "cyan" | "aqua" => 0xFF00FFFF,
-        "magenta" | "fuchsia" => 0xFFFF00FF,
-        "gray" | "grey" => 0xFF808080,
-        "ltgray" | "ltgrey" => 0xFFC0C0C0,
-        "dkgray" | "dkgrey" => 0xFF404040,
-        // Less common, but still seen in Office-generated documents.
-        "orange" => 0xFFFFA500,
-        "brown" => 0xFFA52A2A,
-        "purple" => 0xFF800080,
-        _ => return None,
+    let key = preset.trim();
+    Some(if key.eq_ignore_ascii_case("black") {
+        0xFF000000
+    } else if key.eq_ignore_ascii_case("white") {
+        0xFFFFFFFF
+    } else if key.eq_ignore_ascii_case("red") {
+        0xFFFF0000
+    } else if key.eq_ignore_ascii_case("green") {
+        0xFF00FF00
+    } else if key.eq_ignore_ascii_case("blue") {
+        0xFF0000FF
+    } else if key.eq_ignore_ascii_case("yellow") {
+        0xFFFFFF00
+    } else if key.eq_ignore_ascii_case("cyan") || key.eq_ignore_ascii_case("aqua") {
+        0xFF00FFFF
+    } else if key.eq_ignore_ascii_case("magenta") || key.eq_ignore_ascii_case("fuchsia") {
+        0xFFFF00FF
+    } else if key.eq_ignore_ascii_case("gray") || key.eq_ignore_ascii_case("grey") {
+        0xFF808080
+    } else if key.eq_ignore_ascii_case("ltgray") || key.eq_ignore_ascii_case("ltgrey") {
+        0xFFC0C0C0
+    } else if key.eq_ignore_ascii_case("dkgray") || key.eq_ignore_ascii_case("dkgrey") {
+        0xFF404040
+    } else if key.eq_ignore_ascii_case("orange") {
+        0xFFFFA500
+    } else if key.eq_ignore_ascii_case("brown") {
+        0xFFA52A2A
+    } else if key.eq_ignore_ascii_case("purple") {
+        0xFF800080
+    } else {
+        return None;
     })
 }
 

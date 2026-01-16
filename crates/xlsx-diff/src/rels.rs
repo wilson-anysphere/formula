@@ -90,7 +90,13 @@ pub(crate) fn relationship_semantic_id_map(
         let target = node.attribute("Target").unwrap_or_default();
         let mode = RelationshipTargetMode::from_attribute(node.attribute("TargetMode"));
         let resolved_target = match mode {
-            RelationshipTargetMode::External => target.replace('\\', "/"),
+            RelationshipTargetMode::External => {
+                if target.contains('\\') {
+                    target.replace('\\', "/")
+                } else {
+                    target.to_string()
+                }
+            }
             RelationshipTargetMode::Internal => {
                 super::resolve_relationship_target(rels_part, target)
             }

@@ -1516,7 +1516,8 @@ impl ValueKey {
 pub fn format_render_plan(visible: Range, eval: &CfEvaluationResult) -> String {
     let mut lines = Vec::new();
     for cell in iter_cells(visible) {
-        let label = cell.to_a1();
+        let mut label = String::new();
+        crate::push_a1_cell_ref(cell.row, cell.col, false, false, &mut label);
         let res = eval.get(cell).expect("cell in visible range");
         let mut parts = Vec::new();
 

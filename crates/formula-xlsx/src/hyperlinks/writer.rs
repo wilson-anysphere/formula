@@ -178,7 +178,10 @@ fn write_hyperlinks_block<W: std::io::Write>(
 
         match &link.target {
             HyperlinkTarget::Internal { sheet, cell } => {
-                let location = format!("{}!{}", quote_sheet_name(sheet), cell.to_a1());
+                let mut location = String::new();
+                formula_model::push_sheet_name_a1(&mut location, sheet);
+                location.push('!');
+                formula_model::push_a1_cell_ref(cell.row, cell.col, false, false, &mut location);
                 elem.push_attribute(("location", location.as_str()));
             }
             HyperlinkTarget::ExternalUrl { .. } | HyperlinkTarget::Email { .. } => {
@@ -290,18 +293,6 @@ fn render_relationships_xml(rels: &[Relationship]) -> Result<String, XlsxError> 
 
     writer.write_event(Event::End(BytesEnd::new("Relationships")))?;
     Ok(String::from_utf8(writer.into_inner())?)
-}
-
-fn quote_sheet_name(name: &str) -> String {
-    // Quote only when needed; Excel uses single quotes with doubled embedded quotes.
-    if name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
-    {
-        return name.to_string();
-    }
-    let escaped = name.replace('\'', "''");
-    format!("'{escaped}'")
 }
 
 #[cfg(test)]

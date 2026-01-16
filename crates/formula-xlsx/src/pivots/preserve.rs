@@ -967,31 +967,22 @@ fn lookup_sheet_name<'a>(
         .map(|(_, v)| v.as_str())
 }
 
-fn worksheet_name_needs_quotes(name: &str) -> bool {
-    if name.is_empty() {
-        return true;
-    }
-    name.chars()
-        .any(|c| !c.is_ascii_alphanumeric() && c != '_')
-}
-
-fn escape_sheet_name_for_a1(name: &str) -> String {
-    name.replace('\'', "''")
-}
-
 fn rewrite_sheet_name_in_ref(ref_value: &str, mapping: &HashMap<String, String>) -> Option<String> {
     let (sheet_token, range) = ref_value.rsplit_once('!')?;
-    let (sheet_name, was_quoted) = if sheet_token.starts_with('\'') && sheet_token.ends_with('\'') {
-        let inner = &sheet_token[1..sheet_token.len().saturating_sub(1)];
-        (inner.replace("''", "'"), true)
-    } else {
-        (sheet_token.to_string(), false)
-    };
+    let (sheet_name, was_quoted) =
+        if let Some(inner) = formula_model::unquote_excel_single_quoted_identifier_lenient(sheet_token)
+        {
+            (inner.into_owned(), true)
+        } else {
+            (sheet_token.to_string(), false)
+        };
 
     let new_sheet = lookup_sheet_name(&sheet_name, mapping)?;
-    let quote = was_quoted || worksheet_name_needs_quotes(new_sheet);
+    let quote = was_quoted || formula_model::sheet_name_needs_quotes_a1(new_sheet);
     let new_token = if quote {
-        format!("'{}'", escape_sheet_name_for_a1(new_sheet))
+        let mut out = String::with_capacity(new_sheet.len().saturating_add(2));
+        formula_model::push_excel_single_quoted_identifier(&mut out, new_sheet);
+        out
     } else {
         new_sheet.to_string()
     };

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use formula_model::external_refs::{
@@ -818,8 +819,14 @@ fn normalize_key(s: &str) -> String {
 }
 
 fn normalize_function_key(s: &str) -> String {
-    let key = normalize_key(s);
-    key.strip_prefix("_XLFN.").unwrap_or(&key).to_string()
+    let mut key = normalize_key(s);
+    if key
+        .get(.."_XLFN.".len())
+        .is_some_and(|p| p.eq_ignore_ascii_case("_XLFN."))
+    {
+        key.replace_range(.."_XLFN.".len(), "");
+    }
+    key
 }
 
 pub(crate) fn display_supbook_name(raw: &str) -> String {
@@ -829,7 +836,11 @@ pub(crate) fn display_supbook_name(raw: &str) -> String {
     // Some producers also store the workbook in brackets (e.g. `C:\tmp\[Book.xlsx]`) or wrap the
     // entire path in brackets (`[C:\tmp\Book.xlsx]`). Normalize these cases so we can safely
     // produce `[Book]Sheet` prefixes for external workbook references.
-    let without_nuls = raw.replace('\0', "");
+    let without_nuls: Cow<'_, str> = if raw.contains('\0') {
+        Cow::Owned(raw.replace('\0', ""))
+    } else {
+        Cow::Borrowed(raw)
+    };
     let trimmed_full = without_nuls.trim();
     let has_full_wrapper = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');
 

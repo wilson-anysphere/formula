@@ -271,16 +271,36 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         .as_deref()
         .and_then(|bytes| MetadataPart::parse(bytes).ok());
 
+    fn person_part_name_if_matches(raw: &str) -> Option<String> {
+        let name = raw.strip_prefix('/').unwrap_or(raw);
+        let name: Cow<'_, str> = if name.contains('\\') {
+            Cow::Owned(name.replace('\\', "/"))
+        } else {
+            Cow::Borrowed(name)
+        };
+        let name = name.as_ref();
+        if !name
+            .get(.."xl/persons/".len())
+            .is_some_and(|p| p.eq_ignore_ascii_case("xl/persons/"))
+        {
+            return None;
+        }
+        if !name
+            .get(name.len().saturating_sub(".xml".len())..)
+            .is_some_and(|s| s.eq_ignore_ascii_case(".xml"))
+        {
+            return None;
+        }
+        Some(name.to_string())
+    }
+
     // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
     // not fail workbook load.
     let person_part_names: Vec<String> = archive
         .file_names()
         .filter_map(|name| {
             let name = name.strip_prefix('/').unwrap_or(name);
-            // Be tolerant to case and path separators to match `open_zip_part`.
-            let normalized = name.replace('\\', "/").to_ascii_lowercase();
-            (normalized.starts_with("xl/persons/") && normalized.ends_with(".xml"))
-                .then_some(normalized)
+            person_part_name_if_matches(name)
         })
         .collect();
     let persons = crate::comments::import::collect_persons(
@@ -897,15 +917,26 @@ fn part_name_tolerant(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<S
     }
 
     // Tolerate leading `/` and Windows-style separators.
-    let normalized = name.strip_prefix('/').unwrap_or(name).replace('\\', "/");
-    if parts.contains_key(&normalized) {
-        return Some(normalized);
-    }
-
-    // Some producers may include a leading `/` despite this loader normalizing entries.
-    let with_slash = format!("/{normalized}");
-    if parts.contains_key(&with_slash) {
-        return Some(with_slash);
+    let normalized = name.trim_start_matches(|c| c == '/' || c == '\\');
+    if !normalized.contains('\\') {
+        if parts.contains_key(normalized) {
+            return Some(normalized.to_string());
+        }
+        // Some producers may include a leading `/` despite this loader normalizing entries.
+        let with_slash = format!("/{normalized}");
+        if parts.contains_key(&with_slash) {
+            return Some(with_slash);
+        }
+    } else {
+        let normalized = normalized.replace('\\', "/");
+        if parts.contains_key(normalized.as_str()) {
+            return Some(normalized);
+        }
+        // Some producers may include a leading `/` despite this loader normalizing entries.
+        let with_slash = format!("/{normalized}");
+        if parts.contains_key(&with_slash) {
+            return Some(with_slash);
+        }
     }
 
     parts
@@ -921,15 +952,26 @@ fn part_bytes_tolerant<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> 
     }
 
     // Tolerate leading `/` and Windows-style separators.
-    let normalized = name.strip_prefix('/').unwrap_or(name).replace('\\', "/");
-    if let Some(bytes) = parts.get(&normalized) {
-        return Some(bytes.as_slice());
-    }
-
-    // Some producers may include a leading `/` despite this loader normalizing entries.
-    let with_slash = format!("/{normalized}");
-    if let Some(bytes) = parts.get(&with_slash) {
-        return Some(bytes.as_slice());
+    let normalized = name.trim_start_matches(|c| c == '/' || c == '\\');
+    if !normalized.contains('\\') {
+        if let Some(bytes) = parts.get(normalized) {
+            return Some(bytes.as_slice());
+        }
+        // Some producers may include a leading `/` despite this loader normalizing entries.
+        let with_slash = format!("/{normalized}");
+        if let Some(bytes) = parts.get(&with_slash) {
+            return Some(bytes.as_slice());
+        }
+    } else {
+        let normalized = normalized.replace('\\', "/");
+        if let Some(bytes) = parts.get(normalized.as_str()) {
+            return Some(bytes.as_slice());
+        }
+        // Some producers may include a leading `/` despite this loader normalizing entries.
+        let with_slash = format!("/{normalized}");
+        if let Some(bytes) = parts.get(&with_slash) {
+            return Some(bytes.as_slice());
+        }
     }
 
     // Best-effort fallback: tolerate case, path separators, leading `/`, and percent-encoded names
@@ -1102,20 +1144,35 @@ fn load_from_zip_archive<R: Read + Seek>(
         Vec<DrawingObject>,
     > = std::collections::HashMap::new();
 
+    fn person_part_name_if_matches(raw: &str) -> Option<String> {
+        let name = raw.strip_prefix('/').unwrap_or(raw);
+        let name: Cow<'_, str> = if name.contains('\\') {
+            Cow::Owned(name.replace('\\', "/"))
+        } else {
+            Cow::Borrowed(name)
+        };
+        let name = name.as_ref();
+        if !name
+            .get(.."xl/persons/".len())
+            .is_some_and(|p| p.eq_ignore_ascii_case("xl/persons/"))
+        {
+            return None;
+        }
+        if !name
+            .get(name.len().saturating_sub(".xml".len())..)
+            .is_some_and(|s| s.eq_ignore_ascii_case(".xml"))
+        {
+            return None;
+        }
+        Some(name.to_string())
+    }
+
     // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
     // not fail workbook load.
     let person_part_names: Vec<String> = parts
         .keys()
         .filter_map(|name| {
-            // Be tolerant to case and path separators so we still discover persons parts in
-            // packages that violate the canonical `xl/persons/*.xml` casing.
-            let normalized = name
-                .strip_prefix('/')
-                .unwrap_or(name)
-                .replace('\\', "/")
-                .to_ascii_lowercase();
-            (normalized.starts_with("xl/persons/") && normalized.ends_with(".xml"))
-                .then_some(normalized)
+            person_part_name_if_matches(name.as_str())
         })
         .collect();
     let persons = crate::comments::import::collect_persons(
@@ -1983,11 +2040,10 @@ impl MetadataPart {
                     }
 
                     if let Some(name) = name {
-                        let lower = name.to_ascii_lowercase();
-                        if lower.contains("richvalue")
-                            || lower.contains("rich_value")
-                            || lower.contains("richdata")
-                            || lower.contains("rich")
+                        if crate::ascii::contains_ignore_case(&name, "richvalue")
+                            || crate::ascii::contains_ignore_case(&name, "rich_value")
+                            || crate::ascii::contains_ignore_case(&name, "richdata")
+                            || crate::ascii::contains_ignore_case(&name, "rich")
                         {
                             rich_type_indices.insert(next_metadata_type_idx);
                         }
@@ -2571,12 +2627,16 @@ fn parse_workbook_metadata(
                             saw_window_attr = true;
                         }
                         b"windowState" => {
-                            let state = attr.unescape_value()?.trim().to_ascii_lowercase();
-                            window.state = match state.as_str() {
-                                "minimized" => Some(WorkbookWindowState::Minimized),
-                                "maximized" => Some(WorkbookWindowState::Maximized),
-                                "normal" => Some(WorkbookWindowState::Normal),
-                                _ => None,
+                            let state = attr.unescape_value()?;
+                            let state = state.trim();
+                            window.state = if state.eq_ignore_ascii_case("minimized") {
+                                Some(WorkbookWindowState::Minimized)
+                            } else if state.eq_ignore_ascii_case("maximized") {
+                                Some(WorkbookWindowState::Maximized)
+                            } else if state.eq_ignore_ascii_case("normal") {
+                                Some(WorkbookWindowState::Normal)
+                            } else {
+                                None
                             };
                             saw_window_attr = true;
                         }

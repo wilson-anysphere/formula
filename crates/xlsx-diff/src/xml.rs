@@ -69,12 +69,17 @@ fn build_node(node: Node<'_, '_>, preserve_space: bool, part_name: &str) -> XmlN
             XmlNode::Element(element)
         }
         roxmltree::NodeType::Text => {
-            let mut text = node.text().unwrap_or_default().replace("\r\n", "\n");
-            if !preserve_space && text.trim().is_empty() {
+            let raw = node.text().unwrap_or_default();
+            if !preserve_space && raw.trim().is_empty() {
                 XmlNode::Text(String::new())
             } else {
                 // Do not trim text: whitespace can be significant (e.g. shared strings).
-                XmlNode::Text(std::mem::take(&mut text))
+                let text = if raw.contains("\r\n") {
+                    raw.replace("\r\n", "\n")
+                } else {
+                    raw.to_string()
+                };
+                XmlNode::Text(text)
             }
         }
         _ => XmlNode::Text(String::new()),
@@ -428,25 +433,37 @@ fn attr_value_ns<'a>(el: &'a XmlElement, ns: Option<&str>, local: &str) -> Optio
 
 fn parse_a1_reference(reference: &str) -> Option<(u32, u32)> {
     let mut col: u32 = 0;
-    let mut row_start = 0;
-    let stripped = reference.replace('$', "");
-    for (idx, ch) in stripped.char_indices() {
-        if ch.is_ascii_alphabetic() {
-            let upper = ch.to_ascii_uppercase();
-            col = col
-                .checked_mul(26)?
-                .checked_add((upper as u8 - b'A' + 1) as u32)?;
-        } else {
-            row_start = idx;
-            break;
+    let mut row: u32 = 0;
+    let mut in_row = false;
+
+    for mut b in reference.bytes() {
+        if b == b'$' {
+            continue;
         }
+        if !in_row {
+            if b.is_ascii_alphabetic() {
+                b = b.to_ascii_uppercase();
+                col = col
+                    .checked_mul(26)?
+                    .checked_add((b - b'A' + 1) as u32)?;
+                continue;
+            }
+            if b.is_ascii_digit() {
+                in_row = true;
+            } else {
+                return None;
+            }
+        }
+
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        row = row.checked_mul(10)?.checked_add((b - b'0') as u32)?;
     }
 
-    if col == 0 {
+    if col == 0 || row == 0 {
         return None;
     }
-
-    let row: u32 = stripped.get(row_start..)?.parse().ok()?;
     Some((row, col))
 }
 
@@ -771,6 +788,9 @@ fn keyed_child_path(base: &str, child: &XmlNode, key: &ChildMatchKey) -> String 
 }
 
 fn escape_path_value(value: &str) -> String {
+    if !value.contains('"') {
+        return value.to_string();
+    }
     value.replace('"', "\\\"")
 }
 

@@ -20,12 +20,11 @@ use formula_engine::{
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, Color, DateSystem, DefinedNameScope, Font,
     HorizontalAlignment, Protection, Range, SheetVisibility, Style, TabColor, VerticalAlignment,
-    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    push_column_label, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use unicode_normalization::UnicodeNormalization;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "dax")]
@@ -759,15 +758,25 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
             let raw = alignment.get("horizontal").unwrap_or(&JsonValue::Null);
             let horizontal = match raw {
                 JsonValue::Null => Some(HorizontalAlignment::General),
-                JsonValue::String(s) => match s.trim().to_ascii_lowercase().as_str() {
-                    "general" => Some(HorizontalAlignment::General),
-                    "left" => Some(HorizontalAlignment::Left),
-                    "center" | "centre" => Some(HorizontalAlignment::Center),
-                    "right" => Some(HorizontalAlignment::Right),
-                    "fill" => Some(HorizontalAlignment::Fill),
-                    "justify" => Some(HorizontalAlignment::Justify),
-                    _ => None,
-                },
+                JsonValue::String(s) => {
+                    let s = s.trim();
+                    if s.eq_ignore_ascii_case("general") {
+                        Some(HorizontalAlignment::General)
+                    } else if s.eq_ignore_ascii_case("left") {
+                        Some(HorizontalAlignment::Left)
+                    } else if s.eq_ignore_ascii_case("center") || s.eq_ignore_ascii_case("centre")
+                    {
+                        Some(HorizontalAlignment::Center)
+                    } else if s.eq_ignore_ascii_case("right") {
+                        Some(HorizontalAlignment::Right)
+                    } else if s.eq_ignore_ascii_case("fill") {
+                        Some(HorizontalAlignment::Fill)
+                    } else if s.eq_ignore_ascii_case("justify") {
+                        Some(HorizontalAlignment::Justify)
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             };
             if horizontal.is_some() {
@@ -1534,7 +1543,7 @@ impl FormulaCellKey {
     }
 
     fn address(&self) -> String {
-        CellRef::new(self.row, self.col).to_a1()
+        formula_model::cell_to_a1(self.row, self.col)
     }
 }
 
@@ -1556,17 +1565,8 @@ fn is_formula_input(value: &JsonValue) -> bool {
 }
 
 fn normalize_sheet_key(name: &str) -> String {
-    // Match `formula_engine::Workbook::sheet_key` / `formula_model::sheet_name_eq_case_insensitive`.
-    //
-    // Excel compares sheet names case-insensitively across Unicode and applies compatibility
-    // normalization (NFKC). We approximate this by normalizing with Unicode NFKC and then applying
-    // Unicode uppercasing (locale-independent).
-    //
-    // Fast-path ASCII sheet names to avoid the cost of Unicode normalization on the common case.
-    if name.is_ascii() {
-        return name.to_ascii_uppercase();
-    }
-    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+    // Match `formula_engine::Workbook::sheet_key` (Excel-style Unicode casefolding).
+    formula_model::sheet_name_casefold(name)
 }
 
 /// Encode a literal text string as a scalar workbook `input` value.
@@ -2679,7 +2679,7 @@ impl WorkbookState {
         for write in writes {
             out.push(PivotCellWrite {
                 sheet: sheet.clone(),
-                address: CellRef::new(write.row, write.col).to_a1(),
+                address: formula_model::cell_to_a1(write.row, write.col),
                 value: pivot_value_to_json(write.value, date_system),
                 number_format: write.number_format,
             });
@@ -2695,7 +2695,7 @@ impl WorkbookState {
         self.with_manual_calc_mode(|this| {
             let sheet = this.ensure_sheet(sheet);
             let cell_ref = Self::parse_address(address)?;
-            let address = cell_ref.to_a1();
+            let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
             this.engine
                 .set_cell_style_id(&sheet, &address, style_id)
                 .map_err(|err| js_err(err.to_string()))
@@ -2705,7 +2705,7 @@ impl WorkbookState {
     fn get_cell_style_id_internal(&self, sheet: &str, address: &str) -> Result<u32, JsValue> {
         let sheet = self.require_sheet(sheet)?;
         let cell_ref = Self::parse_address(address)?;
-        let address = cell_ref.to_a1();
+        let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
         let style_id = self
             .engine
             .get_cell_style_id(sheet, &address)
@@ -2725,7 +2725,7 @@ impl WorkbookState {
 
             let sheet = this.ensure_sheet(sheet);
             let cell_ref = Self::parse_address(address)?;
-            let address = cell_ref.to_a1();
+            let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
 
             // Legacy scalar edits overwrite any previous rich input for this cell.
             if let Some(rich_cells) = this.sheets_rich.get_mut(&sheet) {
@@ -2877,7 +2877,8 @@ impl WorkbookState {
                 // `getCellRich.value` will still reflect the scalar engine value.
                 if !input.is_empty() {
                     let sheet = this.ensure_sheet(sheet);
-                    let address = Self::parse_address(address)?.to_a1();
+                    let cell_ref = Self::parse_address(address)?;
+                    let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
                     this.sheets_rich
                         .entry(sheet)
                         .or_default()
@@ -2889,7 +2890,7 @@ impl WorkbookState {
 
             let sheet = this.ensure_sheet(sheet);
             let cell_ref = Self::parse_address(address)?;
-            let address = cell_ref.to_a1();
+            let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
 
             if let Some((origin, end)) = this.engine.spill_range(&sheet, &address) {
                 let edited_row = cell_ref.row;
@@ -2956,7 +2957,8 @@ impl WorkbookState {
     }
     fn get_cell_data(&self, sheet: &str, address: &str) -> Result<CellData, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
-        let address = Self::parse_address(address)?.to_a1();
+        let cell_ref = Self::parse_address(address)?;
+        let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
 
         let input = self
             .sheets
@@ -2977,7 +2979,8 @@ impl WorkbookState {
 
     fn get_cell_rich_data(&self, sheet: &str, address: &str) -> Result<CellDataRich, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
-        let address = Self::parse_address(address)?.to_a1();
+        let cell_ref = Self::parse_address(address)?;
+        let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
 
         let input = self
             .sheets_rich
@@ -3074,8 +3077,9 @@ impl WorkbookState {
         let sheet = self.require_sheet(sheet)?.to_string();
         let target_cell_ref = Self::parse_address(target_cell)?;
         let changing_cell_ref = Self::parse_address(changing_cell)?;
-        let target_cell = target_cell_ref.to_a1();
-        let changing_cell = changing_cell_ref.to_a1();
+        let target_cell = formula_model::cell_to_a1(target_cell_ref.row, target_cell_ref.col);
+        let changing_cell =
+            formula_model::cell_to_a1(changing_cell_ref.row, changing_cell_ref.col);
 
         let mut params =
             GoalSeekParams::new(target_cell.as_str(), target_value, changing_cell.as_str());
@@ -3532,7 +3536,7 @@ impl WorkbookState {
                     for (row, col, value) in copied {
                         let dest_row = dst_top_left.row + (row - src.start.row);
                         let dest_col = dst_top_left.col + (col - src.start.col);
-                        let address = CellRef::new(dest_row, dest_col).to_a1();
+                        let address = formula_model::cell_to_a1(dest_row, dest_col);
                         new_cells.insert(address, value);
                     }
 
@@ -3555,7 +3559,7 @@ impl WorkbookState {
                         let Some(remapped) = remap_key(&key, op) else {
                             continue;
                         };
-                        let remapped_address = CellRef::new(remapped.row, remapped.col).to_a1();
+                        let remapped_address = formula_model::cell_to_a1(remapped.row, remapped.col);
                         next_rich
                             .entry(remapped.sheet)
                             .or_default()
@@ -3588,7 +3592,7 @@ impl WorkbookState {
             // Update the persisted input map used by `toJson` and `getCell.input`.
             for change in &result.changed_cells {
                 let sheet = self.ensure_sheet(&change.sheet);
-                let address = change.cell.to_a1();
+                let address = formula_model::cell_to_a1(change.cell.row, change.cell.col);
                 let sheet_cells = self
                     .sheets
                     .get_mut(&sheet)
@@ -3628,7 +3632,7 @@ impl WorkbookState {
                 };
 
                 let sheet = self.ensure_sheet(&change.sheet);
-                let address = change.cell.to_a1();
+                let address = formula_model::cell_to_a1(change.cell.row, change.cell.col);
                 let key = FormulaCellKey::new(sheet.clone(), change.cell);
 
                 if let Some(formula) = after.formula.as_deref() {
@@ -3684,7 +3688,7 @@ impl WorkbookState {
             // Convert to JS-friendly DTO.
             let mut changed_cells = Vec::with_capacity(result.changed_cells.len());
             for change in &result.changed_cells {
-                let address = change.cell.to_a1();
+                let address = formula_model::cell_to_a1(change.cell.row, change.cell.col);
                 let before = change.before.as_ref().map(|snap| EditCellSnapshotDto {
                     value: engine_value_to_json(snap.value.clone()),
                     formula: snap.formula.clone(),
@@ -3724,7 +3728,7 @@ impl WorkbookState {
                 .iter()
                 .map(|r| EditFormulaRewriteDto {
                     sheet: r.sheet.clone(),
-                    address: r.cell.to_a1(),
+                    address: formula_model::cell_to_a1(r.cell.row, r.cell.col),
                     before: r.before.clone(),
                     after: r.after.clone(),
                 })
@@ -3802,23 +3806,6 @@ fn engine_value_to_js_scalar(value: EngineValue) -> JsValue {
         // Degrade any rich/non-scalar value (references, lambdas, entities, records, etc.) to its
         // display string so existing `getCell` / `recalculate` callers keep receiving scalars.
         other => JsValue::from_str(&other.to_string()),
-    }
-}
-
-fn push_a1_col_name(col: u32, out: &mut String) {
-    // Excel columns are 1-based in A1 notation. We store 0-based internally.
-    let mut n = u64::from(col) + 1;
-    // A u32 column index fits in at most 7 A1 letters (26^7 > u32::MAX).
-    let mut buf = [0u8; 8];
-    let mut len = 0usize;
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        buf[len] = b'A' + rem as u8;
-        len += 1;
-        n = (n - 1) / 26;
-    }
-    for b in buf[..len].iter().rev() {
-        out.push(*b as char);
     }
 }
 
@@ -5101,7 +5088,7 @@ impl WasmWorkbook {
                 .resolve_sheet(&sheet.name)
                 .expect("sheet just ensured must resolve")
                 .to_string();
-            let origin = origin.to_a1();
+            let origin = formula_model::cell_to_a1(origin.row, origin.col);
             let _ = wb.engine.set_sheet_origin(&sheet_name, Some(&origin));
         }
 
@@ -5219,7 +5206,7 @@ impl WasmWorkbook {
                 .to_string();
 
             for (cell_ref, cell) in sheet.iter_cells() {
-                let address = cell_ref.to_a1();
+                let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
                 let phonetic = cell.phonetic.as_deref().map(|s| s.to_string());
 
                 // Apply formatting metadata first (including style-only cells) so cached values can
@@ -5345,11 +5332,12 @@ impl WasmWorkbook {
         let mut has_workbook_bin = false;
         for name in archive.file_names() {
             // Normalize ZIP entry names to forward slashes (Excel uses `/`, but tolerate `\`).
-            let mut normalized = name.trim_start_matches('/');
+            let mut normalized = name.trim_start_matches(|c| c == '/' || c == '\\');
             let replaced;
             if normalized.contains('\\') {
                 replaced = normalized.replace('\\', "/");
-                normalized = &replaced;
+                // A leading `\` becomes `/` after replacement; strip it to keep matching tolerant.
+                normalized = replaced.trim_start_matches('/');
             }
             if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
                 has_workbook_xml = true;
@@ -5983,7 +5971,8 @@ impl WasmWorkbook {
     ) -> Result<Option<String>, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = self.inner.require_sheet(sheet)?.to_string();
-        let address = WorkbookState::parse_address(&address)?.to_a1();
+        let cell_ref = WorkbookState::parse_address(&address)?;
+        let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
         Ok(self
             .inner
             .engine
@@ -6079,7 +6068,7 @@ impl WasmWorkbook {
             for (col_off, engine_value) in row_values.into_iter().enumerate() {
                 let col = start_col + col_off as u32;
                 addr_buf.clear();
-                push_a1_col_name(col, &mut addr_buf);
+                push_column_label(col, &mut addr_buf);
                 addr_buf.push_str(&row_buf);
 
                 let input = if let Some(cells) = sheet_cells {
@@ -6141,7 +6130,7 @@ impl WasmWorkbook {
                 let col = start_col + col_off as u32;
                 let input = if let Some(cells) = sheet_cells {
                     addr_buf.clear();
-                    push_a1_col_name(col, &mut addr_buf);
+                    push_column_label(col, &mut addr_buf);
                     addr_buf.push_str(&row_buf);
                     cells
                         .get(addr_buf.as_str())
@@ -6188,7 +6177,7 @@ impl WasmWorkbook {
             for (c_idx, input) in row_values.into_iter().enumerate() {
                 let row = range_parsed.start.row + r_idx as u32;
                 let col = range_parsed.start.col + c_idx as u32;
-                let addr = CellRef::new(row, col).to_a1();
+                let addr = formula_model::cell_to_a1(row, col);
                 self.inner.set_cell_internal(sheet, &addr, input)?;
             }
         }

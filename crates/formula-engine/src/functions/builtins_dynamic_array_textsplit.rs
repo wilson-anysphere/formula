@@ -187,16 +187,77 @@ fn split_on_any(
         MatchMode::CaseInsensitive => {
             // ASCII fast path: preserve existing TEXTSPLIT behavior and avoid Unicode case-fold allocations.
             if text.is_ascii() && delimiters.iter().all(|d| d.is_ascii()) {
-                let haystack = text.to_ascii_lowercase();
-                let lowered: Vec<String> =
-                    delimiters.iter().map(|s| s.to_ascii_lowercase()).collect();
-                let delims: Vec<&str> = lowered.iter().map(|d| d.as_str()).collect();
-                return split_on_any_impl(text, haystack.as_str(), &delims, ignore_empty);
+                let delims: Vec<&[u8]> = delimiters.iter().map(|d| d.as_bytes()).collect();
+                return split_on_any_ascii_case_insensitive(text, &delims, ignore_empty);
             }
 
             split_on_any_unicode_case_insensitive(text, delimiters, ignore_empty)
         }
     }
+}
+
+fn split_on_any_ascii_case_insensitive(
+    original: &str,
+    delimiters: &[&[u8]],
+    ignore_empty: bool,
+) -> Vec<String> {
+    let haystack = original.as_bytes();
+    let mut segments = Vec::new();
+    let mut cursor = 0usize;
+    let mut segment_start = 0usize;
+
+    while let Some((match_pos, match_len)) = find_next_delim_ascii_case_insensitive(haystack, cursor, delimiters) {
+        let piece = original[segment_start..match_pos].to_string();
+        segments.push(piece);
+        cursor = match_pos + match_len;
+        segment_start = cursor;
+    }
+
+    segments.push(original[segment_start..].to_string());
+
+    if ignore_empty {
+        segments.retain(|s| !s.is_empty());
+    }
+
+    segments
+}
+
+fn find_next_delim_ascii_case_insensitive(
+    haystack: &[u8],
+    from: usize,
+    delimiters: &[&[u8]],
+) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for needle in delimiters {
+        if needle.is_empty() {
+            continue;
+        }
+        if from > haystack.len() || haystack.len() - from < needle.len() {
+            continue;
+        }
+        let mut found = None;
+        for start in from..=haystack.len() - needle.len() {
+            if haystack[start..start + needle.len()].eq_ignore_ascii_case(needle) {
+                found = Some(start);
+                break;
+            }
+        }
+        let Some(pos) = found else {
+            continue;
+        };
+        let cand = (pos, needle.len());
+        best = match best {
+            None => Some(cand),
+            Some((best_pos, best_len)) => {
+                if pos < best_pos || (pos == best_pos && needle.len() > best_len) {
+                    Some(cand)
+                } else {
+                    Some((best_pos, best_len))
+                }
+            }
+        };
+    }
+    best
 }
 
 fn split_on_any_impl(

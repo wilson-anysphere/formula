@@ -24,7 +24,9 @@ pub mod ptg_list;
 pub mod structured_refs;
 
 pub use ftab::{function_id_from_name, function_name_from_id, FTAB_USER_DEFINED};
-pub use function_ids::{function_id_to_name, function_name_to_id, function_spec_from_id};
+pub use function_ids::{
+    function_id_to_name, function_name_to_id, function_name_to_id_uppercase, function_spec_from_id,
+};
 pub use rgce::{decode_rgce, decode_rgce_with_base, decode_rgce_with_rgcb, DecodeRgceError};
 
 #[cfg(feature = "encode")]

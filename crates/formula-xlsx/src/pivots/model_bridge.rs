@@ -173,20 +173,40 @@ fn map_subtotal(subtotal: Option<&str>) -> AggregationType {
         return AggregationType::Sum;
     };
 
-    match subtotal.to_ascii_lowercase().as_str() {
-        "sum" => AggregationType::Sum,
-        "count" => AggregationType::Count,
-        "average" | "avg" => AggregationType::Average,
-        "min" => AggregationType::Min,
-        "max" => AggregationType::Max,
-        "product" => AggregationType::Product,
-        "countnums" => AggregationType::CountNumbers,
-        "stddev" => AggregationType::StdDev,
-        "stddevp" => AggregationType::StdDevP,
-        "var" => AggregationType::Var,
-        "varp" => AggregationType::VarP,
-        _ => AggregationType::Sum,
+    if subtotal.eq_ignore_ascii_case("sum") {
+        return AggregationType::Sum;
     }
+    if subtotal.eq_ignore_ascii_case("count") {
+        return AggregationType::Count;
+    }
+    if subtotal.eq_ignore_ascii_case("average") || subtotal.eq_ignore_ascii_case("avg") {
+        return AggregationType::Average;
+    }
+    if subtotal.eq_ignore_ascii_case("min") {
+        return AggregationType::Min;
+    }
+    if subtotal.eq_ignore_ascii_case("max") {
+        return AggregationType::Max;
+    }
+    if subtotal.eq_ignore_ascii_case("product") {
+        return AggregationType::Product;
+    }
+    if subtotal.eq_ignore_ascii_case("countnums") {
+        return AggregationType::CountNumbers;
+    }
+    if subtotal.eq_ignore_ascii_case("stddev") {
+        return AggregationType::StdDev;
+    }
+    if subtotal.eq_ignore_ascii_case("stddevp") {
+        return AggregationType::StdDevP;
+    }
+    if subtotal.eq_ignore_ascii_case("var") {
+        return AggregationType::Var;
+    }
+    if subtotal.eq_ignore_ascii_case("varp") {
+        return AggregationType::VarP;
+    }
+    AggregationType::Sum
 }
 
 fn aggregation_display_name(agg: AggregationType) -> &'static str {

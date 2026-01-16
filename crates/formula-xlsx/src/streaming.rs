@@ -2319,9 +2319,9 @@ fn scan_existing_cell_types<R: Read + Seek>(
     let mut out: HashMap<String, HashMap<(u32, u32), Option<String>>> = HashMap::new();
 
     for (part, patches) in patches_by_part {
-        let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
+        let mut targets: HashSet<(u32, u32)> = HashSet::new();
         for patch in patches {
-            targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
+            targets.insert((patch.cell.row, patch.cell.col));
         }
         if targets.is_empty() {
             continue;
@@ -2344,7 +2344,7 @@ fn scan_existing_cell_types<R: Read + Seek>(
 
 fn scan_worksheet_cell_types<R: Read>(
     input: R,
-    targets: &HashMap<String, (u32, u32)>,
+    targets: &HashSet<(u32, u32)>,
 ) -> Result<HashMap<(u32, u32), Option<String>>, StreamingPatchError> {
     let mut out: HashMap<(u32, u32), Option<String>> = HashMap::new();
     let mut remaining = targets.len();
@@ -2359,19 +2359,24 @@ fn scan_worksheet_cell_types<R: Read>(
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(ref e) | Event::Empty(ref e) if local_name(e.name().as_ref()) == b"c" => {
-                let mut r: Option<String> = None;
+                let mut coord: Option<(u32, u32)> = None;
                 let mut t: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
-                        b"r" => r = Some(attr.unescape_value()?.into_owned()),
+                        b"r" => {
+                            let r = attr.unescape_value()?;
+                            if let Ok(cell_ref) = CellRef::from_a1(r.as_ref().trim()) {
+                                coord = Some((cell_ref.row, cell_ref.col));
+                            }
+                        }
                         b"t" => t = Some(attr.unescape_value()?.into_owned()),
                         _ => {}
                     }
                 }
-                if let Some(r) = r {
-                    if let Some(&(row, col)) = targets.get(&r) {
-                        out.insert((row, col), t);
+                if let Some(coord) = coord {
+                    if targets.contains(&coord) {
+                        out.insert(coord, t);
                         remaining = remaining.saturating_sub(1);
                         if remaining == 0 {
                             break;
@@ -2395,7 +2400,7 @@ fn scan_existing_shared_string_indices<R: Read + Seek>(
     let mut out: HashMap<String, HashMap<(u32, u32), Option<u32>>> = HashMap::new();
 
     for (part, patches) in patches_by_part {
-        let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
+        let mut targets: HashSet<(u32, u32)> = HashSet::new();
         for patch in patches {
             if matches!(
                 patch.value,
@@ -2404,7 +2409,7 @@ fn scan_existing_shared_string_indices<R: Read + Seek>(
                     | CellValue::Entity(_)
                     | CellValue::Record(_)
             ) {
-                targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
+                targets.insert((patch.cell.row, patch.cell.col));
             }
         }
         if targets.is_empty() {
@@ -2428,7 +2433,7 @@ fn scan_existing_shared_string_indices<R: Read + Seek>(
 
 fn scan_worksheet_shared_string_indices<R: Read>(
     input: R,
-    targets: &HashMap<String, (u32, u32)>,
+    targets: &HashSet<(u32, u32)>,
 ) -> Result<HashMap<(u32, u32), Option<u32>>, StreamingPatchError> {
     let mut out: HashMap<(u32, u32), Option<u32>> = HashMap::new();
     let mut remaining = targets.len();
@@ -2448,35 +2453,43 @@ fn scan_worksheet_shared_string_indices<R: Read>(
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"c" => {
-                let mut r: Option<String> = None;
+                let mut coord: Option<(u32, u32)> = None;
                 let mut t: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
-                        b"r" => r = Some(attr.unescape_value()?.into_owned()),
+                        b"r" => {
+                            let r = attr.unescape_value()?;
+                            if let Ok(cell_ref) = CellRef::from_a1(r.as_ref().trim()) {
+                                coord = Some((cell_ref.row, cell_ref.col));
+                            }
+                        }
                         b"t" => t = Some(attr.unescape_value()?.into_owned()),
                         _ => {}
                     }
                 }
-                if let Some(r) = r {
-                    if let Some(&(row, col)) = targets.get(&r) {
-                        current_target = Some((row, col));
+                if let Some(coord) = coord {
+                    if targets.contains(&coord) {
+                        current_target = Some(coord);
                         current_t = t;
                         current_idx = None;
                     }
                 }
             }
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"c" => {
-                let mut r: Option<String> = None;
+                let mut coord: Option<(u32, u32)> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() == b"r" {
-                        r = Some(attr.unescape_value()?.into_owned());
+                        let r = attr.unescape_value()?;
+                        if let Ok(cell_ref) = CellRef::from_a1(r.as_ref().trim()) {
+                            coord = Some((cell_ref.row, cell_ref.col));
+                        }
                     }
                 }
-                if let Some(r) = r {
-                    if let Some(&(row, col)) = targets.get(&r) {
-                        out.insert((row, col), None);
+                if let Some(coord) = coord {
+                    if targets.contains(&coord) {
+                        out.insert(coord, None);
                         remaining = remaining.saturating_sub(1);
                         if remaining == 0 {
                             break;
@@ -3134,6 +3147,7 @@ fn plan_package_repair_overrides<R: Read + Seek>(
     let mut needs_jpeg = false;
     let mut needs_gif = false;
     let mut needs_webp = false;
+
     for name in &part_names {
         if !has_vba_project
             && crate::zip_util::zip_part_names_equivalent(name.as_str(), "xl/vbaProject.bin")
@@ -3154,16 +3168,15 @@ fn plan_package_repair_overrides<R: Read + Seek>(
             has_vba_data = true;
         }
 
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".png") {
+        if crate::ascii::ends_with_ignore_case(name, ".png") {
             needs_png = true;
-        } else if lower.ends_with(".jpg") {
+        } else if crate::ascii::ends_with_ignore_case(name, ".jpg") {
             needs_jpg = true;
-        } else if lower.ends_with(".jpeg") {
+        } else if crate::ascii::ends_with_ignore_case(name, ".jpeg") {
             needs_jpeg = true;
-        } else if lower.ends_with(".gif") {
+        } else if crate::ascii::ends_with_ignore_case(name, ".gif") {
             needs_gif = true;
-        } else if lower.ends_with(".webp") {
+        } else if crate::ascii::ends_with_ignore_case(name, ".webp") {
             needs_webp = true;
         }
     }
@@ -3301,10 +3314,10 @@ fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
 ) -> Result<bool, StreamingPatchError> {
     for (worksheet_part, patches) in patches_by_part {
-        let mut target_cells: HashSet<String> = HashSet::new();
+        let mut target_cells: HashSet<(u32, u32)> = HashSet::new();
         for patch in patches {
             if !formula_is_material(patch.formula.as_deref()) {
-                target_cells.insert(patch.cell.to_a1());
+                target_cells.insert((patch.cell.row, patch.cell.col));
             }
         }
         if target_cells.is_empty() {
@@ -3329,7 +3342,7 @@ fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
 
 fn worksheet_contains_formula_in_cells<R: Read>(
     input: R,
-    target_cells: &HashSet<String>,
+    target_cells: &HashSet<(u32, u32)>,
 ) -> Result<bool, StreamingPatchError> {
     let mut reader = Reader::from_reader(BufReader::new(input));
     reader.config_mut().trim_text(false);
@@ -3362,13 +3375,16 @@ fn worksheet_contains_formula_in_cells<R: Read>(
 
 fn cell_is_in_set(
     cell_start: &BytesStart<'_>,
-    target_cells: &HashSet<String>,
+    target_cells: &HashSet<(u32, u32)>,
 ) -> Result<bool, StreamingPatchError> {
     for attr in cell_start.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"r" {
             let r = attr.unescape_value()?;
-            return Ok(target_cells.contains(r.as_ref()));
+            if let Ok(cell_ref) = CellRef::from_a1(r.as_ref().trim()) {
+                return Ok(target_cells.contains(&(cell_ref.row, cell_ref.col)));
+            }
+            return Ok(false);
         }
     }
     Ok(false)
@@ -4543,7 +4559,8 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
     }
     if !has_r {
-        let a1 = cell_ref.to_a1();
+        let mut a1 = String::new();
+        formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
         c.push_attribute(("r", a1.as_str()));
     }
 
@@ -4948,12 +4965,14 @@ fn write_patched_cell<W: Write>(
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
     } else {
-        let a1 = cell_ref.to_a1();
+        let mut a1 = String::new();
+        formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
         c.push_attribute(("r", a1.as_str()));
         has_r = true;
     }
     if !has_r {
-        let a1 = cell_ref.to_a1();
+        let mut a1 = String::new();
+        formula_model::push_a1_cell_ref(cell_ref.row, cell_ref.col, false, false, &mut a1);
         c.push_attribute(("r", a1.as_str()));
     }
 
@@ -5491,13 +5510,17 @@ fn union_bounds(a: Option<PatchBounds>, b: Option<PatchBounds>) -> Option<PatchB
 }
 
 fn bounds_to_dimension_ref(bounds: PatchBounds) -> String {
-    let start = CellRef::new(bounds.min_row_0, bounds.min_col_0);
-    let end = CellRef::new(bounds.max_row_0, bounds.max_col_0);
-    if start == end {
-        start.to_a1()
-    } else {
-        format!("{}:{}", start.to_a1(), end.to_a1())
-    }
+    let mut out = String::new();
+    formula_model::push_a1_cell_range(
+        bounds.min_row_0,
+        bounds.min_col_0,
+        bounds.max_row_0,
+        bounds.max_col_0,
+        false,
+        false,
+        &mut out,
+    );
+    out
 }
 
 fn updated_dimension_element(
@@ -5525,13 +5548,10 @@ fn updated_dimension_element(
         }
     }
 
-    let start = CellRef::new(min_row_0, min_col_0);
-    let end = CellRef::new(max_row_0, max_col_0);
-    let updated_ref = if start == end {
-        start.to_a1()
-    } else {
-        format!("{}:{}", start.to_a1(), end.to_a1())
-    };
+    let mut updated_ref = String::new();
+    formula_model::push_a1_cell_range(
+        min_row_0, min_col_0, max_row_0, max_col_0, false, false, &mut updated_ref,
+    );
 
     // Preserve attribute ordering where possible by rewriting `ref` in-place.
     let tag = String::from_utf8_lossy(original.name().as_ref()).into_owned();

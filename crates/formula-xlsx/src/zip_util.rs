@@ -154,6 +154,29 @@ mod tests {
             other => panic!("expected PartTooLarge, got {other:?}"),
         }
     }
+
+    #[test]
+    fn open_zip_part_prefers_exact_over_equivalent() {
+        let bytes = build_zip(&[
+            ("XL\\Workbook.xml", b"equivalent"),
+            ("xl/workbook.xml", b"exact"),
+        ]);
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut file = open_zip_part(&mut archive, "xl/workbook.xml").unwrap();
+        let mut out = String::new();
+        file.read_to_string(&mut out).unwrap();
+        assert_eq!(out, "exact");
+    }
+
+    #[test]
+    fn open_zip_part_handles_leading_slash_variant() {
+        let bytes = build_zip(&[("/xl/workbook.xml", b"with_slash")]);
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut file = open_zip_part(&mut archive, "xl/workbook.xml").unwrap();
+        let mut out = String::new();
+        file.read_to_string(&mut out).unwrap();
+        assert_eq!(out, "with_slash");
+    }
 }
 
 /// Compute a canonicalized key for a ZIP entry/part name suitable for case- and separator-insensitive
@@ -224,41 +247,40 @@ pub(crate) fn zip_part_name_lookup_key(name: &str) -> Vec<u8> {
 ///
 /// Note: `ZipFile` borrows `ZipArchive`. We can't naively call `archive.by_name()` twice and
 /// return the borrowed `ZipFile` because that triggers borrow-checker errors. Instead, this helper
-/// inspects `archive.file_names()` first to decide which entry name to open, then calls
-/// `archive.by_name()` exactly once.
+/// inspects `archive.file_names()` first to decide which entry index to open, then calls
+/// `archive.by_index()` exactly once.
 pub(crate) fn open_zip_part<'a, R: Read + Seek>(
     archive: &'a mut ZipArchive<R>,
     name: &str,
 ) -> Result<ZipFile<'a>, ZipError> {
-    let alt = if let Some(stripped) = name.strip_prefix('/') {
-        stripped.to_string()
-    } else {
-        let mut with_slash = String::with_capacity(name.len() + 1);
-        with_slash.push('/');
-        with_slash.push_str(name);
-        with_slash
-    };
+    fn is_alt_slash_variant(entry: &str, name: &str) -> bool {
+        if let Some(stripped) = name.strip_prefix('/') {
+            entry == stripped
+        } else {
+            entry.strip_prefix('/').is_some_and(|rest| rest == name)
+        }
+    }
 
-    let mut candidate = None::<(String, u8)>;
-    for entry in archive.file_names() {
+    let mut candidate = None::<(usize, u8)>;
+    for (idx, entry) in archive.file_names().enumerate() {
         if entry == name {
-            candidate = Some((entry.to_string(), 3));
+            candidate = Some((idx, 3));
             break;
         }
-        if entry == alt.as_str() {
-            candidate = Some((entry.to_string(), 2));
+        if is_alt_slash_variant(entry, name) {
+            candidate = Some((idx, 2));
             continue;
         }
 
         if zip_part_names_equivalent(entry, name) {
             if candidate.as_ref().map_or(true, |(_, score)| *score < 1) {
-                candidate = Some((entry.to_string(), 1));
+                candidate = Some((idx, 1));
             }
         }
     }
 
     match candidate {
-        Some((name, _)) => archive.by_name(&name),
+        Some((idx, _)) => archive.by_index(idx),
         None => Err(ZipError::FileNotFound),
     }
 }

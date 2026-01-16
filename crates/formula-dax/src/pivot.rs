@@ -1036,7 +1036,7 @@ fn plan_pivot_expr(
             }
             BinaryOp::In => Ok(None),
         },
-        Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
+        Expr::Call { name, args } => crate::with_ascii_uppercase(name, |name| match name {
             "BLANK" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::Blank))),
             "TRUE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(true)))),
             "FALSE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(false)))),
@@ -1149,7 +1149,7 @@ fn plan_pivot_expr(
                 };
                 Ok(Some(PlannedExpr::Not(Box::new(inner))))
             }
-            "AND" | "OR" => {
+            name @ ("AND" | "OR") => {
                 let [left, right] = args.as_slice() else {
                     return Ok(None);
                 };
@@ -1177,7 +1177,7 @@ fn plan_pivot_expr(
                 else {
                     return Ok(None);
                 };
-                let op = match name.to_ascii_uppercase().as_str() {
+                let op = match name {
                     "AND" => BinaryOp::And,
                     "OR" => BinaryOp::Or,
                     _ => unreachable!(),
@@ -1269,7 +1269,7 @@ fn plan_pivot_expr(
                     alternate: None,
                 }))
             }
-            "SUM" | "MIN" | "MAX" | "DISTINCTCOUNT" | "COUNT" | "COUNTA" => {
+            name @ ("SUM" | "MIN" | "MAX" | "DISTINCTCOUNT" | "COUNT" | "COUNTA") => {
                 let [arg] = args.as_slice() else {
                     return Ok(None);
                 };
@@ -1285,7 +1285,7 @@ fn plan_pivot_expr(
                         table: table.clone(),
                         column: column.clone(),
                     })?;
-                let kind = match name.to_ascii_uppercase().as_str() {
+                let kind = match name {
                     "SUM" => AggregationKind::Sum,
                     "MIN" => AggregationKind::Min,
                     "MAX" => AggregationKind::Max,
@@ -1340,7 +1340,7 @@ fn plan_pivot_expr(
                 Ok(Some(PlannedExpr::AggRef(agg_idx)))
             }
             _ => Ok(None),
-        },
+        }),
         _ => Ok(None),
     }
 }

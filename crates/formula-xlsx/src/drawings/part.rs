@@ -1155,21 +1155,37 @@ pub fn load_media_parts(workbook: &mut formula_model::Workbook, parts: &BTreeMap
 }
 
 pub fn content_type_for_extension(ext: &str) -> &'static str {
-    match ext.to_ascii_lowercase().as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        // Enhanced Metafile / Windows Metafile are commonly used by Excel for vector images.
-        // They require explicit Defaults in `[Content_Types].xml` for Excel to open the package
-        // without repair prompts.
-        "emf" => "image/x-emf",
-        "wmf" => "image/x-wmf",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "tif" | "tiff" => "image/tiff",
-        _ => "application/octet-stream",
+    if ext.eq_ignore_ascii_case("png") {
+        return "image/png";
     }
+    if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
+        return "image/jpeg";
+    }
+    if ext.eq_ignore_ascii_case("gif") {
+        return "image/gif";
+    }
+    if ext.eq_ignore_ascii_case("bmp") {
+        return "image/bmp";
+    }
+    // Enhanced Metafile / Windows Metafile are commonly used by Excel for vector images.
+    // They require explicit Defaults in `[Content_Types].xml` for Excel to open the package
+    // without repair prompts.
+    if ext.eq_ignore_ascii_case("emf") {
+        return "image/x-emf";
+    }
+    if ext.eq_ignore_ascii_case("wmf") {
+        return "image/x-wmf";
+    }
+    if ext.eq_ignore_ascii_case("webp") {
+        return "image/webp";
+    }
+    if ext.eq_ignore_ascii_case("svg") {
+        return "image/svg+xml";
+    }
+    if ext.eq_ignore_ascii_case("tif") || ext.eq_ignore_ascii_case("tiff") {
+        return "image/tiff";
+    }
+    "application/octet-stream"
 }
 
 fn drawing_rels_path(drawing_path: &str) -> String {

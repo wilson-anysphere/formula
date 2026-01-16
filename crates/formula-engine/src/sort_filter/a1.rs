@@ -1,5 +1,5 @@
 use crate::sort_filter::types::RangeRef;
-use formula_model::CellRef;
+use formula_model::column_label_to_index;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -84,8 +84,8 @@ fn parse_a1_cell(a1: &str) -> Result<(usize, usize), A1ParseError> {
         return Err(A1ParseError::Invalid(a1.to_string()));
     }
 
-    let col =
-        column_letters_to_index(&col_part).ok_or_else(|| A1ParseError::Invalid(a1.to_string()))?;
+    let col = column_label_to_index(&col_part)
+        .map_err(|_| A1ParseError::Invalid(a1.to_string()))? as usize;
     let row_1based: usize = row_part
         .parse()
         .map_err(|_| A1ParseError::Invalid(a1.to_string()))?;
@@ -99,7 +99,11 @@ fn to_a1_cell(col_index: usize, row_index: usize) -> String {
     // Prefer the shared CellRef formatter for consistency and to avoid overflow in `row + 1`
     // arithmetic for large row indices.
     match (u32::try_from(row_index), u32::try_from(col_index)) {
-        (Ok(row), Ok(col)) => CellRef::new(row, col).to_a1(),
+        (Ok(row), Ok(col)) => {
+            let mut out = String::new();
+            formula_model::push_a1_cell_ref(row, col, false, false, &mut out);
+            out
+        }
         _ => {
             let row_1_based = u64::try_from(row_index)
                 .unwrap_or(u64::MAX)
@@ -107,19 +111,6 @@ fn to_a1_cell(col_index: usize, row_index: usize) -> String {
             format!("{}{}", index_to_column_letters(col_index), row_1_based)
         }
     }
-}
-
-fn column_letters_to_index(letters: &str) -> Option<usize> {
-    let mut col: usize = 0;
-    for ch in letters.chars() {
-        if !ch.is_ascii_uppercase() {
-            return None;
-        }
-        let v = (ch as u8 - b'A' + 1) as usize;
-        col = col.checked_mul(26)?;
-        col = col.checked_add(v)?;
-    }
-    Some(col - 1)
 }
 
 fn index_to_column_letters(index: usize) -> String {

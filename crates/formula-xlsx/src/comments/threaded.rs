@@ -152,7 +152,7 @@ pub fn write_threaded_comments_xml(comments: &[Comment]) -> Vec<u8> {
         xml.push_str("  <threadedComment id=\"");
         xml.push_str(&xml_escape(&comment.id));
         xml.push_str("\" ref=\"");
-        xml.push_str(&xml_escape(&comment.cell_ref.to_a1()));
+        formula_model::push_a1_cell_ref(comment.cell_ref.row, comment.cell_ref.col, false, false, &mut xml);
         xml.push_str("\" personId=\"");
         xml.push_str(&xml_escape(&comment.author.id));
         xml.push_str("\" author=\"");
@@ -171,7 +171,7 @@ pub fn write_threaded_comments_xml(comments: &[Comment]) -> Vec<u8> {
             xml.push_str("\" parentId=\"");
             xml.push_str(&xml_escape(&comment.id));
             xml.push_str("\" ref=\"");
-            xml.push_str(&xml_escape(&comment.cell_ref.to_a1()));
+            formula_model::push_a1_cell_ref(comment.cell_ref.row, comment.cell_ref.col, false, false, &mut xml);
             xml.push_str("\" personId=\"");
             xml.push_str(&xml_escape(&reply.author.id));
             xml.push_str("\" author=\"");

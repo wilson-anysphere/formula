@@ -773,8 +773,8 @@ fn find_any_rich_value_rel_part(pkg: &XlsxPackage) -> Option<String> {
     // (case-insensitive). Some tests use custom names like `customRichValueRel.xml`.
     let mut candidates: Vec<&str> = pkg
         .part_names()
-        .filter(|name| name.starts_with("xl/richData/") && name.to_ascii_lowercase().ends_with(".xml"))
-        .filter(|name| name.to_ascii_lowercase().contains("richvaluerel"))
+        .filter(|name| name.starts_with("xl/richData/") && crate::ascii::ends_with_ignore_case(name, ".xml"))
+        .filter(|name| crate::ascii::contains_ignore_case(name, "richvaluerel"))
         .collect();
     if candidates.is_empty() {
         return None;
@@ -783,8 +783,7 @@ fn find_any_rich_value_rel_part(pkg: &XlsxPackage) -> Option<String> {
     candidates.sort_by(|a, b| {
         fn rank(name: &str) -> (u8, usize) {
             let file = name.rsplit('/').next().unwrap_or(name);
-            let file_lower = file.to_ascii_lowercase();
-            let prefix_rank = if file_lower.starts_with("richvaluerel") {
+            let prefix_rank = if crate::ascii::starts_with_ignore_case(file, "richvaluerel") {
                 0
             } else {
                 1
@@ -826,20 +825,14 @@ fn parse_rich_value_part_name(part_path: &str) -> Option<(RichValuePartFamily, u
     }
 
     let file_name = part_path.rsplit('/').next()?;
-    let file_name_lower = file_name.to_ascii_lowercase();
-    if !file_name_lower.ends_with(".xml") {
-        return None;
-    }
-
-    let stem = &file_name[..file_name.len() - ".xml".len()];
-    let stem_lower = stem.to_ascii_lowercase();
+    let stem = crate::ascii::strip_suffix_ignore_case(file_name, ".xml")?;
 
     // Check the plural prefix first: `richvalues` starts with `richvalue`.
-    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+    let (family, suffix) = if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalues") {
         (RichValuePartFamily::RichValues, rest)
-    } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+    } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "richvalue") {
         (RichValuePartFamily::RichValue, rest)
-    } else if let Some(rest) = stem_lower.strip_prefix("rdrichvalue") {
+    } else if let Some(rest) = crate::ascii::strip_prefix_ignore_case(stem, "rdrichvalue") {
         (RichValuePartFamily::RdRichValue, rest)
     } else {
         return None;
@@ -847,7 +840,7 @@ fn parse_rich_value_part_name(part_path: &str) -> Option<(RichValuePartFamily, u
 
     let idx = if suffix.is_empty() {
         0
-    } else if suffix.chars().all(|c| c.is_ascii_digit()) {
+    } else if suffix.as_bytes().iter().all(u8::is_ascii_digit) {
         suffix.parse::<u32>().ok()?
     } else {
         return None;
@@ -1315,11 +1308,14 @@ fn parse_rich_value_types_xml_best_effort(
             .filter(|n| n.is_element())
             .filter(|n| {
                 let name = n.tag_name().name();
-                if !name.to_ascii_lowercase().ends_with("type") {
+                if !crate::ascii::ends_with_ignore_case(name, "type") {
                     return false;
                 }
                 n.parent_element()
-                    .is_some_and(|p| p.tag_name().name().to_ascii_lowercase().ends_with("types"))
+                    .is_some_and(|p| {
+                        let name = p.tag_name().name();
+                        crate::ascii::ends_with_ignore_case(name, "types")
+                    })
             })
             .collect();
     }
@@ -1341,10 +1337,12 @@ fn parse_rich_value_types_xml_best_effort(
             .children()
             .find(|n| {
                 n.is_element()
-                    && matches!(
-                        n.tag_name().name().to_ascii_lowercase().as_str(),
-                        "props" | "properties" | "fields"
-                    )
+                    && {
+                        let name = n.tag_name().name();
+                        name.eq_ignore_ascii_case("props")
+                            || name.eq_ignore_ascii_case("properties")
+                            || name.eq_ignore_ascii_case("fields")
+                    }
             })
             .unwrap_or(ty);
 
@@ -1397,11 +1395,11 @@ fn parse_rich_value_type_structure_ids_best_effort(bytes: &[u8]) -> Option<HashM
             .filter(|n| n.is_element())
             .filter(|n| {
                 let name = n.tag_name().name();
-                if !name.to_ascii_lowercase().ends_with("type") {
+                if !crate::ascii::ends_with_ignore_case(name, "type") {
                     return false;
                 }
                 n.parent_element()
-                    .is_some_and(|p| p.tag_name().name().to_ascii_lowercase().ends_with("types"))
+                    .is_some_and(|p| crate::ascii::ends_with_ignore_case(p.tag_name().name(), "types"))
             })
             .collect();
     }
@@ -1452,26 +1450,18 @@ fn parse_rv_rel_index_with_schema(
 }
 
 fn descriptor_is_relationship(desc: &RichValueTypePropertyDescriptor) -> bool {
-    let kind = desc
-        .kind
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if kind == "rel" || kind == "relationship" {
+    let kind = desc.kind.as_deref().unwrap_or_default();
+    if kind.eq_ignore_ascii_case("rel") || kind.eq_ignore_ascii_case("relationship") {
         return true;
     }
 
-    let name = desc
-        .name
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if name == "rel" || name == "relationship" {
+    let name = desc.name.as_deref().unwrap_or_default();
+    if name.eq_ignore_ascii_case("rel") || name.eq_ignore_ascii_case("relationship") {
         return true;
     }
 
     // Some schemas might use a property key like `image`/`img` for media relationships.
-    name.contains("image") || name.contains("img")
+    crate::ascii::contains_ignore_case(name, "image") || crate::ascii::contains_ignore_case(name, "img")
 }
 
 fn local_name(name: &str) -> &str {
@@ -1506,10 +1496,18 @@ fn looks_like_rich_value_type_property_def(node: roxmltree::Node<'_, '_>) -> boo
     // Typical property nodes have either a name/id or a type/kind attribute. We treat this as a
     // heuristic so we don't accidentally include container nodes like `<props>`.
     for attr in node.attributes() {
-        if matches!(
-            local_name(attr.name()).to_ascii_lowercase().as_str(),
-            "t" | "type" | "kind" | "name" | "n" | "id" | "key" | "k" | "pid" | "propid"
-        ) {
+        let name = local_name(attr.name());
+        if name.eq_ignore_ascii_case("t")
+            || name.eq_ignore_ascii_case("type")
+            || name.eq_ignore_ascii_case("kind")
+            || name.eq_ignore_ascii_case("name")
+            || name.eq_ignore_ascii_case("n")
+            || name.eq_ignore_ascii_case("id")
+            || name.eq_ignore_ascii_case("key")
+            || name.eq_ignore_ascii_case("k")
+            || name.eq_ignore_ascii_case("pid")
+            || name.eq_ignore_ascii_case("propid")
+        {
             return true;
         }
     }

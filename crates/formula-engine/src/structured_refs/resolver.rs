@@ -55,17 +55,14 @@ fn column_intervals_ci(
     match columns {
         StructuredColumns::All => Ok(Vec::new()),
         StructuredColumns::Single(name) => {
-            column_interval_ci(table, &StructuredColumn::Single(name.clone()))
-                .map(|interval| vec![interval])
+            let idx = column_index_ci(table, name).ok_or(ErrorKind::Ref)?;
+            Ok(vec![(idx, idx)])
         }
-        StructuredColumns::Range { start, end } => column_interval_ci(
-            table,
-            &StructuredColumn::Range {
-                start: start.clone(),
-                end: end.clone(),
-            },
-        )
-        .map(|interval| vec![interval]),
+        StructuredColumns::Range { start, end } => {
+            let start_idx = column_index_ci(table, start).ok_or(ErrorKind::Ref)?;
+            let end_idx = column_index_ci(table, end).ok_or(ErrorKind::Ref)?;
+            Ok(vec![normalize_column_interval(start_idx, end_idx)])
+        }
         StructuredColumns::Multi(parts) => {
             let mut out = Vec::with_capacity(parts.len());
             for part in parts {
@@ -132,13 +129,6 @@ pub fn resolve_structured_ref_in_table(
     origin_cell: CellAddr,
     sref: &StructuredRef,
 ) -> Result<Vec<(CellAddr, CellAddr)>, ErrorKind> {
-    // Excel defaults to `#Data` when no item specifier is present.
-    let items: Vec<StructuredRefItem> = if sref.items.is_empty() {
-        vec![StructuredRefItem::Data]
-    } else {
-        sref.items.clone()
-    };
-
     // Resolve the column selection once. Column intervals are 0-based indices into the table's
     // column set (relative to `table.range.start.col`).
     let table_start = table.range.start;
@@ -159,7 +149,7 @@ pub fn resolve_structured_ref_in_table(
     };
 
     let mut row_intervals: Vec<(u32, u32)> = Vec::new();
-    for item in items {
+    let mut push_item_rows = |item: StructuredRefItem| -> Result<(), ErrorKind> {
         match item {
             StructuredRefItem::ThisRow => {
                 let data_range = table.data_range().ok_or(ErrorKind::Ref)?;
@@ -184,6 +174,16 @@ pub fn resolve_structured_ref_in_table(
                 let base = base_range_for_area(table, TableArea::Data)?;
                 row_intervals.push((base.start.row, base.end.row));
             }
+        }
+        Ok(())
+    };
+
+    // Excel defaults to `#Data` when no item specifier is present.
+    if sref.items.is_empty() {
+        push_item_rows(StructuredRefItem::Data)?;
+    } else {
+        for item in sref.items.iter().cloned() {
+            push_item_rows(item)?;
         }
     }
 

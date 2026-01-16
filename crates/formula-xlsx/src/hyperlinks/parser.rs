@@ -164,7 +164,10 @@ fn parse_hyperlink_element(
             )));
         }
         let uri = rel.target.clone();
-        if uri.to_ascii_lowercase().starts_with("mailto:") {
+        if uri
+            .get(.."mailto:".len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("mailto:"))
+        {
             HyperlinkTarget::Email { uri }
         } else {
             HyperlinkTarget::ExternalUrl { uri }
@@ -210,7 +213,7 @@ fn parse_internal_location(location: &str) -> Result<(String, CellRef), XlsxErro
         XlsxError::Hyperlink(format!("invalid hyperlink location (missing '!'): {location}"))
     })?;
 
-    let sheet = unquote_sheet_name(sheet.trim());
+    let sheet = formula_model::unquote_sheet_name_lenient(sheet);
     let cell_str = cell.trim();
     let cell_str = cell_str
         .split_once(':')
@@ -218,14 +221,4 @@ fn parse_internal_location(location: &str) -> Result<(String, CellRef), XlsxErro
         .unwrap_or(cell_str);
     let cell = cell_from_a1(cell_str)?;
     Ok((sheet, cell))
-}
-
-fn unquote_sheet_name(name: &str) -> String {
-    // Excel quotes sheet names with single quotes; embedded quotes are doubled.
-    let mut s = name.trim();
-    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-        s = &s[1..s.len() - 1];
-        return s.replace("''", "'");
-    }
-    s.to_string()
 }

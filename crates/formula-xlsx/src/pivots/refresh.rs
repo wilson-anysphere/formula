@@ -534,8 +534,9 @@ fn resolve_table_reference(
         } else {
             canonical.to_string()
         };
-        let canonical_lower = canonical.to_ascii_lowercase();
-        if !canonical_lower.starts_with("xl/tables/table") || !canonical_lower.ends_with(".xml") {
+        if !crate::ascii::starts_with_ignore_case(&canonical, "xl/tables/table")
+            || !crate::ascii::ends_with_ignore_case(&canonical, ".xml")
+        {
             continue;
         }
         let Ok(xml) = std::str::from_utf8(bytes) else {
@@ -579,8 +580,9 @@ fn resolve_worksheet_part_for_table(
         } else {
             worksheet_part.to_string()
         };
-        let worksheet_lower = worksheet_part.to_ascii_lowercase();
-        if !worksheet_lower.starts_with("xl/worksheets/") || !worksheet_lower.ends_with(".xml") {
+        if !crate::ascii::starts_with_ignore_case(&worksheet_part, "xl/worksheets/")
+            || !crate::ascii::ends_with_ignore_case(&worksheet_part, ".xml")
+        {
             continue;
         }
         let rels_part = rels_part_name(&worksheet_part);
@@ -969,11 +971,10 @@ fn format_code_looks_like_datetime(code: &str) -> bool {
                     }
                     content.push(c);
                 }
-                let lower = content.to_ascii_lowercase();
-                if !lower.is_empty()
-                    && (lower.chars().all(|c| c == 'h')
-                        || lower.chars().all(|c| c == 'm')
-                        || lower.chars().all(|c| c == 's'))
+                if !content.is_empty()
+                    && (content.chars().all(|c| matches!(c, 'h' | 'H'))
+                        || content.chars().all(|c| matches!(c, 'm' | 'M'))
+                        || content.chars().all(|c| matches!(c, 's' | 'S')))
                 {
                     return true;
                 }
@@ -992,8 +993,9 @@ fn format_code_looks_like_datetime(code: &str) -> bool {
                         break;
                     }
                 }
-                let lower = probe.to_ascii_lowercase();
-                if lower.starts_with("am/pm") || lower.starts_with("a/p") {
+                if crate::ascii::starts_with_ignore_case(&probe, "am/pm")
+                    || crate::ascii::starts_with_ignore_case(&probe, "a/p")
+                {
                     return true;
                 }
             }

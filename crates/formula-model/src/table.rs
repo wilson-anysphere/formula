@@ -103,51 +103,60 @@ pub fn validate_table_name(name: &str) -> Result<(), TableError> {
     }
 
     // Names cannot look like R1C1 references.
-    let upper = name.to_ascii_uppercase();
-    if upper == "R" || upper == "C" || upper == "TRUE" || upper == "FALSE" {
+    if name.eq_ignore_ascii_case("R")
+        || name.eq_ignore_ascii_case("C")
+        || name.eq_ignore_ascii_case("TRUE")
+        || name.eq_ignore_ascii_case("FALSE")
+    {
         return Err(TableError::ReservedName);
     }
-    if looks_like_r1c1_reference(&upper) {
+    if looks_like_r1c1_reference(name) {
         return Err(TableError::ConflictsWithCellReference);
     }
 
     Ok(())
 }
 
-fn looks_like_r1c1_reference(upper: &str) -> bool {
-    // R1C1 or R1 or C1 style references (case folded by caller).
+fn looks_like_r1c1_reference(name: &str) -> bool {
+    // R1C1 or R1 or C1 style references (case-insensitive).
     // We treat all of these as invalid table names.
-    if let Some(rest) = upper.strip_prefix('R') {
-        if rest.is_empty() {
-            return false;
-        }
-        // R<digits>
-        if rest.chars().all(|c| c.is_ascii_digit()) {
-            return true;
-        }
-        // R<digits>C<digits>
-        let mut iter = rest.chars().peekable();
-        let mut saw_row_digit = false;
-        while matches!(iter.peek(), Some(c) if c.is_ascii_digit()) {
-            saw_row_digit = true;
-            iter.next();
-        }
-        if !saw_row_digit || iter.next() != Some('C') {
-            return false;
-        }
-        let mut saw_col_digit = false;
-        while matches!(iter.peek(), Some(c) if c.is_ascii_digit()) {
-            saw_col_digit = true;
-            iter.next();
-        }
-        return saw_col_digit && iter.next().is_none();
-    }
+    let bytes = name.as_bytes();
+    let Some((&first, rest)) = bytes.split_first() else {
+        return false;
+    };
 
-    if let Some(rest) = upper.strip_prefix('C') {
-        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
-    }
+    match first.to_ascii_uppercase() {
+        b'R' => {
+            if rest.is_empty() {
+                return false;
+            }
 
-    false
+            // R<digits>
+            let mut i = 0usize;
+            while i < rest.len() && rest[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i == rest.len() {
+                return true;
+            }
+
+            // R<digits>C<digits>
+            if i == 0 || rest[i].to_ascii_uppercase() != b'C' {
+                return false;
+            }
+            i += 1;
+            if i >= rest.len() {
+                return false;
+            }
+            let start = i;
+            while i < rest.len() && rest[i].is_ascii_digit() {
+                i += 1;
+            }
+            i > start && i == rest.len()
+        }
+        b'C' => !rest.is_empty() && rest.iter().all(|b| b.is_ascii_digit()),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,26 +268,55 @@ impl Table {
             return Err(TableError::InvalidRange);
         }
 
+        fn parse_default_column_number(name: &str) -> Option<u32> {
+            let bytes = name.as_bytes();
+            let prefix = b"column";
+            if bytes.len() <= prefix.len() {
+                return None;
+            }
+            if !bytes
+                .get(..prefix.len())
+                .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+            {
+                return None;
+            }
+            let digits = &name[prefix.len()..];
+            if digits.is_empty() {
+                return None;
+            }
+            // Only treat canonical `Column{n}` (no leading zeros) as a collision with our generated
+            // default names. This matches the existing string-based collision behavior (e.g.
+            // `Column01` does not collide with `Column1`).
+            let digit_bytes = digits.as_bytes();
+            if digit_bytes.len() > 1 && digit_bytes[0] == b'0' {
+                return None;
+            }
+            if !digit_bytes.iter().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            digits.parse().ok().filter(|n: &u32| *n > 0)
+        }
+
         let new_col_count = new_range.width() as usize;
         let current_col_count = self.columns.len();
 
         if new_col_count < current_col_count {
             self.columns.truncate(new_col_count);
         } else if new_col_count > current_col_count {
-            let mut used_names: HashSet<String> = self
+            let mut used_default_nums: HashSet<u32> = self
                 .columns
                 .iter()
-                .map(|c| c.name.to_ascii_lowercase())
+                .filter_map(|c| parse_default_column_number(&c.name))
                 .collect();
             let mut next_id = self.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
             let mut next_default_num: u32 = 1;
 
             for _ in current_col_count..new_col_count {
                 let name = loop {
-                    let candidate = format!("Column{next_default_num}");
-                    next_default_num += 1;
-                    if used_names.insert(candidate.to_ascii_lowercase()) {
-                        break candidate;
+                    let n = next_default_num;
+                    next_default_num = next_default_num.saturating_add(1);
+                    if used_default_nums.insert(n) {
+                        break format!("Column{n}");
                     }
                 };
                 self.columns.push(TableColumn {

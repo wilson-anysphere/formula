@@ -20,23 +20,60 @@ pub enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
+    fn eq_ignore_ascii_case_stripping_separators(s: &str, expected: &str) -> bool {
+        fn next_non_sep(bytes: &[u8], mut i: usize) -> Option<(u8, usize)> {
+            while i < bytes.len() {
+                let b = bytes[i];
+                if b != b'-' && b != b'_' {
+                    return Some((b, i + 1));
+                }
+                i += 1;
+            }
+            None
+        }
+
+        let expected_bytes = expected.as_bytes();
+        let bytes = s.as_bytes();
+        let mut pos = 0usize;
+
+        for &exp in expected_bytes {
+            let Some((b, next)) = next_non_sep(bytes, pos) else {
+                return false;
+            };
+            pos = next;
+            if !b.is_ascii() {
+                return false;
+            }
+            // `expected` is provided in lowercase ASCII.
+            if b.to_ascii_lowercase() != exp {
+                return false;
+            }
+        }
+
+        // Ensure no remaining non-separator bytes.
+        next_non_sep(bytes, pos).is_none()
+    }
+
     /// Parse a hash algorithm name as used in MS-OFFCRYPTO XML.
     ///
     /// Names are case-insensitive (e.g. `SHA1`, `sha256`).
     pub fn parse_offcrypto_name(name: &str) -> Result<Self, CryptoError> {
         // MS-OFFCRYPTO XML typically uses `SHA1`/`SHA256` etc, but tolerate minor variations
         // (e.g. `SHA-256` / `sha_256`) seen in other tooling.
-        let normalized = name
-            .trim()
-            .to_ascii_lowercase()
-            .replace(['-', '_'], "");
-        match normalized.as_str() {
-            "sha1" => Ok(Self::Sha1),
-            "sha256" => Ok(Self::Sha256),
-            "sha384" => Ok(Self::Sha384),
-            "sha512" => Ok(Self::Sha512),
-            other => Err(CryptoError::UnsupportedHashAlgorithm(other.to_string())),
+        let raw = name.trim();
+        if Self::eq_ignore_ascii_case_stripping_separators(raw, "sha1") {
+            return Ok(Self::Sha1);
         }
+        if Self::eq_ignore_ascii_case_stripping_separators(raw, "sha256") {
+            return Ok(Self::Sha256);
+        }
+        if Self::eq_ignore_ascii_case_stripping_separators(raw, "sha384") {
+            return Ok(Self::Sha384);
+        }
+        if Self::eq_ignore_ascii_case_stripping_separators(raw, "sha512") {
+            return Ok(Self::Sha512);
+        }
+        Err(CryptoError::UnsupportedHashAlgorithm(raw.to_string()))
     }
 
     fn digest_len(self) -> usize {
@@ -418,6 +455,10 @@ mod tests {
         );
         assert_eq!(
             HashAlgorithm::parse_offcrypto_name("SHA-256").unwrap(),
+            HashAlgorithm::Sha256
+        );
+        assert_eq!(
+            HashAlgorithm::parse_offcrypto_name("sha_256").unwrap(),
             HashAlgorithm::Sha256
         );
         let err = HashAlgorithm::parse_offcrypto_name("md5").unwrap_err();

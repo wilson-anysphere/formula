@@ -91,72 +91,74 @@ pub fn classify_part(part_name: &str) -> PartKind {
         return PartKind::ContentTypes;
     }
 
-    let lower = part.to_ascii_lowercase();
-    let part = lower.as_str();
-
     // Relationship parts can exist in many directories; treat them as package plumbing.
-    if part.ends_with(".rels") {
+    if crate::ascii::ends_with_ignore_case(part, ".rels") {
         return PartKind::Rels;
     }
 
-    if part.starts_with("docprops/") {
+    if crate::ascii::starts_with_ignore_case(part, "docprops/") {
         return PartKind::DocProps;
     }
 
-    if part == "xl/workbook.xml" || part == "xl/workbook.bin" {
+    if part.eq_ignore_ascii_case("xl/workbook.xml") || part.eq_ignore_ascii_case("xl/workbook.bin") {
         return PartKind::Workbook;
     }
 
     // "Sheets" can also include dialog sheets and macro sheets, but for reporting
     // purposes they are typically grouped with worksheets.
-    if part.starts_with("xl/worksheets/")
-        || part.starts_with("xl/dialogsheets/")
-        || part.starts_with("xl/macrosheets/")
+    if crate::ascii::starts_with_ignore_case(part, "xl/worksheets/")
+        || crate::ascii::starts_with_ignore_case(part, "xl/dialogsheets/")
+        || crate::ascii::starts_with_ignore_case(part, "xl/macrosheets/")
     {
         return PartKind::Worksheet;
     }
 
-    if part == "xl/styles.xml" || part == "xl/styles.bin" || part == "xl/tablestyles.xml" {
+    if part.eq_ignore_ascii_case("xl/styles.xml")
+        || part.eq_ignore_ascii_case("xl/styles.bin")
+        || part.eq_ignore_ascii_case("xl/tablestyles.xml")
+    {
         return PartKind::Styles;
     }
 
-    if part == "xl/sharedstrings.xml" || part == "xl/sharedstrings.bin" {
+    if part.eq_ignore_ascii_case("xl/sharedstrings.xml") || part.eq_ignore_ascii_case("xl/sharedstrings.bin") {
         return PartKind::SharedStrings;
     }
 
-    if part.starts_with("xl/theme/") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/theme/") {
         return PartKind::Theme;
     }
 
-    if part == "xl/calcchain.xml" || part == "xl/calcchain.bin" {
+    if part.eq_ignore_ascii_case("xl/calcchain.xml") || part.eq_ignore_ascii_case("xl/calcchain.bin") {
         return PartKind::CalcChain;
     }
 
-    if part.starts_with("xl/media/") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/media/") {
         return PartKind::Media;
     }
 
-    if part.starts_with("xl/drawings/") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/drawings/") {
         return PartKind::Drawings;
     }
 
-    if part.starts_with("xl/charts/") || part.starts_with("xl/chartsheets/") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/charts/")
+        || crate::ascii::starts_with_ignore_case(part, "xl/chartsheets/")
+    {
         return PartKind::Charts;
     }
 
-    if part.starts_with("xl/tables/") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/tables/") {
         return PartKind::Tables;
     }
 
-    if part.starts_with("xl/pivot") {
+    if crate::ascii::starts_with_ignore_case(part, "xl/pivot") {
         return PartKind::Pivot;
     }
 
-    if part == "xl/vbaproject.bin"
-        || part == "xl/vbaprojectsignature.bin"
-        || part.starts_with("xl/activex/")
-        || part.starts_with("xl/ctrlprops/")
-        || part.starts_with("xl/vba/")
+    if part.eq_ignore_ascii_case("xl/vbaProject.bin")
+        || part.eq_ignore_ascii_case("xl/vbaProjectSignature.bin")
+        || crate::ascii::starts_with_ignore_case(part, "xl/activeX/")
+        || crate::ascii::starts_with_ignore_case(part, "xl/ctrlProps/")
+        || crate::ascii::starts_with_ignore_case(part, "xl/vba/")
     {
         return PartKind::Vba;
     }

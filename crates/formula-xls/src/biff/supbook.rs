@@ -13,6 +13,8 @@
 
 #![allow(dead_code)]
 
+use std::borrow::Cow;
+
 use super::{records, strings};
 
 /// BIFF8 `SUPBOOK` record id.
@@ -318,7 +320,11 @@ fn workbook_name_from_virt_path(virt_path: &str) -> String {
     // - take basename after path separators
     // - strip Excel-style wrapper brackets if present (but preserve literal `[` / `]` characters
     //   in actual workbook names)
-    let without_nuls = virt_path.replace('\0', "");
+    let without_nuls: Cow<'_, str> = if virt_path.contains('\0') {
+        Cow::Owned(virt_path.replace('\0', ""))
+    } else {
+        Cow::Borrowed(virt_path)
+    };
 
     let trimmed_full = without_nuls.trim();
     let has_full_wrapper = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');

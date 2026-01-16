@@ -167,12 +167,38 @@ impl Relationships {
 }
 
 fn xml_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut extra = 0usize;
+    for &b in input.as_bytes() {
+        match b {
+            b'&' => extra += "&amp;".len() - 1,
+            b'<' => extra += "&lt;".len() - 1,
+            b'>' => extra += "&gt;".len() - 1,
+            b'"' => extra += "&quot;".len() - 1,
+            b'\'' => extra += "&apos;".len() - 1,
+            _ => {}
+        }
+    }
+    if extra == 0 {
+        return input.to_string();
+    }
+
+    let mut out = String::with_capacity(input.len() + extra);
+    let mut start = 0usize;
+    for (i, ch) in input.char_indices() {
+        let escaped = match ch {
+            '&' => "&amp;",
+            '<' => "&lt;",
+            '>' => "&gt;",
+            '"' => "&quot;",
+            '\'' => "&apos;",
+            _ => continue,
+        };
+        out.push_str(&input[start..i]);
+        out.push_str(escaped);
+        start = i + 1;
+    }
+    out.push_str(&input[start..]);
+    out
 }
 
 #[cfg(test)]

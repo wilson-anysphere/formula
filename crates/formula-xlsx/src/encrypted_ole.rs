@@ -3,16 +3,21 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use crate::{XlsxError, XlsxPackage};
 
 fn zip_entry_name_matches(candidate: &str, target: &str) -> bool {
-    let target = target.trim_start_matches('/').replace('\\', "/");
+    let target = target.trim_start_matches(|c| c == '/' || c == '\\');
+    let target = if target.contains('\\') {
+        std::borrow::Cow::Owned(target.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(target)
+    };
 
-    let mut normalized = candidate.trim_start_matches('/');
+    let mut normalized = candidate.trim_start_matches(|c| c == '/' || c == '\\');
     let replaced;
     if normalized.contains('\\') {
         replaced = normalized.replace('\\', "/");
-        normalized = &replaced;
+        normalized = replaced.trim_start_matches('/');
     }
 
-    normalized.eq_ignore_ascii_case(&target)
+    normalized.eq_ignore_ascii_case(target.as_ref())
 }
 
 fn zip_has_entry<R: Read + Seek>(archive: &zip::ZipArchive<R>, name: &str) -> bool {
