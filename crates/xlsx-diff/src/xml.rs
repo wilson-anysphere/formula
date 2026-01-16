@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{Context, Result};
+use formula_model::{parse_a1_endpoint, A1Endpoint};
 use roxmltree::{Document, Node};
 
 use crate::Severity;
@@ -432,39 +433,10 @@ fn attr_value_ns<'a>(el: &'a XmlElement, ns: Option<&str>, local: &str) -> Optio
 }
 
 fn parse_a1_reference(reference: &str) -> Option<(u32, u32)> {
-    let mut col: u32 = 0;
-    let mut row: u32 = 0;
-    let mut in_row = false;
-
-    for mut b in reference.bytes() {
-        if b == b'$' {
-            continue;
-        }
-        if !in_row {
-            if b.is_ascii_alphabetic() {
-                b = b.to_ascii_uppercase();
-                col = col
-                    .checked_mul(26)?
-                    .checked_add((b - b'A' + 1) as u32)?;
-                continue;
-            }
-            if b.is_ascii_digit() {
-                in_row = true;
-            } else {
-                return None;
-            }
-        }
-
-        if !b.is_ascii_digit() {
-            return None;
-        }
-        row = row.checked_mul(10)?.checked_add((b - b'0') as u32)?;
+    match parse_a1_endpoint(reference).ok()? {
+        A1Endpoint::Cell(cell) => Some((cell.row.saturating_add(1), cell.col.saturating_add(1))),
+        _ => None,
     }
-
-    if col == 0 || row == 0 {
-        return None;
-    }
-    Some((row, col))
 }
 
 #[derive(Debug, Clone)]

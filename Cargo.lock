@@ -8704,6 +8704,7 @@ dependencies = [
  "anyhow",
  "clap",
  "formula-ascii",
+ "formula-model",
  "formula-office-crypto",
  "formula-xlsx",
  "globset",

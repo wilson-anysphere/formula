@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 formula-ascii = { path = "../formula-ascii" }
+formula-model = { path = "../formula-model" }
 formula-office-crypto = { path = "../formula-office-crypto" }
 globset = "0.4"
 roxmltree = "0.20"

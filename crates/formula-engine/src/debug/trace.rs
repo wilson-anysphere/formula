@@ -777,20 +777,7 @@ fn parse_col_ref_str(input: &str) -> Option<u32> {
     if input.is_empty() {
         return None;
     }
-
-    let mut col: u32 = 0;
-    for ch in input.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        let up = ch.to_ascii_uppercase();
-        let digit = (up as u8 - b'A' + 1) as u32;
-        col = col.checked_mul(26)?.checked_add(digit)?;
-    }
-    if col == 0 || col > formula_model::EXCEL_MAX_COLS {
-        return None;
-    }
-    Some(col - 1)
+    formula_model::column_label_to_index(input).ok()
 }
 
 fn parse_row_ref_str(input: &str) -> Option<u32> {
@@ -799,18 +786,10 @@ fn parse_row_ref_str(input: &str) -> Option<u32> {
     if input.is_empty() {
         return None;
     }
-
-    let mut row: u32 = 0;
-    for ch in input.chars() {
-        if !ch.is_ascii_digit() {
-            return None;
-        }
-        row = row.checked_mul(10)?.checked_add((ch as u8 - b'0') as u32)?;
+    match formula_model::parse_a1_endpoint(input).ok()? {
+        formula_model::A1Endpoint::Row(row0) => Some(row0),
+        _ => None,
     }
-    if row == 0 {
-        return None;
-    }
-    Some(row - 1)
 }
 
 fn parse_row_ref_number(n: f64) -> Option<u32> {
