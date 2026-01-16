@@ -6,7 +6,7 @@ use crate::functions::{
     eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{casefold, Array, ErrorKind, Lambda, RecordValue, Value};
+use crate::value::{casefold, casefold_owned, Array, ErrorKind, Lambda, RecordValue, Value};
 
 fn checked_array_cells(rows: usize, cols: usize) -> Result<usize, ErrorKind> {
     let total = rows.checked_mul(cols).ok_or(ErrorKind::Spill)?;
@@ -472,7 +472,7 @@ fn record_display_key_text(
     if display.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(casefold(&display)))
+        Ok(Some(casefold_owned(display)))
     }
 }
 
@@ -500,7 +500,7 @@ pub(super) fn sort_key(ctx: &dyn FunctionContext, value: &Value) -> SortKeyValue
             if display.is_empty() {
                 SortKeyValue::Blank
             } else {
-                SortKeyValue::Text(casefold(&display))
+                SortKeyValue::Text(casefold_owned(display))
             }
         }
     }

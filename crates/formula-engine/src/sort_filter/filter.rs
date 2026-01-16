@@ -412,7 +412,7 @@ fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocale
     match value {
         FilterValue::Text(s) => {
             let cell_s = cell_to_string(cell, value_locale);
-            text_eq_case_insensitive(&cell_s, s)
+            crate::value::eq_case_insensitive(&cell_s, s)
         }
         FilterValue::Number(n) => coerce_number(cell, value_locale).is_some_and(|v| v == *n),
         FilterValue::Bool(b) => matches!(cell, CellValue::Bool(v) if v == b),
@@ -425,22 +425,14 @@ fn text_match(cell: &CellValue, m: &TextMatch, value_locale: ValueLocaleConfig) 
     let mut pattern = m.pattern.clone();
 
     if !m.case_sensitive {
-        cell_s = crate::value::casefold(&cell_s);
-        pattern = crate::value::casefold(&pattern);
+        cell_s = crate::value::casefold_owned(cell_s);
+        pattern = crate::value::casefold_owned(pattern);
     }
 
     match m.kind {
         TextMatchKind::Contains => cell_s.contains(&pattern),
         TextMatchKind::BeginsWith => cell_s.starts_with(&pattern),
         TextMatchKind::EndsWith => cell_s.ends_with(&pattern),
-    }
-}
-
-fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
-    if a.is_ascii() && b.is_ascii() {
-        a.eq_ignore_ascii_case(b)
-    } else {
-        crate::value::casefold(a) == crate::value::casefold(b)
     }
 }
 

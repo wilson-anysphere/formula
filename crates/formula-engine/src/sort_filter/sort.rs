@@ -1,7 +1,7 @@
 use crate::locale::ValueLocaleConfig;
 use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
-use crate::value::casefold;
+use crate::value::casefold_owned;
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
 use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
 use formula_model::ErrorValue;
@@ -330,7 +330,7 @@ fn fold_text(s: String, case_sensitive: bool) -> String {
     if case_sensitive {
         s
     } else {
-        casefold(&s)
+        casefold_owned(s)
     }
 }
 

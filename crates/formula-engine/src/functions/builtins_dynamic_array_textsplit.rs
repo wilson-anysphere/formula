@@ -320,7 +320,7 @@ fn fold_char_uppercase(c: char, out: &mut Vec<char>) {
 }
 
 fn fold_str_uppercase(s: &str) -> Vec<char> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(s.len());
     for c in s.chars() {
         fold_char_uppercase(c, &mut out);
     }

@@ -1,4 +1,4 @@
-use crate::value::casefold;
+use crate::value::{casefold, with_casefolded_key};
 use crate::value::ErrorKind;
 use crate::LocaleConfig;
 
@@ -221,11 +221,11 @@ impl ErrorTranslations {
     }
 
     fn localized_to_canonical(&self, localized: &str) -> Option<&'static str> {
-        self.maps().loc_to_canon.get(&casefold(localized)).copied()
+        with_casefolded_key(localized, |key| self.maps().loc_to_canon.get(key).copied())
     }
 
     fn canonical_to_localized(&self, canonical: &str) -> Option<&'static str> {
-        self.maps().canon_to_loc.get(&casefold(canonical)).copied()
+        with_casefolded_key(canonical, |key| self.maps().canon_to_loc.get(key).copied())
     }
 }
 
@@ -262,50 +262,49 @@ impl FormulaLocale {
     /// Translate an input function name into canonical form.
     pub fn canonical_function_name(&self, name: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(name);
-        let folded = casefold(base);
-
-        let mapped = self
-            .functions
-            .localized_to_canonical(&folded)
-            .unwrap_or(folded.as_str());
-
         let mut out = String::new();
         if has_prefix {
             out.push_str("_xlfn.");
         }
-        out.push_str(mapped);
+        with_casefolded_key(base, |folded| {
+            let mapped = self
+                .functions
+                .localized_to_canonical(folded)
+                .unwrap_or(folded);
+            out.push_str(mapped);
+        });
         out
     }
 
     /// Translate a canonical function name into its localized display form.
     pub fn localized_function_name(&self, canonical: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(canonical);
-        let folded = casefold(base);
-
-        let mapped = self
-            .functions
-            .canonical_to_localized(&folded)
-            .unwrap_or(folded.as_str());
-
         let mut out = String::new();
         if has_prefix {
             out.push_str("_xlfn.");
         }
-        out.push_str(mapped);
+        with_casefolded_key(base, |folded| {
+            let mapped = self
+                .functions
+                .canonical_to_localized(folded)
+                .unwrap_or(folded);
+            out.push_str(mapped);
+        });
         out
     }
 
     pub fn canonical_boolean_literal(&self, ident: &str) -> Option<bool> {
         // Excel treats keywords case-insensitively across Unicode. Keep boolean keyword matching
         // consistent with function translation keys by using the same Unicode-aware case folding.
-        let folded = casefold(ident);
-        if folded == self.boolean_true {
-            Some(true)
-        } else if folded == self.boolean_false {
-            Some(false)
-        } else {
-            None
-        }
+        with_casefolded_key(ident, |folded| {
+            if folded == self.boolean_true {
+                Some(true)
+            } else if folded == self.boolean_false {
+                Some(false)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn localized_boolean_literal(&self, value: bool) -> &'static str {

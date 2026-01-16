@@ -1,6 +1,6 @@
 use crate::eval::FormulaParseError;
 use crate::parser::{lex, Token, TokenKind};
-use crate::value::casefold;
+use crate::value::with_casefolded_key;
 use crate::{ErrorKind, LocaleConfig, ParseOptions, ReferenceStyle};
 
 use super::FormulaLocale;
@@ -379,7 +379,7 @@ fn casefold_function_name_for_compare(name: &str) -> String {
     if has_prefix {
         out.push_str("_xlfn.");
     }
-    out.push_str(&casefold(base));
+    with_casefolded_key(base, |folded| out.push_str(folded));
     out
 }
 
