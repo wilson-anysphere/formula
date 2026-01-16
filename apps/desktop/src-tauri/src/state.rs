@@ -5454,26 +5454,9 @@ fn quote_sheet_name(name: &str) -> String {
 }
 
 fn col_index_to_letters(col: usize) -> String {
-    if let Ok(col) = u32::try_from(col) {
-        let mut out = String::new();
-        formula_model::push_column_label(col, &mut out);
-        return out;
-    }
-
-    // Best-effort for out-of-range indices. This path is only used to format diagnostics for
-    // extremely large column indices that cannot appear in Excel.
-    let mut col = u64::try_from(col).unwrap_or(u64::MAX).saturating_add(1);
-    let mut buf: Vec<u8> = Vec::new();
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf.push(b'A' + rem);
-        col = (col - 1) / 26;
-    }
-
-    let mut out = String::with_capacity(buf.len());
-    for ch in buf.iter().rev() {
-        out.push(*ch as char);
-    }
+    let mut out = String::new();
+    let col0 = u64::try_from(col).unwrap_or(u64::MAX);
+    formula_model::push_column_label_u64(col0, &mut out);
     out
 }
 

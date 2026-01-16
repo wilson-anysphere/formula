@@ -45,7 +45,7 @@ pub use address::{
     parse_a1_endpoint, push_a1_cell_area_row1, push_a1_cell_range, push_a1_cell_range_row1,
     push_a1_cell_ref, push_a1_cell_ref_row1, push_a1_col_range, push_a1_col_ref,
     push_a1_row_range_row1, push_a1_row_ref_row1,
-    push_column_label, A1Endpoint, A1ParseError, CellRef, Range, RangeIter, RangeParseError,
+    push_column_label, push_column_label_u64, A1Endpoint, A1ParseError, CellRef, Range, RangeIter, RangeParseError,
     column_label_to_index, column_label_to_index_lenient,
 };
 pub use autofilter::{

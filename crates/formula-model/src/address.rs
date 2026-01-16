@@ -481,9 +481,17 @@ impl std::error::Error for RangeParseError {
 
 /// Convert a 0-based column index to an Excel column label and append it to `out`.
 pub fn push_column_label(col: u32, out: &mut String) {
+    push_column_label_u64(u64::from(col), out);
+}
+
+/// Convert a 0-based column index to an Excel column label and append it to `out`.
+///
+/// This is intended for diagnostics and tooling that may carry column indices outside Excel's
+/// `A..=XFD` bounds.
+pub fn push_column_label_u64(col0: u64, out: &mut String) {
     // Excel column labels are 1-based.
-    let mut col = u64::from(col) + 1;
-    let mut buf = [0u8; 10];
+    let mut col = col0.saturating_add(1);
+    let mut buf = [0u8; 16];
     let mut i = 0usize;
     while col > 0 {
         let rem = ((col - 1) % 26) as u8;

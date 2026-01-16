@@ -81,25 +81,14 @@ fn to_a1_cell(col_index: usize, row_index: usize) -> String {
             let row_1_based = u64::try_from(row_index)
                 .unwrap_or(u64::MAX)
                 .saturating_add(1);
-            format!("{}{}", index_to_column_letters(col_index), row_1_based)
+            let mut out = String::new();
+            let col0 = u64::try_from(col_index).unwrap_or(u64::MAX);
+            formula_model::push_column_label_u64(col0, &mut out);
+            use core::fmt::Write as _;
+            let _ = write!(out, "{row_1_based}");
+            out
         }
     }
-}
-
-fn index_to_column_letters(index: usize) -> String {
-    // 0 -> A, 25 -> Z, 26 -> AA
-    //
-    // Do arithmetic in u64 so we don't overflow on large `usize` indices (e.g. wasm32 where
-    // `usize == u32` and callers may use `u32::MAX`).
-    let mut n = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
-    let mut out = Vec::<u8>::new();
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        out.push(b'A' + rem as u8);
-        n = (n - 1) / 26;
-    }
-    out.reverse();
-    String::from_utf8(out).expect("column letters are always valid UTF-8")
 }
 
 #[cfg(test)]
