@@ -1,5 +1,5 @@
 use crate::sort_filter::types::RangeRef;
-use formula_model::column_label_to_index;
+use formula_model::{parse_a1_endpoint, A1Endpoint};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -62,37 +62,10 @@ fn parse_a1_cell(a1: &str) -> Result<(usize, usize), A1ParseError> {
         return Err(A1ParseError::Empty);
     }
 
-    let mut col_part = String::new();
-    let mut row_part = String::new();
-    for ch in a1.chars() {
-        if ch.is_ascii_alphabetic() {
-            if !row_part.is_empty() {
-                return Err(A1ParseError::Invalid(a1.to_string()));
-            }
-            col_part.push(ch.to_ascii_uppercase());
-        } else if ch.is_ascii_digit() {
-            row_part.push(ch);
-        } else if ch == '$' {
-            // Ignore absolute markers.
-            continue;
-        } else {
-            return Err(A1ParseError::Invalid(a1.to_string()));
-        }
+    match parse_a1_endpoint(a1).map_err(|_| A1ParseError::Invalid(a1.to_string()))? {
+        A1Endpoint::Cell(cell) => Ok((cell.col as usize, cell.row as usize)),
+        A1Endpoint::Row(_) | A1Endpoint::Col(_) => Err(A1ParseError::Invalid(a1.to_string())),
     }
-
-    if col_part.is_empty() || row_part.is_empty() {
-        return Err(A1ParseError::Invalid(a1.to_string()));
-    }
-
-    let col = column_label_to_index(&col_part)
-        .map_err(|_| A1ParseError::Invalid(a1.to_string()))? as usize;
-    let row_1based: usize = row_part
-        .parse()
-        .map_err(|_| A1ParseError::Invalid(a1.to_string()))?;
-    if row_1based == 0 {
-        return Err(A1ParseError::Invalid(a1.to_string()));
-    }
-    Ok((col, row_1based - 1))
 }
 
 fn to_a1_cell(col_index: usize, row_index: usize) -> String {
