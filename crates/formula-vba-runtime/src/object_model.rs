@@ -2,11 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use formula_model::{parse_a1_endpoint, push_column_label, A1Endpoint, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+
 use crate::runtime::VbaError;
 use crate::value::VbaValue;
-
-const EXCEL_MAX_ROWS: u32 = 1_048_576;
-const EXCEL_MAX_COLS: u32 = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VbaRangeRef {
@@ -147,86 +146,30 @@ pub struct VbaErrObject {
 pub fn a1_to_row_col(a1: &str) -> Result<(u32, u32), VbaError> {
     // A1 -> (row, col) 1-based
     let a1 = a1.trim();
-    if a1.is_empty() {
-        return Err(VbaError::Runtime("Invalid A1 reference: empty".to_string()));
-    }
-
-    let mut letters = String::new();
-    let mut digits = String::new();
-    let mut saw_digit = false;
-    for ch in a1.chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() {
-            if saw_digit {
-                return Err(VbaError::Runtime(format!("Invalid A1 reference: {a1}")));
-            }
-            letters.push(ch);
-            continue;
-        }
-        if ch.is_ascii_digit() {
-            saw_digit = true;
-            digits.push(ch);
-            continue;
-        }
-        return Err(VbaError::Runtime(format!("Invalid A1 reference: {a1}")));
-    }
-
-    if letters.is_empty() || digits.is_empty() {
-        return Err(VbaError::Runtime(format!("Invalid A1 reference: {a1}")));
-    }
-
-    let col = parse_column_letters_1_based(&letters, a1)?;
-    let row: u32 = digits
-        .parse()
+    let endpoint = parse_a1_endpoint(a1)
         .map_err(|_| VbaError::Runtime(format!("Invalid A1 reference: {a1}")))?;
-    if row == 0 {
+    let A1Endpoint::Cell(cell) = endpoint else {
         return Err(VbaError::Runtime(format!("Invalid A1 reference: {a1}")));
-    }
-    Ok((row, col))
+    };
+    Ok((cell.row.saturating_add(1), cell.col.saturating_add(1)))
 }
 
 pub fn row_col_to_a1(row: u32, col: u32) -> Result<String, VbaError> {
+    use core::fmt::Write as _;
+
     if row == 0 || col == 0 {
         return Err(VbaError::Runtime("Row/col are 1-based".to_string()));
     }
-    use core::fmt::Write as _;
+    if row > EXCEL_MAX_ROWS || col > EXCEL_MAX_COLS {
+        return Err(VbaError::Runtime(format!(
+            "Row/col out of range for Excel: row={row} col={col}"
+        )));
+    }
 
     let mut out = String::new();
-    push_column_letters_1_based(col, &mut out);
+    push_column_label(col - 1, &mut out);
     let _ = write!(out, "{row}");
     Ok(out)
-}
-
-fn parse_column_letters_1_based(letters: &str, full: &str) -> Result<u32, VbaError> {
-    let mut col: u32 = 0;
-    for ch in letters.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return Err(VbaError::Runtime(format!("Invalid A1 reference: {full}")));
-        }
-        let v = (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
-        col = col
-            .checked_mul(26)
-            .and_then(|c| c.checked_add(v))
-            .ok_or_else(|| VbaError::Runtime(format!("Invalid A1 reference: {full}")))?;
-    }
-    if col == 0 {
-        return Err(VbaError::Runtime(format!("Invalid A1 reference: {full}")));
-    }
-    Ok(col)
-}
-
-fn push_column_letters_1_based(mut col: u32, out: &mut String) {
-    let mut buf: Vec<u8> = Vec::new();
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf.push(b'A' + rem);
-        col = (col - 1) / 26;
-    }
-    for ch in buf.iter().rev() {
-        out.push(*ch as char);
-    }
 }
 
 pub(crate) fn parse_range_a1_with_bounds(
@@ -246,49 +189,19 @@ pub(crate) fn parse_range_a1_with_bounds(
         if token.is_empty() {
             return Err(VbaError::Runtime("Invalid A1 reference: empty".to_string()));
         }
-
-        let mut letters = String::new();
-        let mut digits = String::new();
-        for ch in token.chars() {
-            if ch == '$' {
-                continue;
-            }
-            if ch.is_ascii_alphabetic() {
-                letters.push(ch);
-            } else if ch.is_ascii_digit() {
-                digits.push(ch);
-            } else {
-                return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
-            }
-        }
-
-        match (!letters.is_empty(), !digits.is_empty()) {
-            (true, true) => {
-                let row: u32 = digits
-                    .parse()
-                    .map_err(|_| VbaError::Runtime(format!("Invalid A1 reference: {token}")))?;
-                if row == 0 {
-                    return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
-                }
-                let col = parse_column_letters_1_based(&letters, token)?;
-                Ok(A1Ref::Cell { row, col })
-            }
-            (true, false) => {
-                // Entire column reference like `A` or `AA`.
-                let col = parse_column_letters_1_based(&letters, token)?;
-                Ok(A1Ref::Col { col })
-            }
-            (false, true) => {
-                // Entire row reference like `1`.
-                let row: u32 = digits
-                    .parse()
-                    .map_err(|_| VbaError::Runtime(format!("Invalid A1 reference: {token}")))?;
-                if row == 0 {
-                    return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
-                }
-                Ok(A1Ref::Row { row })
-            }
-            (false, false) => Err(VbaError::Runtime(format!("Invalid A1 reference: {token}"))),
+        let endpoint = parse_a1_endpoint(token)
+            .map_err(|_| VbaError::Runtime(format!("Invalid A1 reference: {token}")))?;
+        match endpoint {
+            A1Endpoint::Cell(cell) => Ok(A1Ref::Cell {
+                row: cell.row.saturating_add(1),
+                col: cell.col.saturating_add(1),
+            }),
+            A1Endpoint::Row(row0) => Ok(A1Ref::Row {
+                row: row0.saturating_add(1),
+            }),
+            A1Endpoint::Col(col0) => Ok(A1Ref::Col {
+                col: col0.saturating_add(1),
+            }),
         }
     }
 
@@ -302,18 +215,29 @@ pub(crate) fn parse_range_a1_with_bounds(
         _ => return Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
     };
 
-    match (start, end) {
+    let (r1, c1, r2, c2) = match (start, end) {
         (A1Ref::Cell { row: r1, col: c1 }, A1Ref::Cell { row: r2, col: c2 }) => {
-            Ok((r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2)))
+            (r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2))
         }
         (A1Ref::Col { col: c1 }, A1Ref::Col { col: c2 }) => {
-            Ok((1, c1.min(c2), max_row, c1.max(c2)))
+            (1, c1.min(c2), max_row, c1.max(c2))
         }
         (A1Ref::Row { row: r1 }, A1Ref::Row { row: r2 }) => {
-            Ok((r1.min(r2), 1, r1.max(r2), max_col))
+            (r1.min(r2), 1, r1.max(r2), max_col)
         }
-        _ => Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
+        _ => return Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
+    };
+
+    if r1 == 0 || c1 == 0 || r2 == 0 || c2 == 0 {
+        return Err(VbaError::Runtime(format!("Invalid A1 range: {a1}")));
     }
+    if r2 > max_row || c2 > max_col {
+        return Err(VbaError::Runtime(format!(
+            "A1 range out of bounds: {a1} (max_row={max_row} max_col={max_col})"
+        )));
+    }
+
+    Ok((r1, c1, r2, c2))
 }
 
 /// Parse an A1 reference into `(start_row, start_col, end_row, end_col)` (all 1-based).
