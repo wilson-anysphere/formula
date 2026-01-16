@@ -66,16 +66,6 @@ fn coerce_to_string_with_general_options(
     }
 }
 
-fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
-    if a.is_ascii() && b.is_ascii() {
-        return a.eq_ignore_ascii_case(b);
-    }
-
-    a.chars()
-        .flat_map(|c| c.to_uppercase())
-        .eq(b.chars().flat_map(|c| c.to_uppercase()))
-}
-
 fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate: &Value) -> bool {
     // Excel compares text case-insensitively. Rich values (entities/records) behave like text by
     // using their display string; for records, this includes `display_field` semantics.
@@ -109,7 +99,7 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
         (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
             let a = text_like_str(ctx, a).unwrap();
             let b = text_like_str(ctx, b).unwrap();
-            text_eq_case_insensitive(a.as_ref(), b.as_ref())
+            crate::value::eq_case_insensitive(a.as_ref(), b.as_ref())
         }
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
@@ -136,48 +126,6 @@ fn lookup_cmp_with_equality(ctx: &LookupContext, a: &Value, b: &Value) -> Orderi
         Ordering::Equal
     } else {
         lookup_cmp(ctx, a, b)
-    }
-}
-
-fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
-    let mut a_iter = a.as_bytes().iter();
-    let mut b_iter = b.as_bytes().iter();
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(&ac), Some(&bc)) => {
-                let ac = ac.to_ascii_uppercase();
-                let bc = bc.to_ascii_uppercase();
-                match ac.cmp(&bc) {
-                    Ordering::Equal => continue,
-                    ord => return ord,
-                }
-            }
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (None, None) => return Ordering::Equal,
-        }
-    }
-}
-
-fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
-    if a.is_ascii() && b.is_ascii() {
-        return cmp_ascii_case_insensitive(a, b);
-    }
-
-    // Compare using Unicode-aware uppercasing so matches behave like Excel (e.g. ß -> SS).
-    // This intentionally uses the same `char::to_uppercase` logic as criteria matching.
-    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
-    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
-                Ordering::Equal => continue,
-                ord => return ord,
-            },
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (None, None) => return Ordering::Equal,
-        }
     }
 }
 
@@ -268,12 +216,12 @@ fn lookup_cmp(ctx: &LookupContext, a: &Value, b: &Value) -> Ordering {
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
         (Value::Blank, other) => {
             if let Some(other) = text_like_str(ctx, other) {
-                return cmp_case_insensitive("", other.as_ref());
+                return crate::value::cmp_case_insensitive("", other.as_ref());
             }
         }
         (other, Value::Blank) => {
             if let Some(other) = text_like_str(ctx, other) {
-                return cmp_case_insensitive(other.as_ref(), "");
+                return crate::value::cmp_case_insensitive(other.as_ref(), "");
             }
         }
         _ => {}
@@ -304,7 +252,7 @@ fn lookup_cmp(ctx: &LookupContext, a: &Value, b: &Value) -> Ordering {
         (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
             let a = text_like_str(ctx, a).unwrap();
             let b = text_like_str(ctx, b).unwrap();
-            cmp_case_insensitive(a.as_ref(), b.as_ref())
+            crate::value::cmp_case_insensitive(a.as_ref(), b.as_ref())
         }
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,

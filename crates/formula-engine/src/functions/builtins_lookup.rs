@@ -9,7 +9,7 @@ use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::pivot::{
     AggregationType as PivotAggregationType, PivotKeyPart, PivotValue as PivotEngineValue,
 };
-use crate::value::{casefold, Array, ErrorKind, Value};
+use crate::value::{casefold_owned, with_casefolded_key, Array, ErrorKind, Value};
 use chrono::Datelike;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -1298,8 +1298,9 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut row_criteria = Vec::new();
     let mut col_criteria = Vec::new();
     for (field, item_value) in criteria {
-        if let Some(col) = layout.row_fields.get(&casefold(&field)) {
-            row_criteria.push((*col, item_value));
+        let row_col = with_casefolded_key(field.trim(), |key| layout.row_fields.get(key).copied());
+        if let Some(col) = row_col {
+            row_criteria.push((col, item_value));
             continue;
         }
 
@@ -1499,12 +1500,11 @@ fn getpivotdata_from_registry(
     criteria: &[(String, Value)],
 ) -> Result<Value, ErrorKind> {
     let pivot = entry.pivot.as_ref();
-    let data_field_key = crate::value::casefold(data_field.trim());
-    let value_field_idx = entry
-        .value_field_indices
-        .get(&data_field_key)
-        .copied()
-        .ok_or(ErrorKind::Ref)?;
+    let data_field = data_field.trim();
+    let value_field_idx = with_casefolded_key(data_field, |key| {
+        entry.value_field_indices.get(key).copied()
+    })
+    .ok_or(ErrorKind::Ref)?;
     let value_field = pivot
         .config
         .value_fields
@@ -1522,21 +1522,18 @@ fn getpivotdata_from_registry(
         if field_trimmed.is_empty() {
             return Err(ErrorKind::Value);
         }
-        let field_key = crate::value::casefold(
-            crate::pivot_registry::normalize_pivot_cache_field_name(field_trimmed).as_ref(),
-        );
-        let idx = entry
-            .field_indices
-            .get(&field_key)
-            .copied()
-            .ok_or(ErrorKind::Ref)?;
+        let normalized = crate::pivot_registry::normalize_pivot_cache_field_name(field_trimmed);
+        let (idx, cache_name) = with_casefolded_key(normalized.as_ref(), |key| {
+            (
+                entry.field_indices.get(key).copied(),
+                entry.cache_field_names.get(key),
+            )
+        });
+        let idx = idx.ok_or(ErrorKind::Ref)?;
 
         // Validate the requested item exists for this field so we can return `#N/A` for unknown
         // items (Excel-compatible; matches the legacy scan behavior).
-        let cache_name = entry
-            .cache_field_names
-            .get(&field_key)
-            .ok_or(ErrorKind::Ref)?;
+        let cache_name = cache_name.ok_or(ErrorKind::Ref)?;
         let uniques = pivot
             .cache
             .unique_values
@@ -1568,8 +1565,9 @@ fn getpivotdata_from_registry(
             let field_name = filter.source_field.canonical_name();
             let field_name =
                 crate::pivot_registry::normalize_pivot_cache_field_name(field_name.as_ref());
-            let key = crate::value::casefold(field_name.as_ref());
-            let idx = entry.field_indices.get(&key).copied()?;
+            let idx = with_casefolded_key(field_name.as_ref(), |key| {
+                entry.field_indices.get(key).copied()
+            })?;
             Some((idx, allowed))
         })
         .collect();
@@ -1645,57 +1643,71 @@ fn find_pivot_layout(
     let sheet_id = &pivot_ref.sheet_id;
     let anchor = pivot_ref.start;
 
-    let data_field_fold = casefold(data_field);
-    let data_field_suffix_fold = casefold(&format!(" - {data_field}"));
-    let data_field_gt_fold = casefold(&format!("Grand Total - {data_field}"));
-
-    let mut header_row: Option<u32> = None;
-    let mut header_match_col: Option<u32> = None;
+    let data_field_suffix_fold = {
+        let mut s = String::with_capacity(" - ".len() + data_field.len());
+        s.push_str(" - ");
+        s.push_str(data_field);
+        casefold_owned(s)
+    };
+    let data_field_gt_fold = {
+        let mut s = String::with_capacity("Grand Total - ".len() + data_field.len());
+        s.push_str("Grand Total - ");
+        s.push_str(data_field);
+        casefold_owned(s)
+    };
 
     let max_up = anchor.row.min(MAX_SCAN_ROWS);
     let col_start = anchor.col.saturating_sub(MAX_SCAN_COLS);
     let col_end = anchor.col.saturating_add(MAX_SCAN_COLS);
 
-    for delta in 0..=max_up {
-        let row = anchor.row - delta;
-        for col in col_start..=col_end {
-            let v = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col });
-            let Value::Text(t) = v else {
-                continue;
-            };
-            if t.is_empty() {
-                continue;
-            }
+    let (header_row, header_match_col) = with_casefolded_key(data_field, |data_field_fold| {
+        let mut header_row: Option<u32> = None;
+        let mut header_match_col: Option<u32> = None;
 
-            let t_fold = casefold(&t);
-            let matches = t_fold == data_field_fold
-                || t_fold == data_field_gt_fold
-                || t_fold.ends_with(&data_field_suffix_fold);
-            if !matches {
-                continue;
-            }
+        for delta in 0..=max_up {
+            let row = anchor.row - delta;
+            for col in col_start..=col_end {
+                let v = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col });
+                let Value::Text(t) = v else {
+                    continue;
+                };
+                if t.is_empty() {
+                    continue;
+                }
 
-            let below = ctx.get_cell_value(
-                sheet_id,
-                crate::eval::CellAddr {
-                    row: row.saturating_add(1),
-                    col,
-                },
-            );
-            // Pivot-engine value cells are numbers/blanks; if we see a text value directly below,
-            // this is unlikely to be the pivot header row.
-            if matches!(below, Value::Text(_)) {
-                continue;
-            }
+                let matches = with_casefolded_key(&t, |t_fold| {
+                    t_fold == data_field_fold
+                        || t_fold == data_field_gt_fold.as_str()
+                        || t_fold.ends_with(data_field_suffix_fold.as_str())
+                });
+                if !matches {
+                    continue;
+                }
 
-            header_row = Some(row);
-            header_match_col = Some(col);
-            break;
+                let below = ctx.get_cell_value(
+                    sheet_id,
+                    crate::eval::CellAddr {
+                        row: row.saturating_add(1),
+                        col,
+                    },
+                );
+                // Pivot-engine value cells are numbers/blanks; if we see a text value directly below,
+                // this is unlikely to be the pivot header row.
+                if matches!(below, Value::Text(_)) {
+                    continue;
+                }
+
+                header_row = Some(row);
+                header_match_col = Some(col);
+                break;
+            }
+            if header_row.is_some() {
+                break;
+            }
         }
-        if header_row.is_some() {
-            break;
-        }
-    }
+
+        (header_row, header_match_col)
+    });
 
     let header_row = header_row.ok_or(ErrorKind::Ref)?;
     let header_match_col = header_match_col.ok_or(ErrorKind::Ref)?;
@@ -1755,7 +1767,7 @@ fn find_pivot_layout(
             _ => return Err(ErrorKind::Ref),
         };
         // Duplicate field names would make criteria ambiguous.
-        if row_fields.insert(casefold(&name), col).is_some() {
+        if row_fields.insert(casefold_owned(name), col).is_some() {
             return Err(ErrorKind::Ref);
         }
     }
@@ -1784,24 +1796,28 @@ fn find_pivot_layout(
             _ => break,
         };
 
-        let parsed = parse_pivot_value_header(&header);
-        has_column_fields |= !parsed.column_items.is_empty();
+        let ParsedPivotValueHeader {
+            kind,
+            value_name,
+            column_items,
+        } = parse_pivot_value_header(&header);
+        has_column_fields |= !column_items.is_empty();
 
         let idx = value_cols.len();
         value_cols.push(PivotValueCol {
             col,
-            column_items: parsed.column_items,
-            kind: parsed.kind,
+            column_items,
+            kind,
         });
 
-        let header_key = casefold(&header);
+        let header_key = casefold_owned(header);
         if value_col_by_header.insert(header_key, idx).is_some() {
             // Duplicate rendered header -> ambiguous, not a supported pivot shape.
             return Err(ErrorKind::Ref);
         }
 
         value_cols_by_value_name
-            .entry(casefold(&parsed.value_name))
+            .entry(casefold_owned(value_name))
             .or_default()
             .push(idx);
     }
@@ -1870,17 +1886,17 @@ fn select_pivot_value_col(
 ) -> Result<u32, ErrorKind> {
     // If the caller provided an exact rendered header (e.g. `"A - Sum of Sales"`),
     // honor it directly.
-    let data_field_key = casefold(data_field);
-    let mut candidates: Vec<usize> =
-        if let Some(idx) = layout.value_col_by_header.get(&data_field_key) {
+    let mut candidates: Vec<usize> = with_casefolded_key(data_field, |key| {
+        if let Some(idx) = layout.value_col_by_header.get(key) {
             vec![*idx]
         } else {
             layout
                 .value_cols_by_value_name
-                .get(&data_field_key)
+                .get(key)
                 .cloned()
                 .unwrap_or_default()
-        };
+        }
+    });
 
     if candidates.is_empty() {
         return Err(ErrorKind::Ref);
@@ -1897,7 +1913,7 @@ fn select_pivot_value_col(
             col_items.iter().all(|needle| {
                 col.column_items
                     .iter()
-                    .any(|item| text_eq_case_insensitive(item, needle))
+                    .any(|item| crate::value::eq_case_insensitive(item, needle))
             })
         });
 
@@ -2044,7 +2060,7 @@ fn pivot_item_matches(
         (_, Value::Error(e)) => Err(*e),
         (Value::Text(cell_text), _) => {
             let item_text = item.coerce_to_string_with_ctx(ctx)?;
-            Ok(text_eq_case_insensitive(cell_text, &item_text))
+            Ok(crate::value::eq_case_insensitive(cell_text, &item_text))
         }
         (Value::Blank, _) => {
             let item_text = item.coerce_to_string_with_ctx(ctx)?;
@@ -2448,55 +2464,6 @@ fn approximate_match_in_first_row_array(
     lo.checked_sub(1).map(|idx| idx as u32)
 }
 
-fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
-    if a.is_ascii() && b.is_ascii() {
-        return a.eq_ignore_ascii_case(b);
-    }
-
-    a.chars()
-        .flat_map(|c| c.to_uppercase())
-        .eq(b.chars().flat_map(|c| c.to_uppercase()))
-}
-
-fn cmp_ascii_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
-    let mut a_iter = a.as_bytes().iter();
-    let mut b_iter = b.as_bytes().iter();
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(&ac), Some(&bc)) => {
-                let ac = ac.to_ascii_uppercase();
-                let bc = bc.to_ascii_uppercase();
-                match ac.cmp(&bc) {
-                    std::cmp::Ordering::Equal => continue,
-                    ord => return ord,
-                }
-            }
-            (None, Some(_)) => return std::cmp::Ordering::Less,
-            (Some(_), None) => return std::cmp::Ordering::Greater,
-            (None, None) => return std::cmp::Ordering::Equal,
-        }
-    }
-}
-
-fn cmp_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
-    if a.is_ascii() && b.is_ascii() {
-        return cmp_ascii_case_insensitive(a, b);
-    }
-
-    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
-    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
-                std::cmp::Ordering::Equal => continue,
-                ord => return ord,
-            },
-            (None, Some(_)) => return std::cmp::Ordering::Less,
-            (Some(_), None) => return std::cmp::Ordering::Greater,
-            (None, None) => return std::cmp::Ordering::Equal,
-        }
-    }
-}
 
 fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -2549,7 +2516,7 @@ fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
                 (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
                     let a = text_like_str(ctx, a).unwrap();
                     let b = text_like_str(ctx, b).unwrap();
-                    text_eq_case_insensitive(a.as_ref(), b.as_ref())
+                    crate::value::eq_case_insensitive(a.as_ref(), b.as_ref())
                 }
                 _ => false,
             }
@@ -2623,7 +2590,7 @@ fn excel_cmp(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<i32> {
         },
         (Value::Blank, other) if text_like_str(ctx, other).is_some() => {
             let other = text_like_str(ctx, other)?;
-            Some(match cmp_case_insensitive("", other.as_ref()) {
+            Some(match crate::value::cmp_case_insensitive("", other.as_ref()) {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
                 std::cmp::Ordering::Greater => 1,
@@ -2631,7 +2598,7 @@ fn excel_cmp(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<i32> {
         }
         (other, Value::Blank) if text_like_str(ctx, other).is_some() => {
             let other = text_like_str(ctx, other)?;
-            Some(match cmp_case_insensitive(other.as_ref(), "") {
+            Some(match crate::value::cmp_case_insensitive(other.as_ref(), "") {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
                 std::cmp::Ordering::Greater => 1,
@@ -2659,7 +2626,7 @@ fn excel_cmp(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> Option<i32> {
                 (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
                     let a = text_like_str(ctx, a)?;
                     let b = text_like_str(ctx, b)?;
-                    Some(ordering_to_i32(cmp_case_insensitive(
+                    Some(ordering_to_i32(crate::value::cmp_case_insensitive(
                         a.as_ref(),
                         b.as_ref(),
                     )))

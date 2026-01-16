@@ -109,16 +109,21 @@ impl PivotRegistryEntry {
             cache_field_indices
                 .entry(raw_key.clone())
                 .or_insert(f.index);
-            cache_field_names.entry(raw_key).or_insert(f.name.clone());
+            cache_field_names
+                .entry(raw_key)
+                .or_insert_with(|| f.name.clone());
 
             let normalized = normalize_pivot_cache_field_name(&f.name);
-            let normalized_key = crate::value::casefold(normalized.as_ref());
+            let normalized_key = match normalized {
+                Cow::Borrowed(s) => crate::value::casefold(s),
+                Cow::Owned(s) => crate::value::casefold_owned(s),
+            };
             cache_field_indices
                 .entry(normalized_key.clone())
                 .or_insert(f.index);
             cache_field_names
                 .entry(normalized_key)
-                .or_insert(f.name.clone());
+                .or_insert_with(|| f.name.clone());
         }
 
         let resolve_cache_field =
@@ -154,10 +159,33 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
             let canonical = f.source_field.canonical_name();
-            let canonical_key = crate::value::casefold(canonical.as_ref());
-            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
-            let normalized_key = crate::value::casefold(normalized.as_ref());
-            let display_key = crate::value::casefold(&f.source_field.to_string());
+            let (canonical_key, normalized_key) = match canonical {
+                Cow::Borrowed(canon) => {
+                    let canonical_key = crate::value::casefold(canon);
+                    let normalized = normalize_pivot_cache_field_name(canon);
+                    let normalized_key = if normalized.as_ref() == canon {
+                        canonical_key.clone()
+                    } else {
+                        match normalized {
+                            Cow::Borrowed(s) => crate::value::casefold(s),
+                            Cow::Owned(s) => crate::value::casefold_owned(s),
+                        }
+                    };
+                    (canonical_key, normalized_key)
+                }
+                Cow::Owned(canon) => {
+                    let normalized = normalize_pivot_cache_field_name(&canon);
+                    let normalized_same = normalized.as_ref() == canon.as_str();
+                    let normalized_owned = (!normalized_same).then(|| normalized.into_owned());
+                    let canonical_key = crate::value::casefold_owned(canon);
+                    let normalized_key = match normalized_owned {
+                        None => canonical_key.clone(),
+                        Some(s) => crate::value::casefold_owned(s),
+                    };
+                    (canonical_key, normalized_key)
+                }
+            };
+            let display_key = crate::value::casefold_owned(f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -183,10 +211,33 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
             let canonical = f.source_field.canonical_name();
-            let canonical_key = crate::value::casefold(canonical.as_ref());
-            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
-            let normalized_key = crate::value::casefold(normalized.as_ref());
-            let display_key = crate::value::casefold(&f.source_field.to_string());
+            let (canonical_key, normalized_key) = match canonical {
+                Cow::Borrowed(canon) => {
+                    let canonical_key = crate::value::casefold(canon);
+                    let normalized = normalize_pivot_cache_field_name(canon);
+                    let normalized_key = if normalized.as_ref() == canon {
+                        canonical_key.clone()
+                    } else {
+                        match normalized {
+                            Cow::Borrowed(s) => crate::value::casefold(s),
+                            Cow::Owned(s) => crate::value::casefold_owned(s),
+                        }
+                    };
+                    (canonical_key, normalized_key)
+                }
+                Cow::Owned(canon) => {
+                    let normalized = normalize_pivot_cache_field_name(&canon);
+                    let normalized_same = normalized.as_ref() == canon.as_str();
+                    let normalized_owned = (!normalized_same).then(|| normalized.into_owned());
+                    let canonical_key = crate::value::casefold_owned(canon);
+                    let normalized_key = match normalized_owned {
+                        None => canonical_key.clone(),
+                        Some(s) => crate::value::casefold_owned(s),
+                    };
+                    (canonical_key, normalized_key)
+                }
+            };
+            let display_key = crate::value::casefold_owned(f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -212,10 +263,33 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
             let canonical = f.source_field.canonical_name();
-            let canonical_key = crate::value::casefold(canonical.as_ref());
-            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
-            let normalized_key = crate::value::casefold(normalized.as_ref());
-            let display_key = crate::value::casefold(&f.source_field.to_string());
+            let (canonical_key, normalized_key) = match canonical {
+                Cow::Borrowed(canon) => {
+                    let canonical_key = crate::value::casefold(canon);
+                    let normalized = normalize_pivot_cache_field_name(canon);
+                    let normalized_key = if normalized.as_ref() == canon {
+                        canonical_key.clone()
+                    } else {
+                        match normalized {
+                            Cow::Borrowed(s) => crate::value::casefold(s),
+                            Cow::Owned(s) => crate::value::casefold_owned(s),
+                        }
+                    };
+                    (canonical_key, normalized_key)
+                }
+                Cow::Owned(canon) => {
+                    let normalized = normalize_pivot_cache_field_name(&canon);
+                    let normalized_same = normalized.as_ref() == canon.as_str();
+                    let normalized_owned = (!normalized_same).then(|| normalized.into_owned());
+                    let canonical_key = crate::value::casefold_owned(canon);
+                    let normalized_key = match normalized_owned {
+                        None => canonical_key.clone(),
+                        Some(s) => crate::value::casefold_owned(s),
+                    };
+                    (canonical_key, normalized_key)
+                }
+            };
+            let display_key = crate::value::casefold_owned(f.source_field.to_string());
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -243,11 +317,12 @@ impl PivotRegistryEntry {
         let mut value_field_source_indices: Vec<usize> =
             Vec::with_capacity(pivot.config.value_fields.len());
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
-            value_field_indices.insert(crate::value::casefold(&vf.name), idx);
+            value_field_indices.insert(crate::value::casefold_owned(vf.name.clone()), idx);
             let field_name = vf.source_field.canonical_name();
             let field_name = normalize_pivot_cache_field_name(field_name.as_ref());
-            let key = crate::value::casefold(field_name.as_ref());
-            let (cache_idx, _cache_name) = resolve_cache_field(&vf.source_field, &key)?;
+            let (cache_idx, _cache_name) = crate::value::with_casefolded_key(field_name.as_ref(), |key| {
+                resolve_cache_field(&vf.source_field, key)
+            })?;
             value_field_source_indices.push(cache_idx);
         }
 

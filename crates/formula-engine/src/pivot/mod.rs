@@ -234,7 +234,10 @@ impl PivotCache {
 
         for header in headers {
             let mut base = header.display_string();
-            base = base.trim().to_string();
+            let trimmed = base.trim();
+            if trimmed.len() != base.len() {
+                base = trimmed.to_string();
+            }
 
             // Best-effort canonicalization for Data Model-style DAX identifiers in cache headers.
             //
@@ -251,19 +254,19 @@ impl PivotCache {
             }
 
             let mut name = base.clone();
-            if used_folded.contains(&fold_text_case_insensitive(&name)) {
+            if crate::value::with_casefolded_key(&name, |folded| used_folded.contains(folded)) {
                 let mut suffix = 2usize;
                 loop {
                     name = format!("{base} ({suffix})");
-                    let folded = fold_text_case_insensitive(&name);
-                    if !used_folded.contains(&folded) {
+                    if !crate::value::with_casefolded_key(&name, |folded| used_folded.contains(folded))
+                    {
                         break;
                     }
                     suffix += 1;
                 }
             }
 
-            used_folded.insert(fold_text_case_insensitive(&name));
+            used_folded.insert(crate::value::casefold(&name));
             out.push(name);
         }
 
@@ -879,31 +882,11 @@ impl Accumulator {
 }
 
 fn normalize_pivot_item_name(name: &str) -> String {
-    fold_text_case_insensitive(name)
+    crate::value::casefold(name)
 }
 
 fn normalize_pivot_item_name_owned(name: String) -> String {
-    fold_text_case_insensitive_owned(name)
-}
-
-fn fold_text_case_insensitive(s: &str) -> String {
-    if s.is_ascii() {
-        s.to_ascii_uppercase()
-    } else {
-        // Use Unicode-aware uppercasing to approximate Excel-like case-insensitive matching for
-        // non-ASCII text (e.g. ß -> SS).
-        s.chars().flat_map(|c| c.to_uppercase()).collect()
-    }
-}
-
-fn fold_text_case_insensitive_owned(mut s: String) -> String {
-    if s.is_ascii() {
-        s.make_ascii_uppercase();
-        return s;
-    }
-    // Use Unicode-aware uppercasing to approximate Excel-like case-insensitive matching for
-    // non-ASCII text (e.g. ß -> SS).
-    s.chars().flat_map(|c| c.to_uppercase()).collect()
+    crate::value::casefold_owned(name)
 }
 
 #[derive(Debug, Clone)]
@@ -5977,7 +5960,7 @@ mod tests {
 
         let folded: HashSet<String> = field_names
             .iter()
-            .map(|s| fold_text_case_insensitive(s))
+            .map(|s| crate::value::casefold(s))
             .collect();
         assert_eq!(folded.len(), field_names.len());
 
@@ -6005,7 +5988,7 @@ mod tests {
 
         let folded: HashSet<String> = field_names
             .iter()
-            .map(|s| fold_text_case_insensitive(s))
+            .map(|s| crate::value::casefold(s))
             .collect();
         assert_eq!(folded.len(), field_names.len());
     }
