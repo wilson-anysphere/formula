@@ -109,10 +109,7 @@ fn lex_partial_r1c1_bracket_field_access_produces_tokens() {
     );
     assert_eq!(out.tokens[1].kind, TokenKind::Dot);
     assert_eq!(out.tokens[2].kind, TokenKind::LBracket);
-    assert_eq!(
-        out.tokens[3].kind,
-        TokenKind::Ident("\"Change%\"".to_string())
-    );
+    assert_eq!(out.tokens[3].kind, TokenKind::String("Change%".to_string()));
     assert_eq!(out.tokens[4].kind, TokenKind::RBracket);
     assert_eq!(out.tokens[5].kind, TokenKind::Eof);
 }

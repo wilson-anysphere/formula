@@ -376,7 +376,7 @@ impl<'a> Lexer<'a> {
 
         while let Some(ch) = self.peek_char() {
             let start = self.idx;
-            if self.bracket_depth > 0 && !matches!(ch, '[' | ']') {
+            if self.bracket_depth > 0 && !matches!(ch, '[' | ']' | '"') {
                 // Inside workbook/structured reference brackets, treat everything as raw text so
                 // locale separators (e.g. `,` in `Table1[[#Headers],[Col]]`) don't get lexed as
                 // unions/arg separators and non-locale delimiters don't fail lexing.
@@ -2789,23 +2789,23 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBracket => {
                 self.expect(TokenKind::LBracket)?;
-                let raw_inner = match &mut self.tokens[self.pos].kind {
+                let field = match &mut self.tokens[self.pos].kind {
                     TokenKind::Ident(s) => {
                         let raw = std::mem::take(s);
                         self.pos += 1;
-                        raw
+                        parse_field_selector_from_brackets(&raw, dot_span)?
+                    }
+                    TokenKind::String(s) => {
+                        let value = std::mem::take(s);
+                        self.pos += 1;
+                        value
                     }
                     TokenKind::RBracket => String::new(),
                     _ => {
-                        return Err(ParseError::new(
-                            "Expected field selector",
-                            self.current_span(),
-                        ));
+                        return Err(ParseError::new("Expected field selector", self.current_span()));
                     }
                 };
                 self.expect(TokenKind::RBracket)?;
-
-                let field = parse_field_selector_from_brackets(&raw_inner, dot_span)?;
                 Ok(Expr::FieldAccess(FieldAccessExpr {
                     base: Box::new(base),
                     field,
@@ -2855,11 +2855,22 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => {
                 self.next(); // '['
 
-                let raw_inner = match &mut self.tokens[self.pos].kind {
+                let field = match &mut self.tokens[self.pos].kind {
                     TokenKind::Ident(s) => {
                         let raw = std::mem::take(s);
                         self.pos += 1;
-                        raw
+                        match parse_field_selector_from_brackets(&raw, dot_span) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                self.record_error(e);
+                                raw.trim().to_string()
+                            }
+                        }
+                    }
+                    TokenKind::String(s) => {
+                        let value = std::mem::take(s);
+                        self.pos += 1;
+                        value
                     }
                     _ => String::new(),
                 };
@@ -2880,14 +2891,6 @@ impl<'a> Parser<'a> {
                         self.next();
                     }
                 }
-
-                let field = match parse_field_selector_from_brackets(&raw_inner, dot_span) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        self.record_error(e);
-                        raw_inner.trim().to_string()
-                    }
-                };
 
                 Expr::FieldAccess(FieldAccessExpr {
                     base: Box::new(base),
