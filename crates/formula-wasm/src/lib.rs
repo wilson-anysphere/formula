@@ -18,9 +18,9 @@ use formula_engine::{
     Value as EngineValue,
 };
 use formula_model::{
-    display_formula_text, Alignment, CellRef, CellValue, Color, DateSystem, DefinedNameScope, Font,
-    HorizontalAlignment, Protection, Range, SheetVisibility, Style, TabColor, VerticalAlignment,
-    push_column_label, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    display_formula_text, push_column_label, Alignment, CellRef, CellValue, Color, DateSystem,
+    DefinedNameScope, Font, HorizontalAlignment, Protection, Range, SheetVisibility, Style,
+    TabColor, VerticalAlignment, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -764,8 +764,7 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
                         Some(HorizontalAlignment::General)
                     } else if s.eq_ignore_ascii_case("left") {
                         Some(HorizontalAlignment::Left)
-                    } else if s.eq_ignore_ascii_case("center") || s.eq_ignore_ascii_case("centre")
-                    {
+                    } else if s.eq_ignore_ascii_case("center") || s.eq_ignore_ascii_case("centre") {
                         Some(HorizontalAlignment::Center)
                     } else if s.eq_ignore_ascii_case("right") {
                         Some(HorizontalAlignment::Right)
@@ -1010,18 +1009,39 @@ fn parse_options_and_locale_from_js(
     ))
 }
 
-fn normalize_function_context_name(name: &str, locale: Option<&FormulaLocale>) -> String {
-    let canonical = match locale {
-        Some(locale) => locale.canonical_function_name(name),
-        None => name.to_ascii_uppercase(),
-    };
+fn normalize_function_context_name_owned(name: String, locale: Option<&FormulaLocale>) -> String {
+    match locale {
+        Some(locale) => {
+            // Canonicalization handles localized names and preserves the `_xlfn.` prefix in
+            // lowercase (Excel-style) when present.
+            let mut canonical = locale.canonical_function_name(&name);
+            strip_xlfn_prefix_in_place(&mut canonical);
+            canonical
+        }
+        None => {
+            // Fast path for the common editor case: ASCII-only function names.
+            let mut name = name;
+            strip_xlfn_prefix_in_place(&mut name);
+            name.make_ascii_uppercase();
+            name
+        }
+    }
+}
 
-    const XL_FN_PREFIX: &str = "_xlfn.";
-    canonical
+#[cfg(test)]
+fn normalize_function_context_name(name: &str, locale: Option<&FormulaLocale>) -> String {
+    normalize_function_context_name_owned(name.to_string(), locale)
+}
+
+#[inline]
+fn strip_xlfn_prefix_in_place(s: &mut String) {
+    const XL_FN_PREFIX: &[u8] = b"_XLFN.";
+    if s.as_bytes()
         .get(..XL_FN_PREFIX.len())
-        .filter(|prefix| prefix.eq_ignore_ascii_case(XL_FN_PREFIX))
-        .map(|_| canonical[XL_FN_PREFIX.len()..].to_string())
-        .unwrap_or(canonical)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(XL_FN_PREFIX))
+    {
+        s.replace_range(..XL_FN_PREFIX.len(), "");
+    }
 }
 fn edit_error_to_string(err: EngineEditError) -> String {
     match err {
@@ -3078,8 +3098,7 @@ impl WorkbookState {
         let target_cell_ref = Self::parse_address(target_cell)?;
         let changing_cell_ref = Self::parse_address(changing_cell)?;
         let target_cell = formula_model::cell_to_a1(target_cell_ref.row, target_cell_ref.col);
-        let changing_cell =
-            formula_model::cell_to_a1(changing_cell_ref.row, changing_cell_ref.col);
+        let changing_cell = formula_model::cell_to_a1(changing_cell_ref.row, changing_cell_ref.col);
 
         let mut params =
             GoalSeekParams::new(target_cell.as_str(), target_value, changing_cell.as_str());
@@ -3559,7 +3578,8 @@ impl WorkbookState {
                         let Some(remapped) = remap_key(&key, op) else {
                             continue;
                         };
-                        let remapped_address = formula_model::cell_to_a1(remapped.row, remapped.col);
+                        let remapped_address =
+                            formula_model::cell_to_a1(remapped.row, remapped.col);
                         next_rich
                             .entry(remapped.sheet)
                             .or_default()
@@ -3896,7 +3916,8 @@ fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
 
 #[derive(Debug)]
 struct FallbackFunctionFrame {
-    name: String,
+    name_start: usize,
+    name_end: usize,
     paren_depth: usize,
     arg_index: usize,
     brace_depth: usize,
@@ -4076,8 +4097,6 @@ fn scan_fallback_function_context(
                             }
                         }
 
-                        let ident = &formula_prefix[start..end];
-
                         // Look ahead for `(`, allowing whitespace between.
                         let mut j = end;
                         while j < formula_prefix.len() {
@@ -4097,7 +4116,8 @@ fn scan_fallback_function_context(
                         {
                             paren_depth += 1;
                             stack.push(FallbackFunctionFrame {
-                                name: ident.to_ascii_uppercase(),
+                                name_start: start,
+                                name_end: end,
                                 paren_depth,
                                 arg_index: 0,
                                 brace_depth,
@@ -4117,9 +4137,15 @@ fn scan_fallback_function_context(
         }
     }
 
-    stack.last().map(|frame| formula_engine::FunctionContext {
-        name: frame.name.clone(),
-        arg_index: frame.arg_index,
+    stack.last().map(|frame| {
+        debug_assert!(frame.name_start <= frame.name_end);
+        debug_assert!(frame.name_end <= formula_prefix.len());
+        debug_assert!(formula_prefix.is_char_boundary(frame.name_start));
+        debug_assert!(formula_prefix.is_char_boundary(frame.name_end));
+        formula_engine::FunctionContext {
+            name: formula_prefix[frame.name_start..frame.name_end].to_string(),
+            arg_index: frame.arg_index,
+        }
     })
 }
 
@@ -4193,7 +4219,7 @@ pub fn parse_formula_partial(
 
     let context = WasmParseContext {
         function: parsed.context.function.map(|ctx| WasmFunctionContext {
-            name: normalize_function_context_name(&ctx.name, locale),
+            name: normalize_function_context_name_owned(ctx.name, locale),
             arg_index: ctx.arg_index,
         }),
     };
