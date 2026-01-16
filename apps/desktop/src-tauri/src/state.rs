@@ -5454,18 +5454,27 @@ fn quote_sheet_name(name: &str) -> String {
 }
 
 fn col_index_to_letters(col: usize) -> String {
-    // Excel columns are base-26 with A=1..Z=26.
-    //
-    // Do arithmetic in u64 so very large `usize` indices (e.g. u32::MAX on wasm32/32-bit targets)
-    // don't overflow on the 0->1 conversion.
+    if let Ok(col) = u32::try_from(col) {
+        let mut out = String::new();
+        formula_model::push_column_label(col, &mut out);
+        return out;
+    }
+
+    // Best-effort for out-of-range indices. This path is only used to format diagnostics for
+    // extremely large column indices that cannot appear in Excel.
     let mut col = u64::try_from(col).unwrap_or(u64::MAX).saturating_add(1);
-    let mut letters = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
     while col > 0 {
         let rem = ((col - 1) % 26) as u8;
-        letters.push((b'A' + rem) as char);
+        buf.push(b'A' + rem);
         col = (col - 1) / 26;
     }
-    letters.iter().rev().collect()
+
+    let mut out = String::with_capacity(buf.len());
+    for ch in buf.iter().rev() {
+        out.push(*ch as char);
+    }
+    out
 }
 
 fn scalar_to_what_if_value(value: &CellScalar) -> WhatIfCellValue {
