@@ -683,13 +683,22 @@ impl FunctionName {
     pub fn new(original: String) -> Self {
         const XLFN_PREFIX: &str = "_XLFN.";
 
-        let mut name_upper = original.to_ascii_uppercase();
-        let has_prefix = if name_upper.starts_with(XLFN_PREFIX) {
-            // `name_upper` is already ASCII uppercase, so removing the prefix is safe and stable.
-            name_upper.replace_range(..XLFN_PREFIX.len(), "");
-            true
+        // Excel stores newer built-in functions with an `_xlfn.` prefix in files. We preserve a
+        // flag so serialization can optionally re-emit the prefix in "file mode".
+        let (has_prefix, base) = match original.get(..XLFN_PREFIX.len()) {
+            Some(prefix) if prefix.eq_ignore_ascii_case(XLFN_PREFIX) => {
+                (true, &original[XLFN_PREFIX.len()..])
+            }
+            _ => (false, original.as_str()),
+        };
+
+        // Fast path for the common case where the (unprefixed) identifier is already ASCII
+        // uppercase: avoid the `to_ascii_uppercase()` transform loop.
+        let name_upper = if base.is_ascii() && !base.as_bytes().iter().any(|b| b.is_ascii_lowercase())
+        {
+            base.to_string()
         } else {
-            false
+            base.to_ascii_uppercase()
         };
 
         Self {

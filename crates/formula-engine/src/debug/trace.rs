@@ -1593,9 +1593,14 @@ impl ParserImpl {
     fn parse_function_call(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let name_tok = self.next();
         let name = match name_tok.kind {
-            TokenKind::Ident(s) => {
-                let upper = s.to_ascii_uppercase();
-                upper.strip_prefix("_XLFN.").unwrap_or(&upper).to_string()
+            TokenKind::Ident(mut s) => {
+                s.make_ascii_uppercase();
+                const XLFN_PREFIX: &str = "_XLFN.";
+                if s.starts_with(XLFN_PREFIX) {
+                    // In-place prefix removal avoids allocating a second string.
+                    s.replace_range(..XLFN_PREFIX.len(), "");
+                }
+                s
             }
             other => {
                 return Err(FormulaParseError::Expected {
@@ -2930,7 +2935,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         .fields
                         .iter()
                         .find(|(k, _)| {
-                            crate::value::cmp_case_insensitive(k, &field_name) == Ordering::Equal
+                            crate::value::eq_case_insensitive(k, &field_name)
                         })
                         .map(|(_, v)| v.clone())
                         .unwrap_or(Value::Error(ErrorKind::Field)),
@@ -2938,7 +2943,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         .fields
                         .iter()
                         .find(|(k, _)| {
-                            crate::value::cmp_case_insensitive(k, &field_name) == Ordering::Equal
+                            crate::value::eq_case_insensitive(k, &field_name)
                         })
                         .map(|(_, v)| v.clone())
                         .unwrap_or(Value::Error(ErrorKind::Field)),

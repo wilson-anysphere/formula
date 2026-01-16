@@ -141,18 +141,7 @@ pub enum Function {
 
 impl Function {
     pub fn from_name(name: &str) -> Self {
-        let mut buf = [0u8; 64];
-        if name.len() <= buf.len() {
-            for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
-                *dst = src.to_ascii_uppercase();
-            }
-            let upper = std::str::from_utf8(&buf[..name.len()])
-                .expect("ASCII uppercasing preserves UTF-8");
-            return Self::from_uppercase_name(upper);
-        }
-
-        let upper = name.to_ascii_uppercase();
-        Self::from_uppercase_name(&upper)
+        crate::value::with_ascii_uppercased_key(name, |upper| Self::from_uppercase_name(upper))
     }
 
     fn from_uppercase_name(upper: &str) -> Self {
@@ -815,10 +804,9 @@ impl<'a> Parser<'a> {
             // If the name is not a known built-in function, interpret `name(args...)` as a call
             // expression on a lexical name reference (used for LET/LAMBDA invocation syntax).
             if matches!(func, Function::Unknown(_)) {
-                let mut upper = ident.to_string();
-                upper.make_ascii_uppercase();
+                let callee = crate::value::with_ascii_uppercased_key(ident, |upper| Arc::from(upper));
                 return Ok(Expr::Call {
-                    callee: Box::new(Expr::NameRef(Arc::from(upper))),
+                    callee: Box::new(Expr::NameRef(callee)),
                     args,
                 });
             }
@@ -834,9 +822,8 @@ impl<'a> Parser<'a> {
         }
 
         let Some(first) = parse_a1_ref(ident, self.origin) else {
-            let mut upper = ident.to_string();
-            upper.make_ascii_uppercase();
-            return Ok(Expr::NameRef(Arc::from(upper)));
+            let name = crate::value::with_ascii_uppercased_key(ident, |upper| Arc::from(upper));
+            return Ok(Expr::NameRef(name));
         };
         self.skip_ws();
         if self.peek_byte() == Some(b':') {

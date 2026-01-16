@@ -16,7 +16,7 @@ use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
-    cmp_case_insensitive, format_number_general_with_options, parse_number,
+    cmp_case_insensitive, eq_case_insensitive, format_number_general_with_options, parse_number,
     ErrorKind as EngineErrorKind, RecordValue, Value as EngineValue,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -10254,7 +10254,7 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
                 (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
                     let a = text_like_str(a).unwrap();
                     let b = text_like_str(b).unwrap();
-                    cmp_case_insensitive(a.as_ref(), b.as_ref()) == Ordering::Equal
+                    eq_case_insensitive(a.as_ref(), b.as_ref())
                 }
                 (Value::Bool(a), Value::Bool(b)) => a == b,
                 (Value::Error(a), Value::Error(b)) => a == b,

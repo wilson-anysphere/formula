@@ -431,16 +431,33 @@ impl Workbook {
         // not enough here; e.g. U+212A KELVIN SIGN (K) should match ASCII 'K' after NFKC
         // normalization.
         if name.is_ascii() {
-            return name.to_ascii_uppercase();
+            if !name.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                return name.to_string();
+            }
+            // Avoid an intermediate `String` for long ASCII keys that need uppercasing.
+            let mut out = name.to_string();
+            out.make_ascii_uppercase();
+            return out;
         }
         name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+    }
+
+    fn with_sheet_key_lookup<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+        if name.is_ascii() {
+            return crate::value::with_ascii_uppercased_key(name, f);
+        }
+
+        let key: String = name.nfkc().flat_map(|c| c.to_uppercase()).collect();
+        f(&key)
     }
 
     /// Returns `true` if `name` would conflict with any existing sheet (stable key or display name)
     /// under Excel-style case-insensitive name resolution.
     fn sheet_name_taken(&self, name: &str) -> bool {
-        let key = Self::sheet_key(name);
-        self.sheet_display_name_to_id.contains_key(&key) || self.sheet_key_to_id.contains_key(&key)
+        Self::with_sheet_key_lookup(name, |key| {
+            self.sheet_display_name_to_id.contains_key(key)
+                || self.sheet_key_to_id.contains_key(key)
+        })
     }
 
     /// Generate a valid, unique Excel worksheet **display name** for a new sheet.
@@ -521,8 +538,7 @@ impl Workbook {
     }
 
     fn sheet_id_by_key(&self, sheet_key: &str) -> Option<SheetId> {
-        let key = Self::sheet_key(sheet_key);
-        self.sheet_key_to_id.get(&key).copied()
+        Self::with_sheet_key_lookup(sheet_key, |key| self.sheet_key_to_id.get(key).copied())
     }
 
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
@@ -533,11 +549,12 @@ impl Workbook {
         // Excel formulas reference the user-visible tab name. Resolve by display name
         // case-insensitively, but fall back to the stable key so existing call sites / persisted
         // workbooks that reference `sheet_key` keep working.
-        let key = Self::sheet_key(name);
-        self.sheet_display_name_to_id
-            .get(&key)
-            .copied()
-            .or_else(|| self.sheet_key_to_id.get(&key).copied())
+        Self::with_sheet_key_lookup(name, |key| {
+            self.sheet_display_name_to_id
+                .get(key)
+                .copied()
+                .or_else(|| self.sheet_key_to_id.get(key).copied())
+        })
     }
 
     /// Update the user-visible display name for `sheet_id`.
@@ -1479,10 +1496,12 @@ impl Engine {
             .is_some_and(|k| formula_model::sheet_name_eq_case_insensitive(k, &old_name))
         {
             let new_key = Workbook::sheet_key(new_name);
-            if let Some(old_key) = old_sheet_key.as_ref().map(|k| Workbook::sheet_key(k)) {
-                if self.workbook.sheet_key_to_id.get(&old_key) == Some(&id) {
-                    self.workbook.sheet_key_to_id.remove(&old_key);
-                }
+            if let Some(old_sheet_key) = old_sheet_key.as_deref() {
+                Workbook::with_sheet_key_lookup(old_sheet_key, |old_key| {
+                    if self.workbook.sheet_key_to_id.get(old_key) == Some(&id) {
+                        self.workbook.sheet_key_to_id.remove(old_key);
+                    }
+                });
             }
             self.workbook.sheet_keys[id] = Some(new_name.to_string());
             self.workbook.sheet_key_to_id.insert(new_key, id);
@@ -1499,20 +1518,23 @@ impl Engine {
         // updated as well so the old name no longer resolves via the fallback
         // `display_name -> key` lookup. This prevents operations like pivot refresh (which uses
         // `ensure_sheet`) from accidentally resurrecting the pre-rename name.
-        let key_name = self
-            .workbook
-            .sheet_key_name(id)
-            .unwrap_or(&old_name)
-            .to_string();
-        if formula_model::sheet_name_eq_case_insensitive(&key_name, &old_name) {
-            let old_key = Workbook::sheet_key(&key_name);
+        let key_matches_old = match self.workbook.sheet_key_name(id) {
+            Some(name) => formula_model::sheet_name_eq_case_insensitive(name, &old_name),
+            None => true,
+        };
+        if key_matches_old {
             let new_key = Workbook::sheet_key(new_name);
             if let Some(slot) = self.workbook.sheet_keys.get_mut(id) {
                 *slot = Some(new_name.to_string());
             }
-            if self.workbook.sheet_key_to_id.get(&old_key) == Some(&id) {
-                self.workbook.sheet_key_to_id.remove(&old_key);
-            }
+            // If the stable key matched the old display name, its canonical lookup key is equal to
+            // the old display name's canonical key. Remove using `old_name` directly so we avoid
+            // borrowing the sheet-keys array while mutating the map.
+            Workbook::with_sheet_key_lookup(&old_name, |old_key| {
+                if self.workbook.sheet_key_to_id.get(old_key) == Some(&id) {
+                    self.workbook.sheet_key_to_id.remove(old_key);
+                }
+            });
             self.workbook.sheet_key_to_id.insert(new_key, id);
         }
 
@@ -2116,14 +2138,14 @@ impl Engine {
             .map(|sheet_state| sheet_state.tables.iter().map(|t| t.id).collect())
             .unwrap_or_default();
         self.workbook.pivots.retain(|_, def| {
-            let dest_key = Workbook::sheet_key(&def.destination.sheet);
             let destination_matches =
-                dest_key == deleted_sheet_key_norm || dest_key == deleted_sheet_display_key_norm;
+                Workbook::with_sheet_key_lookup(&def.destination.sheet, |dest_key| {
+                    dest_key == deleted_sheet_key_norm || dest_key == deleted_sheet_display_key_norm
+                });
             let source_matches = match &def.source {
-                PivotSource::Range { sheet, .. } => {
-                    let key = Workbook::sheet_key(sheet);
+                PivotSource::Range { sheet, .. } => Workbook::with_sheet_key_lookup(sheet, |key| {
                     key == deleted_sheet_key_norm || key == deleted_sheet_display_key_norm
-                }
+                }),
                 PivotSource::Table { table_id } => deleted_table_ids.contains(table_id),
             };
             !(destination_matches || source_matches)
@@ -4979,23 +5001,23 @@ impl Engine {
     }
 
     pub fn get_name(&self, name: &str, scope: NameScope<'_>) -> Option<&NameDefinition> {
-        let name_key = normalize_defined_name(name);
-        if name_key.is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return None;
         }
 
-        match scope {
-            NameScope::Workbook => self.workbook.names.get(&name_key).map(|n| &n.definition),
+        with_defined_name_key(name, |key| match scope {
+            NameScope::Workbook => self.workbook.names.get(key).map(|n| &n.definition),
             NameScope::Sheet(sheet_name) => {
                 let sheet_id = self.workbook.sheet_id(sheet_name)?;
                 self.workbook
                     .sheets
                     .get(sheet_id)?
                     .names
-                    .get(&name_key)
+                    .get(key)
                     .map(|n| &n.definition)
             }
-        }
+        })
     }
 
     pub fn set_cell_formula(
@@ -5990,8 +6012,9 @@ impl Engine {
         }
 
         // Keep pivot table definitions in sync with the structural workbook edit.
-        let mut resolve_sheet_id =
-            |name: &str| sheet_name_to_id.get(&Workbook::sheet_key(name)).copied();
+        let mut resolve_sheet_id = |name: &str| {
+            Workbook::with_sheet_key_lookup(name, |key| sheet_name_to_id.get(key).copied())
+        };
         for pivot in self.workbook.pivots.values_mut() {
             pivot.apply_edit_op_with_sheet_resolver(&op_clone, &mut resolve_sheet_id);
         }
@@ -10366,7 +10389,11 @@ fn rewrite_all_formulas_structural(
                 ctx_sheet,
                 origin,
                 &edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -10401,7 +10428,11 @@ fn rewrite_all_formulas_structural(
                         ctx_sheet,
                         origin,
                         &edit,
-                        |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                        |name| {
+                            Workbook::with_sheet_key_lookup(name, |key| {
+                                sheet_order_indices.get(key).copied()
+                            })
+                        },
                     );
                     if changed {
                         *formula = new_formula;
@@ -10415,7 +10446,11 @@ fn rewrite_all_formulas_structural(
                         ctx_sheet,
                         origin,
                         &edit,
-                        |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                        |name| {
+                            Workbook::with_sheet_key_lookup(name, |key| {
+                                sheet_order_indices.get(key).copied()
+                            })
+                        },
                     );
                     if changed {
                         *formula = new_formula;
@@ -10451,7 +10486,11 @@ fn rewrite_all_formulas_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -11203,11 +11242,6 @@ fn canonical_expr_collect_defined_name_prefix_errors(
                 return;
             }
 
-            let name_key = normalize_defined_name(&nref.name);
-            if name_key.is_empty() {
-                return;
-            }
-
             let sheet_id = match nref.sheet.as_ref() {
                 None => Some(current_sheet),
                 Some(sheet_ref) => sheet_ref
@@ -11218,9 +11252,14 @@ fn canonical_expr_collect_defined_name_prefix_errors(
                 return;
             };
 
-            canonical_expr_collect_defined_name_prefix_errors_for_name(
-                sheet_id, &name_key, workbook, visiting, flags,
-            );
+            with_defined_name_key(&nref.name, |name_key| {
+                if name_key.is_empty() {
+                    return;
+                }
+                canonical_expr_collect_defined_name_prefix_errors_for_name(
+                    sheet_id, name_key, workbook, visiting, flags,
+                );
+            });
         }
         crate::Expr::FieldAccess(access) => {
             canonical_expr_collect_defined_name_prefix_errors(
@@ -11327,29 +11366,27 @@ fn canonical_expr_collect_defined_name_prefix_errors_for_name(
     if flags.external_reference {
         return;
     }
+    let Some(def) = resolve_defined_name(workbook, sheet_id, name_key) else {
+        return;
+    };
+
+    let (NameDefinition::Reference(formula) | NameDefinition::Formula(formula)) = &def.definition else {
+        // Constants do not expand into prefixes.
+        return;
+    };
 
     let visit_key = (sheet_id, name_key.to_string());
     if !visiting.insert(visit_key.clone()) {
         return;
     }
 
-    let Some(def) = resolve_defined_name(workbook, sheet_id, name_key) else {
-        visiting.remove(&visit_key);
-        return;
-    };
+    if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
+        canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
 
-    match &def.definition {
-        NameDefinition::Constant(_) => {}
-        NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
-            if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
-
-                if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
-                    canonical_expr_collect_defined_name_prefix_errors(
-                        &ast.expr, sheet_id, workbook, visiting, flags,
-                    );
-                }
-            }
+        if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
+            canonical_expr_collect_defined_name_prefix_errors(
+                &ast.expr, sheet_id, workbook, visiting, flags,
+            );
         }
     }
 
@@ -12380,11 +12417,12 @@ impl crate::eval::ValueResolver for Snapshot {
         //
         // Resolve by display name first (Excel tab name), with a stable-key fallback so existing
         // call sites that still pass `sheet_key` keep working.
-        let key = Workbook::sheet_key(name);
-        self.sheet_display_name_to_id
-            .get(&key)
-            .copied()
-            .or_else(|| self.sheet_key_to_id.get(&key).copied())
+        Workbook::with_sheet_key_lookup(name, |key| {
+            self.sheet_display_name_to_id
+                .get(key)
+                .copied()
+                .or_else(|| self.sheet_key_to_id.get(key).copied())
+        })
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -12430,27 +12468,28 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<crate::eval::ResolvedName> {
-        let key = normalize_defined_name(name);
-        if let Some(map) = self.sheet_names.get(sheet_id) {
-            if let Some(def) = map.get(&key) {
-                return Some(def.clone());
-            }
-        }
-        if let Some(def) = self.workbook_names.get(&key) {
-            return Some(def.clone());
-        }
-
-        // Excel allows referring to a table by name (e.g. `=Table1`) which resolves to the table's
-        // default data body area.
         let name = name.trim();
         if name.is_empty() {
             return None;
         }
+
+        if let Some(def) = with_defined_name_key(name, |key| {
+            if let Some(map) = self.sheet_names.get(sheet_id) {
+                if let Some(def) = map.get(key) {
+                    return Some(def.clone());
+                }
+            }
+            self.workbook_names.get(key).cloned()
+        }) {
+            return Some(def);
+        }
+
+        // Excel allows referring to a table by name (e.g. `=Table1`) which resolves to the table's
+        // default data body area.
         for tables in &self.tables {
             for table in tables {
-                if crate::value::cmp_case_insensitive(&table.name, name) == Ordering::Equal
-                    || crate::value::cmp_case_insensitive(&table.display_name, name)
-                        == Ordering::Equal
+                if crate::value::eq_case_insensitive(&table.name, name)
+                    || crate::value::eq_case_insensitive(&table.display_name, name)
                 {
                     return Some(crate::eval::ResolvedName::Expr(Expr::StructuredRef(
                         crate::eval::StructuredRefExpr {
@@ -14248,13 +14287,13 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         // Excel resolves sheet names case-insensitively across Unicode using compatibility
         // normalization (NFKC). Ensure bytecode runtime sheet-name lookups (e.g. INDIRECT, SHEET)
         // match the engine's canonical sheet-key semantics.
-        let key = Workbook::sheet_key(name);
-        let local = self
-            .snapshot
-            .sheet_display_name_to_id
-            .get(&key)
-            .copied()
-            .or_else(|| self.snapshot.sheet_key_to_id.get(&key).copied());
+        let local = Workbook::with_sheet_key_lookup(name, |key| {
+            self.snapshot
+                .sheet_display_name_to_id
+                .get(key)
+                .copied()
+                .or_else(|| self.snapshot.sheet_key_to_id.get(key).copied())
+        });
         if local.is_some() {
             return local;
         }
@@ -15913,9 +15952,8 @@ fn walk_expr_flags(
                 let candidate = nref.name.trim();
                 if !candidate.is_empty()
                     && tables_by_sheet.iter().flatten().any(|t| {
-                        crate::value::cmp_case_insensitive(&t.name, candidate) == Ordering::Equal
-                            || crate::value::cmp_case_insensitive(&t.display_name, candidate)
-                                == Ordering::Equal
+                        crate::value::eq_case_insensitive(&t.name, candidate)
+                            || crate::value::eq_case_insensitive(&t.display_name, candidate)
                     })
                 {
                     return;
@@ -16018,7 +16056,7 @@ fn walk_expr_flags(
             );
         }
         Expr::FunctionCall { name, args, .. } => {
-            if let Some(spec) = crate::functions::lookup_function(name) {
+            if let Some(spec) = crate::functions::lookup_function_upper(name) {
                 if spec.volatility == crate::functions::Volatility::Volatile {
                     *volatile = true;
                 }
@@ -16704,7 +16742,7 @@ fn walk_external_dependencies(
             );
         }
         Expr::FunctionCall { name, args, .. } => {
-            if let Some(spec) = crate::functions::lookup_function(name) {
+            if let Some(spec) = crate::functions::lookup_function_upper(name) {
                 match spec.name {
                     "INDIRECT" => {
                         // `INDIRECT` can dynamically produce references (including external workbook
@@ -16850,32 +16888,38 @@ fn walk_external_dependencies(
             } else {
                 // Unknown function name: treat it as a potential defined name (UDF) and expand the
                 // definition if present.
-                let name_key = normalize_defined_name(name);
-                let is_local = !name_key.is_empty() && name_is_local(lexical_scopes, &name_key);
-                if !name_key.is_empty() && !is_local {
-                    let sheet = current_cell.sheet;
-                    let visit_key = (sheet, name_key.clone());
-                    if visiting_names.insert(visit_key.clone()) {
-                        if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
-                            if let Some(expr) = def.compiled.as_ref() {
-                                walk_external_dependencies(
-                                    expr,
-                                    CellKey {
-                                        sheet,
-                                        addr: current_cell.addr,
-                                    },
-                                    workbook,
-                                    external_value_provider,
-                                    external_sheets,
-                                    external_workbooks,
-                                    visiting_names,
-                                    lexical_scopes,
-                                );
-                            }
-                        }
-                        visiting_names.remove(&visit_key);
+                with_defined_name_key(name, |name_key| {
+                    if name_key.is_empty() {
+                        return;
                     }
-                }
+                    if name_is_local(lexical_scopes, name_key) {
+                        return;
+                    }
+
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.to_string());
+                    if !visiting_names.insert(visit_key.clone()) {
+                        return;
+                    }
+                    if let Some(def) = resolve_defined_name(workbook, sheet, name_key) {
+                        if let Some(expr) = def.compiled.as_ref() {
+                            walk_external_dependencies(
+                                expr,
+                                CellKey {
+                                    sheet,
+                                    addr: current_cell.addr,
+                                },
+                                workbook,
+                                external_value_provider,
+                                external_sheets,
+                                external_workbooks,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                        }
+                    }
+                    visiting_names.remove(&visit_key);
+                });
             }
 
             for a in args {
@@ -17077,7 +17121,9 @@ fn walk_external_expr(
 
             let sheet_key = explicit_sheet_key
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| crate::external_refs::format_external_key(workbook, &table_sheet));
+                .unwrap_or_else(|| {
+                    crate::external_refs::format_external_key(workbook, &table_sheet)
+                });
 
             let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
                 &table,
@@ -17187,7 +17233,7 @@ fn walk_external_expr(
             );
         }
         Expr::FunctionCall { name, args, .. } => {
-            if let Some(spec) = crate::functions::lookup_function(name) {
+            if let Some(spec) = crate::functions::lookup_function_upper(name) {
                 match spec.name {
                     "LET" => {
                         if args.len() < 3 || args.len() % 2 == 0 {
@@ -17258,31 +17304,37 @@ fn walk_external_expr(
                     _ => {}
                 }
             } else {
-                let name_key = normalize_defined_name(name);
-                let is_local = !name_key.is_empty() && name_is_local(lexical_scopes, &name_key);
-                if !name_key.is_empty() && !is_local {
-                    let sheet = current_cell.sheet;
-                    let visit_key = (sheet, name_key.clone());
-                    if visiting_names.insert(visit_key.clone()) {
-                        if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
-                            if let Some(expr) = def.compiled.as_ref() {
-                                walk_external_expr(
-                                    expr,
-                                    CellKey {
-                                        sheet,
-                                        addr: current_cell.addr,
-                                    },
-                                    workbook,
-                                    external_value_provider,
-                                    precedents,
-                                    visiting_names,
-                                    lexical_scopes,
-                                );
-                            }
-                        }
-                        visiting_names.remove(&visit_key);
+                with_defined_name_key(name, |name_key| {
+                    if name_key.is_empty() {
+                        return;
                     }
-                }
+                    if name_is_local(lexical_scopes, name_key) {
+                        return;
+                    }
+
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.to_string());
+                    if !visiting_names.insert(visit_key.clone()) {
+                        return;
+                    }
+                    if let Some(def) = resolve_defined_name(workbook, sheet, name_key) {
+                        if let Some(expr) = def.compiled.as_ref() {
+                            walk_external_expr(
+                                expr,
+                                CellKey {
+                                    sheet,
+                                    addr: current_cell.addr,
+                                },
+                                workbook,
+                                external_value_provider,
+                                precedents,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                        }
+                    }
+                    visiting_names.remove(&visit_key);
+                });
             }
 
             for a in args {
@@ -18048,7 +18100,7 @@ fn walk_calc_expr(
             );
         }
         Expr::FunctionCall { name, args, .. } => {
-            if let Some(spec) = crate::functions::lookup_function(name) {
+            if let Some(spec) = crate::functions::lookup_function_upper(name) {
                 match spec.name {
                     "CELL" => {
                         if args.is_empty() {
@@ -18786,7 +18838,7 @@ fn walk_calc_expr(
                 }
             }
 
-            if let Some(spec) = crate::functions::lookup_function(name) {
+            if let Some(spec) = crate::functions::lookup_function_upper(name) {
                 // `CELL("width", ref)` consults column metadata for `ref` but does not depend on the
                 // contents of `ref`. Avoid registering plain reference literals as calc precedents
                 // so formulas like `A1 = CELL("width", A1)` do not create spurious circular
@@ -19040,6 +19092,10 @@ fn normalize_defined_name(name: &str) -> String {
     crate::value::casefold(name.trim())
 }
 
+fn with_defined_name_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+    crate::value::with_casefolded_key(name.trim(), f)
+}
+
 fn rewrite_defined_name_structural(
     engine: &Engine,
     def: &DefinedName,
@@ -19056,7 +19112,11 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -19066,7 +19126,11 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             (NameDefinition::Formula(new_formula), changed)
         }
@@ -19109,7 +19173,11 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -19119,7 +19187,11 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                |name| {
+                    Workbook::with_sheet_key_lookup(name, |key| {
+                        sheet_order_indices.get(key).copied()
+                    })
+                },
             );
             (NameDefinition::Formula(new_formula), changed)
         }

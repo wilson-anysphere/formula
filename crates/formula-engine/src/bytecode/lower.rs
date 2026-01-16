@@ -3,7 +3,7 @@ use super::value::{
     Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetId, SheetRangeRef,
     Value,
 };
-use crate::value::casefold;
+use crate::value::{casefold, with_casefolded_key};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -971,7 +971,7 @@ fn lower_canonical_expr_inner(
                         // a lambda invocation. Lower it as an unknown function call so bytecode
                         // eligibility can reject it (yielding `IneligibleExpr` rather than a lower
                         // error).
-                        if crate::functions::lookup_function(name_upper).is_some() {
+                        if crate::functions::lookup_function_upper(name_upper).is_some() {
                             return Ok(BytecodeExpr::FuncCall {
                                 func: Function::Unknown(name),
                                 args,
@@ -980,10 +980,10 @@ fn lower_canonical_expr_inner(
 
                         // Non-builtin function call. Treat this as a lambda invocation only when the
                         // name is in lexical scope (LET/LAMBDA parameters).
-                        let key = casefold(name_upper.trim());
-                        if !scopes.is_defined(&key) {
+                        if !with_casefolded_key(name_upper.trim(), |key| scopes.is_defined(key)) {
                             return Err(LowerError::Unsupported);
                         }
+                        let key = casefold(name_upper.trim());
 
                         Ok(BytecodeExpr::Call {
                             callee: Box::new(BytecodeExpr::NameRef(Arc::from(key))),
@@ -1021,11 +1021,11 @@ fn lower_canonical_expr_inner(
             if !prefix.is_unprefixed() {
                 return Err(LowerError::Unsupported);
             }
-            let key = casefold(nref.name.trim());
-            if !scopes.is_defined(&key) {
+            let name = nref.name.trim();
+            if !with_casefolded_key(name, |key| scopes.is_defined(key)) {
                 return Err(LowerError::Unsupported);
             }
-            Ok(BytecodeExpr::NameRef(Arc::from(key)))
+            Ok(BytecodeExpr::NameRef(Arc::from(casefold(name))))
         }
         crate::Expr::Postfix(p) => match p.op {
             crate::PostfixOp::Percent => Ok(BytecodeExpr::Binary {
