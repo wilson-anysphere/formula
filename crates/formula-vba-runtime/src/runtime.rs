@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, Timelike};
+use formula_model::column_label_to_index;
 use thiserror::Error;
 
 use crate::ast::{
@@ -1085,25 +1086,12 @@ impl<'a> Executor<'a> {
                     n
                 } else if !is_row {
                     // VBA allows `Cells(1, "B")` where the column is given as letters.
-                    let mut col: u32 = 0;
-                    for ch in s.chars() {
-                        if !ch.is_ascii_alphabetic() {
-                            return Err(VbaError::Runtime(format!(
-                                "Invalid column index `{s}` (expected number or letters)"
-                            )));
-                        }
-                        col = col
-                            .checked_mul(26)
-                            .and_then(|v| {
-                                v.checked_add((ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32)
-                            })
-                            .ok_or_else(|| {
-                                VbaError::Runtime(format!(
-                                    "Invalid column index `{s}` (overflow)"
-                                ))
-                            })?;
-                    }
-                    return Ok(col.max(1));
+                    let col0 = column_label_to_index(s).map_err(|_| {
+                        VbaError::Runtime(format!(
+                            "Invalid column index `{s}` (expected number or Excel column label)"
+                        ))
+                    })?;
+                    return Ok(col0 + 1);
                 } else {
                     return Err(VbaError::Runtime(format!(
                         "Invalid row index `{s}` (expected a number)"
