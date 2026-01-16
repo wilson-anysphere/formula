@@ -310,14 +310,21 @@ fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
         if raw.is_null() || raw.is_undefined() {
             Some(HorizontalAlignment::General)
         } else if let Some(raw) = raw.as_string() {
-            match raw.trim().to_lowercase().as_str() {
-                "general" => Some(HorizontalAlignment::General),
-                "left" => Some(HorizontalAlignment::Left),
-                "center" | "centre" => Some(HorizontalAlignment::Center),
-                "right" => Some(HorizontalAlignment::Right),
-                "fill" => Some(HorizontalAlignment::Fill),
-                "justify" => Some(HorizontalAlignment::Justify),
-                _ => None,
+            let trimmed = raw.trim();
+            if trimmed.eq_ignore_ascii_case("general") {
+                Some(HorizontalAlignment::General)
+            } else if trimmed.eq_ignore_ascii_case("left") {
+                Some(HorizontalAlignment::Left)
+            } else if trimmed.eq_ignore_ascii_case("center") || trimmed.eq_ignore_ascii_case("centre") {
+                Some(HorizontalAlignment::Center)
+            } else if trimmed.eq_ignore_ascii_case("right") {
+                Some(HorizontalAlignment::Right)
+            } else if trimmed.eq_ignore_ascii_case("fill") {
+                Some(HorizontalAlignment::Fill)
+            } else if trimmed.eq_ignore_ascii_case("justify") {
+                Some(HorizontalAlignment::Justify)
+            } else {
+                None
             }
         } else {
             None
@@ -327,11 +334,15 @@ fn parse_alignment_from_js(value: &JsValue) -> Option<Alignment> {
     };
 
     let vertical = get_js_string(&obj, &["vertical"]).and_then(|raw| {
-        match raw.trim().to_lowercase().as_str() {
-            "top" => Some(VerticalAlignment::Top),
-            "center" => Some(VerticalAlignment::Center),
-            "bottom" => Some(VerticalAlignment::Bottom),
-            _ => None,
+        let trimmed = raw.trim();
+        if trimmed.eq_ignore_ascii_case("top") {
+            Some(VerticalAlignment::Top)
+        } else if trimmed.eq_ignore_ascii_case("center") {
+            Some(VerticalAlignment::Center)
+        } else if trimmed.eq_ignore_ascii_case("bottom") {
+            Some(VerticalAlignment::Bottom)
+        } else {
+            None
         }
     });
 
@@ -4885,16 +4896,28 @@ impl WasmWorkbook {
             if let Some(color) = tab_color {
                 match color {
                     TabColorJson::String(raw) => {
-                        let mut trimmed = raw.trim();
-                        if let Some(stripped) = trimmed.strip_prefix('#') {
-                            trimmed = stripped;
-                        }
+                        let trimmed = raw.trim();
                         if trimmed.is_empty() {
                             wb.sheet_tab_colors.remove(&display_name);
                         } else {
+                            let mut rgb = if trimmed.len() == raw.len() {
+                                raw
+                            } else {
+                                trimmed.to_string()
+                            };
+                            if rgb.starts_with('#') {
+                                rgb.remove(0);
+                            }
+                            if rgb.is_empty() {
+                                wb.sheet_tab_colors.remove(&display_name);
+                                continue;
+                            }
+                            if rgb.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                                rgb.make_ascii_uppercase();
+                            }
                             wb.sheet_tab_colors.insert(
                                 display_name.clone(),
-                                TabColor::rgb(trimmed.to_uppercase()),
+                                TabColor::rgb(rgb),
                             );
                         }
                     }
