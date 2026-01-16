@@ -6,7 +6,7 @@ use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::format_number_general_with_options;
-use crate::value::{parse_number, NumberLocale};
+use crate::value::{casefold, parse_number, NumberLocale};
 use crate::{ErrorKind, LocaleConfig, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,7 @@ struct TextCriteria {
 
 impl TextCriteria {
     fn new(raw: &str) -> Self {
-        let folded = fold_case(raw);
+        let folded = casefold(raw);
         let wildcard = WildcardPattern::new(&folded);
         let literal_folded = wildcard.literal_pattern();
 
@@ -285,7 +285,7 @@ fn matches_text_criteria(
         // values still satisfy the predicate because they are not equal to the text pattern.
         return matches!(op, CriteriaOp::Ne);
     };
-    let value_folded = fold_case(&value_text);
+    let value_folded = casefold(&value_text);
 
     match op {
         CriteriaOp::Eq => {
@@ -523,8 +523,4 @@ fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<Stri
 
 fn parse_error_kind(raw: &str) -> Option<ErrorKind> {
     ErrorKind::from_code(raw)
-}
-
-fn fold_case(input: &str) -> String {
-    input.chars().flat_map(|c| c.to_uppercase()).collect()
 }
