@@ -61,12 +61,68 @@ pub(crate) fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
     }
 }
 
+#[inline]
+pub(crate) fn eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        cmp_case_insensitive(a, b) == Ordering::Equal
+    }
+}
+
 pub(crate) fn casefold(s: &str) -> String {
     if s.is_ascii() {
+        let bytes = s.as_bytes();
+        if !bytes.iter().any(|b| b.is_ascii_lowercase()) {
+            return s.to_string();
+        }
         return s.to_ascii_uppercase();
     }
 
     s.chars().flat_map(|c| c.to_uppercase()).collect()
+}
+
+pub(crate) fn casefold_owned(mut s: String) -> String {
+    if s.is_ascii() {
+        s.make_ascii_uppercase();
+        return s;
+    }
+    s.chars().flat_map(|c| c.to_uppercase()).collect()
+}
+
+#[inline]
+pub(crate) fn with_ascii_uppercased_key<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
+    // Equivalent to `s.to_ascii_uppercase()`, but avoids allocating for common short strings by
+    // uppercasing into a small stack buffer.
+    //
+    // ASCII uppercasing preserves UTF-8 validity because it only mutates bytes in the `a-z`
+    // range (all non-ASCII UTF-8 bytes are >= 0x80).
+    let bytes = s.as_bytes();
+    if !bytes.iter().any(|b| b.is_ascii_lowercase()) {
+        return f(s);
+    }
+
+    let mut buf = [0u8; 64];
+    if bytes.len() <= buf.len() {
+        for (dst, src) in buf[..bytes.len()].iter_mut().zip(bytes) {
+            *dst = src.to_ascii_uppercase();
+        }
+        let upper =
+            std::str::from_utf8(&buf[..bytes.len()]).expect("ASCII uppercasing preserves UTF-8");
+        return f(upper);
+    }
+
+    let upper = s.to_ascii_uppercase();
+    f(&upper)
+}
+
+pub(crate) fn with_casefolded_key<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
+    if s.is_ascii() {
+        return with_ascii_uppercased_key(s, f);
+    }
+
+    let folded: String = s.chars().flat_map(|c| c.to_uppercase()).collect();
+    f(&folded)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -322,14 +378,13 @@ impl EntityValue {
         if let Some(v) = self.fields.get(field) {
             return Some(v.clone());
         }
-        let folded = casefold(field);
-        if let Some(v) = self.fields.get(&folded) {
-            return Some(v.clone());
+        if let Some(v) = with_casefolded_key(field, |folded| self.fields.get(folded).cloned()) {
+            return Some(v);
         }
 
         self.fields
             .iter()
-            .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
+            .find(|(k, _)| eq_case_insensitive(k, field))
             .map(|(_, v)| v.clone())
     }
 }
@@ -387,14 +442,13 @@ impl RecordValue {
         if let Some(v) = self.fields.get(field) {
             return Some(v.clone());
         }
-        let folded = casefold(field);
-        if let Some(v) = self.fields.get(&folded) {
-            return Some(v.clone());
+        if let Some(v) = with_casefolded_key(field, |folded| self.fields.get(folded).cloned()) {
+            return Some(v);
         }
 
         self.fields
             .iter()
-            .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
+            .find(|(k, _)| eq_case_insensitive(k, field))
             .map(|(_, v)| v.clone())
     }
 }
@@ -785,5 +839,32 @@ mod tests {
         let mut record = RecordValue::with_fields_iter("Fallback", [("name", "Apple")]);
         record.display_field = Some("Name".to_string());
         assert_eq!(Value::Record(record).to_string(), "Apple");
+    }
+
+    #[test]
+    fn with_ascii_uppercased_key_matches_to_ascii_uppercase() {
+        let long = "a".repeat(100);
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup", long.as_str()] {
+            let out = with_ascii_uppercased_key(s, |upper| upper.to_string());
+            assert_eq!(out, s.to_ascii_uppercase(), "input={s:?}");
+        }
+    }
+
+    #[test]
+    fn with_casefolded_key_matches_casefold() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            let mut out: Option<String> = None;
+            with_casefolded_key(s, |key| {
+                out = Some(key.to_string());
+            });
+            assert_eq!(out.as_deref(), Some(casefold(s).as_str()), "input={s:?}");
+        }
+    }
+
+    #[test]
+    fn casefold_owned_matches_casefold() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            assert_eq!(casefold_owned(s.to_string()), casefold(s), "input={s:?}");
+        }
     }
 }
