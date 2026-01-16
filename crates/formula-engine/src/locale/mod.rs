@@ -2,6 +2,7 @@ mod registry;
 mod translate;
 mod value_locale;
 
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
 pub use registry::{get_locale, iter_locales, FormulaLocale, DE_DE, EN_US, ES_ES, FR_FR};
@@ -59,10 +60,26 @@ struct LocaleKeyParts<'a> {
     region: Option<&'a str>,
 }
 
-fn normalize_locale_key(id: &str) -> Option<String> {
+fn normalize_locale_key(id: &str) -> Option<Cow<'_, str>> {
     let trimmed = id.trim();
     if trimmed.is_empty() {
         return None;
+    }
+
+    let suffix_start = trimmed
+        .find(|c| matches!(c, '.' | '@'))
+        .unwrap_or(trimmed.len());
+    let trimmed = &trimmed[..suffix_start];
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let needs_transform = trimmed
+        .as_bytes()
+        .iter()
+        .any(|b| *b == b'_' || b.is_ascii_uppercase());
+    if !needs_transform {
+        return Some(Cow::Borrowed(trimmed));
     }
 
     // Normalize common locale tag spellings:
@@ -79,17 +96,7 @@ fn normalize_locale_key(id: &str) -> Option<String> {
         };
         key.push(ch.to_ascii_lowercase());
     }
-
-    // Handle common POSIX locale tags like `en_US.UTF-8` or `de_DE@euro` by dropping the encoding /
-    // modifier suffix. (Browser/BCP-47 tags don't use these, but it's a cheap compatibility win.)
-    if let Some(idx) = key.find('.') {
-        key.truncate(idx);
-    }
-    if let Some(idx) = key.find('@') {
-        key.truncate(idx);
-    }
-
-    Some(key)
+    Some(Cow::Owned(key))
 }
 
 fn parse_locale_key(key: &str) -> Option<LocaleKeyParts<'_>> {
@@ -117,8 +124,30 @@ fn parse_locale_key(key: &str) -> Option<LocaleKeyParts<'_>> {
 }
 
 fn normalize_locale_id(id: &str) -> Option<&'static str> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Fast path for canonical ids (common in engine/wire formats): avoid allocation + lowercasing.
+    match trimmed {
+        "en-US" => return Some("en-US"),
+        "de-DE" => return Some("de-DE"),
+        "fr-FR" => return Some("fr-FR"),
+        "es-ES" => return Some("es-ES"),
+        "ja-JP" => return Some("ja-JP"),
+        "zh-CN" => return Some("zh-CN"),
+        "zh-TW" => return Some("zh-TW"),
+        "ko-KR" => return Some("ko-KR"),
+        // Common aliases for the formula parsing locale (still English function names + `,`).
+        "en-GB" | "en-UK" | "en-AU" | "en-NZ" | "en-IE" | "en-ZA" => return Some("en-US"),
+        // POSIX "C locale" aliases.
+        "C" | "POSIX" => return Some("en-US"),
+        _ => {}
+    }
+
     let key = normalize_locale_key(id)?;
-    let parts = parse_locale_key(&key)?;
+    let parts = parse_locale_key(key.as_ref())?;
 
     // Map language/region variants onto the small set of engine-supported locales.
     // For example, `fr-CA` still resolves to `fr-FR`, and `de-AT` resolves to `de-DE`.

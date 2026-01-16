@@ -110,8 +110,28 @@ impl ValueLocaleConfig {
 
     #[must_use]
     pub fn for_locale_id(id: &str) -> Option<Self> {
+        let trimmed = id.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        // Fast path for common canonical ids (avoid allocation + splitting).
+        match trimmed {
+            "en-US" => return Some(Self::en_us()),
+            "en-GB" | "en-UK" | "en-AU" | "en-NZ" | "en-IE" | "en-ZA" => return Some(Self::en_gb()),
+            "de-DE" => return Some(Self::de_de()),
+            "fr-FR" => return Some(Self::fr_fr()),
+            "es-ES" => return Some(Self::es_es()),
+            "ja-JP" => return Some(Self::ja_jp()),
+            "zh-CN" => return Some(Self::zh_cn()),
+            "zh-TW" => return Some(Self::zh_tw()),
+            "ko-KR" => return Some(Self::ko_kr()),
+            "C" | "POSIX" => return Some(Self::en_us()),
+            _ => {}
+        }
+
         let key = super::normalize_locale_key(id)?;
-        let parts = super::parse_locale_key(&key)?;
+        let parts = super::parse_locale_key(key.as_ref())?;
 
         match parts.lang {
             // Many POSIX environments report locale as `C` / `POSIX` for the default "C locale".
