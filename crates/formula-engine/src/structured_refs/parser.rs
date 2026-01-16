@@ -488,4 +488,20 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn parses_this_row_column_range_ref_when_embedded_in_formula() {
+        let input = "SUM([@[Col1]:[Col3]])";
+        let start = "SUM(".len();
+        let (sref, end) = parse_structured_ref(input, start).unwrap();
+        assert_eq!(end, start + "[@[Col1]:[Col3]]".len());
+        assert_eq!(sref.items, vec![StructuredRefItem::ThisRow]);
+        assert_eq!(
+            sref.columns,
+            StructuredColumns::Range {
+                start: "Col1".into(),
+                end: "Col3".into(),
+            }
+        );
+    }
 }

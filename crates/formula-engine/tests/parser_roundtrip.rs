@@ -117,6 +117,16 @@ fn roundtrip_with_xlfn_prefix_in_file_mode() {
 }
 
 #[test]
+fn roundtrip_with_uppercase_xlfn_prefix_in_file_mode() {
+    let opts = ParseOptions::default();
+    let mut ser = SerializeOptions::default();
+    ser.include_xlfn_prefix = true;
+    let ast = parse_formula("=_XLFN.XLOOKUP(A1,B1,C1)", opts).unwrap();
+    // Serialization always emits the `_xlfn.` prefix in lowercase, matching Excel file spelling.
+    assert_eq!(ast.to_string(ser).unwrap(), "=_xlfn.XLOOKUP(A1,B1,C1)");
+}
+
+#[test]
 fn roundtrip_de_de_locale() {
     let mut opts = ParseOptions::default();
     opts.locale = LocaleConfig::de_de();

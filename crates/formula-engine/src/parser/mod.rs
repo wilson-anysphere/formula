@@ -322,308 +322,6 @@ struct Lexer<'a> {
     prev_sig: Option<PrevSig>,
 }
 
-#[derive(Debug)]
-enum U32Set {
-    Inline { len: u8, data: [u32; 4] },
-    Heap(Vec<u32>),
-}
-
-impl U32Set {
-    fn new() -> Self {
-        Self::Inline { len: 0, data: [0; 4] }
-    }
-
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Inline { len, .. } => *len == 0,
-            Self::Heap(v) => v.is_empty(),
-        }
-    }
-
-    fn clear(&mut self) {
-        match self {
-            Self::Inline { len, .. } => *len = 0,
-            Self::Heap(v) => v.clear(),
-        }
-    }
-
-    fn take(&mut self) -> Self {
-        std::mem::replace(self, Self::new())
-    }
-
-    fn as_slice(&self) -> &[u32] {
-        match self {
-            Self::Inline { len, data } => &data[..usize::from(*len)],
-            Self::Heap(v) => v.as_slice(),
-        }
-    }
-
-    fn contains(&self, value: u32) -> bool {
-        self.as_slice().contains(&value)
-    }
-
-    fn push_unique(&mut self, value: u32) {
-        if self.contains(value) {
-            return;
-        }
-        match self {
-            Self::Inline { len, data } => {
-                let idx = usize::from(*len);
-                if idx < data.len() {
-                    data[idx] = value;
-                    *len += 1;
-                    return;
-                }
-                let mut v = Vec::with_capacity(data.len() * 2);
-                v.extend_from_slice(&data[..idx]);
-                v.push(value);
-                *self = Self::Heap(v);
-            }
-            Self::Heap(v) => v.push(value),
-        }
-    }
-}
-
-fn push_unique_u32(states: &mut [U32Set], pos: usize, value: u32) {
-    if let Some(entry) = states.get_mut(pos) {
-        entry.push_unique(value);
-    }
-}
-
-const MODE_NORMAL: u32 = 0;
-const MODE_STRING: u32 = 1;
-const MODE_QUOTED_IDENT: u32 = 2;
-
-fn encode_state(depth: u32, mode: u32) -> u32 {
-    (depth << 2) | (mode & 0b11)
-}
-
-fn decode_depth(state: u32) -> u32 {
-    state >> 2
-}
-
-fn decode_mode(state: u32) -> u32 {
-    state & 0b11
-}
-
-fn push_depth(states: &mut [U32Set], pos: usize, depth: u32) {
-    push_unique_u32(states, pos, depth);
-}
-
-/// Find the end position (exclusive) for a bracketed segment starting at `start`.
-///
-/// This handles Excel's structured-ref escape semantics where `]` inside an identifier is encoded
-/// as `]]`, which is ambiguous with nested bracket closure (e.g. `[[Col]]`).
-///
-/// The scanner explores both interpretations and returns the earliest closing bracket that does
-/// not immediately leave a stray `]` outside the segment (which would be invalid formula syntax).
-fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
-    let bytes = src.as_bytes().get(start..)?;
-    if bytes.first().copied() != Some(b'[') {
-        return None;
-    }
-
-    // Fast path: when the segment does not contain `]]`, the bracket nesting is unambiguous and
-    // we can return the first matching close without the full state-space exploration below.
-    //
-    // This is common for external workbook prefixes like `[Book.xlsx]Sheet1!A1`.
-    if !bytes.windows(2).any(|w| w == b"]]") {
-        let mut depth: u32 = 1;
-        for (i, &b) in bytes.iter().enumerate().skip(1) {
-            match b {
-                b'[' => depth += 1,
-                b']' => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        return Some(start.saturating_add(i + 1).min(src.len()));
-                    }
-                }
-                _ => {}
-            }
-        }
-        return None;
-    }
-
-    // Track reachable bracket depths at each char index. This treats `]]` as either:
-    // - closing bracket + another close (consume one char; the next `]` is processed normally), or
-    // - an escaped literal `]` (consume two chars; depth unchanged).
-    //
-    // We choose the earliest closing bracket that can still lead to a globally valid parse of the
-    // *remainder* of the formula (i.e. doesn't leave stray `]` tokens outside of any bracketed
-    // segment).
-    let n = bytes.len();
-    if n < 2 {
-        return None;
-    }
-
-    let mut fwd: Vec<U32Set> = std::iter::repeat_with(U32Set::new).take(n + 1).collect();
-    fwd[1].push_unique(1);
-    for i in 1..n {
-        let depths = fwd[i].take();
-        if depths.is_empty() {
-            continue;
-        }
-        for depth in depths.as_slice().iter().copied() {
-            if depth == 0 {
-                continue;
-            }
-            match bytes[i] {
-                b'[' => push_depth(&mut fwd, i + 1, depth + 1),
-                b']' => {
-                    push_depth(&mut fwd, i + 1, depth - 1);
-                    if bytes.get(i + 1) == Some(&b']') {
-                        push_depth(&mut fwd, i + 2, depth);
-                    }
-                }
-                _ => push_depth(&mut fwd, i + 1, depth),
-            }
-        }
-    }
-
-    let mut bwd: Vec<U32Set> = std::iter::repeat_with(U32Set::new).take(n + 1).collect();
-    bwd[n].push_unique(encode_state(0, MODE_NORMAL));
-    for i in (0..n).rev() {
-        let (before, after) = bwd.split_at_mut(i + 1);
-        let states_before = &mut before[i];
-        states_before.clear();
-
-        let states_after_1 = after[0].as_slice();
-        let states_after_2 = after.get(1).map(|v| v.as_slice());
-
-        let mut push_state_into_before = |depth: u32, mode: u32| {
-            if mode != MODE_NORMAL && depth != 0 {
-                return;
-            }
-            let state = encode_state(depth, mode);
-            states_before.push_unique(state);
-        };
-
-        match bytes[i] {
-            b'[' => {
-                for &state in states_after_1 {
-                    let depth_after = decode_depth(state);
-                    let mode_after = decode_mode(state);
-                    if mode_after != MODE_NORMAL {
-                        push_state_into_before(0, mode_after);
-                    } else if depth_after > 0 {
-                        push_state_into_before(depth_after - 1, MODE_NORMAL);
-                    }
-                }
-            }
-            b']' => {
-                for &state in states_after_1 {
-                    let depth_after = decode_depth(state);
-                    let mode_after = decode_mode(state);
-                    if mode_after != MODE_NORMAL {
-                        push_state_into_before(0, mode_after);
-                    } else {
-                        push_state_into_before(depth_after + 1, MODE_NORMAL);
-                    }
-                }
-
-                // Escape transitions are only valid while inside brackets (depth > 0).
-                if bytes.get(i + 1) == Some(&b']') {
-                    for &state in states_after_2.unwrap_or_default() {
-                        let depth_after = decode_depth(state);
-                        let mode_after = decode_mode(state);
-                        if mode_after == MODE_NORMAL && depth_after > 0 {
-                            push_state_into_before(depth_after, MODE_NORMAL);
-                        }
-                    }
-                }
-            }
-            b'"' => {
-                for &state in states_after_1 {
-                    let depth_after = decode_depth(state);
-                    let mode_after = decode_mode(state);
-                    match mode_after {
-                        MODE_STRING if depth_after == 0 => {
-                            // Opening quote (`"`), entering string literal.
-                            push_state_into_before(0, MODE_NORMAL);
-                        }
-                        MODE_NORMAL => {
-                            if depth_after > 0 {
-                                // Quotes are literal characters inside brackets.
-                                push_state_into_before(depth_after, MODE_NORMAL);
-                            } else if bytes.get(i + 1) != Some(&b'"') {
-                                // Closing quote (`"`), exiting string literal.
-                                push_state_into_before(0, MODE_STRING);
-                            }
-                        }
-                        MODE_QUOTED_IDENT if depth_after == 0 => {
-                            // Quotes are literal characters inside quoted identifiers.
-                            push_state_into_before(0, MODE_QUOTED_IDENT);
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Escaped quote (`""`) within a string literal.
-                if bytes.get(i + 1) == Some(&b'"') {
-                    for &state in states_after_2.unwrap_or_default() {
-                        let depth_after = decode_depth(state);
-                        let mode_after = decode_mode(state);
-                        if depth_after == 0 && mode_after == MODE_STRING {
-                            push_state_into_before(0, MODE_STRING);
-                        }
-                    }
-                }
-            }
-            b'\'' => {
-                for &state in states_after_1 {
-                    let depth_after = decode_depth(state);
-                    let mode_after = decode_mode(state);
-                    match mode_after {
-                        MODE_QUOTED_IDENT if depth_after == 0 => {
-                            // Opening quote (`'`), entering quoted identifier.
-                            push_state_into_before(0, MODE_NORMAL);
-                        }
-                        MODE_NORMAL => {
-                            if depth_after > 0 {
-                                // Quotes are literal characters inside brackets.
-                                push_state_into_before(depth_after, MODE_NORMAL);
-                            } else if bytes.get(i + 1) != Some(&b'\'') {
-                                // Closing quote (`'`), exiting quoted identifier.
-                                push_state_into_before(0, MODE_QUOTED_IDENT);
-                            }
-                        }
-                        MODE_STRING if depth_after == 0 => {
-                            // Quotes are literal characters inside string literals.
-                            push_state_into_before(0, MODE_STRING);
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Escaped quote (`''`) within a quoted identifier.
-                if bytes.get(i + 1) == Some(&b'\'') {
-                    for &state in states_after_2.unwrap_or_default() {
-                        let depth_after = decode_depth(state);
-                        let mode_after = decode_mode(state);
-                        if depth_after == 0 && mode_after == MODE_QUOTED_IDENT {
-                            push_state_into_before(0, MODE_QUOTED_IDENT);
-                        }
-                    }
-                }
-            }
-            _ => {
-                for &state in states_after_1 {
-                    let depth_after = decode_depth(state);
-                    let mode_after = decode_mode(state);
-                    push_state_into_before(depth_after, mode_after);
-                }
-            }
-        }
-    }
-
-    for end_idx in 1..=n {
-        if fwd[end_idx].contains(0) && bwd[end_idx].contains(encode_state(0, MODE_NORMAL)) {
-            return Some(start.saturating_add(end_idx).min(src.len()));
-        }
-    }
-    None
-}
-
 fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
     formula_model::external_refs::find_external_workbook_prefix_end_if_followed_by_sheet_or_name_token(
         src, start,
@@ -864,9 +562,7 @@ impl<'a> Lexer<'a> {
                         // Workbook prefixes are *not* nesting, even if the workbook name contains
                         // `[` characters (e.g. `=[A1[Name.xlsx]Sheet1!A1`). Prefer a non-nesting
                         // scan when the bracketed segment is followed by a sheet name and `!`.
-                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start)
-                            .or_else(|| find_bracket_end(self.src, start))
-                        {
+                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start) {
                             self.bump();
                             self.push(TokenKind::LBracket, start, self.idx);
 
@@ -3330,10 +3026,18 @@ impl<'a> Parser<'a> {
                 }
 
                 let start_idx = skip_ws(close_idx + 1);
-                if !matches!(
-                    kind_at(start_idx),
-                    Some(TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
-                ) {
+                // Only treat the token after `]` as a candidate sheet/name token if it looks like
+                // something the lexer would have produced in normal mode (i.e. not raw bracket
+                // content like `:` that gets emitted as `Ident` while inside `[...]`).
+                let valid_name_token = match kind_at(start_idx) {
+                    Some(TokenKind::QuotedIdent(_)) => true,
+                    Some(TokenKind::Ident(s)) => s
+                        .chars()
+                        .next()
+                        .is_some_and(|c| is_ident_start_char(c)),
+                    _ => false,
+                };
+                if !valid_name_token {
                     continue;
                 }
                 let idx = skip_ws(start_idx + 1);
@@ -3461,6 +3165,34 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBracket)?;
 
         let spec_start = open_span.end;
+
+        // Structured references can contain escaped `]` as `]]`, but `]]` is also used to close
+        // nested bracket groups. Use the structured-ref parser's disambiguation logic to find the
+        // correct end position when possible.
+        if let Some((_, end_pos)) = crate::structured_refs::parse_structured_ref(self.src, open_span.start)
+        {
+            // Advance to the closing `]` token for the chosen end position.
+            while self.current_span().end < end_pos {
+                if matches!(self.peek_kind(), TokenKind::Eof) {
+                    return Err(ParseError::new(
+                        "Unterminated structured reference",
+                        self.current_span(),
+                    ));
+                }
+                self.next();
+            }
+            let close_span = self.current_span();
+            self.expect(TokenKind::RBracket)?;
+
+            let spec = self.src[spec_start..close_span.start].to_string();
+            return Ok(Expr::StructuredRef(StructuredRef {
+                workbook,
+                sheet,
+                table,
+                spec,
+            }));
+        }
+
         let mut depth: i32 = 1;
         let mut spec_end: Option<usize> = None;
 
