@@ -5448,9 +5448,9 @@ fn coord_to_a1(row: usize, col: usize) -> String {
 }
 
 fn quote_sheet_name(name: &str) -> String {
-    // Excel escapes single quotes inside a quoted sheet name by doubling them.
-    let escaped = name.replace('\'', "''");
-    format!("'{escaped}'")
+    let mut out = String::with_capacity(name.len().saturating_add(2));
+    formula_model::push_excel_single_quoted_identifier(&mut out, name);
+    out
 }
 
 fn col_index_to_letters(col: usize) -> String {
