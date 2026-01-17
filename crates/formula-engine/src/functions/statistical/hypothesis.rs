@@ -197,7 +197,10 @@ pub fn t_test(xs: &[f64], ys: &[f64], tails: i64, test_type: i64) -> Result<f64,
 
             (t, df)
         }
-        _ => unreachable!(),
+        _ => {
+            debug_assert!(false, "T.TEST type should have been validated: {test_type}");
+            return Err(ErrorKind::Num);
+        }
     };
 
     if !t.is_finite() || !df.is_finite() || df <= 0.0 {

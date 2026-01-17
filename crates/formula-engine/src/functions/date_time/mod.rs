@@ -214,7 +214,10 @@ pub fn yearfrac(
 
             Ok(sign * (years as f64 + (remaining_days as f64) / (denom_days as f64)))
         }
-        _ => unreachable!(),
+        _ => {
+            debug_assert!(false, "YEARFRAC basis should have been validated: {basis}");
+            Err(ExcelError::Num)
+        }
     }
 }
 

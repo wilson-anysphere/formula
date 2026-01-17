@@ -565,9 +565,13 @@ fn lower_canonical_reference_expr(
                     Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell)))
                 }
                 BytecodeExpr::MultiRangeRef(r) => Ok(BytecodeExpr::MultiRangeRef(r)),
-                other => unreachable!(
-                    "lower_cell_ref_expr only lowers to CellRef/MultiRangeRef, got {other:?}"
-                ),
+                other => {
+                    debug_assert!(
+                        false,
+                        "lower_cell_ref_expr only lowers to CellRef/MultiRangeRef, got {other:?}"
+                    );
+                    Err(LowerError::Unsupported)
+                }
             }
         }
         crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => lower_range_ref(
@@ -585,7 +589,10 @@ fn lower_canonical_reference_expr(
             let op = match b.op {
                 crate::BinaryOp::Union => BinaryOp::Union,
                 crate::BinaryOp::Intersect => BinaryOp::Intersect,
-                _ => unreachable!("guarded above"),
+                _ => {
+                    debug_assert!(false, "guarded above");
+                    return Err(LowerError::Unsupported);
+                }
             };
             Ok(BytecodeExpr::Binary {
                 op,
@@ -811,7 +818,10 @@ fn lower_canonical_expr_inner(
                     crate::BinaryOp::Le => BinaryOp::Le,
                     crate::BinaryOp::Gt => BinaryOp::Gt,
                     crate::BinaryOp::Ge => BinaryOp::Ge,
-                    _ => unreachable!("guarded above"),
+                    _ => {
+                        debug_assert!(false, "guarded above");
+                        return Err(LowerError::Unsupported);
+                    }
                 };
                 Ok(BytecodeExpr::Binary {
                     op,

@@ -1337,7 +1337,8 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
         for (range, crit) in ranges.iter().zip(criteria.iter()) {
             let CriteriaRange::Reference(r) = range else {
-                unreachable!("all ranges are references");
+                debug_assert!(false, "all ranges are references");
+                return Value::Error(ErrorKind::Value);
             };
             for addr in ctx.iter_reference_cells(r) {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
@@ -1370,7 +1371,8 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut count: u64 = 0;
     if let Some(driver_idx) = driver_idx {
         let CriteriaRange::Reference(driver_range) = &ranges[driver_idx] else {
-            unreachable!("driver_idx always points at a reference range");
+            debug_assert!(false, "driver_idx always points at a reference range");
+            return Value::Error(ErrorKind::Value);
         };
         let driver_crit = &criteria[driver_idx];
 
@@ -2239,7 +2241,10 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                     }
-                    _ => unreachable!("filtered above"),
+                    _ => {
+                        debug_assert!(false, "filtered above");
+                        continue;
+                    }
                 }
             }
         }
@@ -2287,7 +2292,10 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                         }
-                        _ => unreachable!("filtered above"),
+                        _ => {
+                            debug_assert!(false, "filtered above");
+                            continue;
+                        }
                     }
                 }
             }
@@ -2413,7 +2421,10 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                     }
-                    _ => unreachable!("filtered above"),
+                    _ => {
+                        debug_assert!(false, "filtered above");
+                        continue;
+                    }
                 }
             }
         }
@@ -2461,7 +2472,10 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                         }
-                        _ => unreachable!("filtered above"),
+                        _ => {
+                            debug_assert!(false, "filtered above");
+                            continue;
+                        }
                     }
                 }
             }
@@ -2605,12 +2619,18 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let slice_a: &[Value] = match &a {
             SumproductOperand::Scalar(v) => std::slice::from_ref(v),
             SumproductOperand::Array(values) => values,
-            SumproductOperand::Reference(_) => unreachable!(),
+            SumproductOperand::Reference(_) => {
+                debug_assert!(false, "non-reference branch received reference operand");
+                return Value::Error(ErrorKind::Value);
+            }
         };
         let slice_b: &[Value] = match &b {
             SumproductOperand::Scalar(v) => std::slice::from_ref(v),
             SumproductOperand::Array(values) => values,
-            SumproductOperand::Reference(_) => unreachable!(),
+            SumproductOperand::Reference(_) => {
+                debug_assert!(false, "non-reference branch received reference operand");
+                return Value::Error(ErrorKind::Value);
+            }
         };
 
         let arrays: [&[Value]; 2] = [slice_a, slice_b];
@@ -2723,9 +2743,11 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 } else {
-                    unreachable!(
+                    debug_assert!(
+                        false,
                         "broadcast validation should have handled all length combinations"
                     );
+                    return Err(ErrorKind::Value);
                 }
             }
             (SumproductOperand::Reference(ra), SumproductOperand::Array(vb)) => {
@@ -2808,9 +2830,11 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 } else {
-                    unreachable!(
+                    debug_assert!(
+                        false,
                         "broadcast validation should have handled all length combinations"
                     );
+                    return Err(ErrorKind::Value);
                 }
             }
             (SumproductOperand::Reference(ra), SumproductOperand::Scalar(vb)) => {
@@ -2928,9 +2952,11 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 } else {
-                    unreachable!(
+                    debug_assert!(
+                        false,
                         "broadcast validation should have handled all length combinations"
                     );
+                    return Err(ErrorKind::Value);
                 }
             }
             (SumproductOperand::Scalar(va), SumproductOperand::Reference(rb)) => {
@@ -2961,9 +2987,13 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             (SumproductOperand::Array(_), SumproductOperand::Array(_))
             | (SumproductOperand::Scalar(_), SumproductOperand::Scalar(_))
             | (SumproductOperand::Scalar(_), SumproductOperand::Array(_))
-            | (SumproductOperand::Array(_), SumproductOperand::Scalar(_)) => unreachable!(
-                "non-reference cases should have been handled by shared math::sumproduct path"
-            ),
+            | (SumproductOperand::Array(_), SumproductOperand::Scalar(_)) => {
+                debug_assert!(
+                    false,
+                    "non-reference cases should have been handled by shared math::sumproduct path"
+                );
+                return Err(ErrorKind::Value);
+            }
         }
 
         if saw_nan {

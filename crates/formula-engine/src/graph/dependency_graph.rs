@@ -679,7 +679,10 @@ impl DependencyGraph {
             while let Some(node) = ready_ranges.pop_first() {
                 let range_id = match node.kind {
                     ReadyNodeKind::Range(id) => id,
-                    ReadyNodeKind::Cell(_) => unreachable!("ready_ranges only stores range nodes"),
+                    ReadyNodeKind::Cell(_) => {
+                        debug_assert!(false, "ready_ranges only stores range nodes");
+                        continue;
+                    }
                 };
 
                 range_in.remove(&range_id);
@@ -709,7 +712,10 @@ impl DependencyGraph {
             while let Some(node) = ready_cells.pop_first() {
                 let cell = match node.kind {
                     ReadyNodeKind::Cell(cell) => cell,
-                    ReadyNodeKind::Range(_) => unreachable!("ready_cells only stores cell nodes"),
+                    ReadyNodeKind::Range(_) => {
+                        debug_assert!(false, "ready_cells only stores cell nodes");
+                        continue;
+                    }
                 };
                 // `cell_in` only tracks cells we still need to schedule; skip if already processed.
                 if cell_in.remove(&cell).is_none() {

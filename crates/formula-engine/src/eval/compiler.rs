@@ -139,28 +139,19 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
 }
 
 fn lower_binary(b: &crate::BinaryExpr, origin: Option<crate::CellAddr>) -> Expr<String> {
+    let compare = |op: CompareOp| Expr::Compare {
+        op,
+        left: Box::new(lower_expr(&b.left, origin)),
+        right: Box::new(lower_expr(&b.right, origin)),
+    };
+
     match b.op {
-        crate::BinaryOp::Eq
-        | crate::BinaryOp::Ne
-        | crate::BinaryOp::Lt
-        | crate::BinaryOp::Le
-        | crate::BinaryOp::Gt
-        | crate::BinaryOp::Ge => {
-            let op = match b.op {
-                crate::BinaryOp::Eq => CompareOp::Eq,
-                crate::BinaryOp::Ne => CompareOp::Ne,
-                crate::BinaryOp::Lt => CompareOp::Lt,
-                crate::BinaryOp::Le => CompareOp::Le,
-                crate::BinaryOp::Gt => CompareOp::Gt,
-                crate::BinaryOp::Ge => CompareOp::Ge,
-                _ => unreachable!("handled by match guard"),
-            };
-            Expr::Compare {
-                op,
-                left: Box::new(lower_expr(&b.left, origin)),
-                right: Box::new(lower_expr(&b.right, origin)),
-            }
-        }
+        crate::BinaryOp::Eq => compare(CompareOp::Eq),
+        crate::BinaryOp::Ne => compare(CompareOp::Ne),
+        crate::BinaryOp::Lt => compare(CompareOp::Lt),
+        crate::BinaryOp::Le => compare(CompareOp::Le),
+        crate::BinaryOp::Gt => compare(CompareOp::Gt),
+        crate::BinaryOp::Ge => compare(CompareOp::Ge),
         crate::BinaryOp::Range => {
             if let Some(range) = try_lower_static_range_ref(&b.left, &b.right, origin) {
                 return Expr::RangeRef(range);
@@ -631,40 +622,31 @@ fn compile_binary(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
     sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> CompiledExpr {
+    let mut compare = |op: CompareOp| Expr::Compare {
+        op,
+        left: Box::new(compile_expr_inner(
+            &b.left,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        )),
+        right: Box::new(compile_expr_inner(
+            &b.right,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        )),
+    };
+
     match b.op {
-        crate::BinaryOp::Eq
-        | crate::BinaryOp::Ne
-        | crate::BinaryOp::Lt
-        | crate::BinaryOp::Le
-        | crate::BinaryOp::Gt
-        | crate::BinaryOp::Ge => {
-            let op = match b.op {
-                crate::BinaryOp::Eq => CompareOp::Eq,
-                crate::BinaryOp::Ne => CompareOp::Ne,
-                crate::BinaryOp::Lt => CompareOp::Lt,
-                crate::BinaryOp::Le => CompareOp::Le,
-                crate::BinaryOp::Gt => CompareOp::Gt,
-                crate::BinaryOp::Ge => CompareOp::Ge,
-                _ => unreachable!("handled by match guard"),
-            };
-            Expr::Compare {
-                op,
-                left: Box::new(compile_expr_inner(
-                    &b.left,
-                    current_sheet,
-                    current_cell,
-                    resolve_sheet,
-                    sheet_dimensions,
-                )),
-                right: Box::new(compile_expr_inner(
-                    &b.right,
-                    current_sheet,
-                    current_cell,
-                    resolve_sheet,
-                    sheet_dimensions,
-                )),
-            }
-        }
+        crate::BinaryOp::Eq => compare(CompareOp::Eq),
+        crate::BinaryOp::Ne => compare(CompareOp::Ne),
+        crate::BinaryOp::Lt => compare(CompareOp::Lt),
+        crate::BinaryOp::Le => compare(CompareOp::Le),
+        crate::BinaryOp::Gt => compare(CompareOp::Gt),
+        crate::BinaryOp::Ge => compare(CompareOp::Ge),
         crate::BinaryOp::Range => {
             if let Some(range) = try_compile_static_range_ref(
                 &b.left,
@@ -852,11 +834,15 @@ fn compile_sheet_reference(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> SheetReference<usize> {
     match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(_), _) => match lower_sheet_reference(workbook, sheet) {
+        (Some(book), _) => match lower_sheet_reference(workbook, sheet) {
             SheetReference::External(key) => SheetReference::External(key),
-            SheetReference::Sheet(_)
-            | SheetReference::SheetRange(_, _)
-            | SheetReference::Current => unreachable!("workbook-qualified refs always lower to external keys"),
+            other => {
+                debug_assert!(
+                    false,
+                    "workbook-qualified refs should lower to external keys, got {other:?}"
+                );
+                SheetReference::External(crate::external_refs::format_external_workbook_key(book))
+            }
         },
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => resolve_sheet(sheet)

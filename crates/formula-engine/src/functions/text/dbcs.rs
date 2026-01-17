@@ -390,11 +390,8 @@ fn asc_cp932(input: &str) -> String {
         if matches!(ch, 'ヰ' | 'ヱ') {
             if let Some(&next) = iter.peek() {
                 if next == COMBINING_DAKUTEN {
-                    out.push_str(match ch {
-                        'ヰ' => "\u{FF72}", // ｲ
-                        'ヱ' => "\u{FF74}", // ｴ
-                        _ => unreachable!("matches! ensures only ヰ/ヱ"),
-                    });
+                    let base = if ch == 'ヰ' { "\u{FF72}" } else { "\u{FF74}" }; // ｲ / ｴ
+                    out.push_str(base);
                     out.push(HALFWIDTH_DAKUTEN);
                     iter.next(); // consume combining mark
                     continue;
