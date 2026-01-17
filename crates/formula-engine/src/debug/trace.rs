@@ -1132,7 +1132,13 @@ impl ParserImpl {
                     let sheet_name_tok = self.next();
                     let name = match sheet_name_tok.kind {
                         TokenKind::SheetName(name) => name,
-                        _ => unreachable!("peeked SheetName then consumed different token"),
+                        other => {
+                            debug_assert!(
+                                false,
+                                "peeked SheetName then consumed different token: {other:?}"
+                            );
+                            return Err(FormulaParseError::UnexpectedToken(format!("{other:?}")));
+                        }
                     };
 
                     if let Some((workbook, name)) = parse_workbook_scoped_external_name_ref(&name) {
@@ -1849,7 +1855,13 @@ impl ParserImpl {
             let sref_tok = self.next();
             let sref = match sref_tok.kind {
                 TokenKind::StructuredRef(sref) => sref,
-                _ => unreachable!("peeked structured ref then consumed different token"),
+                other => {
+                    debug_assert!(
+                        false,
+                        "peeked structured ref then consumed different token: {other:?}"
+                    );
+                    return Err(FormulaParseError::UnexpectedToken(format!("{other:?}")));
+                }
             };
 
             return Ok(SpannedExpr {
