@@ -479,7 +479,8 @@ impl Workbook {
         // Note: stable sheet keys are allowed to be arbitrary (including long UUID-like strings),
         // so we must *not* derive a display name by defaulting to the key when the key is not a
         // valid Excel sheet name.
-        for idx in 1usize.. {
+        let mut idx = 1usize;
+        loop {
             let candidate = format!("Sheet{idx}");
             // `Sheet{n}` is always valid for reasonable `n`, but validate anyway to avoid accidental
             // future changes (or pathological `idx` growth).
@@ -488,8 +489,12 @@ impl Workbook {
             {
                 return candidate;
             }
+            if idx == usize::MAX {
+                debug_assert!(false, "sheet name generator exhausted all candidates");
+                return "Sheet".to_string();
+            }
+            idx += 1;
         }
-        unreachable!("infinite iterator must return a sheet name")
     }
 
     fn ensure_sheet(&mut self, sheet_key: &str) -> SheetId {
@@ -14582,7 +14587,15 @@ fn bytecode_expr_within_grid_limits_inner(
                                         match func {
                                             Function::Row => i64::from(resolved.rows()),
                                             Function::Column => i64::from(resolved.cols()),
-                                            _ => unreachable!("matched above"),
+                                            other => {
+                                                debug_assert!(
+                                                    false,
+                                                    "ROW/COLUMN special casing matched unexpected function: {other:?}"
+                                                );
+                                                return Err(
+                                                    BytecodeCompileReason::ExceedsRangeCellLimit,
+                                                );
+                                            }
                                         }
                                     } else {
                                         (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
@@ -14632,7 +14645,13 @@ fn bytecode_expr_within_grid_limits_inner(
                                                 match func {
                                                     Function::Row => i64::from(resolved.rows()),
                                                     Function::Column => i64::from(resolved.cols()),
-                                                    _ => unreachable!("matched above"),
+                                                    other => {
+                                                        debug_assert!(
+                                                            false,
+                                                            "ROW/COLUMN special casing matched unexpected function: {other:?}"
+                                                        );
+                                                        return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                                    }
                                                 }
                                             } else {
                                                 (i64::from(resolved.rows()))

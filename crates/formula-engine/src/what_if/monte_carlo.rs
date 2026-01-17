@@ -256,7 +256,11 @@ impl Distribution {
                 }
             }
             Distribution::Discrete { .. } => {
-                unreachable!("discrete distributions are rejected for correlated sampling")
+                debug_assert!(
+                    false,
+                    "discrete distributions are rejected for correlated sampling"
+                );
+                f64::NAN
             }
             Distribution::Beta {
                 alpha,
@@ -271,8 +275,13 @@ impl Distribution {
                 } else {
                     // `StatrsBeta::new` should not fail after `validate`, but we avoid panics
                     // here since this pathway is only used when correlations are requested.
-                    let dist = StatrsBeta::new(*alpha, *beta).expect("validated beta parameters");
-                    dist.inverse_cdf(u)
+                    match StatrsBeta::new(*alpha, *beta) {
+                        Ok(dist) => dist.inverse_cdf(u),
+                        Err(_) => {
+                            debug_assert!(false, "validated beta parameters failed to construct");
+                            u
+                        }
+                    }
                 };
                 scale_unit_interval(raw, *min, *max)
             }
@@ -282,7 +291,11 @@ impl Distribution {
                 -tail.ln() / rate
             }
             Distribution::Poisson { .. } => {
-                unreachable!("poisson distributions are rejected for correlated sampling")
+                debug_assert!(
+                    false,
+                    "poisson distributions are rejected for correlated sampling"
+                );
+                f64::NAN
             }
         }
     }

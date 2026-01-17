@@ -244,7 +244,10 @@ fn digit_char(value: u32) -> char {
     match value {
         0..=9 => (b'0' + (value as u8)) as char,
         10..=35 => (b'A' + ((value - 10) as u8)) as char,
-        _ => unreachable!(),
+        _ => {
+            debug_assert!(false, "digit value out of range: {value}");
+            '?'
+        }
     }
 }
 

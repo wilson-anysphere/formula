@@ -453,7 +453,8 @@ pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, Erro
             return Ok(sum);
         }
 
-        unreachable!("broadcast validation should have handled all length combinations");
+        debug_assert!(false, "broadcast validation should have handled all length combinations");
+        return Err(ErrorKind::Value);
     }
 
     let mut sum = 0.0;
