@@ -74,7 +74,10 @@ fn sheet_number_value_for_references(ctx: &dyn FunctionContext, references: &[Re
                     }
                 }
 
-                let order = order.as_ref().expect("checked is_none above");
+                let Some(order) = order.as_ref() else {
+                    debug_assert!(false, "external sheet order should have been resolved");
+                    return Value::Error(ErrorKind::NA);
+                };
                 let idx = match order
                     .iter()
                     .position(|s| sheet_name_eq_case_insensitive(s, sheet))
@@ -183,7 +186,13 @@ fn single_cell_reference_from_arg(arg: ArgValue, err: ErrorKind) -> Result<Refer
         ArgValue::Reference(r) => r,
         ArgValue::ReferenceUnion(mut ranges) => {
             if ranges.len() == 1 {
-                ranges.pop().expect("checked len")
+                match ranges.pop() {
+                    Some(r) => r,
+                    None => {
+                        debug_assert!(false, "checked len");
+                        return Err(Value::Error(err));
+                    }
+                }
             } else {
                 return Err(Value::Error(err));
             }
@@ -191,7 +200,13 @@ fn single_cell_reference_from_arg(arg: ArgValue, err: ErrorKind) -> Result<Refer
         ArgValue::Scalar(Value::Reference(r)) => r,
         ArgValue::Scalar(Value::ReferenceUnion(mut ranges)) => {
             if ranges.len() == 1 {
-                ranges.pop().expect("checked len")
+                match ranges.pop() {
+                    Some(r) => r,
+                    None => {
+                        debug_assert!(false, "checked len");
+                        return Err(Value::Error(err));
+                    }
+                }
             } else {
                 return Err(Value::Error(err));
             }
