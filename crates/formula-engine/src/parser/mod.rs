@@ -797,11 +797,12 @@ impl<'a> Lexer<'a> {
             };
 
             if should_intersect {
-                let raw = match &mut self.tokens[i].kind {
-                    TokenKind::Whitespace(raw) => std::mem::take(raw),
-                    _ => unreachable!("should_intersect requires Whitespace token"),
-                };
-                self.tokens[i].kind = TokenKind::Intersect(raw);
+                if let TokenKind::Whitespace(raw) = &mut self.tokens[i].kind {
+                    let raw = std::mem::take(raw);
+                    self.tokens[i].kind = TokenKind::Intersect(raw);
+                } else {
+                    debug_assert!(false, "should_intersect requires Whitespace token");
+                }
             }
             i += 1;
         }
@@ -2420,12 +2421,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_reference_or_name_or_func(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek_kind(), TokenKind::LBracket) {
+            debug_assert!(false, "LBracket handled by parse_bracket_start");
+            return self.parse_bracket_start();
+        }
+
         // Handle optional external workbook prefix and/or sheet prefix.
         // We do this by peeking patterns: [Book]Sheet!..., Sheet!... etc.
         let save_pos = self.pos;
 
         let (workbook, sheet) = match self.peek_kind() {
-            TokenKind::LBracket => unreachable!("handled elsewhere"),
             TokenKind::QuotedIdent(_) | TokenKind::Ident(_) => {
                 // Could be sheet prefix (if followed by `!`), or a function/name.
                 //
@@ -3257,7 +3262,12 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 out
             }
-            _ => unreachable!("caller should guard with TokenKind::Ident"),
+            _ => {
+                debug_assert!(false, "caller should guard with TokenKind::Ident");
+                let max = self.tokens.len().saturating_sub(1);
+                self.pos = self.pos.saturating_add(1).min(max);
+                String::new()
+            }
         }
     }
 
@@ -3268,7 +3278,15 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 out
             }
-            _ => unreachable!("caller should guard with TokenKind::Ident | TokenKind::QuotedIdent"),
+            _ => {
+                debug_assert!(
+                    false,
+                    "caller should guard with TokenKind::Ident | TokenKind::QuotedIdent"
+                );
+                let max = self.tokens.len().saturating_sub(1);
+                self.pos = self.pos.saturating_add(1).min(max);
+                String::new()
+            }
         }
     }
 
@@ -3279,7 +3297,12 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 out
             }
-            _ => unreachable!("caller should guard with TokenKind::Number"),
+            _ => {
+                debug_assert!(false, "caller should guard with TokenKind::Number");
+                let max = self.tokens.len().saturating_sub(1);
+                self.pos = self.pos.saturating_add(1).min(max);
+                String::new()
+            }
         }
     }
 
@@ -3290,7 +3313,12 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 out
             }
-            _ => unreachable!("caller should guard with TokenKind::String"),
+            _ => {
+                debug_assert!(false, "caller should guard with TokenKind::String");
+                let max = self.tokens.len().saturating_sub(1);
+                self.pos = self.pos.saturating_add(1).min(max);
+                String::new()
+            }
         }
     }
 
@@ -3301,7 +3329,12 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 out
             }
-            _ => unreachable!("caller should guard with TokenKind::Error"),
+            _ => {
+                debug_assert!(false, "caller should guard with TokenKind::Error");
+                let max = self.tokens.len().saturating_sub(1);
+                self.pos = self.pos.saturating_add(1).min(max);
+                String::new()
+            }
         }
     }
 
@@ -3443,50 +3476,60 @@ fn coerce_range_operands(left: Expr, right: Expr) -> (Expr, Expr) {
         }
     }
 
-    fn into_col_ref(expr: Expr, coerce: ColCoerce) -> ColRef {
+    fn into_col_ref(expr: &Expr, coerce: ColCoerce) -> Option<ColRef> {
         match (expr, coerce) {
-            (Expr::ColRef(r), ColCoerce::Existing) => r,
-            (Expr::NameRef(n), ColCoerce::FromName { col, abs }) => ColRef {
-                workbook: n.workbook,
-                sheet: n.sheet,
+            (Expr::ColRef(r), ColCoerce::Existing) => Some(r.clone()),
+            (Expr::NameRef(n), ColCoerce::FromName { col, abs }) => Some(ColRef {
+                workbook: n.workbook.clone(),
+                sheet: n.sheet.clone(),
                 col: Coord::A1 { index: col, abs },
-            },
-            _ => unreachable!("col_coerce should be checked before calling into_col_ref"),
+            }),
+            _ => {
+                debug_assert!(false, "col_coerce should be checked before calling into_col_ref");
+                None
+            }
         }
     }
 
-    fn into_row_ref(expr: Expr, coerce: RowCoerce) -> RowRef {
+    fn into_row_ref(expr: &Expr, coerce: RowCoerce) -> Option<RowRef> {
         match (expr, coerce) {
-            (Expr::RowRef(r), RowCoerce::Existing) => r,
-            (Expr::NameRef(n), RowCoerce::FromName { row, abs }) => RowRef {
-                workbook: n.workbook,
-                sheet: n.sheet,
+            (Expr::RowRef(r), RowCoerce::Existing) => Some(r.clone()),
+            (Expr::NameRef(n), RowCoerce::FromName { row, abs }) => Some(RowRef {
+                workbook: n.workbook.clone(),
+                sheet: n.sheet.clone(),
                 row: Coord::A1 { index: row, abs },
-            },
-            (Expr::Number(_), RowCoerce::FromNumber { row }) => RowRef {
+            }),
+            (Expr::Number(_), RowCoerce::FromNumber { row }) => Some(RowRef {
                 workbook: None,
                 sheet: None,
                 row: Coord::A1 {
                     index: row,
                     abs: false,
                 },
-            },
-            _ => unreachable!("row_coerce should be checked before calling into_row_ref"),
+            }),
+            _ => {
+                debug_assert!(false, "row_coerce should be checked before calling into_row_ref");
+                None
+            }
         }
     }
 
     if let (Some(left_coerce), Some(right_coerce)) = (col_coerce(&left), col_coerce(&right)) {
-        return (
-            Expr::ColRef(into_col_ref(left, left_coerce)),
-            Expr::ColRef(into_col_ref(right, right_coerce)),
-        );
+        if let (Some(l), Some(r)) = (
+            into_col_ref(&left, left_coerce),
+            into_col_ref(&right, right_coerce),
+        ) {
+            return (Expr::ColRef(l), Expr::ColRef(r));
+        }
     }
 
     if let (Some(left_coerce), Some(right_coerce)) = (row_coerce(&left), row_coerce(&right)) {
-        return (
-            Expr::RowRef(into_row_ref(left, left_coerce)),
-            Expr::RowRef(into_row_ref(right, right_coerce)),
-        );
+        if let (Some(l), Some(r)) = (
+            into_row_ref(&left, left_coerce),
+            into_row_ref(&right, right_coerce),
+        ) {
+            return (Expr::RowRef(l), Expr::RowRef(r));
+        }
     }
 
     (left, right)
