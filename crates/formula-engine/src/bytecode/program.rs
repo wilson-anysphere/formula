@@ -47,6 +47,10 @@ pub enum OpCode {
     MakeLambda = 28,
     /// Call a closure value with `b` arguments.
     CallValue = 29,
+    /// Sentinel opcode used when decoding invalid bytecode.
+    ///
+    /// This should never be produced by the compiler, but can appear if the program is corrupted.
+    Invalid = 255,
 }
 
 /// Packed instruction:
@@ -66,7 +70,8 @@ impl Instruction {
 
     #[inline]
     pub fn op(self) -> OpCode {
-        match ((self.0 >> 56) & 0xFF) as u8 {
+        let op = ((self.0 >> 56) & 0xFF) as u8;
+        match op {
             0 => OpCode::PushConst,
             1 => OpCode::LoadCell,
             2 => OpCode::LoadRange,
@@ -97,7 +102,10 @@ impl Instruction {
             27 => OpCode::Intersect,
             28 => OpCode::MakeLambda,
             29 => OpCode::CallValue,
-            _ => unreachable!("invalid opcode"),
+            _ => {
+                debug_assert!(false, "invalid opcode: {op}");
+                OpCode::Invalid
+            }
         }
     }
 

@@ -3,7 +3,7 @@ use super::value::{
     Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetId, SheetRangeRef,
     Value,
 };
-use crate::value::{casefold, with_casefolded_key};
+use crate::value::{casefolded_key_arc, casefolded_key_arc_if};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -500,7 +500,7 @@ fn collect_concat_operands<'a>(expr: &'a crate::Expr, out: &mut Vec<&'a crate::E
 
 #[derive(Default)]
 struct LexicalScopes {
-    scopes: Vec<HashSet<String>>,
+    scopes: Vec<HashSet<Arc<str>>>,
 }
 
 impl LexicalScopes {
@@ -512,7 +512,7 @@ impl LexicalScopes {
         self.scopes.pop();
     }
 
-    fn define(&mut self, key: String) {
+    fn define(&mut self, key: Arc<str>) {
         if self.scopes.is_empty() {
             self.push_scope();
         }
@@ -980,13 +980,14 @@ fn lower_canonical_expr_inner(
 
                         // Non-builtin function call. Treat this as a lambda invocation only when the
                         // name is in lexical scope (LET/LAMBDA parameters).
-                        if !with_casefolded_key(name_upper.trim(), |key| scopes.is_defined(key)) {
+                        let Some(key) = casefolded_key_arc_if(name_upper.trim(), |folded| {
+                            scopes.is_defined(folded)
+                        }) else {
                             return Err(LowerError::Unsupported);
-                        }
-                        let key = casefold(name_upper.trim());
+                        };
 
                         Ok(BytecodeExpr::Call {
-                            callee: Box::new(BytecodeExpr::NameRef(Arc::from(key))),
+                            callee: Box::new(BytecodeExpr::NameRef(key)),
                             args,
                         })
                     }
@@ -1022,10 +1023,12 @@ fn lower_canonical_expr_inner(
                 return Err(LowerError::Unsupported);
             }
             let name = nref.name.trim();
-            if !with_casefolded_key(name, |key| scopes.is_defined(key)) {
+            let Some(key) =
+                casefolded_key_arc_if(name, |folded| scopes.is_defined(folded))
+            else {
                 return Err(LowerError::Unsupported);
-            }
-            Ok(BytecodeExpr::NameRef(Arc::from(casefold(name))))
+            };
+            Ok(BytecodeExpr::NameRef(key))
         }
         crate::Expr::Postfix(p) => match p.op {
             crate::PostfixOp::Percent => Ok(BytecodeExpr::Binary {
@@ -1093,8 +1096,8 @@ fn lower_let(
             for (idx, arg) in call.args.iter().enumerate() {
                 if idx % 2 == 0 {
                     if let Some(name) = bare_identifier(arg) {
-                        let key = casefold(name.trim());
-                        args_out.push(BytecodeExpr::NameRef(Arc::from(key.as_str())));
+                        let key: Arc<str> = casefolded_key_arc(name.trim());
+                        args_out.push(BytecodeExpr::NameRef(Arc::clone(&key)));
                         scopes.define(key);
                         continue;
                     }
@@ -1126,8 +1129,8 @@ fn lower_let(
                 // error semantics.
                 return Err(LowerError::Unsupported);
             };
-            let key = casefold(name.trim());
-            args_out.push(BytecodeExpr::NameRef(Arc::from(key.as_str())));
+            let key: Arc<str> = casefolded_key_arc(name.trim());
+            args_out.push(BytecodeExpr::NameRef(Arc::clone(&key)));
 
             // Allow the LET binding name to be referenced inside any LAMBDA bodies produced by the
             // value expression (for recursion via `f(x)`).
@@ -1139,7 +1142,7 @@ fn lower_let(
                 expand_sheet_span_ids,
                 sheet_dimensions,
                 scopes,
-                Some(&key),
+                Some(key.as_ref()),
             )?;
             args_out.push(value_expr);
             scopes.define(key);
@@ -1181,28 +1184,30 @@ fn lower_lambda(
     }
 
     let mut params: Vec<Arc<str>> = Vec::with_capacity(call.args.len().saturating_sub(1));
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<Arc<str>> = HashSet::new();
 
     for param_expr in &call.args[..call.args.len() - 1] {
         let Some(name) = bare_identifier(param_expr) else {
             return Ok(value_error_literal());
         };
-        let key = casefold(name.trim());
-        if !seen.insert(key.clone()) {
+        let key: Arc<str> = casefolded_key_arc(name.trim());
+        if !seen.insert(Arc::clone(&key)) {
             return Ok(value_error_literal());
         }
-        params.push(Arc::from(key));
+        params.push(key);
     }
 
-    let body_expr = call.args.last().expect("checked args non-empty");
+    let Some(body_expr) = call.args.last() else {
+        return Ok(value_error_literal());
+    };
 
     scopes.push_scope();
     let result = (|| {
         if let Some(self_name) = lambda_self_name {
-            scopes.define(self_name.to_string());
+            scopes.define(Arc::from(self_name));
         }
         for p in &params {
-            scopes.define(p.as_ref().to_string());
+            scopes.define(Arc::clone(p));
         }
 
         let body = lower_canonical_expr_inner(
@@ -1236,9 +1241,9 @@ fn lower_isomitted(call: &crate::FunctionCall) -> Result<BytecodeExpr, LowerErro
     let Some(name) = bare_identifier(&call.args[0]) else {
         return Ok(value_error_literal());
     };
-    let key = casefold(name.trim());
+    let key: Arc<str> = casefolded_key_arc(name.trim());
     Ok(BytecodeExpr::FuncCall {
         func: Function::IsOmitted,
-        args: vec![BytecodeExpr::NameRef(Arc::from(key))],
+        args: vec![BytecodeExpr::NameRef(key)],
     })
 }

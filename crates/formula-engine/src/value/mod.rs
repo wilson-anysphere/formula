@@ -44,10 +44,9 @@ pub(crate) fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
     }
 
     // Compare using Unicode-aware uppercasing so matches behave like Excel (e.g. ß -> SS).
-    // This intentionally uses the same `char::to_uppercase` logic as criteria matching and
-    // lookup semantics.
-    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
-    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    // Avoid the `ToUppercase` iterator for ASCII characters, even in mixed Unicode strings.
+    let mut a_iter = FoldedUppercaseChars::new(a);
+    let mut b_iter = FoldedUppercaseChars::new(b);
     loop {
         match (a_iter.next(), b_iter.next()) {
             (Some(ac), Some(bc)) => match ac.cmp(&bc) {
@@ -57,6 +56,47 @@ pub(crate) fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+struct FoldedUppercaseChars<'a> {
+    chars: std::str::Chars<'a>,
+    pending: Option<std::char::ToUppercase>,
+    ascii_needs_uppercasing: bool,
+}
+
+impl<'a> FoldedUppercaseChars<'a> {
+    fn new(s: &'a str) -> Self {
+        let ascii_needs_uppercasing = s.as_bytes().iter().any(|b| b.is_ascii_lowercase());
+        Self {
+            chars: s.chars(),
+            pending: None,
+            ascii_needs_uppercasing,
+        }
+    }
+}
+
+impl Iterator for FoldedUppercaseChars<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        loop {
+            if let Some(pending) = &mut self.pending {
+                if let Some(ch) = pending.next() {
+                    return Some(ch);
+                }
+                self.pending = None;
+            }
+
+            let ch = self.chars.next()?;
+            if ch.is_ascii() {
+                if self.ascii_needs_uppercasing {
+                    return Some(ch.to_ascii_uppercase());
+                }
+                return Some(ch);
+            }
+            self.pending = Some(ch.to_uppercase());
         }
     }
 }
@@ -71,6 +111,10 @@ pub(crate) fn eq_case_insensitive(a: &str, b: &str) -> bool {
 }
 
 pub(crate) fn casefold(s: &str) -> String {
+    fold_to_uppercase_string(s)
+}
+
+fn fold_to_uppercase_string(s: &str) -> String {
     if s.is_ascii() {
         let bytes = s.as_bytes();
         if !bytes.iter().any(|b| b.is_ascii_lowercase()) {
@@ -79,23 +123,112 @@ pub(crate) fn casefold(s: &str) -> String {
         return s.to_ascii_uppercase();
     }
 
-    s.chars().flat_map(|c| c.to_uppercase()).collect()
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii() {
+            out.push(ch.to_ascii_uppercase());
+        } else {
+            out.extend(ch.to_uppercase());
+        }
+    }
+    out
+}
+
+fn fold_to_lowercase_string(s: &str) -> String {
+    if s.is_ascii() {
+        let bytes = s.as_bytes();
+        if !bytes.iter().any(|b| b.is_ascii_uppercase()) {
+            return s.to_string();
+        }
+        return s.to_ascii_lowercase();
+    }
+
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.extend(ch.to_lowercase());
+        }
+    }
+    out
+}
+
+/// Fold a string using Unicode-aware uppercasing into a `Vec<char>`.
+///
+/// This is used by case-insensitive matching in places that need a character stream (rather than a
+/// `String`) because Unicode uppercasing can expand a single character into multiple characters
+/// (e.g. `ß` → `SS`).
+pub(crate) fn fold_to_uppercase_chars(s: &str) -> Vec<char> {
+    if s.is_ascii() {
+        let needs_uppercasing = s.as_bytes().iter().any(|b| b.is_ascii_lowercase());
+        let mut out: Vec<char> = Vec::with_capacity(s.len());
+        if needs_uppercasing {
+            out.extend(s.as_bytes().iter().map(|&b| (b as char).to_ascii_uppercase()));
+        } else {
+            out.extend(s.chars());
+        }
+        return out;
+    }
+
+    let mut out: Vec<char> = Vec::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii() {
+            out.push(ch.to_ascii_uppercase());
+        } else {
+            out.extend(ch.to_uppercase());
+        }
+    }
+    out
+}
+
+pub(crate) fn fold_str_to_uppercase_with_starts(
+    s: &str,
+    ascii_needs_uppercasing: bool,
+) -> (Vec<char>, Vec<usize>) {
+    let mut folded: Vec<char> = Vec::with_capacity(s.len());
+    let mut starts: Vec<usize> = Vec::with_capacity(s.len());
+    for ch in s.chars() {
+        starts.push(folded.len());
+        if ch.is_ascii() {
+            if ascii_needs_uppercasing {
+                folded.push(ch.to_ascii_uppercase());
+            } else {
+                folded.push(ch);
+            }
+        } else {
+            folded.extend(ch.to_uppercase());
+        }
+    }
+    (folded, starts)
 }
 
 pub(crate) fn casefold_owned(mut s: String) -> String {
-    if s.is_ascii() {
-        s.make_ascii_uppercase();
-        return s;
+    let mut ascii_needs_uppercasing = false;
+    for &b in s.as_bytes() {
+        if b >= 0x80 {
+            return fold_to_uppercase_string(&s);
+        }
+        ascii_needs_uppercasing |= b.is_ascii_lowercase();
     }
-    s.chars().flat_map(|c| c.to_uppercase()).collect()
+    if ascii_needs_uppercasing {
+        s.make_ascii_uppercase();
+    }
+    s
 }
 
 pub(crate) fn lowercase_owned(mut s: String) -> String {
-    if s.is_ascii() {
-        s.make_ascii_lowercase();
-        return s;
+    let mut ascii_needs_lowercasing = false;
+    for &b in s.as_bytes() {
+        if b >= 0x80 {
+            return fold_to_lowercase_string(&s);
+        }
+        ascii_needs_lowercasing |= b.is_ascii_uppercase();
     }
-    s.chars().flat_map(|c| c.to_lowercase()).collect()
+    if ascii_needs_lowercasing {
+        s.make_ascii_lowercase();
+    }
+    s
 }
 
 #[inline]
@@ -129,8 +262,18 @@ pub(crate) fn with_casefolded_key<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
         return with_ascii_uppercased_key(s, f);
     }
 
-    let folded: String = s.chars().flat_map(|c| c.to_uppercase()).collect();
+    let folded: String = fold_to_uppercase_string(s);
     f(&folded)
+}
+
+#[inline]
+pub(crate) fn casefolded_key_arc(s: &str) -> Arc<str> {
+    with_casefolded_key(s, |folded| Arc::from(folded))
+}
+
+#[inline]
+pub(crate) fn casefolded_key_arc_if(s: &str, pred: impl FnOnce(&str) -> bool) -> Option<Arc<str>> {
+    with_casefolded_key(s, |folded| pred(folded).then(|| Arc::from(folded)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -870,6 +1013,27 @@ mod tests {
     }
 
     #[test]
+    fn cmp_case_insensitive_handles_mixed_ascii_and_unicode() {
+        assert_eq!(cmp_case_insensitive("aö", "AÖ"), Ordering::Equal);
+        assert_eq!(cmp_case_insensitive("straße", "STRASSE"), Ordering::Equal);
+    }
+
+    #[test]
+    fn casefolded_key_arc_if_matches_casefold_when_predicate_passes() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            let key = casefolded_key_arc_if(s, |_| true).unwrap();
+            assert_eq!(key.as_ref(), casefold(s).as_str(), "input={s:?}");
+        }
+    }
+
+    #[test]
+    fn casefolded_key_arc_if_returns_none_when_predicate_fails() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            assert!(casefolded_key_arc_if(s, |_| false).is_none(), "input={s:?}");
+        }
+    }
+
+    #[test]
     fn casefold_owned_matches_casefold() {
         for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
             assert_eq!(casefold_owned(s.to_string()), casefold(s), "input={s:?}");
@@ -884,6 +1048,15 @@ mod tests {
                 s.to_lowercase(),
                 "input={s:?}"
             );
+        }
+    }
+
+    #[test]
+    fn fold_to_uppercase_chars_matches_unicode_to_uppercase_expansion() {
+        for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
+            let folded: Vec<char> = fold_to_uppercase_chars(s);
+            let expected: Vec<char> = s.chars().flat_map(|c| c.to_uppercase()).collect();
+            assert_eq!(folded, expected, "input={s:?}");
         }
     }
 }

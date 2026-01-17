@@ -5,7 +5,7 @@ use crate::eval::{
 };
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{ArgValue, FunctionContext};
-use crate::value::{casefold, Array, ErrorKind, Value};
+use crate::value::{casefold, with_casefolded_key, Array, ErrorKind, Value};
 use crate::{CellAddr as ParserCellAddr, ParseOptions, ReferenceStyle};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
@@ -123,7 +123,15 @@ fn parse_database_range(
         let label = header_label(ctx, array.get(0, col).unwrap_or(&Value::Blank))?;
         if let Some(label) = label {
             saw_header = true;
-            header_map.entry(casefold(label.trim())).or_insert(col);
+            let trimmed = label.trim();
+            let key = if trimmed.len() == label.len() {
+                // Common case: header label already has no outer whitespace, so we can fold the
+                // owned string in-place on ASCII (and avoid allocating a second `String`).
+                crate::value::casefold_owned(label)
+            } else {
+                casefold(trimmed)
+            };
+            header_map.entry(key).or_insert(col);
         }
     }
 
@@ -147,11 +155,12 @@ fn resolve_field(
     match field {
         Value::Error(e) => Err(*e),
         Value::Text(s) => {
-            let key = casefold(s.trim());
-            if key.is_empty() {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
                 return Err(ErrorKind::Value);
             }
-            table.header_map.get(&key).copied().ok_or(ErrorKind::Value)
+            let col = with_casefolded_key(trimmed, |key| table.header_map.get(key).copied());
+            col.ok_or(ErrorKind::Value)
         }
         other => {
             let idx = other.coerce_to_i64_with_ctx(ctx)?;
@@ -207,11 +216,12 @@ fn parse_criteria_range(
         let header_cell = array.get(0, col).unwrap_or(&Value::Blank);
         let label = header_label(ctx, header_cell)?;
         if let Some(label) = label {
-            let key = casefold(label.trim());
-            if key.is_empty() {
+            let trimmed = label.trim();
+            if trimmed.is_empty() {
                 return Err(ErrorKind::Value);
             }
-            if let Some(db_col) = table.header_map.get(&key).copied() {
+            let db_col = with_casefolded_key(trimmed, |key| table.header_map.get(key).copied());
+            if let Some(db_col) = db_col {
                 col_map.push(CriteriaColumn::Standard(db_col));
             } else {
                 col_map.push(CriteriaColumn::Computed);

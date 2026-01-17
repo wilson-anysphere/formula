@@ -597,10 +597,12 @@ fn eval_ast_inner(
                         lexical_scopes,
                         true,
                     );
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name.clone(), value);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "LET eval: expected an active scope");
+                        lexical_scopes.pop();
+                        return Value::Error(ErrorKind::Value);
+                    };
+                    scope.insert(name.clone(), value);
                 }
                 let result = eval_ast_inner(
                     &args[last],
@@ -1353,7 +1355,8 @@ fn numeric_unary(op: UnaryOp, v: &Value) -> Value {
         UnaryOp::Plus => Value::Number(n),
         UnaryOp::Neg => Value::Number(-n),
         UnaryOp::ImplicitIntersection => {
-            unreachable!("implicit intersection requires Grid + base context")
+            debug_assert!(false, "implicit intersection requires Grid + base context");
+            Value::Error(ErrorKind::Value)
         }
     }
 }
@@ -1949,23 +1952,16 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(ErrorKind::Value);
     }
 
-    fn text_like_str(value: &Value) -> Option<&str> {
-        match value {
-            Value::Text(s) => Some(s.as_ref()),
-            _ => None,
-        }
-    }
-
     // Blank coerces to the other type for comparisons.
     let (l, r) = match (&left, &right) {
         (Value::Empty | Value::Missing, Value::Number(_)) => (Value::Number(0.0), right.clone()),
         (Value::Number(_), Value::Empty | Value::Missing) => (left.clone(), Value::Number(0.0)),
         (Value::Empty | Value::Missing, Value::Bool(_)) => (Value::Bool(false), right.clone()),
         (Value::Bool(_), Value::Empty | Value::Missing) => (left.clone(), Value::Bool(false)),
-        (Value::Empty | Value::Missing, other) if text_like_str(other).is_some() => {
+        (Value::Empty | Value::Missing, other) if matches!(other, Value::Text(_)) => {
             (Value::Text(Arc::from("")), right.clone())
         }
-        (other, Value::Empty | Value::Missing) if text_like_str(other).is_some() => {
+        (other, Value::Empty | Value::Missing) if matches!(other, Value::Text(_)) => {
             (left.clone(), Value::Text(Arc::from("")))
         }
         _ => (left.clone(), right.clone()),
@@ -1973,17 +1969,13 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
 
     Ok(match (l, r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(&a).is_some() && text_like_str(&b).is_some() => {
-            cmp_case_insensitive(text_like_str(&a).unwrap(), text_like_str(&b).unwrap())
-        }
+        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a.as_ref(), b.as_ref()),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
         // Type precedence (approximate Excel): numbers < text < booleans.
-        (Value::Number(_), b) if text_like_str(&b).is_some() || matches!(b, Value::Bool(_)) => {
-            Ordering::Less
-        }
-        (a, Value::Bool(_)) if text_like_str(&a).is_some() => Ordering::Less,
-        (a, Value::Number(_)) if text_like_str(&a).is_some() => Ordering::Greater,
-        (Value::Bool(_), b) if matches!(b, Value::Number(_)) || text_like_str(&b).is_some() => {
+        (Value::Number(_), b) if matches!(b, Value::Text(_) | Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), b) if matches!(b, Value::Number(_) | Value::Text(_)) => {
             Ordering::Greater
         }
         // Blank should have been coerced above.
@@ -6940,19 +6932,25 @@ fn fn_sumif(
                 for col_off in 0..cols {
                     let crit_col = crit_range.col_start + col_off;
                     let sum_col = sum_range.col_start + col_off;
-                    let crit_slice = grid
-                        .column_slice_strict_numeric(
-                            crit_col,
-                            crit_range.row_start,
-                            crit_range.row_end,
-                        )
-                        .unwrap();
-                    let sum_slice = grid
-                        .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
-                        .unwrap();
+                    let Some(crit_slice) = grid.column_slice_strict_numeric(
+                        crit_col,
+                        crit_range.row_start,
+                        crit_range.row_end,
+                    ) else {
+                        slices_ok = false;
+                        break;
+                    };
+                    let Some(sum_slice) =
+                        grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                    else {
+                        slices_ok = false;
+                        break;
+                    };
                     sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
                 }
-                return Value::Number(sum);
+                if slices_ok {
+                    return Value::Number(sum);
+                }
             }
         }
 
@@ -7231,16 +7229,25 @@ fn fn_sumifs(
             let mut sum = 0.0;
             for col_off in 0..cols {
                 let sum_col = sum_range.col_start + col_off;
-                let sum_slice = grid
-                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
-                    .unwrap();
+                let Some(sum_slice) =
+                    grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                else {
+                    slices_ok = false;
+                    break;
+                };
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
-                    let slice = grid
-                        .column_slice_strict_numeric(col, range.row_start, range.row_end)
-                        .unwrap();
+                    let Some(slice) =
+                        grid.column_slice_strict_numeric(col, range.row_start, range.row_end)
+                    else {
+                        slices_ok = false;
+                        break;
+                    };
                     crit_slices.push(slice);
+                }
+                if !slices_ok {
+                    break;
                 }
 
                 // Tight numeric scan.
@@ -7297,7 +7304,9 @@ fn fn_sumifs(
                 }
             }
 
-            return Value::Number(sum);
+            if slices_ok {
+                return Value::Number(sum);
+            }
         }
     }
 
@@ -7900,25 +7909,32 @@ fn fn_averageif(
                 for col_off in 0..cols {
                     let crit_col = crit_range.col_start + col_off;
                     let avg_col = avg_range.col_start + col_off;
-                    let crit_slice = grid
-                        .column_slice_strict_numeric(
-                            crit_col,
-                            crit_range.row_start,
-                            crit_range.row_end,
-                        )
-                        .unwrap();
-                    let avg_slice = grid
-                        .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
-                        .unwrap();
+                    let Some(crit_slice) = grid.column_slice_strict_numeric(
+                        crit_col,
+                        crit_range.row_start,
+                        crit_range.row_end,
+                    ) else {
+                        slices_ok = false;
+                        break;
+                    };
+                    let Some(avg_slice) =
+                        grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                    else {
+                        slices_ok = false;
+                        break;
+                    };
                     let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
                     sum += s;
                     count += c;
                 }
 
-                if count == 0 {
+                if !slices_ok {
+                    // fall back to row-major scan below
+                } else if count == 0 {
                     return Value::Error(ErrorKind::Div0);
+                } else {
+                    return Value::Number(sum / count as f64);
                 }
-                return Value::Number(sum / count as f64);
             }
         }
 
@@ -8225,16 +8241,25 @@ fn fn_averageifs(
             let mut count = 0usize;
             for col_off in 0..cols {
                 let avg_col = avg_range.col_start + col_off;
-                let avg_slice = grid
-                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
-                    .unwrap();
+                let Some(avg_slice) =
+                    grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                else {
+                    slices_ok = false;
+                    break;
+                };
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
-                    let slice = grid
-                        .column_slice_strict_numeric(col, range.row_start, range.row_end)
-                        .unwrap();
+                    let Some(slice) =
+                        grid.column_slice_strict_numeric(col, range.row_start, range.row_end)
+                    else {
+                        slices_ok = false;
+                        break;
+                    };
                     crit_slices.push(slice);
+                }
+                if !slices_ok {
+                    break;
                 }
 
                 if numeric_crits.len() == 1 {
@@ -8295,10 +8320,13 @@ fn fn_averageifs(
                 }
             }
 
-            if count == 0 {
+            if !slices_ok {
+                // fall back to row-major scan below
+            } else if count == 0 {
                 return Value::Error(ErrorKind::Div0);
+            } else {
+                return Value::Number(sum / count as f64);
             }
-            return Value::Number(sum / count as f64);
         }
     }
 
@@ -10250,17 +10278,18 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
                 }
             }
 
+            let a_text = text_like_str(a);
+            let b_text = text_like_str(b);
+            if let (Some(a_text), Some(b_text)) = (&a_text, &b_text) {
+                return eq_case_insensitive(a_text.as_ref(), b_text.as_ref());
+            }
+
             match (a, b) {
-                (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-                    let a = text_like_str(a).unwrap();
-                    let b = text_like_str(b).unwrap();
-                    eq_case_insensitive(a.as_ref(), b.as_ref())
-                }
                 (Value::Bool(a), Value::Bool(b)) => a == b,
                 (Value::Error(a), Value::Error(b)) => a == b,
                 (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => true,
-                (Value::Number(a), b) if text_like_str(b).is_some() => {
-                    let b = text_like_str(b).unwrap();
+                (Value::Number(a), _) if b_text.is_some() => {
+                    let b = b_text.as_deref().unwrap_or("");
                     let trimmed = b.trim();
                     if trimmed.is_empty() {
                         false
@@ -10274,8 +10303,8 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
                         .is_ok_and(|parsed| parsed == *a)
                     }
                 }
-                (a, Value::Number(b)) if text_like_str(a).is_some() => {
-                    let a = text_like_str(a).unwrap();
+                (_, Value::Number(b)) if a_text.is_some() => {
+                    let a = a_text.as_deref().unwrap_or("");
                     let trimmed = a.trim();
                     if trimmed.is_empty() {
                         false
@@ -10813,12 +10842,10 @@ fn parse_countif_criteria(
     criteria: &Value,
     locale: &crate::LocaleConfig,
 ) -> Result<EngineCriteria, ErrorKind> {
-    // Errors in the criteria argument always propagate (they don't act as "match error" criteria).
-    if let Value::Error(e) = criteria {
-        return Err(*e);
-    }
-
     let criteria_value = match criteria {
+        // Errors in the criteria argument always propagate (they don't act as "match error"
+        // criteria).
+        Value::Error(e) => return Err(*e),
         Value::Number(_)
         | Value::Bool(_)
         | Value::Text(_)
@@ -10826,7 +10853,6 @@ fn parse_countif_criteria(
         | Value::Record(_)
         | Value::Empty
         | Value::Missing => bytecode_value_to_engine_ref(criteria),
-        Value::Error(_) => unreachable!("handled above"),
         Value::Lambda(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
             return Err(ErrorKind::Value);
         }
@@ -12646,8 +12672,12 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
     if all_slices {
         let mut sum = 0.0;
         for col_offset in 0..cols_usize {
-            let sa = slice_a[col_offset].expect("validated all_slices");
-            let sb = slice_b[col_offset].expect("validated all_slices");
+            let Some(sa) = slice_a[col_offset] else {
+                return Err(ErrorKind::Value);
+            };
+            let Some(sb) = slice_b[col_offset] else {
+                return Err(ErrorKind::Value);
+            };
             sum += simd::sumproduct_ignore_nan_f64(sa, sb);
         }
         return Ok(sum);

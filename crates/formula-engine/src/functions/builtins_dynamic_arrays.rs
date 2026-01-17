@@ -459,21 +459,20 @@ fn record_display_key_text(
     ctx: &dyn FunctionContext,
     record: &RecordValue,
 ) -> Result<Option<String>, ErrorKind> {
-    let display = if let Some(display_field) = record.display_field.as_deref() {
+    if let Some(display_field) = record.display_field.as_deref() {
         if let Some(value) = record.get_field_case_insensitive(display_field) {
-            value.coerce_to_string_with_ctx(ctx)?
-        } else {
-            record.display.clone()
+            let display = value.coerce_to_string_with_ctx(ctx)?;
+            if display.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(casefold_owned(display)));
         }
-    } else {
-        record.display.clone()
-    };
-
-    if display.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(casefold_owned(display)))
     }
+
+    if record.display.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(casefold(&record.display)))
 }
 
 pub(super) fn sort_key(ctx: &dyn FunctionContext, value: &Value) -> SortKeyValue {

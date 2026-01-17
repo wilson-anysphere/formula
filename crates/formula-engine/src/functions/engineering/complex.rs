@@ -1,4 +1,5 @@
 use num_complex::Complex64;
+use std::borrow::Cow;
 
 use crate::functions::FunctionContext;
 use crate::value::{ErrorKind, NumberLocale, Value};
@@ -29,6 +30,25 @@ fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
     }
 }
 
+fn strip_whitespace_if_needed(s: &str) -> Cow<'_, str> {
+    let mut it = s.char_indices();
+    while let Some((idx, ch)) = it.next() {
+        if !ch.is_whitespace() {
+            continue;
+        }
+
+        let mut out = String::with_capacity(s.len());
+        out.push_str(&s[..idx]);
+        for (_, ch) in it {
+            if !ch.is_whitespace() {
+                out.push(ch);
+            }
+        }
+        return Cow::Owned(out);
+    }
+    Cow::Borrowed(s)
+}
+
 /// Parse an Excel-style complex number string (engineering functions).
 ///
 /// Supported forms:
@@ -39,7 +59,8 @@ fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
 ///
 /// Whitespace is ignored.
 pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedComplex, ErrorKind> {
-    let mut normalized: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let normalized = strip_whitespace_if_needed(text);
+    let normalized = normalized.as_ref();
     if normalized.is_empty() {
         return Ok(ParsedComplex {
             value: Complex64::new(0.0, 0.0),
@@ -47,24 +68,27 @@ pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedCo
         });
     }
 
-    let suffix = match normalized.chars().last() {
+    let (suffix, core) = match normalized.chars().last() {
         Some('i') | Some('I') => Some('i'),
         Some('j') | Some('J') => Some('j'),
         _ => None,
-    };
-
-    if let Some(suffix) = suffix {
-        normalized.pop();
-
-        // Excel only allows the imaginary unit suffix in the final position.
-        if normalized
+    }
+    .map(|suffix| {
+        let last = normalized
             .chars()
-            .any(|c| matches!(c, 'i' | 'I' | 'j' | 'J'))
-        {
+            .last()
+            .expect("non-empty normalized has a last char");
+        let core_end = normalized.len().saturating_sub(last.len_utf8());
+        (suffix, &normalized[..core_end])
+    })
+    .unwrap_or(('i', normalized));
+
+    if normalized.len() != core.len() {
+        // Excel only allows the imaginary unit suffix in the final position.
+        if core.chars().any(|c| matches!(c, 'i' | 'I' | 'j' | 'J')) {
             return Err(ErrorKind::Num);
         }
 
-        let core = normalized.as_str();
         if core.is_empty() || core == "+" {
             return Ok(ParsedComplex {
                 value: Complex64::new(0.0, 1.0),
@@ -126,14 +150,11 @@ pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedCo
         })
     } else {
         // Reject stray i/j characters elsewhere.
-        if normalized
-            .chars()
-            .any(|c| matches!(c, 'i' | 'I' | 'j' | 'J'))
-        {
+        if normalized.chars().any(|c| matches!(c, 'i' | 'I' | 'j' | 'J')) {
             return Err(ErrorKind::Num);
         }
 
-        let re = parse_component(&normalized, locale)?;
+        let re = parse_component(normalized, locale)?;
         Ok(ParsedComplex {
             value: Complex64::new(re, 0.0),
             suffix: 'i',

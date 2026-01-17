@@ -70,6 +70,130 @@ fn debug_trace_supports_bracket_field_access() {
 }
 
 #[test]
+fn debug_trace_supports_bracket_field_access_with_whitespace_between_dot_and_bracket() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("List Price".to_string(), Value::Number(42.0));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1. [\"List Price\"]")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Number(42.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "A1. [\"List Price\"]");
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FieldAccess { ref field } if field == "List Price"
+    ));
+}
+
+#[test]
+fn debug_trace_supports_bracket_field_access_with_literal_rbracket() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("[Price]".to_string(), Value::Number(12.5));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1.["[Price]"]"#)
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Number(12.5));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), r#"A1.["[Price]"]"#);
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FieldAccess { ref field } if field == "[Price]"
+    ));
+}
+
+#[test]
+fn debug_trace_supports_bracket_field_access_with_unbalanced_rbracket_in_field_name() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("Price]".to_string(), Value::Number(7.0));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1.["Price]"]"#)
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Number(7.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), r#"A1.["Price]"]"#);
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FieldAccess { ref field } if field == "Price]"
+    ));
+}
+
+#[test]
+fn debug_trace_supports_bracket_field_access_with_escaped_quotes() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("He said \"Hi\"".to_string(), Value::Number(4.0));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1.["He said ""Hi"""]"#)
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Number(4.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), r#"A1.["He said ""Hi"""]"#);
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FieldAccess { ref field } if field == "He said \"Hi\""
+    ));
+}
+
+#[test]
 fn debug_trace_field_access_on_non_record_returns_value_error() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

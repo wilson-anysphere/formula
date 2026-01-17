@@ -84,7 +84,9 @@ impl Vm {
         let mut pc: usize = 0;
         while pc < instrs.len() {
             let inst = instrs[pc];
-            match inst.op() {
+            let op = inst.op();
+            match op {
+                OpCode::Invalid => return Value::Error(ErrorKind::Value),
                 OpCode::PushConst => {
                     let v = program.consts[inst.a() as usize].to_value();
                     self.stack.push(v);
@@ -145,7 +147,7 @@ impl Vm {
                 | OpCode::Ge => {
                     let right = self.stack.pop().unwrap_or(Value::Empty);
                     let left = self.stack.pop().unwrap_or(Value::Empty);
-                    let op = match inst.op() {
+                    let op = match op {
                         OpCode::Add => BinaryOp::Add,
                         OpCode::Sub => BinaryOp::Sub,
                         OpCode::Mul => BinaryOp::Mul,
@@ -159,7 +161,10 @@ impl Vm {
                         OpCode::Le => BinaryOp::Le,
                         OpCode::Gt => BinaryOp::Gt,
                         OpCode::Ge => BinaryOp::Ge,
-                        _ => unreachable!(),
+                        _ => {
+                            debug_assert!(false, "invalid binary opcode: {op:?}");
+                            return Value::Error(ErrorKind::Value);
+                        }
                     };
                     self.stack
                         .push(apply_binary(op, left, right, grid, self.sheet_id, base));

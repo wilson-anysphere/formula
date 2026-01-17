@@ -181,14 +181,12 @@ fn split_on_any(
 ) -> Vec<String> {
     match match_mode {
         MatchMode::CaseSensitive => {
-            let delims: Vec<&str> = delimiters.iter().map(|d| d.as_str()).collect();
-            split_on_any_impl(text, text, &delims, ignore_empty)
+            split_on_any_case_sensitive(text, text, delimiters, ignore_empty)
         }
         MatchMode::CaseInsensitive => {
             // ASCII fast path: preserve existing TEXTSPLIT behavior and avoid Unicode case-fold allocations.
             if text.is_ascii() && delimiters.iter().all(|d| d.is_ascii()) {
-                let delims: Vec<&[u8]> = delimiters.iter().map(|d| d.as_bytes()).collect();
-                return split_on_any_ascii_case_insensitive(text, &delims, ignore_empty);
+                return split_on_any_ascii_case_insensitive(text, delimiters, ignore_empty);
             }
 
             split_on_any_unicode_case_insensitive(text, delimiters, ignore_empty)
@@ -198,7 +196,7 @@ fn split_on_any(
 
 fn split_on_any_ascii_case_insensitive(
     original: &str,
-    delimiters: &[&[u8]],
+    delimiters: &[String],
     ignore_empty: bool,
 ) -> Vec<String> {
     let haystack = original.as_bytes();
@@ -206,17 +204,18 @@ fn split_on_any_ascii_case_insensitive(
     let mut cursor = 0usize;
     let mut segment_start = 0usize;
 
-    while let Some((match_pos, match_len)) = find_next_delim_ascii_case_insensitive(haystack, cursor, delimiters) {
-        let piece = original[segment_start..match_pos].to_string();
-        segments.push(piece);
+    while let Some((match_pos, match_len)) =
+        find_next_delim_ascii_case_insensitive(haystack, cursor, delimiters)
+    {
+        if !ignore_empty || match_pos > segment_start {
+            segments.push(original[segment_start..match_pos].to_string());
+        }
         cursor = match_pos + match_len;
         segment_start = cursor;
     }
 
-    segments.push(original[segment_start..].to_string());
-
-    if ignore_empty {
-        segments.retain(|s| !s.is_empty());
+    if !ignore_empty || segment_start < original.len() {
+        segments.push(original[segment_start..].to_string());
     }
 
     segments
@@ -225,13 +224,14 @@ fn split_on_any_ascii_case_insensitive(
 fn find_next_delim_ascii_case_insensitive(
     haystack: &[u8],
     from: usize,
-    delimiters: &[&[u8]],
+    delimiters: &[String],
 ) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
     for needle in delimiters {
         if needle.is_empty() {
             continue;
         }
+        let needle = needle.as_bytes();
         if from > haystack.len() || haystack.len() - from < needle.len() {
             continue;
         }
@@ -260,10 +260,10 @@ fn find_next_delim_ascii_case_insensitive(
     best
 }
 
-fn split_on_any_impl(
+fn split_on_any_case_sensitive(
     original: &str,
     haystack: &str,
-    delimiters: &[&str],
+    delimiters: &[String],
     ignore_empty: bool,
 ) -> Vec<String> {
     let mut segments = Vec::new();
@@ -271,22 +271,21 @@ fn split_on_any_impl(
     let mut segment_start = 0usize;
 
     while let Some((match_pos, match_len)) = find_next_delim(haystack, cursor, delimiters) {
-        let piece = original[segment_start..match_pos].to_string();
-        segments.push(piece);
+        if !ignore_empty || match_pos > segment_start {
+            segments.push(original[segment_start..match_pos].to_string());
+        }
         cursor = match_pos + match_len;
         segment_start = cursor;
     }
 
-    segments.push(original[segment_start..].to_string());
-
-    if ignore_empty {
-        segments.retain(|s| !s.is_empty());
+    if !ignore_empty || segment_start < original.len() {
+        segments.push(original[segment_start..].to_string());
     }
 
     segments
 }
 
-fn find_next_delim(haystack: &str, from: usize, delimiters: &[&str]) -> Option<(usize, usize)> {
+fn find_next_delim(haystack: &str, from: usize, delimiters: &[String]) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
     for delim in delimiters {
         if delim.is_empty() {
@@ -311,59 +310,30 @@ fn find_next_delim(haystack: &str, from: usize, delimiters: &[&str]) -> Option<(
     best
 }
 
-fn fold_char_uppercase(c: char, out: &mut Vec<char>) {
-    if c.is_ascii() {
-        out.push(c.to_ascii_uppercase());
-    } else {
-        out.extend(c.to_uppercase());
-    }
-}
-
-fn fold_str_uppercase(s: &str) -> Vec<char> {
-    let mut out = Vec::with_capacity(s.len());
-    for c in s.chars() {
-        fold_char_uppercase(c, &mut out);
-    }
-    out
-}
-
 fn match_delim_at_unicode_case_insensitive(
-    haystack_chars: &[char],
-    start: usize,
+    haystack_folded: &[char],
+    folded_starts: &[usize],
+    start_char: usize,
     delim_folded: &[char],
 ) -> Option<usize> {
     if delim_folded.is_empty() {
         return None;
     }
 
-    let mut di = 0usize;
-    let mut hi = start;
-    while di < delim_folded.len() {
-        let ch = *haystack_chars.get(hi)?;
-        if ch.is_ascii() {
-            let fc = ch.to_ascii_uppercase();
-            if di >= delim_folded.len() || fc != delim_folded[di] {
-                return None;
-            }
-            di += 1;
-        } else {
-            for fc in ch.to_uppercase() {
-                // If the delimiter would end "mid-character" after case folding (e.g. trying to match
-                // "S" against "ß" which folds to "SS"), treat it as not a match. This keeps delimiter
-                // matches aligned to original character boundaries.
-                if di >= delim_folded.len() {
-                    return None;
-                }
-                if fc != delim_folded[di] {
-                    return None;
-                }
-                di += 1;
-            }
-        }
-        hi += 1;
+    let start_folded = *folded_starts.get(start_char)?;
+    let end_folded = start_folded.checked_add(delim_folded.len())?;
+    let hay_window = haystack_folded.get(start_folded..end_folded)?;
+    if hay_window != delim_folded {
+        return None;
     }
 
-    Some(hi)
+    // If the delimiter would end "mid-character" after case folding (e.g. trying to match "S"
+    // against "ß" which folds to "SS"), treat it as not a match. This keeps delimiter matches
+    // aligned to original character boundaries.
+    if end_folded == haystack_folded.len() {
+        return Some(folded_starts.len());
+    }
+    folded_starts.binary_search(&end_folded).ok()
 }
 
 fn split_on_any_unicode_case_insensitive(
@@ -371,26 +341,41 @@ fn split_on_any_unicode_case_insensitive(
     delimiters: &[String],
     ignore_empty: bool,
 ) -> Vec<String> {
-    let hay_chars: Vec<char> = text.chars().collect();
-    let mut char_starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    let mut char_starts: Vec<usize> = Vec::new();
+    let mut hay_folded: Vec<char> = Vec::new();
+    let mut folded_starts: Vec<usize> = Vec::new();
+    for (byte_idx, ch) in text.char_indices() {
+        char_starts.push(byte_idx);
+        folded_starts.push(hay_folded.len());
+        if ch.is_ascii() {
+            hay_folded.push(ch.to_ascii_uppercase());
+        } else {
+            hay_folded.extend(ch.to_uppercase());
+        }
+    }
     char_starts.push(text.len());
+    let hay_len = folded_starts.len();
 
-    let folded_delimiters: Vec<Vec<char>> =
-        delimiters.iter().map(|d| fold_str_uppercase(d)).collect();
+    let folded_delimiters: Vec<Vec<char>> = delimiters
+        .iter()
+        .map(|d| crate::value::fold_to_uppercase_chars(d))
+        .collect();
 
     let mut segments = Vec::new();
     let mut cursor = 0usize;
     let mut segment_start = 0usize;
 
-    while cursor < hay_chars.len() {
+    while cursor < hay_len {
         // Find the next delimiter match by scanning forward. This is O(n * delimiters) but keeps
         // indices aligned to original text character boundaries even when Unicode case folding
         // changes length (e.g. ß -> SS).
         let mut found: Option<(usize, usize)> = None;
-        for i in cursor..hay_chars.len() {
+        for i in cursor..hay_len {
             let mut best_end: Option<usize> = None;
             for delim in &folded_delimiters {
-                if let Some(end) = match_delim_at_unicode_case_insensitive(&hay_chars, i, delim) {
+                if let Some(end) =
+                    match_delim_at_unicode_case_insensitive(&hay_folded, &folded_starts, i, delim)
+                {
                     best_end = match best_end {
                         None => Some(end),
                         Some(prev) if end > prev => Some(end),
@@ -408,16 +393,18 @@ fn split_on_any_unicode_case_insensitive(
             break;
         };
 
-        let piece = text[char_starts[segment_start]..char_starts[match_pos]].to_string();
-        segments.push(piece);
+        let start = char_starts[segment_start];
+        let end = char_starts[match_pos];
+        if !ignore_empty || end > start {
+            segments.push(text[start..end].to_string());
+        }
         cursor = match_pos + match_len;
         segment_start = cursor;
     }
 
-    segments.push(text[char_starts[segment_start]..].to_string());
-
-    if ignore_empty {
-        segments.retain(|s| !s.is_empty());
+    let tail_start = char_starts[segment_start];
+    if !ignore_empty || tail_start < text.len() {
+        segments.push(text[tail_start..].to_string());
     }
 
     segments

@@ -1,5 +1,6 @@
 use crate::error::{ExcelError, ExcelResult};
 use crate::functions::financial::iterative::{newton_raphson, EXCEL_ITERATION_TOLERANCE};
+use smallvec::SmallVec;
 
 const MAX_ITER_IRR: usize = 20;
 const MAX_ITER_XIRR: usize = 100;
@@ -164,7 +165,10 @@ pub fn xirr(values: &[f64], dates: &[f64], guess: Option<f64>) -> ExcelResult<f6
     }
 
     let base = dates[0];
-    let exponents: Vec<f64> = dates.iter().map(|d| (*d - base) / 365.0).collect();
+    let mut exponents: SmallVec<[f64; 16]> = SmallVec::with_capacity(dates.len());
+    for d in dates {
+        exponents.push((*d - base) / 365.0);
+    }
 
     let f = |r: f64| xirr_npv(values, &exponents, r);
     let df = |r: f64| xirr_npv_derivative(values, &exponents, r);

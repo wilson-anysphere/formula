@@ -73,7 +73,10 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if functions.insert(name.clone(), entry).is_some() {
-            panic!("Duplicate function name registered in formula-engine inventory: {name}");
+            return Err(format!(
+                "duplicate function name registered in formula-engine inventory: {name}"
+            )
+            .into());
         }
     }
 

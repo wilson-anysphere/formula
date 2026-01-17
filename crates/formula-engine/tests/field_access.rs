@@ -1,6 +1,8 @@
 use formula_engine::{
     parse_formula, parse_formula_partial, Engine, ErrorKind, ParseOptions, SerializeOptions, Value,
 };
+use formula_engine::value::RecordValue;
+use std::collections::HashMap;
 
 #[test]
 fn field_access_roundtrip_ident() {
@@ -67,4 +69,46 @@ fn field_access_propagates_base_error() {
         engine.get_cell_value("Sheet1", "B1"),
         Value::Error(ErrorKind::Div0)
     );
+}
+
+#[test]
+fn field_access_bracket_selector_allows_outer_whitespace() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("Change%".to_string(), Value::Number(3.0));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1.[  "Change%"  ]"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+}
+
+#[test]
+fn field_access_bracket_selector_allows_whitespace_between_dot_and_bracket() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("Change%".to_string(), Value::Number(3.0));
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1. ["Change%"]"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 }

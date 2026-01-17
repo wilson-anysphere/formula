@@ -76,21 +76,49 @@ pub fn t_test(xs: &[f64], ys: &[f64], tails: i64, test_type: i64) -> Result<f64,
             if xs.len() < 2 {
                 return Err(ErrorKind::Div0);
             }
-            let diffs: Vec<f64> = xs.iter().zip(ys.iter()).map(|(&a, &b)| a - b).collect();
-            let mean_d = super::mean(&diffs);
+            // Compute diffs statistics without allocating an intermediate `Vec`.
+            let n = xs.len() as f64;
+            let mut sum = 0.0;
+            let mut c = 0.0;
+            for (&a, &b) in xs.iter().zip(ys.iter()) {
+                let d = a - b;
+                let y = d - c;
+                let t = sum + y;
+                c = (t - sum) - y;
+                sum = t;
+            }
+
+            let mean_d = sum / n;
             if !mean_d.is_finite() {
                 return Err(ErrorKind::Num);
             }
-            let sd_d = super::stdev_s(&diffs)?;
+
+            let mut sse = 0.0;
+            let mut c = 0.0;
+            for (&a, &b) in xs.iter().zip(ys.iter()) {
+                let d = a - b;
+                let dev = d - mean_d;
+                let term = dev * dev;
+                let y = term - c;
+                let t = sse + y;
+                c = (t - sse) - y;
+                sse = t;
+            }
+            if !sse.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            let sse = sse.max(0.0);
+            let sd_d = (sse / (n - 1.0)).sqrt();
             if sd_d == 0.0 {
                 return Err(ErrorKind::Div0);
             }
-            let se = sd_d / (diffs.len() as f64).sqrt();
+
+            let se = sd_d / n.sqrt();
             if se == 0.0 || !se.is_finite() {
                 return Err(ErrorKind::Div0);
             }
             let t = mean_d / se;
-            (t, (diffs.len() - 1) as f64)
+            (t, n - 1.0)
         }
         2 => {
             if xs.len() < 2 || ys.len() < 2 {

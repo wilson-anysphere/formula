@@ -13,6 +13,7 @@
 #[cfg(test)]
 use chrono::NaiveDate;
 use formula_columnar::{ColumnarTable, Value as ColumnarValue};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -157,12 +158,6 @@ fn pivot_key_part_to_pivot_value(part: &PivotKeyPart) -> PivotValue {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PivotKey(pub Vec<PivotKeyPart>);
-
-impl PivotKey {
-    fn display_strings(&self) -> Vec<String> {
-        self.0.iter().map(|p| p.display_string()).collect()
-    }
-}
 
 impl PartialOrd for PivotKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -881,8 +876,12 @@ impl Accumulator {
     }
 }
 
-fn normalize_pivot_item_name(name: &str) -> String {
-    crate::value::casefold(name)
+fn accumulator_vec(count: usize) -> Vec<Accumulator> {
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        out.push(Accumulator::new());
+    }
+    out
 }
 
 fn normalize_pivot_item_name_owned(name: String) -> String {
@@ -934,27 +933,29 @@ impl FieldItemResolver {
     }
 
     fn contains_display_name(&self, name: &str) -> bool {
-        let normalized = normalize_pivot_item_name(name);
-        self.by_name.contains_key(&normalized) || self.ambiguous.contains(&normalized)
+        crate::value::with_casefolded_key(name, |folded| {
+            self.by_name.contains_key(folded) || self.ambiguous.contains(folded)
+        })
     }
 
     fn insert_calculated_item(&mut self, name: &str) {
-        let normalized = normalize_pivot_item_name(name);
+        let normalized = crate::value::casefold(name);
         self.by_name
             .insert(normalized, PivotKeyPart::Text(name.to_string()));
     }
 
     fn resolve(&self, name: &str) -> Result<PivotKeyPart, String> {
-        let normalized = normalize_pivot_item_name(name);
-        if self.ambiguous.contains(&normalized) {
-            return Err(format!(
-                "item reference \"{name}\" is ambiguous (multiple distinct items share that display name)"
-            ));
-        }
-        self.by_name
-            .get(&normalized)
-            .cloned()
-            .ok_or_else(|| format!("unknown item reference \"{name}\""))
+        crate::value::with_casefolded_key(name, |folded| {
+            if self.ambiguous.contains(folded) {
+                return Err(format!(
+                    "item reference \"{name}\" is ambiguous (multiple distinct items share that display name)"
+                ));
+            }
+            self.by_name
+                .get(folded)
+                .cloned()
+                .ok_or_else(|| format!("unknown item reference \"{name}\""))
+        })
     }
 }
 
@@ -1158,8 +1159,8 @@ impl<'a> CalculatedItemParser<'a> {
         while let Some(b) = self.consume() {
             match b {
                 b'"' => {
-                    return Ok(String::from_utf8(out)
-                        .expect("string literal bytes come from valid UTF-8 input"))
+                    return String::from_utf8(out)
+                        .map_err(|_| "string literal contains invalid UTF-8".to_string());
                 }
                 b'\\' => {
                     let escaped = self
@@ -1361,6 +1362,7 @@ impl PivotEngine {
         }
 
         let indices = FieldIndices::new(source, cfg)?;
+        let value_field_count = cfg.value_fields.len();
 
         let mut cube: HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>> = HashMap::new();
         let mut row_keys: HashSet<PivotKey> = HashSet::new();
@@ -1378,11 +1380,9 @@ impl PivotEngine {
             col_keys.insert(col_key.clone());
 
             let row_entry = cube.entry(row_key).or_default();
-            let cell = row_entry.entry(col_key).or_insert_with(|| {
-                (0..cfg.value_fields.len())
-                    .map(|_| Accumulator::new())
-                    .collect()
-            });
+            let cell = row_entry
+                .entry(col_key)
+                .or_insert_with(|| accumulator_vec(value_field_count));
 
             for (vf_idx, _vf) in cfg.value_fields.iter().enumerate() {
                 let val = source.value(row, indices.value_indices[vf_idx]);
@@ -1398,19 +1398,13 @@ impl PivotEngine {
         }
 
         let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
-        let row_sort_specs = cfg
-            .row_fields
-            .iter()
-            .map(KeySortSpec::for_field)
-            .collect::<Vec<_>>();
+        let row_sort_specs: SmallVec<[KeySortSpec; 4]> =
+            cfg.row_fields.iter().map(KeySortSpec::for_field).collect();
         row_keys.sort_by(|a, b| compare_pivot_keys(a, b, &row_sort_specs));
 
         let mut col_keys: Vec<PivotKey> = col_keys.into_iter().collect();
-        let col_sort_specs = cfg
-            .column_fields
-            .iter()
-            .map(KeySortSpec::for_field)
-            .collect::<Vec<_>>();
+        let col_sort_specs: SmallVec<[KeySortSpec; 4]> =
+            cfg.column_fields.iter().map(KeySortSpec::for_field).collect();
         col_keys.sort_by(|a, b| compare_pivot_keys(a, b, &col_sort_specs));
 
         // Ensure at least one column key exists to simplify output logic.
@@ -1436,7 +1430,6 @@ impl PivotEngine {
                 let group_totals = Self::precompute_group_totals(
                     &cube,
                     &row_keys,
-                    &col_keys,
                     cfg,
                     subtotal_levels,
                 );
@@ -1466,7 +1459,7 @@ impl PivotEngine {
                     row_kinds.push(PivotRowKind::Leaf { row_key_idx });
 
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len());
                     }
 
                     prev_row_key = Some(row_key.clone());
@@ -1509,11 +1502,11 @@ impl PivotEngine {
                     // Update subtotal accumulators & grand accumulator.
                     for level in 0..subtotal_levels {
                         if let Some(acc) = group_accs[level].as_mut() {
-                            acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                            acc.merge_row(row_map, cfg.value_fields.len());
                         }
                     }
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len());
                     }
 
                     prev_row_key = Some(row_key.clone());
@@ -1541,7 +1534,7 @@ impl PivotEngine {
                     ));
                     row_kinds.push(PivotRowKind::Leaf { row_key_idx });
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len());
                     }
                 }
             }
@@ -1675,8 +1668,7 @@ impl PivotEngine {
         item_name: &str,
         expr: &CalculatedItemExpr,
     ) -> Result<(), PivotError> {
-        let existing_row_keys: Vec<PivotKey> = row_keys.iter().cloned().collect();
-        if existing_row_keys.is_empty() {
+        if row_keys.is_empty() {
             return Ok(());
         }
 
@@ -1687,21 +1679,21 @@ impl PivotEngine {
         }
 
         let mut groups: HashMap<PivotKey, RowGroup> = HashMap::new();
-        for row_key in &existing_row_keys {
+        for row_key in row_keys.iter() {
             let Some(item_part) = row_key.0.get(row_field_idx).cloned() else {
                 continue;
             };
             let mut base_parts = row_key.0.clone();
             base_parts.remove(row_field_idx);
             let base_key = PivotKey(base_parts);
+            let row_key = row_key.clone();
             let entry = groups.entry(base_key).or_insert_with(|| RowGroup {
                 template: row_key.clone(),
                 items: HashMap::new(),
             });
-            entry.items.insert(item_part, row_key.clone());
+            entry.items.insert(item_part, row_key);
         }
 
-        let col_keys_vec: Vec<PivotKey> = col_keys.iter().cloned().collect();
         let new_part = PivotKeyPart::Text(item_name.to_string());
 
         let mut new_rows: Vec<(PivotKey, HashMap<PivotKey, Vec<Accumulator>>)> = Vec::new();
@@ -1717,7 +1709,7 @@ impl PivotEngine {
 
             let mut new_row_map: HashMap<PivotKey, Vec<Accumulator>> = HashMap::new();
 
-            for col_key in &col_keys_vec {
+            for col_key in col_keys.iter() {
                 let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
                 for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
                     let agg = vf.aggregation;
@@ -1779,8 +1771,7 @@ impl PivotEngine {
         item_name: &str,
         expr: &CalculatedItemExpr,
     ) -> Result<(), PivotError> {
-        let existing_col_keys: Vec<PivotKey> = col_keys.iter().cloned().collect();
-        if existing_col_keys.is_empty() {
+        if col_keys.is_empty() {
             return Ok(());
         }
 
@@ -1791,21 +1782,21 @@ impl PivotEngine {
         }
 
         let mut groups: HashMap<PivotKey, ColGroup> = HashMap::new();
-        for col_key in &existing_col_keys {
+        for col_key in col_keys.iter() {
             let Some(item_part) = col_key.0.get(col_field_idx).cloned() else {
                 continue;
             };
             let mut base_parts = col_key.0.clone();
             base_parts.remove(col_field_idx);
             let base_key = PivotKey(base_parts);
+            let col_key = col_key.clone();
             let entry = groups.entry(base_key).or_insert_with(|| ColGroup {
                 template: col_key.clone(),
                 items: HashMap::new(),
             });
-            entry.items.insert(item_part, col_key.clone());
+            entry.items.insert(item_part, col_key);
         }
 
-        let row_keys_vec: Vec<PivotKey> = row_keys.iter().cloned().collect();
         let new_part = PivotKeyPart::Text(item_name.to_string());
 
         for group in groups.values() {
@@ -1818,7 +1809,7 @@ impl PivotEngine {
 
             col_keys.insert(new_col_key.clone());
 
-            for row_key in &row_keys_vec {
+            for row_key in row_keys.iter() {
                 let row_map = cube.entry(row_key.clone()).or_default();
                 let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
                 for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
@@ -1858,6 +1849,20 @@ impl PivotEngine {
         Ok(())
     }
 
+    fn join_non_empty_display_strings(strings: impl IntoIterator<Item = String>) -> String {
+        let mut out = String::new();
+        for s in strings {
+            if s.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_str(" / ");
+            }
+            out.push_str(&s);
+        }
+        out
+    }
+
     fn build_header_row(col_keys: &[PivotKey], cfg: &PivotConfig) -> Vec<PivotValue> {
         let mut row = Vec::new();
 
@@ -1885,12 +1890,7 @@ impl PivotEngine {
             let col_label = if cfg.column_fields.is_empty() {
                 String::new()
             } else {
-                col_key
-                    .display_strings()
-                    .into_iter()
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" / ")
+                Self::join_non_empty_display_strings(col_key.0.iter().map(|p| p.display_string()))
             };
             for vf in &cfg.value_fields {
                 let base = if vf.name.is_empty() {
@@ -1949,12 +1949,9 @@ impl PivotEngine {
                     row.push(pivot_key_part_to_pivot_value(&row_key.0[0]));
                 } else {
                     // Compact: join row keys into one cell.
-                    let s = row_key
-                        .display_strings()
-                        .into_iter()
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" / ");
+                    let s = Self::join_non_empty_display_strings(
+                        row_key.0.iter().map(|p| p.display_string()),
+                    );
                     row.push(PivotValue::Text(s));
                 }
             }
@@ -1976,9 +1973,7 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len())
-            .map(|_| Accumulator::new())
-            .collect();
+        let mut row_total_accs = accumulator_vec(cfg.value_fields.len());
 
         for col_key in col_keys {
             let maybe_cell = row_map.and_then(|m| m.get(col_key));
@@ -2037,20 +2032,19 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len())
-            .map(|_| Accumulator::new())
-            .collect();
+        let mut row_total_accs = accumulator_vec(cfg.value_fields.len());
+        let empty = Accumulator::new();
 
         for col_key in col_keys {
-            let cell_accs = totals.cells.get(col_key).cloned().unwrap_or_else(|| {
-                (0..cfg.value_fields.len())
-                    .map(|_| Accumulator::new())
-                    .collect()
-            });
-
-            for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
-                row_total_accs[vf_idx].merge(&cell_accs[vf_idx]);
-                row.push(cell_accs[vf_idx].finalize(vf.aggregation));
+            if let Some(cell_accs) = totals.cells.get(col_key) {
+                for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                    row_total_accs[vf_idx].merge(&cell_accs[vf_idx]);
+                    row.push(cell_accs[vf_idx].finalize(vf.aggregation));
+                }
+            } else {
+                for vf in &cfg.value_fields {
+                    row.push(empty.finalize(vf.aggregation));
+                }
             }
         }
 
@@ -2086,12 +2080,13 @@ impl PivotEngine {
     fn precompute_group_totals(
         cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
         row_keys: &[PivotKey],
-        col_keys: &[PivotKey],
         cfg: &PivotConfig,
         subtotal_levels: usize,
     ) -> Vec<HashMap<PivotKey, GroupAccumulator>> {
-        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> =
-            (0..subtotal_levels).map(|_| HashMap::new()).collect();
+        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> = Vec::with_capacity(subtotal_levels);
+        for _ in 0..subtotal_levels {
+            out.push(HashMap::new());
+        }
 
         for row_key in row_keys {
             let row_map = cube.get(row_key);
@@ -2100,7 +2095,7 @@ impl PivotEngine {
                 let entry = out[level]
                     .entry(prefix_key)
                     .or_insert_with(GroupAccumulator::new);
-                entry.merge_row(row_map, col_keys, cfg.value_fields.len());
+                entry.merge_row(row_map, cfg.value_fields.len());
             }
         }
 
@@ -2157,31 +2152,23 @@ impl PivotEngine {
         let regular_column_count = col_keys.len() * value_field_count;
         let row_grand_total_start = row_label_width + regular_column_count;
 
-        let leaf_rows: Vec<(usize, usize)> = row_kinds
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, kind)| match kind {
-                PivotRowKind::Leaf { row_key_idx } => Some((idx, *row_key_idx)),
-                _ => None,
-            })
-            .collect();
+        let mut leaf_rows: Vec<(usize, usize)> = Vec::new();
+        let mut leaf_row_indices: Vec<usize> = Vec::new();
+        let mut subtotal_rows: Vec<(usize, &PivotKey)> = Vec::new();
+        let mut grand_total_row: Option<usize> = None;
+        for (idx, kind) in row_kinds.iter().enumerate() {
+            match kind {
+                PivotRowKind::Header => {}
+                PivotRowKind::Leaf { row_key_idx } => {
+                    leaf_rows.push((idx, *row_key_idx));
+                    leaf_row_indices.push(idx);
+                }
+                PivotRowKind::Subtotal { prefix_key, .. } => subtotal_rows.push((idx, prefix_key)),
+                PivotRowKind::GrandTotal => grand_total_row = Some(idx),
+            }
+        }
 
-        let leaf_row_indices: Vec<usize> = leaf_rows.iter().map(|(r, _)| *r).collect();
-
-        let subtotal_rows: Vec<(usize, &PivotKey)> = row_kinds
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, kind)| match kind {
-                PivotRowKind::Subtotal { prefix_key, .. } => Some((idx, prefix_key)),
-                _ => None,
-            })
-            .collect();
-
-        let grand_total_row = row_kinds
-            .iter()
-            .enumerate()
-            .find_map(|(idx, kind)| matches!(kind, PivotRowKind::GrandTotal).then_some(idx));
-
+        let mut cols = Vec::with_capacity(col_keys.len() + usize::from(cfg.grand_totals.columns));
         for vf_idx in 0..value_field_count {
             let show_as = cfg.value_fields[vf_idx]
                 .show_as
@@ -2193,8 +2180,7 @@ impl PivotEngine {
             // All output columns that correspond to this value field:
             // - each column key has `value_field_count` columns (one per value field)
             // - followed by an optional row grand total section (also one per value field)
-            let mut cols =
-                Vec::with_capacity(col_keys.len() + usize::from(cfg.grand_totals.columns));
+            cols.clear();
             for col_idx in 0..col_keys.len() {
                 cols.push(row_label_width + col_idx * value_field_count + vf_idx);
             }
@@ -2954,16 +2940,14 @@ impl PivotEngine {
         base_part: &PivotKeyPart,
         difference: bool,
     ) {
-        let base_col_keys = col_keys
-            .iter()
-            .map(|col_key| {
-                let mut parts = col_key.0.clone();
-                if base_col_pos < parts.len() {
-                    parts[base_col_pos] = base_part.clone();
-                }
-                PivotKey(parts)
-            })
-            .collect::<Vec<_>>();
+        let mut base_col_keys: Vec<PivotKey> = Vec::with_capacity(col_keys.len());
+        for col_key in col_keys {
+            let mut parts = col_key.0.clone();
+            if base_col_pos < parts.len() && parts[base_col_pos] != *base_part {
+                parts[base_col_pos] = base_part.clone();
+            }
+            base_col_keys.push(PivotKey(parts));
+        }
 
         for &(r, row_key_idx) in leaf_rows {
             let Some(row_key) = row_keys.get(row_key_idx) else {
@@ -3090,12 +3074,13 @@ impl PivotEngine {
         let mut out = Vec::with_capacity(keys.len());
 
         for key in keys {
-            let group_parts = key
-                .0
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, part)| (idx != exclude_pos).then_some(part.clone()))
-                .collect::<Vec<_>>();
+            let mut group_parts: Vec<PivotKeyPart> = Vec::with_capacity(key.0.len().saturating_sub(1));
+            for (idx, part) in key.0.iter().enumerate() {
+                if idx == exclude_pos {
+                    continue;
+                }
+                group_parts.push(part.clone());
+            }
             let group_key = PivotKey(group_parts);
 
             let next_id = id_by_key.len();
@@ -3117,8 +3102,9 @@ impl PivotEngine {
             return;
         }
 
+        let mut running_by_group = vec![0.0; group_count];
         for &c in cols {
-            let mut running_by_group = vec![0.0; group_count];
+            running_by_group.fill(0.0);
             for &(r, row_key_idx) in leaf_rows {
                 let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
@@ -3130,9 +3116,9 @@ impl PivotEngine {
                 else {
                     continue;
                 };
-                if let Some(running) = running_by_group.get_mut(group_id) {
-                    *running += n;
-                    data[r][c] = PivotValue::Number(*running);
+                if group_id < running_by_group.len() {
+                    running_by_group[group_id] += n;
+                    data[r][c] = PivotValue::Number(running_by_group[group_id]);
                 }
             }
         }
@@ -3149,8 +3135,9 @@ impl PivotEngine {
             return;
         }
 
+        let mut running_by_group = vec![0.0; group_count];
         for &r in leaf_rows {
-            let mut running_by_group = vec![0.0; group_count];
+            running_by_group.fill(0.0);
             for (col_idx, &c) in cols.iter().enumerate() {
                 let Some(group_id) = col_group_ids.get(col_idx).copied() else {
                     continue;
@@ -3162,9 +3149,9 @@ impl PivotEngine {
                 else {
                     continue;
                 };
-                if let Some(running) = running_by_group.get_mut(group_id) {
-                    *running += n;
-                    data[r][c] = PivotValue::Number(*running);
+                if group_id < running_by_group.len() {
+                    running_by_group[group_id] += n;
+                    data[r][c] = PivotValue::Number(running_by_group[group_id]);
                 }
             }
         }
@@ -3194,8 +3181,11 @@ impl PivotEngine {
             return;
         }
 
+        let mut values_by_group: Vec<Vec<(usize, f64)>> = (0..group_count).map(|_| Vec::new()).collect();
         for &c in cols {
-            let mut values_by_group: Vec<Vec<(usize, f64)>> = vec![Vec::new(); group_count];
+            for values in values_by_group.iter_mut() {
+                values.clear();
+            }
             for &(r, row_key_idx) in leaf_rows {
                 let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
@@ -3212,7 +3202,7 @@ impl PivotEngine {
                 }
             }
 
-            for mut values in values_by_group {
+            for values in values_by_group.iter_mut() {
                 if values.is_empty() {
                     continue;
                 }
@@ -3255,8 +3245,11 @@ impl PivotEngine {
             return;
         }
 
+        let mut values_by_group: Vec<Vec<(usize, f64)>> = (0..group_count).map(|_| Vec::new()).collect();
         for &r in leaf_rows {
-            let mut values_by_group: Vec<Vec<(usize, f64)>> = vec![Vec::new(); group_count];
+            for values in values_by_group.iter_mut() {
+                values.clear();
+            }
             for (col_idx, &c) in cols.iter().enumerate() {
                 let Some(group_id) = col_group_ids.get(col_idx).copied() else {
                     continue;
@@ -3273,7 +3266,7 @@ impl PivotEngine {
                 }
             }
 
-            for mut values in values_by_group {
+            for values in values_by_group.iter_mut() {
                 if values.is_empty() {
                     continue;
                 }
@@ -3314,10 +3307,12 @@ impl PivotEngine {
         descending: bool,
     ) {
         for &c in cols {
-            let mut values: Vec<(usize, f64)> = leaf_rows
-                .iter()
-                .filter_map(|&r| data[r][c].as_number().map(|n| (r, n)))
-                .collect();
+            let mut values: Vec<(usize, f64)> = Vec::with_capacity(leaf_rows.len());
+            for &r in leaf_rows {
+                if let Some(n) = data[r][c].as_number() {
+                    values.push((r, n));
+                }
+            }
             if values.is_empty() {
                 continue;
             }
@@ -3330,7 +3325,6 @@ impl PivotEngine {
                 }
             });
 
-            let mut rank_by_row: HashMap<usize, usize> = HashMap::new();
             let mut next_rank = 1usize;
             let mut i = 0usize;
             while i < values.len() {
@@ -3340,16 +3334,10 @@ impl PivotEngine {
                     j += 1;
                 }
                 for k in i..j {
-                    rank_by_row.insert(values[k].0, next_rank);
+                    data[values[k].0][c] = PivotValue::Number(next_rank as f64);
                 }
                 next_rank += j - i;
                 i = j;
-            }
-
-            for &r in leaf_rows {
-                if let Some(rank) = rank_by_row.get(&r) {
-                    data[r][c] = PivotValue::Number(*rank as f64);
-                }
             }
         }
     }
@@ -3370,18 +3358,23 @@ impl GroupAccumulator {
     fn merge_row(
         &mut self,
         row_map: Option<&HashMap<PivotKey, Vec<Accumulator>>>,
-        col_keys: &[PivotKey],
         value_field_count: usize,
     ) {
-        for col_key in col_keys {
-            let src = row_map.and_then(|m| m.get(col_key));
-            if let Some(src_accs) = src {
-                let dst = self.cells.entry(col_key.clone()).or_insert_with(|| {
-                    (0..value_field_count).map(|_| Accumulator::new()).collect()
-                });
-                for i in 0..value_field_count {
-                    dst[i].merge(&src_accs[i]);
-                }
+        let Some(row_map) = row_map else {
+            return;
+        };
+
+        for (col_key, src_accs) in row_map {
+            debug_assert_eq!(src_accs.len(), value_field_count);
+
+            let dst = self
+                .cells
+                .entry(col_key.clone())
+                .or_insert_with(|| accumulator_vec(value_field_count));
+            debug_assert_eq!(dst.len(), value_field_count);
+
+            for (dst_acc, src_acc) in dst.iter_mut().zip(src_accs.iter()) {
+                dst_acc.merge(src_acc);
             }
         }
     }
@@ -6004,12 +5997,12 @@ mod tests {
         let cache = PivotCache::from_range(&data).unwrap();
 
         // The cache should expose non-empty, unique names.
+        let mut field_names: Vec<&str> = Vec::with_capacity(cache.fields.len());
+        for f in &cache.fields {
+            field_names.push(f.name.as_str());
+        }
         assert_eq!(
-            cache
-                .fields
-                .iter()
-                .map(|f| f.name.as_str())
-                .collect::<Vec<_>>(),
+            field_names,
             vec!["Column1", "Sales", "Sales (2)"]
         );
 

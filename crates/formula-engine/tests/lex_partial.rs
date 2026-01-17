@@ -113,3 +113,39 @@ fn lex_partial_r1c1_bracket_field_access_produces_tokens() {
     assert_eq!(out.tokens[4].kind, TokenKind::RBracket);
     assert_eq!(out.tokens[5].kind, TokenKind::Eof);
 }
+
+#[test]
+fn lex_partial_r1c1_bracket_field_access_allows_whitespace_between_dot_and_bracket() {
+    let opts = ParseOptions {
+        reference_style: ReferenceStyle::R1C1,
+        ..ParseOptions::default()
+    };
+    let out = lex_partial(r#"RC[-1]. ["Change%"]"#, &opts);
+    assert!(
+        out.error.is_none(),
+        "expected no lex error, got {:?}",
+        out.error
+    );
+
+    let kinds: Vec<&TokenKind> = out
+        .tokens
+        .iter()
+        .map(|t| &t.kind)
+        .filter(|k| !matches!(k, TokenKind::Whitespace(_)))
+        .collect();
+
+    assert_eq!(kinds.len(), 6, "unexpected tokens: {:?}", out.tokens);
+    assert!(
+        matches!(
+            kinds[0],
+            TokenKind::R1C1Cell(cell) if cell.row == Coord::Offset(0) && cell.col == Coord::Offset(-1)
+        ),
+        "unexpected first token: {:?}",
+        kinds[0]
+    );
+    assert_eq!(*kinds[1], TokenKind::Dot);
+    assert_eq!(*kinds[2], TokenKind::LBracket);
+    assert_eq!(*kinds[3], TokenKind::String("Change%".to_string()));
+    assert_eq!(*kinds[4], TokenKind::RBracket);
+    assert_eq!(*kinds[5], TokenKind::Eof);
+}

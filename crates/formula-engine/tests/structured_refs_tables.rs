@@ -131,6 +131,35 @@ fn table_fixture_escaped_bracket_column() -> Table {
     }
 }
 
+fn table_fixture_escaped_bracket_multi_col() -> Table {
+    Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:B3").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "A]B".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Col2".into(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    }
+}
+
 fn setup_engine_with_table() -> Engine {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
@@ -511,6 +540,27 @@ fn evaluates_structured_ref_with_escaped_bracket_in_nested_group() {
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+}
+
+#[test]
+fn evaluates_multi_column_structured_ref_with_escaped_bracket_name() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_escaped_bracket_multi_col()]);
+
+    engine.set_cell_value("Sheet1", "A1", "A]B").expect("A1");
+    engine.set_cell_value("Sheet1", "B1", "Col2").expect("B1");
+
+    engine.set_cell_value("Sheet1", "A2", 1.0_f64).expect("A2");
+    engine.set_cell_value("Sheet1", "A3", 2.0_f64).expect("A3");
+    engine.set_cell_value("Sheet1", "B2", 10.0_f64).expect("B2");
+    engine.set_cell_value("Sheet1", "B3", 20.0_f64).expect("B3");
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM(Table1[[A]]B],[Col2]])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(33.0));
 }
 
 #[test]

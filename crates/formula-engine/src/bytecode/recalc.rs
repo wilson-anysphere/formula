@@ -111,7 +111,10 @@ impl CalcGraph {
             remaining -= current.len();
             levels.push(current);
             let mut next: Vec<usize> = Vec::new();
-            for &n in levels.last().unwrap() {
+            let Some(level) = levels.last() else {
+                break;
+            };
+            for &n in level {
                 for &m in &dependents[n] {
                     indegree[m] -= 1;
                     if indegree[m] == 0 {

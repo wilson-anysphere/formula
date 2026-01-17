@@ -9,6 +9,7 @@ enum Token {
 pub(crate) struct WildcardPattern {
     tokens: Vec<Token>,
     has_wildcards: bool,
+    ascii_only: bool,
 }
 
 impl WildcardPattern {
@@ -17,39 +18,48 @@ impl WildcardPattern {
         let has_wildcards = tokens
             .iter()
             .any(|t| matches!(t, Token::Star | Token::QMark));
+        let ascii_only = tokens.iter().all(|t| match t {
+            Token::Star | Token::QMark => true,
+            Token::Literal(c) => c.is_ascii(),
+        });
         Self {
             tokens,
             has_wildcards,
+            ascii_only,
         }
     }
 
     pub(crate) fn matches(&self, text: &str) -> bool {
         if !self.has_wildcards {
+            if self.ascii_only && text.is_ascii() {
+                return literal_tokens_match_text_ascii_case_insensitive(
+                    &self.tokens,
+                    text.as_bytes(),
+                );
+            }
             return literal_tokens_match_text_unicode_case_insensitive(&self.tokens, text);
+        }
+
+        // Fast path for the common ASCII case: avoid building an intermediate `Vec<char>` for the
+        // case-folded text.
+        if self.ascii_only && text.is_ascii() {
+            return wildcard_match_tokens_ascii_case_insensitive(&self.tokens, text.as_bytes());
         }
 
         // Excel wildcard matching is case-insensitive. Use Unicode uppercasing so patterns like
         // "straße" match "STRASSE" (ß uppercases to SS), but keep an ASCII fast-path to avoid
         // the overhead for the common case.
-        let text: Vec<char> = if text.is_ascii() {
-            let mut out = Vec::with_capacity(text.len());
-            if !text.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
-                out.extend(text.chars());
-            } else {
-                out.extend(text.chars().map(|c| c.to_ascii_uppercase()));
-            }
-            out
-        } else {
-            text.chars().flat_map(|c| c.to_uppercase()).collect()
-        };
-        wildcard_match_tokens(&self.tokens, &text)
+        crate::value::with_casefolded_key(text, |folded| self.matches_folded(folded))
     }
 
     /// Like [`WildcardPattern::matches`], but assumes `text` is already case-folded to the same
     /// representation used when tokenizing the pattern.
     pub(crate) fn matches_folded(&self, text: &str) -> bool {
-        let text: Vec<char> = text.chars().collect();
-        wildcard_match_tokens(&self.tokens, &text)
+        if self.ascii_only && text.is_ascii() {
+            return wildcard_match_tokens_ascii(&self.tokens, text.as_bytes());
+        }
+
+        wildcard_match_tokens_str(&self.tokens, text)
     }
 
     pub(crate) fn has_wildcards(&self) -> bool {
@@ -137,6 +147,9 @@ impl Iterator for FoldedUppercaseChars<'_> {
                 }
                 return Some(ch);
             }
+            if ch.is_ascii() {
+                return Some(ch.to_ascii_uppercase());
+            }
             self.pending = Some(ch.to_uppercase());
         }
     }
@@ -155,7 +168,25 @@ fn literal_tokens_match_text_unicode_case_insensitive(tokens: &[Token], text: &s
     ti == tokens.len()
 }
 
-fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
+fn literal_tokens_match_text_ascii_case_insensitive(tokens: &[Token], text: &[u8]) -> bool {
+    if tokens.len() != text.len() {
+        return false;
+    }
+    for (tok, &b) in tokens.iter().zip(text) {
+        let Token::Literal(c) = tok else {
+            return false;
+        };
+        if !c.is_ascii() {
+            return false;
+        }
+        if b.to_ascii_uppercase() != (*c as u8) {
+            return false;
+        }
+    }
+    true
+}
+
+fn wildcard_match_tokens_str(pattern: &[Token], text: &str) -> bool {
     let mut pi = 0usize;
     let mut ti = 0usize;
     let mut star: Option<usize> = None;
@@ -164,10 +195,68 @@ fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
     while ti < text.len() {
         if pi < pattern.len() {
             match pattern[pi] {
-                Token::Literal(c) if c == text[ti] => {
+                Token::Literal(c) => {
+                    let Some(ch) = text[ti..].chars().next() else {
+                        return false;
+                    };
+                    if ch == c {
+                        pi += 1;
+                        ti += ch.len_utf8();
+                        continue;
+                    }
+                }
+                Token::QMark => {
+                    let Some(ch) = text[ti..].chars().next() else {
+                        return false;
+                    };
                     pi += 1;
-                    ti += 1;
+                    ti += ch.len_utf8();
                     continue;
+                }
+                Token::Star => {
+                    star = Some(pi);
+                    pi += 1;
+                    star_text = ti;
+                    continue;
+                }
+            }
+        }
+
+        if let Some(star_pos) = star {
+            pi = star_pos + 1;
+            let Some(ch) = text[star_text..].chars().next() else {
+                return false;
+            };
+            star_text += ch.len_utf8();
+            ti = star_text;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pattern.len() && pattern[pi] == Token::Star {
+        pi += 1;
+    }
+
+    pi == pattern.len()
+}
+
+fn wildcard_match_tokens_ascii_case_insensitive(pattern: &[Token], text: &[u8]) -> bool {
+    let mut pi = 0usize;
+    let mut ti = 0usize;
+    let mut star: Option<usize> = None;
+    let mut star_text = 0usize;
+
+    while ti < text.len() {
+        if pi < pattern.len() {
+            match pattern[pi] {
+                Token::Literal(c) => {
+                    let b = text[ti].to_ascii_uppercase();
+                    if c.is_ascii() && b == c as u8 {
+                        pi += 1;
+                        ti += 1;
+                        continue;
+                    }
                 }
                 Token::QMark => {
                     pi += 1;
@@ -180,7 +269,52 @@ fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
                     star_text = ti;
                     continue;
                 }
-                _ => {}
+            }
+        }
+
+        if let Some(star_pos) = star {
+            pi = star_pos + 1;
+            star_text += 1;
+            ti = star_text;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pattern.len() && pattern[pi] == Token::Star {
+        pi += 1;
+    }
+
+    pi == pattern.len()
+}
+
+fn wildcard_match_tokens_ascii(pattern: &[Token], text: &[u8]) -> bool {
+    let mut pi = 0usize;
+    let mut ti = 0usize;
+    let mut star: Option<usize> = None;
+    let mut star_text = 0usize;
+
+    while ti < text.len() {
+        if pi < pattern.len() {
+            match pattern[pi] {
+                Token::Literal(c) => {
+                    if c.is_ascii() && text[ti] == c as u8 {
+                        pi += 1;
+                        ti += 1;
+                        continue;
+                    }
+                }
+                Token::QMark => {
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                Token::Star => {
+                    star = Some(pi);
+                    pi += 1;
+                    star_text = ti;
+                    continue;
+                }
             }
         }
 
@@ -220,6 +354,16 @@ mod tests {
         assert!(pat.matches("STRASSE"));
         assert!(pat.matches("straße"));
         assert!(!pat.matches("S"));
+    }
+
+    #[test]
+    fn matches_wildcards_handle_unicode_uppercase_expansion() {
+        let pat = WildcardPattern::new("straße*");
+        assert!(pat.has_wildcards());
+        assert!(pat.matches("STRASSE"));
+        assert!(pat.matches("STRASSE123"));
+        assert!(pat.matches("straße123"));
+        assert!(!pat.matches("STRAS"));
     }
 
     #[test]

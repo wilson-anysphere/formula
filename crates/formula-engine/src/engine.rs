@@ -422,6 +422,15 @@ enum WorkbookRenameSheetError {
 }
 
 impl Workbook {
+    fn sheet_key_nfkc_uppercase(name: &str) -> String {
+        debug_assert!(!name.is_ascii());
+        let mut out = String::with_capacity(name.len());
+        for ch in name.nfkc() {
+            out.extend(ch.to_uppercase());
+        }
+        out
+    }
+
     fn sheet_key(name: &str) -> String {
         // Excel compares sheet names case-insensitively across Unicode and applies compatibility
         // normalization (NFKC). We approximate this by normalizing with Unicode NFKC and then
@@ -439,7 +448,7 @@ impl Workbook {
             out.make_ascii_uppercase();
             return out;
         }
-        name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+        Self::sheet_key_nfkc_uppercase(name)
     }
 
     fn with_sheet_key_lookup<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
@@ -447,7 +456,7 @@ impl Workbook {
             return crate::value::with_ascii_uppercased_key(name, f);
         }
 
-        let key: String = name.nfkc().flat_map(|c| c.to_uppercase()).collect();
+        let key: String = Self::sheet_key_nfkc_uppercase(name);
         f(&key)
     }
 
@@ -967,10 +976,10 @@ impl RecalcValueChangeCollector {
         });
 
         for (key, after) in after {
-            let before = self
-                .before
-                .get(&key)
-                .expect("recalc change must record before value");
+            let Some(before) = self.before.get(&key) else {
+                debug_assert!(false, "recalc change missing before value");
+                continue;
+            };
             if *before == after {
                 continue;
             }
@@ -2338,12 +2347,17 @@ impl Engine {
             return Ok(());
         }
 
-        let name = self
+        let Some(name) = self
             .workbook
             .sheet_key_name(id)
             .or_else(|| self.workbook.sheet_name(id))
-            .expect("sheet exists")
-            .to_string();
+        else {
+            debug_assert!(false, "sheet exists but has no name");
+            return Err(SheetLifecycleError::Internal(
+                "sheet exists but has no name".to_string(),
+            ));
+        };
+        let name = name.to_string();
         self.delete_sheet(&name).map_err(|e| match e {
             EngineError::CannotDeleteLastSheet => SheetLifecycleError::CannotDeleteLastSheet,
             other => SheetLifecycleError::Internal(other.to_string()),
@@ -2661,11 +2675,10 @@ impl Engine {
         }
 
         let dependents: Vec<CellKey> = {
-            let sheet_state = self
-                .workbook
-                .sheets
-                .get_mut(sheet_id)
-                .expect("sheet just ensured must exist");
+            let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+                debug_assert!(false, "sheet just ensured must exist");
+                return Ok(());
+            };
             if sheet_state.origin == origin {
                 return Ok(());
             }
@@ -4927,10 +4940,11 @@ impl Engine {
         scope: NameScope<'_>,
         definition: NameDefinition,
     ) -> Result<(), EngineError> {
-        let name_key = normalize_defined_name(name);
-        if name_key.is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return Ok(());
         }
+        let name_key = normalize_defined_name(name);
 
         let compiled = match &definition {
             NameDefinition::Constant(_) => None,
@@ -4973,31 +4987,33 @@ impl Engine {
     }
 
     pub fn remove_name(&mut self, name: &str, scope: NameScope<'_>) -> Option<NameDefinition> {
-        let name_key = normalize_defined_name(name);
-        if name_key.is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return None;
         }
 
-        let removed = match scope {
-            NameScope::Workbook => self.workbook.names.remove(&name_key),
-            NameScope::Sheet(sheet_name) => {
-                let sheet_id = self.workbook.sheet_id(sheet_name)?;
-                self.workbook
-                    .sheets
-                    .get_mut(sheet_id)?
-                    .names
-                    .remove(&name_key)
-            }
-        };
+        with_defined_name_key(name, |name_key| {
+            let removed = match scope {
+                NameScope::Workbook => self.workbook.names.remove(name_key),
+                NameScope::Sheet(sheet_name) => {
+                    let sheet_id = self.workbook.sheet_id(sheet_name)?;
+                    self.workbook
+                        .sheets
+                        .get_mut(sheet_id)?
+                        .names
+                        .remove(name_key)
+                }
+            };
 
-        let removed_def = removed.map(|n| n.definition);
-        if removed_def.is_some() {
-            self.refresh_cells_after_name_change(&name_key);
-            if self.calc_settings.calculation_mode != CalculationMode::Manual {
-                self.recalculate();
+            let removed_def = removed.map(|n| n.definition);
+            if removed_def.is_some() {
+                self.refresh_cells_after_name_change(name_key);
+                if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                    self.recalculate();
+                }
             }
-        }
-        removed_def
+            removed_def
+        })
     }
 
     pub fn get_name(&self, name: &str, scope: NameScope<'_>) -> Option<&NameDefinition> {
@@ -6542,6 +6558,8 @@ impl Engine {
                 {
                     if let Some(pool) = crate::parallel::rayon_pool() {
                         results.extend(pool.install(|| {
+                            let mut out: Vec<(CellKey, Value)> =
+                                Vec::with_capacity(parallel_tasks.len());
                             parallel_tasks
                                 .par_iter()
                                 .map_init(
@@ -6604,7 +6622,8 @@ impl Engine {
                                         }
                                     },
                                 )
-                                .collect::<Vec<_>>()
+                                .collect_into_vec(&mut out);
+                            out
                         }));
                     } else {
                         // If we can't initialize a thread pool (e.g. under thread-constrained CI
@@ -7762,10 +7781,11 @@ impl Engine {
                     args.push(value_expr);
 
                     if let Some(name_key) = bare_identifier(&name_expr) {
-                        lexical_scopes
-                            .last_mut()
-                            .expect("pushed scope")
-                            .insert(name_key);
+                        let Some(scope) = lexical_scopes.last_mut() else {
+                            debug_assert!(false, "missing LET scope");
+                            return expr.clone();
+                        };
+                        scope.insert(name_key);
                     }
                 }
 
@@ -10554,7 +10574,7 @@ fn cell_snapshot(cell: &Cell) -> CellSnapshot {
 }
 
 fn sheet_id_from_graph(sheet: u32) -> SheetId {
-    usize::try_from(sheet).expect("sheet id exceeds usize")
+    sheet as SheetId
 }
 
 fn clamp_addr_to_excel_dimensions(addr: CellAddr) -> CellAddr {
@@ -10901,9 +10921,10 @@ fn expand_nodes_to_cells(
             out.push((sheet, addr));
         }
 
-        let stream = streams
-            .get_mut(idx)
-            .expect("heap indices are valid stream indices");
+        let Some(stream) = streams.get_mut(idx) else {
+            debug_assert!(false, "heap stream index out of range");
+            break;
+        };
         stream.advance();
         if let Some((sheet, addr)) = stream.peek() {
             heap.push(std::cmp::Reverse((
@@ -11428,11 +11449,9 @@ fn rewrite_structured_refs_for_bytecode(
         })
     }
 
-    fn build_union_expr(mut parts: Vec<crate::Expr>) -> crate::Expr {
+    fn build_union_expr(mut parts: Vec<crate::Expr>) -> Option<crate::Expr> {
         let mut iter = parts.drain(..);
-        let mut acc = iter
-            .next()
-            .expect("caller must provide at least one union operand");
+        let mut acc = iter.next()?;
         for expr in iter {
             acc = crate::Expr::Binary(crate::BinaryExpr {
                 op: crate::BinaryOp::Union,
@@ -11440,7 +11459,7 @@ fn rewrite_structured_refs_for_bytecode(
                 right: Box::new(expr),
             });
         }
-        acc
+        Some(acc)
     }
 
     match expr {
@@ -11452,18 +11471,7 @@ fn rewrite_structured_refs_for_bytecode(
 
             // The structured-ref resolver is table-name driven when available, so ignore any
             // explicit sheet prefix (matching the evaluation compiler behavior).
-            let mut text = String::new();
-            if let Some(table) = &r.table {
-                text.push_str(table);
-            }
-            text.push('[');
-            text.push_str(&r.spec);
-            text.push(']');
-
-            let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0)?;
-            if end != text.len() {
-                return None;
-            }
+            let sref = crate::structured_refs::parse_structured_ref_parts(r.table.as_deref(), &r.spec)?;
 
             let ranges = crate::structured_refs::resolve_structured_ref(
                 tables_by_sheet,
@@ -11503,7 +11511,7 @@ fn rewrite_structured_refs_for_bytecode(
                 return if parts.len() == 1 {
                     parts.pop()
                 } else {
-                    Some(build_union_expr(parts))
+                    build_union_expr(parts)
                 };
             }
 
@@ -11525,7 +11533,7 @@ fn rewrite_structured_refs_for_bytecode(
             if parts.len() == 1 {
                 parts.pop()
             } else {
-                Some(build_union_expr(parts))
+                build_union_expr(parts)
             }
         }
         crate::Expr::FieldAccess(access) => {
@@ -11926,11 +11934,16 @@ impl Snapshot {
             match &def.definition {
                 NameDefinition::Constant(v) => crate::eval::ResolvedName::Constant(v.clone()),
                 NameDefinition::Reference(_) | NameDefinition::Formula(_) => {
-                    crate::eval::ResolvedName::Expr(
-                        def.compiled
-                            .clone()
-                            .expect("non-constant defined name must have compiled expression"),
-                    )
+                    match def.compiled.clone() {
+                        Some(expr) => crate::eval::ResolvedName::Expr(expr),
+                        None => {
+                            debug_assert!(
+                                false,
+                                "non-constant defined name must have compiled expression"
+                            );
+                            crate::eval::ResolvedName::Constant(Value::Error(ErrorKind::Name))
+                        }
+                    }
                 }
             }
         }
@@ -12854,10 +12867,12 @@ fn rewrite_defined_name_constants_for_bytecode(
                         args.push(pair[1].clone());
                     }
 
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name_key);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "missing LET scope");
+                        lexical_scopes.pop();
+                        return None;
+                    };
+                    scope.insert(name_key);
                 }
 
                 if let Some(rewritten) = rewrite_inner(
@@ -13430,6 +13445,11 @@ impl BytecodeColumnCache {
 
             for inst in program.instrs() {
                 match inst.op() {
+                    bytecode::OpCode::Invalid => {
+                        // If bytecode is corrupted, keep analysis panic-free and conservative.
+                        // The column cache is only an optimization; correctness does not rely on it.
+                        stack.clear();
+                    }
                     bytecode::OpCode::PushConst | bytecode::OpCode::LoadCell => {
                         stack.push(StackValue::Other);
                     }
@@ -14873,10 +14893,12 @@ fn bytecode_expr_is_eligible_inner(
                         return BytecodeLocalBindingKind::Scalar;
                     };
                     let kind = infer_binding_kind(&pair[1], scopes);
-                    scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name.clone(), kind);
+                    let Some(scope) = scopes.last_mut() else {
+                        debug_assert!(false, "missing LET scope");
+                        scopes.pop();
+                        return BytecodeLocalBindingKind::Scalar;
+                    };
+                    scope.insert(name.clone(), kind);
                 }
                 let kind = infer_binding_kind(&args[args.len() - 1], scopes);
                 scopes.pop();
@@ -15068,10 +15090,12 @@ fn bytecode_expr_is_eligible_inner(
 
                 lexical_scopes.push(HashMap::new());
                 for p in params.iter() {
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(p.clone(), BytecodeLocalBindingKind::Scalar);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "missing lambda scope");
+                        lexical_scopes.pop();
+                        return false;
+                    };
+                    scope.insert(p.clone(), BytecodeLocalBindingKind::Scalar);
                 }
                 let ok = choose_index_is_guaranteed_scalar(body, lexical_scopes);
                 lexical_scopes.pop();
@@ -15154,10 +15178,12 @@ fn bytecode_expr_is_eligible_inner(
                             return true;
                         };
                         let kind = infer_binding_kind(&pair[1], lexical_scopes);
-                        lexical_scopes
-                            .last_mut()
-                            .expect("pushed scope")
-                            .insert(name.clone(), kind);
+                        let Some(scope) = lexical_scopes.last_mut() else {
+                            debug_assert!(false, "missing LET scope");
+                            lexical_scopes.pop();
+                            return true;
+                        };
+                        scope.insert(name.clone(), kind);
                     }
                     let ok = choose_index_is_guaranteed_scalar(&args[last], lexical_scopes);
                     lexical_scopes.pop();
@@ -15390,10 +15416,12 @@ fn bytecode_expr_is_eligible_inner(
                     // Allow recursive lambdas of the form:
                     // `LET(f, LAMBDA(x, f(x)), f(1))`
                     // by treating the binding name as visible while checking the RHS.
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name.clone(), BytecodeLocalBindingKind::Scalar);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "missing LET scope");
+                        lexical_scopes.pop();
+                        return false;
+                    };
+                    scope.insert(name.clone(), BytecodeLocalBindingKind::Scalar);
                     // LET bindings can hold scalars, ranges, and array literals. We only need to
                     // ensure the overall LET expression remains non-spilling in scalar contexts;
                     // that is enforced by the `NameRef` eligibility check, which gates range/array
@@ -15405,10 +15433,12 @@ fn bytecode_expr_is_eligible_inner(
 
                     let kind = infer_binding_kind(&pair[1], lexical_scopes);
 
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name.clone(), kind);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "missing LET scope");
+                        lexical_scopes.pop();
+                        return false;
+                    };
+                    scope.insert(name.clone(), kind);
                 }
 
                 // LET can return scalars, ranges, or array literals depending on context:
@@ -15850,10 +15880,12 @@ fn bytecode_expr_is_eligible_inner(
                     lexical_scopes.pop();
                     return false;
                 }
-                lexical_scopes
-                    .last_mut()
-                    .expect("pushed scope")
-                    .insert(p.clone(), BytecodeLocalBindingKind::Scalar);
+                let Some(scope) = lexical_scopes.last_mut() else {
+                    debug_assert!(false, "missing lambda scope");
+                    lexical_scopes.pop();
+                    return false;
+                };
+                scope.insert(p.clone(), BytecodeLocalBindingKind::Scalar);
             }
             let ok = bytecode_expr_is_eligible_inner(body, false, false, lexical_scopes);
             lexical_scopes.pop();
@@ -16142,10 +16174,12 @@ fn walk_expr_flags(
                             // name reference (which would disable the bytecode backend).
                             if matches!(&pair[1], Expr::FunctionCall { name, .. } if name == "LAMBDA")
                             {
-                                lexical_scopes
-                                    .last_mut()
-                                    .expect("pushed scope")
-                                    .insert(name_key.clone());
+                            let Some(scope) = lexical_scopes.last_mut() else {
+                                debug_assert!(false, "missing LET scope");
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            scope.insert(name_key.clone());
                             }
 
                             walk_expr_flags(
@@ -16162,10 +16196,12 @@ fn walk_expr_flags(
                                 lexical_scopes,
                                 external_refs_volatile,
                             );
-                            lexical_scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name_key);
+                        let Some(scope) = lexical_scopes.last_mut() else {
+                            debug_assert!(false, "missing LET scope");
+                            lexical_scopes.pop();
+                            return;
+                        };
+                        scope.insert(name_key);
                         }
 
                         walk_expr_flags(
@@ -16835,10 +16871,12 @@ fn walk_external_dependencies(
                                 visiting_names,
                                 lexical_scopes,
                             );
-                            lexical_scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name_key);
+                            let Some(scope) = lexical_scopes.last_mut() else {
+                                debug_assert!(false, "missing LET scope");
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            scope.insert(name_key);
                         }
 
                         walk_external_dependencies(
@@ -17255,10 +17293,12 @@ fn walk_external_expr(
                                 visiting_names,
                                 lexical_scopes,
                             );
-                            lexical_scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name_key);
+                            let Some(scope) = lexical_scopes.last_mut() else {
+                                debug_assert!(false, "missing LET scope");
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            scope.insert(name_key);
                         }
 
                         walk_external_expr(
@@ -17637,10 +17677,12 @@ fn walk_calc_expr(
                         visiting_names,
                         lexical_scopes,
                     );
-                    lexical_scopes
-                        .last_mut()
-                        .expect("pushed scope")
-                        .insert(name_key);
+                    let Some(scope) = lexical_scopes.last_mut() else {
+                        debug_assert!(false, "missing LET scope");
+                        lexical_scopes.pop();
+                        return;
+                    };
+                    scope.insert(name_key);
                 }
 
                 walk_calc_expr_reference_context(
@@ -18472,10 +18514,12 @@ fn walk_calc_expr(
                                 visiting_names,
                                 lexical_scopes,
                             );
-                            lexical_scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name_key);
+                            let Some(scope) = lexical_scopes.last_mut() else {
+                                debug_assert!(false, "missing LET scope");
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            scope.insert(name_key);
                         }
 
                         walk_calc_expr(
@@ -19051,7 +19095,13 @@ fn resolve_sheet_span(
 }
 
 fn sheet_id_for_graph(sheet: SheetId) -> u32 {
-    sheet.try_into().expect("sheet id exceeds u32")
+    u32::try_from(sheet).unwrap_or_else(|_| {
+        debug_assert!(false, "sheet id exceeds u32");
+        // If invariants drift (e.g. corrupted workbook state), avoid panicking in production.
+        // This is effectively unreachable in practice because the engine cannot handle billions
+        // of sheets anyway (graph ids are u32).
+        u32::MAX
+    })
 }
 
 fn cell_id_from_key(key: CellKey) -> CellId {
@@ -19060,7 +19110,8 @@ fn cell_id_from_key(key: CellKey) -> CellId {
 
 fn cell_key_from_id(id: CellId) -> CellKey {
     CellKey {
-        sheet: usize::try_from(id.sheet_id).expect("sheet id exceeds usize"),
+        // `CellId` stores `sheet_id` as `u32`, which always fits in `usize` on our targets.
+        sheet: id.sheet_id as usize,
         addr: CellAddr {
             row: id.cell.row,
             col: id.cell.col,
@@ -19142,7 +19193,10 @@ fn rewrite_defined_name_structural(
 
     let formula = match &new_def {
         NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
-        NameDefinition::Constant(_) => unreachable!("handled above"),
+        NameDefinition::Constant(_) => {
+            debug_assert!(false, "handled above");
+            return Ok(None);
+        }
     };
     let ast = crate::parse_formula(
         formula,
@@ -19203,7 +19257,10 @@ fn rewrite_defined_name_range_map(
 
     let formula = match &new_def {
         NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
-        NameDefinition::Constant(_) => unreachable!("handled above"),
+        NameDefinition::Constant(_) => {
+            debug_assert!(false, "handled above");
+            return Ok(None);
+        }
     };
     let ast = crate::parse_formula(
         formula,
@@ -21683,8 +21740,12 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 3);
+        let mut default_order: Vec<&str> = Vec::with_capacity(report.len());
+        for e in &report {
+            default_order.push(e.sheet.as_str());
+        }
         assert_eq!(
-            report.iter().map(|e| e.sheet.as_str()).collect::<Vec<_>>(),
+            default_order,
             vec!["Sheet1", "Sheet2", "Sheet3"],
             "expected report order to match the default tab order"
         );
@@ -21698,11 +21759,12 @@ mod tests {
 
         let reordered = engine.bytecode_compile_report(10);
         assert_eq!(reordered.len(), 3);
+        let mut reordered_order: Vec<&str> = Vec::with_capacity(reordered.len());
+        for e in &reordered {
+            reordered_order.push(e.sheet.as_str());
+        }
         assert_eq!(
-            reordered
-                .iter()
-                .map(|e| e.sheet.as_str())
-                .collect::<Vec<_>>(),
+            reordered_order,
             vec!["Sheet2", "Sheet3", "Sheet1"],
             "expected report order to match the updated tab order"
         );

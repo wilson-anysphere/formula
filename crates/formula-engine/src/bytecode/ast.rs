@@ -1160,10 +1160,13 @@ mod tests {
     #[test]
     fn rejects_function_calls_with_more_than_255_args() {
         let origin = CellCoord::new(0, 0);
-        let args = std::iter::repeat("1")
-            .take(crate::EXCEL_MAX_ARGS + 1)
-            .collect::<Vec<_>>()
-            .join(",");
+        let mut args = String::new();
+        for i in 0..(crate::EXCEL_MAX_ARGS + 1) {
+            if i > 0 {
+                args.push(',');
+            }
+            args.push('1');
+        }
         let formula = format!("=SUM({args})");
 
         assert!(matches!(

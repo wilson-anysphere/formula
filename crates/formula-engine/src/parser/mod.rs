@@ -278,6 +278,7 @@ enum PrevSig {
     R1C1Col,
     Ident,
     QuotedIdent,
+    Dot,
     RParen,
     RBrace,
     RBracket,
@@ -299,6 +300,7 @@ impl PrevSig {
             TokenKind::R1C1Col(_) => Self::R1C1Col,
             TokenKind::Ident(_) => Self::Ident,
             TokenKind::QuotedIdent(_) => Self::QuotedIdent,
+            TokenKind::Dot => Self::Dot,
             TokenKind::RParen => Self::RParen,
             TokenKind::RBrace => Self::RBrace,
             TokenKind::RBracket => Self::RBracket,
@@ -559,24 +561,36 @@ impl<'a> Lexer<'a> {
                 }
                 '[' => {
                     if self.bracket_depth == 0 {
+                        // Field access selectors use brackets after a dot (e.g. `A1.["Field"]`).
+                        // Preserve string tokenization inside those selectors by bypassing the
+                        // structured-ref "opaque bracket segment" fast path.
+                        if self.prev_sig == Some(PrevSig::Dot) {
+                            self.bump();
+                            self.bracket_depth += 1;
+                            self.push(TokenKind::LBracket, start, self.idx);
+                            continue;
+                        }
+
                         // Workbook prefixes are *not* nesting, even if the workbook name contains
                         // `[` characters (e.g. `=[A1[Name.xlsx]Sheet1!A1`). Prefer a non-nesting
                         // scan when the bracketed segment is followed by a sheet name and `!`.
-                        if let Some(end) = find_workbook_prefix_end_if_valid(self.src, start) {
-                            self.bump();
-                            self.push(TokenKind::LBracket, start, self.idx);
+                        if let Some(end_exclusive) = find_workbook_prefix_end_if_valid(self.src, start)
+                        {
+                            self.lex_raw_bracketed_ident_segment(start, end_exclusive);
+                            continue;
+                        }
 
-                            let inner_start = self.idx;
-                            let inner_end = end.saturating_sub(1);
-                            if inner_end > inner_start {
-                                let raw = self.src[inner_start..inner_end].to_string();
-                                self.rollback_to(inner_end);
-                                self.push(TokenKind::Ident(raw), inner_start, inner_end);
-                            }
-
-                            let close_start = self.idx;
-                            self.bump();
-                            self.push(TokenKind::RBracket, close_start, self.idx);
+                        // Structured references are lexed as a single bracketed segment so we
+                        // don't mis-lex locale separators inside nested structured-ref groups
+                        // (e.g. `Table1[[A]]B],[Col2]]`).
+                        if let Some(end_exclusive) = crate::structured_refs::find_structured_ref_end(
+                            self.src,
+                            start,
+                        )
+                        .or_else(|| {
+                            crate::structured_refs::find_structured_ref_end_lenient(self.src, start)
+                        }) {
+                            self.lex_raw_bracketed_ident_segment(start, end_exclusive);
                             continue;
                         }
                     }
@@ -586,17 +600,6 @@ impl<'a> Lexer<'a> {
                     self.push(TokenKind::LBracket, start, self.idx);
                 }
                 ']' => {
-                    // Excel escapes `]` inside structured references as `]]`. At the outermost
-                    // bracket depth, treat a double `]]` as a literal `]` rather than the end of
-                    // the bracketed segment.
-                    if self.bracket_depth == 1 && self.src[self.idx..].starts_with("]]") {
-                        self.bump();
-                        self.push(TokenKind::RBracket, start, self.idx);
-                        let start2 = self.idx;
-                        self.bump();
-                        self.push(TokenKind::RBracket, start2, self.idx);
-                        continue;
-                    }
                     self.bump();
                     self.bracket_depth = self.bracket_depth.saturating_sub(1);
                     self.push(TokenKind::RBracket, start, self.idx);
@@ -824,6 +827,33 @@ impl<'a> Lexer<'a> {
     fn rollback_to(&mut self, idx: usize) {
         self.idx = idx;
         self.chars = self.src[idx..].chars();
+    }
+
+    // Lex a bracketed segment as `[` + raw `Ident(...)` + `]` tokens, without any nesting.
+    // `end_exclusive` must be the byte index immediately after the closing `]`.
+    fn lex_raw_bracketed_ident_segment(&mut self, start: usize, end_exclusive: usize) {
+        debug_assert_eq!(self.src.as_bytes().get(start), Some(&b'['));
+        debug_assert!(end_exclusive <= self.src.len());
+        debug_assert!(end_exclusive > start);
+        debug_assert_eq!(
+            self.src.as_bytes().get(end_exclusive - 1),
+            Some(&b']')
+        );
+
+        self.bump();
+        self.push(TokenKind::LBracket, start, self.idx);
+
+        let inner_start = self.idx;
+        let inner_end = end_exclusive - 1;
+        if inner_end > inner_start {
+            let raw = self.src[inner_start..inner_end].to_string();
+            self.rollback_to(inner_end);
+            self.push(TokenKind::Ident(raw), inner_start, inner_end);
+        }
+
+        let close_start = self.idx;
+        self.bump();
+        self.push(TokenKind::RBracket, close_start, self.idx);
     }
 
     fn peek_char(&self) -> Option<char> {
@@ -3172,7 +3202,9 @@ impl<'a> Parser<'a> {
         // Structured references can contain escaped `]` as `]]`, but `]]` is also used to close
         // nested bracket groups. Use the structured-ref parser's disambiguation logic to find the
         // correct end position when possible.
-        if let Some((_, end_pos)) = crate::structured_refs::parse_structured_ref(self.src, open_span.start)
+        if let Some(end_pos) =
+            crate::structured_refs::find_structured_ref_end(self.src, open_span.start)
+                .or_else(|| crate::structured_refs::find_structured_ref_end_lenient(self.src, open_span.start))
         {
             // Advance to the closing `]` token for the chosen end position.
             while self.current_span().end < end_pos {
@@ -3195,59 +3227,10 @@ impl<'a> Parser<'a> {
                 spec,
             }));
         }
-
-        let mut depth: i32 = 1;
-        let mut spec_end: Option<usize> = None;
-
-        while depth > 0 {
-            match self.peek_kind() {
-                TokenKind::LBracket => {
-                    depth += 1;
-                    self.next();
-                }
-                TokenKind::RBracket => {
-                    // Excel escapes ']' inside structured references as ']]'. When parsing the
-                    // *outermost* bracket, treat a double ']]' as a literal ']' rather than the
-                    // end of the structured ref.
-                    if depth == 1
-                        && matches!(
-                            self.tokens.get(self.pos + 1).map(|t| &t.kind),
-                            Some(TokenKind::RBracket)
-                        )
-                    {
-                        self.next();
-                        self.next();
-                        continue;
-                    }
-
-                    let close_span = self.current_span();
-                    self.next();
-                    depth -= 1;
-                    if depth == 0 {
-                        spec_end = Some(close_span.start);
-                    }
-                }
-                TokenKind::Eof => {
-                    return Err(ParseError::new(
-                        "Unterminated structured reference",
-                        self.current_span(),
-                    ));
-                }
-                _ => {
-                    self.next();
-                }
-            }
-        }
-
-        let spec_end = spec_end.expect("loop should set spec_end when depth reaches zero");
-        let spec = self.src[spec_start..spec_end].to_string();
-
-        Ok(Expr::StructuredRef(StructuredRef {
-            workbook,
-            sheet,
-            table,
-            spec,
-        }))
+        Err(ParseError::new(
+            "Unterminated structured reference",
+            self.current_span(),
+        ))
     }
 
     fn take_name_token(&mut self) -> Result<String, ParseError> {

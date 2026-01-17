@@ -1643,24 +1643,20 @@ fn find_pivot_layout(
     let sheet_id = &pivot_ref.sheet_id;
     let anchor = pivot_ref.start;
 
-    let data_field_suffix_fold = {
-        let mut s = String::with_capacity(" - ".len() + data_field.len());
-        s.push_str(" - ");
-        s.push_str(data_field);
-        casefold_owned(s)
-    };
-    let data_field_gt_fold = {
-        let mut s = String::with_capacity("Grand Total - ".len() + data_field.len());
-        s.push_str("Grand Total - ");
-        s.push_str(data_field);
-        casefold_owned(s)
-    };
-
     let max_up = anchor.row.min(MAX_SCAN_ROWS);
     let col_start = anchor.col.saturating_sub(MAX_SCAN_COLS);
     let col_end = anchor.col.saturating_add(MAX_SCAN_COLS);
 
     let (header_row, header_match_col) = with_casefolded_key(data_field, |data_field_fold| {
+        // Compare against folded headers without allocating composite strings.
+        //
+        // Pivot output uses `"Grand Total - <value name>"` and `"<col item> - <value name>"`
+        // variants, so we match:
+        // - exact header
+        // - a leading `"GRAND TOTAL - "` prefix (folded domain)
+        // - a `" - "` suffix boundary immediately before the value name
+        const GRAND_TOTAL_PREFIX_FOLDED: &str = "GRAND TOTAL - ";
+
         let mut header_row: Option<u32> = None;
         let mut header_match_col: Option<u32> = None;
 
@@ -1676,9 +1672,18 @@ fn find_pivot_layout(
                 }
 
                 let matches = with_casefolded_key(&t, |t_fold| {
-                    t_fold == data_field_fold
-                        || t_fold == data_field_gt_fold.as_str()
-                        || t_fold.ends_with(data_field_suffix_fold.as_str())
+                    if t_fold == data_field_fold {
+                        return true;
+                    }
+                    if t_fold
+                        .strip_prefix(GRAND_TOTAL_PREFIX_FOLDED)
+                        .is_some_and(|rest| rest == data_field_fold)
+                    {
+                        return true;
+                    }
+                    t_fold
+                        .strip_suffix(data_field_fold)
+                        .is_some_and(|prefix| prefix.ends_with(" - "))
                 });
                 if !matches {
                     continue;
@@ -1810,8 +1815,7 @@ fn find_pivot_layout(
             kind,
         });
 
-        let header_key = casefold_owned(header);
-        if value_col_by_header.insert(header_key, idx).is_some() {
+        if value_col_by_header.insert(casefold_owned(header), idx).is_some() {
             // Duplicate rendered header -> ambiguous, not a supported pivot shape.
             return Err(ErrorKind::Ref);
         }
@@ -1884,46 +1888,60 @@ fn select_pivot_value_col(
     data_field: &str,
     col_criteria: &[Value],
 ) -> Result<u32, ErrorKind> {
-    // If the caller provided an exact rendered header (e.g. `"A - Sum of Sales"`),
-    // honor it directly.
-    let mut candidates: Vec<usize> = with_casefolded_key(data_field, |key| {
-        if let Some(idx) = layout.value_col_by_header.get(key) {
-            vec![*idx]
-        } else {
-            layout
-                .value_cols_by_value_name
-                .get(key)
-                .cloned()
-                .unwrap_or_default()
-        }
+    let (exact_header_idx, value_name_candidates) = with_casefolded_key(data_field, |key| {
+        (
+            layout.value_col_by_header.get(key).copied(),
+            layout.value_cols_by_value_name.get(key),
+        )
     });
-
-    if candidates.is_empty() {
-        return Err(ErrorKind::Ref);
-    }
 
     if !col_criteria.is_empty() {
         let mut col_items = Vec::with_capacity(col_criteria.len());
         for v in col_criteria {
             col_items.push(v.coerce_to_string_with_ctx(ctx)?);
         }
-
-        candidates.retain(|idx| {
-            let col = &layout.value_cols[*idx];
+        let matches_column_items = |idx: usize| {
+            let col = &layout.value_cols[idx];
             col_items.iter().all(|needle| {
                 col.column_items
                     .iter()
                     .any(|item| crate::value::eq_case_insensitive(item, needle))
             })
-        });
-
-        return match candidates.len() {
-            0 => Err(ErrorKind::NA),
-            1 => Ok(layout.value_cols[candidates[0]].col),
-            _ => Err(ErrorKind::Ref),
         };
+
+        if let Some(idx) = exact_header_idx {
+            if matches_column_items(idx) {
+                return Ok(layout.value_cols[idx].col);
+            }
+            return Err(ErrorKind::NA);
+        }
+
+        let Some(candidates) = value_name_candidates else {
+            return Err(ErrorKind::Ref);
+        };
+        let mut found: Option<u32> = None;
+        for &idx in candidates {
+            if !matches_column_items(idx) {
+                continue;
+            }
+            if found.is_some() {
+                return Err(ErrorKind::Ref);
+            }
+            found = Some(layout.value_cols[idx].col);
+        }
+        return found.ok_or(ErrorKind::NA);
     }
 
+    if let Some(idx) = exact_header_idx {
+        return Ok(layout.value_cols[idx].col);
+    }
+
+    let Some(candidates) = value_name_candidates else {
+        return Err(ErrorKind::Ref);
+    };
+    if candidates.is_empty() {
+        return Err(ErrorKind::Ref);
+    }
     if candidates.len() == 1 {
         return Ok(layout.value_cols[candidates[0]].col);
     }
@@ -1931,7 +1949,7 @@ fn select_pivot_value_col(
     // When column fields exist and no column criteria are provided, prefer the row grand total
     // column (`"Grand Total - <value name>"`) if present; otherwise the selection is ambiguous.
     let mut gt: Option<u32> = None;
-    for idx in &candidates {
+    for idx in candidates {
         let col = &layout.value_cols[*idx];
         if col.kind == PivotValueColKind::GrandTotal {
             if gt.is_some() {

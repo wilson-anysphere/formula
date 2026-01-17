@@ -4,6 +4,7 @@ use crate::sort_filter::sort::datetime_to_excel_serial_1900;
 use crate::sort_filter::types::{CellValue, RangeData, RangeRef};
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -349,17 +350,13 @@ pub fn apply_autofilter_with_value_locale(
         visible_rows[local_row] = row_visible;
     }
 
-    let hidden_sheet_rows = visible_rows
-        .iter()
-        .enumerate()
-        .filter_map(|(local_row, visible)| {
-            if local_row == 0 || *visible {
-                None
-            } else {
-                Some(range.range.start_row + local_row)
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut hidden_sheet_rows: Vec<usize> = Vec::new();
+    hidden_sheet_rows.reserve(row_count.saturating_sub(1));
+    for (local_row, visible) in visible_rows.iter().enumerate().skip(1) {
+        if !*visible {
+            hidden_sheet_rows.push(range.range.start_row + local_row);
+        }
+    }
 
     FilterResult {
         visible_rows,
@@ -412,7 +409,7 @@ fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocale
     match value {
         FilterValue::Text(s) => {
             let cell_s = cell_to_string(cell, value_locale);
-            crate::value::eq_case_insensitive(&cell_s, s)
+            crate::value::eq_case_insensitive(cell_s.as_ref(), s)
         }
         FilterValue::Number(n) => coerce_number(cell, value_locale).is_some_and(|v| v == *n),
         FilterValue::Bool(b) => matches!(cell, CellValue::Bool(v) if v == b),
@@ -421,19 +418,61 @@ fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocale
 }
 
 fn text_match(cell: &CellValue, m: &TextMatch, value_locale: ValueLocaleConfig) -> bool {
-    let mut cell_s = cell_to_string(cell, value_locale);
-    let mut pattern = m.pattern.clone();
-
-    if !m.case_sensitive {
-        cell_s = crate::value::casefold_owned(cell_s);
-        pattern = crate::value::casefold_owned(pattern);
+    if m.case_sensitive {
+        let cell_s = cell_to_string(cell, value_locale);
+        return match m.kind {
+            TextMatchKind::Contains => cell_s.contains(m.pattern.as_str()),
+            TextMatchKind::BeginsWith => cell_s.starts_with(m.pattern.as_str()),
+            TextMatchKind::EndsWith => cell_s.ends_with(m.pattern.as_str()),
+        };
     }
 
-    match m.kind {
-        TextMatchKind::Contains => cell_s.contains(&pattern),
-        TextMatchKind::BeginsWith => cell_s.starts_with(&pattern),
-        TextMatchKind::EndsWith => cell_s.ends_with(&pattern),
+    let cell_s = cell_to_string(cell, value_locale);
+    if cell_s.is_ascii() && m.pattern.is_ascii() {
+        let needle = m.pattern.as_str();
+        let hay = cell_s.as_ref();
+        return match m.kind {
+            TextMatchKind::Contains => ascii_contains_case_insensitive(hay, needle),
+            TextMatchKind::BeginsWith => ascii_starts_with_case_insensitive(hay, needle),
+            TextMatchKind::EndsWith => ascii_ends_with_case_insensitive(hay, needle),
+        };
     }
+
+    let cell_s = crate::value::casefold_owned(cell_to_string(cell, value_locale).into_owned());
+    crate::value::with_casefolded_key(m.pattern.as_str(), |pattern_folded| match m.kind {
+        TextMatchKind::Contains => cell_s.contains(pattern_folded),
+        TextMatchKind::BeginsWith => cell_s.starts_with(pattern_folded),
+        TextMatchKind::EndsWith => cell_s.ends_with(pattern_folded),
+    })
+}
+
+fn ascii_contains_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    for i in 0..=haystack.len() - needle.len() {
+        if haystack[i..i + needle.len()].eq_ignore_ascii_case(needle) {
+            return true;
+        }
+    }
+    false
+}
+
+fn ascii_starts_with_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack[..needle.len()].eq_ignore_ascii_case(needle)
+}
+
+fn ascii_ends_with_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack[haystack.len() - needle.len()..].eq_ignore_ascii_case(needle)
 }
 
 fn number_cmp(cell: &CellValue, cmp: &NumberComparison, value_locale: ValueLocaleConfig) -> bool {
@@ -476,10 +515,10 @@ fn date_cmp(cell: &CellValue, cmp: &DateComparison, value_locale: ValueLocaleCon
     }
 }
 
-fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
+fn cell_to_string<'a>(cell: &'a CellValue, value_locale: ValueLocaleConfig) -> Cow<'a, str> {
     match cell {
-        CellValue::Blank => String::new(),
-        CellValue::Number(n) => {
+        CellValue::Blank => Cow::Borrowed(""),
+        CellValue::Number(n) => Cow::Owned(
             formula_format::format_value(
                 FormatValue::Number(*n),
                 None,
@@ -488,18 +527,13 @@ fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
                     date_system: DateSystem::Excel1900,
                 },
             )
-            .text
-        }
-        CellValue::Text(s) => s.clone(),
-        CellValue::Bool(b) => {
-            if *b {
-                "TRUE".to_string()
-            } else {
-                "FALSE".to_string()
-            }
-        }
-        CellValue::Error(err) => err.to_string(),
-        CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+            .text,
+        ),
+        CellValue::Text(s) => Cow::Borrowed(s),
+        CellValue::Bool(true) => Cow::Borrowed("TRUE"),
+        CellValue::Bool(false) => Cow::Borrowed("FALSE"),
+        CellValue::Error(err) => Cow::Borrowed(err.as_str()),
+        CellValue::DateTime(dt) => Cow::Owned(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
     }
 }
 

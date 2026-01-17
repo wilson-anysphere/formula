@@ -6,7 +6,7 @@ use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::format_number_general_with_options;
-use crate::value::{casefold, parse_number, NumberLocale};
+use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, LocaleConfig, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +37,11 @@ struct TextCriteria {
 
 impl TextCriteria {
     fn new(raw: &str) -> Self {
-        let folded = casefold(raw);
-        let wildcard = WildcardPattern::new(&folded);
+        // `WildcardPattern` tokenizes the pattern in a case-insensitive manner (Unicode-aware),
+        // so we don't need to pre-fold the raw string.
+        let wildcard = WildcardPattern::new(raw);
+        // For `>`/`<` comparisons, treat wildcard operators as literal characters while still
+        // applying escape handling and case folding.
         let literal_folded = wildcard.literal_pattern();
 
         Self {
@@ -285,26 +288,25 @@ fn matches_text_criteria(
         // values still satisfy the predicate because they are not equal to the text pattern.
         return matches!(op, CriteriaOp::Ne);
     };
-    let value_folded = casefold(&value_text);
 
-    match op {
+    crate::value::with_casefolded_key(&value_text, |value_folded| match op {
         CriteriaOp::Eq => {
             if !pattern.wildcard.has_wildcards() {
                 return value_folded == pattern.literal_folded;
             }
-            pattern.wildcard.matches_folded(&value_folded)
+            pattern.wildcard.matches_folded(value_folded)
         }
         CriteriaOp::Ne => {
             if !pattern.wildcard.has_wildcards() {
                 return value_folded != pattern.literal_folded;
             }
-            !pattern.wildcard.matches_folded(&value_folded)
+            !pattern.wildcard.matches_folded(value_folded)
         }
-        CriteriaOp::Lt => value_folded < pattern.literal_folded,
-        CriteriaOp::Lte => value_folded <= pattern.literal_folded,
-        CriteriaOp::Gt => value_folded > pattern.literal_folded,
-        CriteriaOp::Gte => value_folded >= pattern.literal_folded,
-    }
+        CriteriaOp::Lt => value_folded < pattern.literal_folded.as_str(),
+        CriteriaOp::Lte => value_folded <= pattern.literal_folded.as_str(),
+        CriteriaOp::Gt => value_folded > pattern.literal_folded.as_str(),
+        CriteriaOp::Gte => value_folded >= pattern.literal_folded.as_str(),
+    })
 }
 
 fn parse_criteria_string(

@@ -413,13 +413,21 @@ fn find_and_search() {
     );
     assert_eq!(sheet.eval("=SEARCH(\"B\",\"abc\")"), Value::Number(2.0));
     assert_eq!(sheet.eval("=SEARCH(\"Ö\",\"ö\")"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=SEARCH(\"A\",\"aö\")"), Value::Number(1.0));
 
     assert_eq!(sheet.eval("=SEARCH(\"a?c\",\"abc\")"), Value::Number(1.0));
     assert_eq!(
         sheet.eval("=SEARCH(\"a*c\",\"abbbbbc\")"),
         Value::Number(1.0)
     );
+    assert_eq!(
+        sheet.eval("=SEARCH(\"a**c\",\"abbbbbc\")"),
+        Value::Number(1.0)
+    );
     assert_eq!(sheet.eval("=SEARCH(\"~*\",\"a*b\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=SEARCH(\"~?\",\"a?b\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=SEARCH(\"~\",\"a~b\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=SEARCH(\"SS\",\"ß\")"), Value::Number(1.0));
     assert_eq!(
         sheet.eval("=SEARCH(\"b\",\"abc\",3)"),
         Value::Error(ErrorKind::Value)

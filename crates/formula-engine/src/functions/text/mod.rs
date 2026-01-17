@@ -3,6 +3,7 @@ pub(crate) mod dbcs;
 mod format;
 mod join;
 mod replace;
+pub(crate) mod search_pattern;
 pub(crate) mod thai;
 mod transform;
 

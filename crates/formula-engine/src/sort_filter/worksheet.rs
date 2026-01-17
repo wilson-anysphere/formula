@@ -76,10 +76,11 @@ pub fn sort_worksheet_range_with_value_locale(
         CellRef::new(range.end.row, range.end.col),
     );
 
-    let moved_cells = sheet
-        .iter_cells_in_range(data_range)
-        .map(|(cell_ref, cell)| (cell_ref, cell.clone()))
-        .collect::<Vec<_>>();
+    let it = sheet.iter_cells_in_range(data_range);
+    let mut moved_cells = Vec::with_capacity(it.size_hint().0);
+    for (cell_ref, cell) in it {
+        moved_cells.push((cell_ref, cell.clone()));
+    }
 
     sheet.clear_range(data_range);
 

@@ -1,11 +1,12 @@
 use crate::locale::ValueLocaleConfig;
 use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
-use crate::value::casefold_owned;
+use crate::value::{casefold, casefold_owned};
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
 use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
 use formula_model::ErrorValue;
 use std::cmp::Ordering;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -326,18 +327,21 @@ fn detect_key_value(
     }
 }
 
-fn fold_text(s: String, case_sensitive: bool) -> String {
+fn fold_text(s: Cow<'_, str>, case_sensitive: bool) -> String {
     if case_sensitive {
-        s
-    } else {
-        casefold_owned(s)
+        return s.into_owned();
+    }
+
+    match s {
+        Cow::Borrowed(s) => casefold(s),
+        Cow::Owned(s) => casefold_owned(s),
     }
 }
 
-fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
+fn cell_to_string<'a>(cell: &'a CellValue, value_locale: ValueLocaleConfig) -> Cow<'a, str> {
     match cell {
-        CellValue::Blank => String::new(),
-        CellValue::Number(n) => {
+        CellValue::Blank => Cow::Borrowed(""),
+        CellValue::Number(n) => Cow::Owned(
             formula_format::format_value(
                 FormatValue::Number(*n),
                 None,
@@ -346,18 +350,13 @@ fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
                     date_system: DateSystem::Excel1900,
                 },
             )
-            .text
-        }
-        CellValue::Text(s) => s.clone(),
-        CellValue::Bool(b) => {
-            if *b {
-                "TRUE".to_string()
-            } else {
-                "FALSE".to_string()
-            }
-        }
-        CellValue::Error(err) => err.to_string(),
-        CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+            .text,
+        ),
+        CellValue::Text(s) => Cow::Borrowed(s),
+        CellValue::Bool(true) => Cow::Borrowed("TRUE"),
+        CellValue::Bool(false) => Cow::Borrowed("FALSE"),
+        CellValue::Error(err) => Cow::Borrowed(err.as_str()),
+        CellValue::DateTime(dt) => Cow::Owned(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
     }
 }
 
@@ -523,14 +522,15 @@ mod tests {
 
         let perm = sort_range(&mut data, &spec);
 
+        let mut names: Vec<&str> = Vec::with_capacity(data.rows.len());
+        for r in &data.rows {
+            names.push(match &r[0] {
+                CellValue::Text(s) => s.as_str(),
+                _ => "?",
+            });
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .map(|r| match &r[0] {
-                    CellValue::Text(s) => s.as_str(),
-                    _ => "?",
-                })
-                .collect::<Vec<_>>(),
+            names,
             vec!["Name", "Alice", "Bob", "Charlie"]
         );
 
@@ -558,15 +558,15 @@ mod tests {
 
         sort_range(&mut data, &spec);
 
+        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        for r in data.rows.iter().skip(1) {
+            values.push(match &r[0] {
+                CellValue::Text(s) => s.as_str(),
+                _ => "?",
+            });
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .skip(1)
-                .map(|r| match &r[0] {
-                    CellValue::Text(s) => s.as_str(),
-                    _ => "?",
-                })
-                .collect::<Vec<_>>(),
+            values,
             vec!["2", "10"]
         );
     }
@@ -591,15 +591,15 @@ mod tests {
 
         sort_range_with_value_locale(&mut data, &spec, ValueLocaleConfig::de_de());
 
+        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        for r in data.rows.iter().skip(1) {
+            values.push(match &r[0] {
+                CellValue::Text(s) => s.as_str(),
+                _ => "?",
+            });
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .skip(1)
-                .map(|r| match &r[0] {
-                    CellValue::Text(s) => s.as_str(),
-                    _ => "?",
-                })
-                .collect::<Vec<_>>(),
+            values,
             vec!["1,10", "1,2"]
         );
     }
@@ -624,15 +624,15 @@ mod tests {
 
         sort_range(&mut data, &spec);
 
+        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        for r in data.rows.iter().skip(1) {
+            values.push(match &r[0] {
+                CellValue::Text(s) => s.as_str(),
+                _ => "?",
+            });
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .skip(1)
-                .map(|r| match &r[0] {
-                    CellValue::Text(s) => s.as_str(),
-                    _ => "?",
-                })
-                .collect::<Vec<_>>(),
+            values,
             vec!["2:00", "12:00"]
         );
     }
@@ -733,12 +733,12 @@ mod tests {
 
         sort_range(&mut data, &spec);
 
+        let mut sorted: Vec<CellValue> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        for r in data.rows.iter().skip(1) {
+            sorted.push(r[0].clone());
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .skip(1)
-                .map(|r| r[0].clone())
-                .collect::<Vec<_>>(),
+            sorted,
             vec![
                 CellValue::Number(1.0),
                 CellValue::Text("a".into()),
@@ -771,12 +771,12 @@ mod tests {
 
         sort_range(&mut data, &spec);
 
+        let mut sorted: Vec<CellValue> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        for r in data.rows.iter().skip(1) {
+            sorted.push(r[0].clone());
+        }
         assert_eq!(
-            data.rows
-                .iter()
-                .skip(1)
-                .map(|r| r[0].clone())
-                .collect::<Vec<_>>(),
+            sorted,
             vec![
                 CellValue::Error(ErrorValue::Div0),
                 CellValue::Error(ErrorValue::GettingData),

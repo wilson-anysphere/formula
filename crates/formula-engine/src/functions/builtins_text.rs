@@ -1,6 +1,9 @@
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
+use crate::functions::text::search_pattern::{
+    matches_pattern_with_memo, min_required_hay_len, parse_search_pattern_folded, PatternToken,
+};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{casefold_owned, lowercase_owned, Array, ErrorKind, Value};
@@ -204,10 +207,15 @@ fn right_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if n < 0 {
             return Err(ErrorKind::Value);
         }
-        let chars: Vec<char> = text.chars().collect();
-        let len = chars.len();
-        let start = len.saturating_sub(n as usize);
-        Ok(Value::Text(chars[start..].iter().collect()))
+        let n = n as usize;
+        if n == 0 {
+            return Ok(Value::Text(String::new()));
+        }
+        let start_byte = match text.char_indices().rev().nth(n - 1) {
+            Some((i, _)) => i,
+            None => 0,
+        };
+        Ok(Value::Text(text[start_byte..].to_string()))
     })
 }
 
@@ -881,12 +889,30 @@ fn replace_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 fn slice_chars(text: &str, start: usize, len: usize) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if start >= chars.len() {
+    if len == 0 {
         return String::new();
     }
-    let end = (start + len).min(chars.len());
-    chars[start..end].iter().collect()
+
+    let end_char = start.saturating_add(len);
+    let mut start_byte: Option<usize> = (start == 0).then_some(0);
+    let mut end_byte: Option<usize> = None;
+    let mut ci = 0usize;
+    for (i, _) in text.char_indices() {
+        if ci == start {
+            start_byte = Some(i);
+        }
+        if ci == end_char {
+            end_byte = Some(i);
+            break;
+        }
+        ci += 1;
+    }
+
+    let Some(start_byte) = start_byte else {
+        return String::new();
+    };
+    let end_byte = end_byte.unwrap_or(text.len());
+    text[start_byte..end_byte].to_string()
 }
 
 fn excel_trim(text: &str) -> String {
@@ -903,177 +929,113 @@ fn excel_trim(text: &str) -> String {
         in_space = false;
         out.push(ch);
     }
-    out.trim_matches(' ').to_string()
+    out
 }
 
 fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -> Value {
     if start < 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let needle_chars: Vec<char> = needle.chars().collect();
-    let hay_chars: Vec<char> = haystack.chars().collect();
     let start_idx = (start - 1) as usize;
-    if start_idx > hay_chars.len() {
-        return Value::Error(ErrorKind::Value);
-    }
-
-    if needle_chars.is_empty() {
-        return Value::Number(start as f64);
-    }
 
     if case_insensitive {
-        // Excel SEARCH is case-insensitive using Unicode-aware uppercasing (e.g. ß -> SS).
-        // Fold both pattern and haystack into a comparable char stream.
-        let needle_folded: Vec<char> = if needle.is_ascii() {
-            let needs_uppercasing = needle.as_bytes().iter().any(|b| b.is_ascii_lowercase());
-            let mut out = Vec::with_capacity(needle.len());
-            if needs_uppercasing {
-                out.extend(needle.chars().map(|c| c.to_ascii_uppercase()));
-            } else {
-                out.extend(needle.chars());
-            }
-            out
-        } else {
-            needle.chars().flat_map(|c| c.to_uppercase()).collect()
-        };
-        let needle_tokens = parse_search_pattern(&needle_folded);
+        let hay_ascii_needs_uppercasing = haystack
+            .as_bytes()
+            .iter()
+            .any(|b| b.is_ascii_lowercase());
+        let (hay_folded, folded_starts) =
+            crate::value::fold_str_to_uppercase_with_starts(haystack, hay_ascii_needs_uppercasing);
+        let hay_len_chars = folded_starts.len();
 
-        let hay_ascii_needs_uppercasing = haystack.is_ascii()
-            && haystack
-                .as_bytes()
-                .iter()
-                .any(|b| b.is_ascii_lowercase());
-        let mut hay_folded = Vec::with_capacity(hay_chars.len());
-        let mut folded_starts = Vec::with_capacity(hay_chars.len());
-        for ch in &hay_chars {
-            folded_starts.push(hay_folded.len());
-            if ch.is_ascii() {
-                if hay_ascii_needs_uppercasing {
-                    hay_folded.push(ch.to_ascii_uppercase());
-                } else {
-                    hay_folded.push(*ch);
-                }
-            } else {
-                hay_folded.extend(ch.to_uppercase());
-            }
+        if start_idx > hay_len_chars {
+            return Value::Error(ErrorKind::Value);
+        }
+        if needle.is_empty() {
+            return Value::Number(start as f64);
+        }
+        if start_idx == hay_len_chars {
+            return Value::Error(ErrorKind::Value);
         }
 
-        for orig_idx in start_idx..hay_chars.len() {
+        // Excel SEARCH is case-insensitive using Unicode-aware uppercasing (e.g. ß -> SS).
+        // Fold the pattern into a comparable char stream while parsing (avoids an intermediate
+        // `Vec<char>` allocation for the folded pattern).
+        let needle_tokens = parse_search_pattern_folded(needle);
+        let min_required = min_required_hay_len(&needle_tokens);
+
+        if let [PatternToken::LiteralSeq(seq)] = needle_tokens.as_slice() {
+            for orig_idx in start_idx..hay_len_chars {
+                let folded_idx = folded_starts[orig_idx];
+                if hay_folded.len().saturating_sub(folded_idx) < seq.len() {
+                    break;
+                }
+                if hay_folded[folded_idx..].starts_with(seq) {
+                    return Value::Number((orig_idx + 1) as f64);
+                }
+            }
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let stride = hay_folded.len() + 1;
+        let mut memo: Vec<Option<bool>> = vec![None; (needle_tokens.len() + 1) * stride];
+        for orig_idx in start_idx..hay_len_chars {
             let folded_idx = folded_starts[orig_idx];
-            if matches_pattern(&needle_tokens, &hay_folded, folded_idx) {
+            if hay_folded.len().saturating_sub(folded_idx) < min_required {
+                break;
+            }
+            if matches_pattern_with_memo(&needle_tokens, &hay_folded, folded_idx, stride, &mut memo)
+            {
                 return Value::Number((orig_idx + 1) as f64);
             }
         }
         Value::Error(ErrorKind::Value)
     } else {
-        let needle_tokens = vec![PatternToken::LiteralSeq(needle_chars)];
-        for i in start_idx..hay_chars.len() {
-            if matches_pattern(&needle_tokens, &hay_chars, i) {
-                return Value::Number((i + 1) as f64);
+        if haystack.is_ascii() {
+            let hay_len = haystack.len();
+            if start_idx > hay_len {
+                return Value::Error(ErrorKind::Value);
             }
+            if needle.is_empty() {
+                return Value::Number(start as f64);
+            }
+            if start_idx == hay_len {
+                return Value::Error(ErrorKind::Value);
+            }
+            if let Some(rel) = haystack[start_idx..].find(needle) {
+                return Value::Number((start_idx + rel + 1) as f64);
+            }
+            return Value::Error(ErrorKind::Value);
         }
-        Value::Error(ErrorKind::Value)
-    }
-}
 
-#[derive(Debug, Clone)]
-enum PatternToken {
-    LiteralSeq(Vec<char>),
-    AnyOne,
-    AnyMany,
-}
-
-fn parse_search_pattern(pattern: &[char]) -> Vec<PatternToken> {
-    let mut tokens = Vec::new();
-    let mut literal = Vec::new();
-    let mut idx = 0;
-    while idx < pattern.len() {
-        let ch = pattern[idx];
-        if ch == '~' {
-            idx += 1;
-            if idx < pattern.len() {
-                literal.push(pattern[idx]);
-                idx += 1;
-            } else {
-                literal.push('~');
+        let mut hay_len_chars = 0usize;
+        let mut start_byte: Option<usize> = None;
+        for (i, _) in haystack.char_indices() {
+            if hay_len_chars == start_idx {
+                start_byte = Some(i);
             }
-            continue;
+            hay_len_chars += 1;
         }
-        match ch {
-            '*' => {
-                if !literal.is_empty() {
-                    tokens.push(PatternToken::LiteralSeq(std::mem::take(&mut literal)));
-                }
-                tokens.push(PatternToken::AnyMany);
-                idx += 1;
-            }
-            '?' => {
-                if !literal.is_empty() {
-                    tokens.push(PatternToken::LiteralSeq(std::mem::take(&mut literal)));
-                }
-                tokens.push(PatternToken::AnyOne);
-                idx += 1;
-            }
-            _ => {
-                literal.push(ch);
-                idx += 1;
-            }
-        }
-    }
-    if !literal.is_empty() {
-        tokens.push(PatternToken::LiteralSeq(literal));
-    }
-    tokens
-}
 
-fn matches_pattern(tokens: &[PatternToken], hay: &[char], start: usize) -> bool {
-    let mut memo = vec![vec![None; hay.len() + 1]; tokens.len() + 1];
-    match_rec(tokens, hay, start, 0, &mut memo)
-}
-
-fn match_rec(
-    tokens: &[PatternToken],
-    hay: &[char],
-    hay_idx: usize,
-    tok_idx: usize,
-    memo: &mut [Vec<Option<bool>>],
-) -> bool {
-    if let Some(cached) = memo[tok_idx][hay_idx] {
-        return cached;
-    }
-    let result = if tok_idx == tokens.len() {
-        true
-    } else {
-        match &tokens[tok_idx] {
-            PatternToken::LiteralSeq(seq) => {
-                if hay_idx + seq.len() > hay.len() {
-                    false
-                } else if hay[hay_idx..hay_idx + seq.len()] == *seq {
-                    match_rec(tokens, hay, hay_idx + seq.len(), tok_idx + 1, memo)
-                } else {
-                    false
-                }
-            }
-            PatternToken::AnyOne => {
-                if hay_idx >= hay.len() {
-                    false
-                } else {
-                    match_rec(tokens, hay, hay_idx + 1, tok_idx + 1, memo)
-                }
-            }
-            PatternToken::AnyMany => {
-                if match_rec(tokens, hay, hay_idx, tok_idx + 1, memo) {
-                    true
-                } else if hay_idx < hay.len() {
-                    match_rec(tokens, hay, hay_idx + 1, tok_idx, memo)
-                } else {
-                    false
-                }
-            }
+        if start_idx > hay_len_chars {
+            return Value::Error(ErrorKind::Value);
         }
-    };
-    memo[tok_idx][hay_idx] = Some(result);
-    result
+        if needle.is_empty() {
+            return Value::Number(start as f64);
+        }
+        if start_idx == hay_len_chars {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let start_byte = start_byte.expect("start_idx < hay_len_chars implies a start byte");
+        let hay = &haystack[start_byte..];
+        let Some(rel) = hay.find(needle) else {
+            return Value::Error(ErrorKind::Value);
+        };
+
+        let prefix = &hay[..rel];
+        let prefix_chars = prefix.chars().count();
+        Value::Number((start_idx + prefix_chars + 1) as f64)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1324,8 +1286,9 @@ fn excel_error_to_kind(err: ExcelError) -> ErrorKind {
 
 fn coerce_single_char(value: &Value, ctx: &dyn FunctionContext) -> Result<char, ErrorKind> {
     let s = value.coerce_to_string_with_ctx(ctx)?;
-    match s.chars().collect::<Vec<_>>().as_slice() {
-        [ch] => Ok(*ch),
+    let mut chars = s.chars();
+    match (chars.next(), chars.next()) {
+        (Some(ch), None) => Ok(ch),
         _ => Err(ErrorKind::Value),
     }
 }
@@ -1338,8 +1301,9 @@ fn coerce_optional_single_char(
     if s.is_empty() {
         return Ok(None);
     }
-    match s.chars().collect::<Vec<_>>().as_slice() {
-        [ch] => Ok(Some(*ch)),
+    let mut chars = s.chars();
+    match (chars.next(), chars.next()) {
+        (Some(ch), None) => Ok(Some(ch)),
         _ => Err(ErrorKind::Value),
     }
 }

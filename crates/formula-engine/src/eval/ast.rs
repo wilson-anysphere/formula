@@ -277,11 +277,13 @@ impl<S: Clone> Expr<S> {
             Expr::ArrayLiteral { rows, cols, values } => Expr::ArrayLiteral {
                 rows: *rows,
                 cols: *cols,
-                values: values
-                    .iter()
-                    .map(|v| v.map_sheets(f))
-                    .collect::<Vec<_>>()
-                    .into(),
+                values: {
+                    let mut out: Vec<Expr<T>> = Vec::with_capacity(values.len());
+                    for v in values.iter() {
+                        out.push(v.map_sheets(f));
+                    }
+                    out.into()
+                },
             },
             Expr::NameRef(r) => Expr::NameRef(NameRef {
                 sheet: f(&r.sheet),

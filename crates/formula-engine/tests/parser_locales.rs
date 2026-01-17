@@ -252,6 +252,33 @@ fn lex_comma_decimal_locales_disambiguate_union_and_arg_separators() {
 }
 
 #[test]
+fn lex_comma_decimal_locales_treat_structured_refs_as_opaque_bracket_segments() {
+    // Structured references can contain escaped brackets (`]]`) and nested bracket groups.
+    // Delimiters inside the structured-ref bracket payload must not affect top-level tokenization,
+    // even in locales where `;` is the function argument separator.
+    for locale in [
+        LocaleConfig::de_de(),
+        LocaleConfig::fr_fr(),
+        LocaleConfig::es_es(),
+    ] {
+        let mut opts = ParseOptions::default();
+        opts.locale = locale;
+
+        let tokens = lex("SUM(Table1[[A]]B],[Col2]];1)", &opts).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
+        assert!(matches!(tokens[1].kind, TokenKind::LParen));
+        assert!(matches!(tokens[2].kind, TokenKind::Ident(ref s) if s == "Table1"));
+        assert!(matches!(tokens[3].kind, TokenKind::LBracket));
+        assert!(matches!(tokens[4].kind, TokenKind::Ident(_)));
+        assert!(matches!(tokens[5].kind, TokenKind::RBracket));
+        assert!(matches!(tokens[6].kind, TokenKind::ArgSep));
+        assert!(matches!(tokens[7].kind, TokenKind::Number(ref n) if n == "1"));
+        assert!(matches!(tokens[8].kind, TokenKind::RParen));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+    }
+}
+
+#[test]
 fn lex_localized_error_literal_inverted_exclamation() {
     let mut opts = ParseOptions::default();
     opts.locale = LocaleConfig::en_us();

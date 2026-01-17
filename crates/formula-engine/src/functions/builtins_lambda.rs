@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
@@ -72,14 +71,13 @@ fn lambda_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut params: Vec<String> = Vec::with_capacity(args.len().saturating_sub(1));
-    let mut seen: HashSet<String> = HashSet::new();
 
     for param_expr in &args[..args.len() - 1] {
         let Some(name) = bare_identifier(param_expr) else {
             return Value::Error(ErrorKind::Value);
         };
         let name_key = casefold(name.trim());
-        if !seen.insert(name_key.clone()) {
+        if params.iter().any(|p| p == &name_key) {
             return Value::Error(ErrorKind::Value);
         }
         params.push(name_key);

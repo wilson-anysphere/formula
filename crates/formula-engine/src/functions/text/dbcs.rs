@@ -33,6 +33,9 @@
 use crate::eval::CompiledExpr;
 use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::array_lift;
+use crate::functions::text::search_pattern::{
+    matches_pattern_with_memo, min_required_hay_len, parse_search_pattern_folded, PatternToken,
+};
 use crate::functions::{call_function, ArgValue, FunctionContext, Reference};
 use crate::value::{Array, ErrorKind, Value};
 use encoding_rs::{
@@ -165,10 +168,7 @@ pub(crate) fn rightb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Val
             return Err(ErrorKind::Value);
         }
         let n = usize::try_from(n).unwrap_or(usize::MAX);
-        let total = encoded_byte_prefixes(codepage, &text)
-            .last()
-            .copied()
-            .unwrap_or(0);
+        let total = dbcs_total_bytes(codepage, &text);
         let start0 = total.saturating_sub(n);
         Ok(Value::Text(slice_bytes_dbcs(codepage, &text, start0, n)))
     })
@@ -884,28 +884,6 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
     total
 }
 
-fn encoded_byte_prefixes(codepage: u16, text: &str) -> Vec<usize> {
-    let Some(encoding) = encoding_for_codepage(codepage) else {
-        // Fallback: treat each character as a single byte.
-        let mut out = Vec::with_capacity(text.chars().count().saturating_add(1));
-        out.push(0);
-        for (idx, _ch) in text.chars().enumerate() {
-            out.push(idx.saturating_add(1));
-        }
-        return out;
-    };
-
-    let mut out = Vec::with_capacity(text.chars().count().saturating_add(1));
-    out.push(0);
-
-    let mut total = 0usize;
-    for ch in text.chars() {
-        total = total.saturating_add(encoded_byte_len_for_char(encoding, ch));
-        out.push(total);
-    }
-    out
-}
-
 fn encoded_byte_len_for_char(encoding: &'static Encoding, ch: char) -> usize {
     // DBCS encodings used by Excel are stateless; encode a single codepoint and count bytes.
     let mut encoder = encoding.new_encoder();
@@ -920,49 +898,96 @@ fn encoded_byte_len_for_char(encoding: &'static Encoding, ch: char) -> usize {
             encoding_rs::EncoderResult::Unmappable(_) => return 1,
             encoding_rs::EncoderResult::OutputFull => {
                 // Should not happen for DBCS codepages (<=2 bytes/codepoint), but be defensive.
-                let mut bigger = vec![0u8; scratch.len().saturating_mul(2).max(16)];
+                // Avoid a heap allocation here: try again with a larger stack buffer once.
+                let mut bigger = [0u8; 32];
                 let (result, _read, written) =
                     encoder.encode_from_utf8_without_replacement(input, &mut bigger, true);
-                match result {
-                    encoding_rs::EncoderResult::InputEmpty => return written,
-                    encoding_rs::EncoderResult::Unmappable(_) => return 1,
-                    encoding_rs::EncoderResult::OutputFull => {
-                        // Give up; treat as single-byte.
-                        return 1;
-                    }
-                }
+                return match result {
+                    encoding_rs::EncoderResult::InputEmpty => written,
+                    encoding_rs::EncoderResult::Unmappable(_) => 1,
+                    encoding_rs::EncoderResult::OutputFull => 1,
+                };
             }
         }
     }
+}
+
+fn dbcs_total_bytes(codepage: u16, text: &str) -> usize {
+    let encoding = encoding_for_codepage(codepage);
+    let mut total = 0usize;
+    for ch in text.chars() {
+        let len = match encoding {
+            Some(enc) => encoded_byte_len_for_char(enc, ch),
+            None => 1,
+        };
+        total = total.saturating_add(len);
+    }
+    total
+}
+
+fn aligned_utf8_range_for_dbcs_byte_range(
+    codepage: u16,
+    text: &str,
+    start0: usize,
+    len: usize,
+) -> (usize, usize) {
+    let end0 = start0.saturating_add(len);
+    let encoding = encoding_for_codepage(codepage);
+
+    let mut bytes_before = 0usize;
+    let mut char_idx = 0usize;
+
+    let mut start_char: Option<usize> = (start0 == 0).then_some(0);
+    let mut start_byte: Option<usize> = (start0 == 0).then_some(0);
+
+    let mut end_char = 0usize;
+    let mut end_byte = 0usize;
+
+    for (utf8_idx, ch) in text.char_indices() {
+        if start_char.is_none() && bytes_before >= start0 {
+            start_char = Some(char_idx);
+            start_byte = Some(utf8_idx);
+        }
+        if bytes_before <= end0 {
+            end_char = char_idx;
+            end_byte = utf8_idx;
+        }
+
+        let blen = match encoding {
+            Some(enc) => encoded_byte_len_for_char(enc, ch),
+            None => 1,
+        };
+        bytes_before = bytes_before.saturating_add(blen);
+        char_idx += 1;
+    }
+
+    let text_end = text.len();
+    if start_char.is_none() && bytes_before >= start0 {
+        start_char = Some(char_idx);
+        start_byte = Some(text_end);
+    }
+    if bytes_before <= end0 {
+        end_char = char_idx;
+        end_byte = text_end;
+    }
+
+    let start_char = start_char.unwrap_or(char_idx);
+    let start_byte = start_byte.unwrap_or(text_end);
+    if end_char <= start_char {
+        return (start_byte, start_byte);
+    }
+    (start_byte, end_byte)
 }
 
 fn slice_bytes_dbcs(codepage: u16, text: &str, start0: usize, len: usize) -> String {
     if len == 0 {
         return String::new();
     }
-
-    let prefixes = encoded_byte_prefixes(codepage, text);
-    let total = prefixes.last().copied().unwrap_or(0);
-
-    let start0 = start0.min(total);
-    let end0 = start0.saturating_add(len).min(total);
-
-    // Align start to the next character boundary (ceil) and end to the previous boundary (floor)
-    // so we never return partial DBCS code units.
-    let start_char = prefixes
-        .iter()
-        .position(|&b| b >= start0)
-        .unwrap_or(prefixes.len().saturating_sub(1));
-    let end_char_excl = prefixes.iter().rposition(|&b| b <= end0).unwrap_or(0);
-
-    if end_char_excl <= start_char {
+    let (start_byte, end_byte) = aligned_utf8_range_for_dbcs_byte_range(codepage, text, start0, len);
+    if end_byte <= start_byte {
         return String::new();
     }
-
-    text.chars()
-        .skip(start_char)
-        .take(end_char_excl - start_char)
-        .collect()
+    text[start_byte..end_byte].to_string()
 }
 
 fn replaceb_bytes(
@@ -972,23 +997,8 @@ fn replaceb_bytes(
     len: usize,
     new_text: &str,
 ) -> String {
-    let prefixes = encoded_byte_prefixes(codepage, old_text);
-    let total = prefixes.last().copied().unwrap_or(0);
-
-    let start0 = start0.min(total);
-    let end0 = start0.saturating_add(len).min(total);
-
-    let start_char = prefixes
-        .iter()
-        .position(|&b| b >= start0)
-        .unwrap_or(prefixes.len().saturating_sub(1));
-    let mut end_char_excl = prefixes.iter().rposition(|&b| b <= end0).unwrap_or(0);
-    if end_char_excl < start_char {
-        end_char_excl = start_char;
-    }
-
-    let start_byte = char_pos_to_byte(old_text, start_char);
-    let end_byte = char_pos_to_byte(old_text, end_char_excl);
+    let (start_byte, end_byte) = aligned_utf8_range_for_dbcs_byte_range(codepage, old_text, start0, len);
+    let end_byte = end_byte.max(start_byte);
 
     let mut out = String::with_capacity(
         old_text.len() - end_byte.saturating_sub(start_byte) + new_text.len(),
@@ -997,16 +1007,6 @@ fn replaceb_bytes(
     out.push_str(new_text);
     out.push_str(&old_text[end_byte..]);
     out
-}
-
-fn char_pos_to_byte(s: &str, char_pos: usize) -> usize {
-    if char_pos == 0 {
-        return 0;
-    }
-    s.char_indices()
-        .nth(char_pos)
-        .map(|(idx, _)| idx)
-        .unwrap_or_else(|| s.len())
 }
 
 fn findb_impl(
@@ -1020,23 +1020,35 @@ fn findb_impl(
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut hay_chars: Vec<char> = Vec::new();
+    let mut hay_folded: Vec<char> = Vec::new();
+    let mut folded_starts: Vec<usize> = Vec::new();
     let mut byte_prefixes: Vec<usize> = Vec::new();
     byte_prefixes.push(0);
     let mut total_bytes = 0usize;
+    let mut orig_len = 0usize;
+    let mut char_starts: Vec<usize> = Vec::new();
 
     let encoding = encoding_for_codepage(codepage);
-    for ch in haystack.chars() {
-        hay_chars.push(ch);
+    for (utf8_idx, ch) in haystack.char_indices() {
+        if !case_insensitive {
+            char_starts.push(utf8_idx);
+        }
+        if case_insensitive {
+            folded_starts.push(hay_folded.len());
+            if ch.is_ascii() {
+                hay_folded.push(ch.to_ascii_uppercase());
+            } else {
+                hay_folded.extend(ch.to_uppercase());
+            }
+        }
         let len = match encoding {
             Some(enc) => encoded_byte_len_for_char(enc, ch),
             None => 1,
         };
         total_bytes = total_bytes.saturating_add(len);
         byte_prefixes.push(total_bytes);
+        orig_len += 1;
     }
-
-    let needle_chars: Vec<char> = needle.chars().collect();
 
     let Ok(start0) = usize::try_from(start.saturating_sub(1)) else {
         return Value::Error(ErrorKind::Value);
@@ -1046,175 +1058,67 @@ fn findb_impl(
     }
 
     // Convert byte-based start offset to a character index aligned to the next boundary.
-    let start_idx = byte_prefixes
-        .iter()
-        .position(|&b| b >= start0)
-        .unwrap_or(hay_chars.len());
-    if start_idx > hay_chars.len() {
+    let start_idx = byte_prefixes.partition_point(|&b| b < start0);
+    if start_idx > orig_len {
         return Value::Error(ErrorKind::Value);
     }
 
-    if needle_chars.is_empty() {
+    if needle.is_empty() {
         return Value::Number(start as f64);
     }
 
     if case_insensitive {
         // Excel SEARCH is case-insensitive using Unicode-aware uppercasing (e.g. ß -> SS).
         // Fold both pattern and haystack into a comparable char stream.
-        let needle_folded: Vec<char> = if needle.is_ascii() {
-            let needs_uppercasing = needle.as_bytes().iter().any(|b| b.is_ascii_lowercase());
-            let mut out = Vec::with_capacity(needle.len());
-            if needs_uppercasing {
-                out.extend(needle.chars().map(|c| c.to_ascii_uppercase()));
-            } else {
-                out.extend(needle.chars());
-            }
-            out
-        } else {
-            needle.chars().flat_map(|c| c.to_uppercase()).collect()
-        };
-        let needle_tokens = parse_search_pattern(&needle_folded);
+        let needle_tokens = parse_search_pattern_folded(needle);
+        let min_required = min_required_hay_len(&needle_tokens);
+        debug_assert_eq!(folded_starts.len(), orig_len);
 
-        let hay_ascii_needs_uppercasing = haystack.is_ascii()
-            && haystack
-                .as_bytes()
-                .iter()
-                .any(|b| b.is_ascii_lowercase());
-        let mut hay_folded = Vec::with_capacity(hay_chars.len());
-        let mut folded_starts = Vec::with_capacity(hay_chars.len());
-        for ch in &hay_chars {
-            folded_starts.push(hay_folded.len());
-            if ch.is_ascii() {
-                if hay_ascii_needs_uppercasing {
-                    hay_folded.push(ch.to_ascii_uppercase());
-                } else {
-                    hay_folded.push(*ch);
+        if let [PatternToken::LiteralSeq(seq)] = needle_tokens.as_slice() {
+            for orig_idx in start_idx..orig_len {
+                let folded_idx = folded_starts[orig_idx];
+                if hay_folded.len().saturating_sub(folded_idx) < seq.len() {
+                    break;
                 }
-            } else {
-                hay_folded.extend(ch.to_uppercase());
+                if hay_folded[folded_idx..].starts_with(seq) {
+                    let byte_pos = byte_prefixes[orig_idx].saturating_add(1);
+                    return Value::Number(byte_pos as f64);
+                }
             }
+            return Value::Error(ErrorKind::Value);
         }
 
-        for orig_idx in start_idx..hay_chars.len() {
+        let stride = hay_folded.len() + 1;
+        let mut memo: Vec<Option<bool>> = vec![None; (needle_tokens.len() + 1) * stride];
+        for orig_idx in start_idx..orig_len {
             let folded_idx = folded_starts[orig_idx];
-            if matches_pattern(&needle_tokens, &hay_folded, folded_idx) {
-                let byte_pos = byte_prefixes
-                    .get(orig_idx)
-                    .copied()
-                    .unwrap_or(0)
-                    .saturating_add(1);
+            if hay_folded.len().saturating_sub(folded_idx) < min_required {
+                break;
+            }
+            if matches_pattern_with_memo(&needle_tokens, &hay_folded, folded_idx, stride, &mut memo)
+            {
+                let byte_pos = byte_prefixes[orig_idx].saturating_add(1);
                 return Value::Number(byte_pos as f64);
             }
         }
         Value::Error(ErrorKind::Value)
     } else {
-        let needle_tokens = vec![PatternToken::LiteralSeq(needle_chars)];
-        for i in start_idx..hay_chars.len() {
-            if matches_pattern(&needle_tokens, &hay_chars, i) {
-                let byte_pos = byte_prefixes.get(i).copied().unwrap_or(0).saturating_add(1);
-                return Value::Number(byte_pos as f64);
-            }
+        debug_assert_eq!(char_starts.len(), orig_len);
+        if start_idx == orig_len {
+            return Value::Error(ErrorKind::Value);
         }
-        Value::Error(ErrorKind::Value)
-    }
-}
 
-#[derive(Debug, Clone)]
-enum PatternToken {
-    LiteralSeq(Vec<char>),
-    AnyOne,
-    AnyMany,
-}
-
-fn parse_search_pattern(pattern: &[char]) -> Vec<PatternToken> {
-    let mut tokens = Vec::new();
-    let mut literal = Vec::new();
-    let mut idx = 0;
-    while idx < pattern.len() {
-        let ch = pattern[idx];
-        if ch == '~' {
-            idx += 1;
-            if idx < pattern.len() {
-                literal.push(pattern[idx]);
-                idx += 1;
-            } else {
-                literal.push('~');
-            }
-            continue;
-        }
-        match ch {
-            '*' => {
-                if !literal.is_empty() {
-                    tokens.push(PatternToken::LiteralSeq(std::mem::take(&mut literal)));
-                }
-                tokens.push(PatternToken::AnyMany);
-                idx += 1;
-            }
-            '?' => {
-                if !literal.is_empty() {
-                    tokens.push(PatternToken::LiteralSeq(std::mem::take(&mut literal)));
-                }
-                tokens.push(PatternToken::AnyOne);
-                idx += 1;
-            }
-            _ => {
-                literal.push(ch);
-                idx += 1;
-            }
-        }
+        let start_utf8 = char_starts[start_idx];
+        let hay = &haystack[start_utf8..];
+        let Some(rel) = hay.find(needle) else {
+            return Value::Error(ErrorKind::Value);
+        };
+        let match_utf8 = start_utf8 + rel;
+        let Ok(char_idx) = char_starts.binary_search(&match_utf8) else {
+            debug_assert!(false, "UTF-8 substring matches should start on char boundaries");
+            return Value::Error(ErrorKind::Value);
+        };
+        let byte_pos = byte_prefixes[char_idx].saturating_add(1);
+        Value::Number(byte_pos as f64)
     }
-    if !literal.is_empty() {
-        tokens.push(PatternToken::LiteralSeq(literal));
-    }
-    tokens
-}
-
-fn matches_pattern(tokens: &[PatternToken], hay: &[char], start: usize) -> bool {
-    let mut memo = vec![vec![None; hay.len() + 1]; tokens.len() + 1];
-    match_rec(tokens, hay, start, 0, &mut memo)
-}
-
-fn match_rec(
-    tokens: &[PatternToken],
-    hay: &[char],
-    hay_idx: usize,
-    tok_idx: usize,
-    memo: &mut [Vec<Option<bool>>],
-) -> bool {
-    if let Some(cached) = memo[tok_idx][hay_idx] {
-        return cached;
-    }
-    let result = if tok_idx == tokens.len() {
-        true
-    } else {
-        match &tokens[tok_idx] {
-            PatternToken::LiteralSeq(seq) => {
-                if hay_idx + seq.len() > hay.len() {
-                    false
-                } else if hay[hay_idx..hay_idx + seq.len()] == *seq {
-                    match_rec(tokens, hay, hay_idx + seq.len(), tok_idx + 1, memo)
-                } else {
-                    false
-                }
-            }
-            PatternToken::AnyOne => {
-                if hay_idx >= hay.len() {
-                    false
-                } else {
-                    match_rec(tokens, hay, hay_idx + 1, tok_idx + 1, memo)
-                }
-            }
-            PatternToken::AnyMany => {
-                if match_rec(tokens, hay, hay_idx, tok_idx + 1, memo) {
-                    true
-                } else if hay_idx < hay.len() {
-                    match_rec(tokens, hay, hay_idx + 1, tok_idx, memo)
-                } else {
-                    false
-                }
-            }
-        }
-    };
-    memo[tok_idx][hay_idx] = Some(result);
-    result
 }

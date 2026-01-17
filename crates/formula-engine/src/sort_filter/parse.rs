@@ -1,4 +1,5 @@
 use chrono::{Duration, NaiveDate, NaiveDateTime};
+use std::borrow::Cow;
 
 use crate::locale::{DateOrder, ValueLocaleConfig};
 
@@ -16,7 +17,7 @@ pub(crate) fn parse_text_number(text: &str, value_locale: ValueLocaleConfig) -> 
     if separators.thousands_sep == '.' && text.contains(separators.thousands_sep) {
         if let Some(compact) = compact_for_grouping_validation(text) {
             if !has_valid_thousands_grouping(
-                &compact,
+                compact.as_ref(),
                 separators.decimal_sep,
                 separators.thousands_sep,
             ) {
@@ -273,11 +274,13 @@ pub(crate) fn parse_text_datetime(
     // Time-only values (e.g. "2:30", "2 PM") should sort/filter like Excel time serials.
     // Interpret them as DateTime values anchored at the Excel 1900 epoch date (1899-12-31),
     // which yields the same numeric serial behavior as `datetime_to_excel_serial_1900`.
-    let tokens: Vec<&str> = s.split_whitespace().collect();
-    let looks_like_time_only = match tokens.as_slice() {
-        [_] => true,
-        [_, suffix] => suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM"),
-        _ => false,
+    let looks_like_time_only = {
+        let mut it = s.split_whitespace();
+        match (it.next(), it.next(), it.next()) {
+            (Some(_), None, None) => true,
+            (Some(_), Some(suffix), None) => suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM"),
+            _ => false,
+        }
     };
     if looks_like_time_only {
         if let Ok(fraction) = crate::coercion::datetime::parse_timevalue_text(s, value_locale) {
@@ -293,7 +296,7 @@ pub(crate) fn parse_text_datetime(
     None
 }
 
-fn compact_for_grouping_validation(text: &str) -> Option<String> {
+fn compact_for_grouping_validation(text: &str) -> Option<Cow<'_, str>> {
     let mut s = text.trim();
     if s.is_empty() {
         return None;
@@ -326,12 +329,12 @@ fn compact_for_grouping_validation(text: &str) -> Option<String> {
         break;
     }
 
-    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    if compact.is_empty() {
-        None
-    } else {
-        Some(compact)
+    if !s.chars().any(|c| c.is_whitespace()) {
+        return Some(Cow::Borrowed(s));
     }
+
+    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    (!compact.is_empty()).then(|| Cow::Owned(compact))
 }
 
 fn has_valid_thousands_grouping(compact: &str, decimal_sep: char, group_sep: char) -> bool {
@@ -362,23 +365,22 @@ fn has_valid_thousands_grouping(compact: &str, decimal_sep: char, group_sep: cha
         return false;
     }
 
-    let segments: Vec<&str> = integer.split(group_sep).collect();
-    if segments.len() <= 1 {
+    let mut segs = integer.split(group_sep);
+    let Some(first) = segs.next() else {
         return true;
-    }
+    };
+    let Some(second) = segs.next() else {
+        return true;
+    };
 
-    if segments[0].is_empty() || segments[0].len() > 3 {
+    if first.is_empty() || first.len() > 3 || !first.chars().all(|c| c.is_ascii_digit()) {
         return false;
     }
-
-    for seg in &segments {
-        if seg.is_empty() || !seg.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
+    if second.is_empty() || second.len() != 3 || !second.chars().all(|c| c.is_ascii_digit()) {
+        return false;
     }
-
-    for seg in &segments[1..] {
-        if seg.len() != 3 {
+    for seg in segs {
+        if seg.is_empty() || seg.len() != 3 || !seg.chars().all(|c| c.is_ascii_digit()) {
             return false;
         }
     }

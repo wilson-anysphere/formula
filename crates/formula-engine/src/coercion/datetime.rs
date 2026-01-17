@@ -1,5 +1,7 @@
 use chrono::{DateTime, Datelike, Utc};
 
+use std::borrow::Cow;
+
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::{ExcelError, ExcelResult};
 
@@ -41,7 +43,7 @@ pub fn parse_value_text(
     let mut try_number = true;
     if group_sep == '.' && text.contains(group_sep) {
         if let Some(compact) = compact_for_grouping_validation(text) {
-            if !has_valid_thousands_grouping(&compact, decimal_sep, group_sep) {
+            if !has_valid_thousands_grouping(compact.as_ref(), decimal_sep, group_sep) {
                 try_number = false;
             }
         }
@@ -76,7 +78,7 @@ pub fn parse_value_text(
     }
 }
 
-fn compact_for_grouping_validation(text: &str) -> Option<String> {
+fn compact_for_grouping_validation(text: &str) -> Option<Cow<'_, str>> {
     let mut s = text.trim();
     if s.is_empty() {
         return None;
@@ -109,12 +111,25 @@ fn compact_for_grouping_validation(text: &str) -> Option<String> {
         break;
     }
 
+    if s.is_empty() {
+        return None;
+    }
+
+    let has_whitespace = if s.is_ascii() {
+        s.as_bytes().iter().any(|b| b.is_ascii_whitespace())
+    } else {
+        s.chars().any(|c| c.is_whitespace())
+    };
+    if !has_whitespace {
+        return Some(Cow::Borrowed(s));
+    }
+
     let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.is_empty() {
-        None
-    } else {
-        Some(compact)
+        return None;
     }
+
+    Some(Cow::Owned(compact))
 }
 
 fn has_valid_thousands_grouping(compact: &str, decimal_sep: char, group_sep: char) -> bool {
@@ -145,23 +160,22 @@ fn has_valid_thousands_grouping(compact: &str, decimal_sep: char, group_sep: cha
         return false;
     }
 
-    let segments: Vec<&str> = integer.split(group_sep).collect();
-    if segments.len() <= 1 {
+    let mut segs = integer.split(group_sep);
+    let Some(first) = segs.next() else {
         return true;
-    }
+    };
+    let Some(second) = segs.next() else {
+        return true;
+    };
 
-    if segments[0].is_empty() || segments[0].len() > 3 {
+    if first.is_empty() || first.len() > 3 || !first.chars().all(|c| c.is_ascii_digit()) {
         return false;
     }
-
-    for seg in &segments {
-        if seg.is_empty() || !seg.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
+    if second.is_empty() || second.len() != 3 || !second.chars().all(|c| c.is_ascii_digit()) {
+        return false;
     }
-
-    for seg in &segments[1..] {
-        if seg.len() != 3 {
+    for seg in segs {
+        if seg.is_empty() || seg.len() != 3 || !seg.chars().all(|c| c.is_ascii_digit()) {
             return false;
         }
     }
@@ -181,20 +195,28 @@ fn try_parse_date(
     }
 
     let now_year = now_utc.year();
-    let tokens: Vec<&str> = raw.split_whitespace().collect();
-
     // Token-based patterns like `2020-01-01`, `1/2/2020`, `2-Jan-2020`.
-    for token in &tokens {
+    for token in raw.split_whitespace() {
         if let Some(result) = parse_date_token(token, cfg, now_year) {
             return Some(result.and_then(|(y, m, d)| date_parts_to_serial(y, m, d, system)));
         }
     }
 
     // Month name forms that span tokens like `Jan 2 2020` or `2 Jan 2020`.
-    for i in 0..tokens.len() {
-        if let Some(result) = parse_month_name_sequence(&tokens, i, now_year) {
+    let mut it = raw.split_whitespace();
+    let mut t0 = it.next()?;
+    let mut t1 = it.next();
+    let mut t2 = it.next();
+    loop {
+        if let Some(result) = parse_month_name_sequence_opt(t0, t1, t2, now_year) {
             return Some(result.and_then(|(y, m, d)| date_parts_to_serial(y, m, d, system)));
         }
+        let Some(next0) = t1 else {
+            break;
+        };
+        t0 = next0;
+        t1 = t2;
+        t2 = it.next();
     }
 
     None
@@ -224,8 +246,20 @@ fn parse_date_token(
             continue;
         }
 
-        let parts: Vec<&str> = token.split(sep).collect();
-        if parts.len() == 3 {
+        let mut it = token.split(sep);
+        let Some(a) = it.next() else {
+            continue;
+        };
+        let Some(b) = it.next() else {
+            continue;
+        };
+        let c = it.next();
+        if it.next().is_some() {
+            continue;
+        }
+
+        if let Some(c) = c {
+            let parts = [a, b, c];
             let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
             let month_parts = parts
                 .iter()
@@ -250,7 +284,6 @@ fn parse_date_token(
             return None;
         }
 
-        if parts.len() == 2 {
             // Excel accepts `m/d` or `d/m` without a year, using the current year.
             // Restrict this to the locale's date separator to avoid confusing decimal numbers
             // like `1.5` in locales where `.` is the decimal separator.
@@ -259,29 +292,29 @@ fn parse_date_token(
                 continue;
             }
 
-            if parts.iter().all(|p| is_ascii_digit_str(p)) {
-                return Some(parse_numeric_2part_date(&parts, cfg, now_year));
-            }
+        let parts = [a, b];
+        if parts.iter().all(|p| is_ascii_digit_str(p)) {
+            return Some(parse_numeric_2part_date(&parts, cfg, now_year));
+        }
 
-            if let Some(result) = parse_month_name_parts(&parts, now_year) {
-                return Some(result);
-            }
+        if let Some(result) = parse_month_name_parts(&parts, now_year) {
+            return Some(result);
+        }
 
-            let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
-            let month_parts = parts
-                .iter()
-                .filter(|p| parse_month_name(p).is_some())
-                .count();
-            if numeric_parts == 0 && month_parts == 0 {
-                return None;
-            }
-
-            if numeric_parts >= 1 || month_parts >= 1 {
-                return Some(Err(ExcelError::Value));
-            }
-
+        let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
+        let month_parts = parts
+            .iter()
+            .filter(|p| parse_month_name(p).is_some())
+            .count();
+        if numeric_parts == 0 && month_parts == 0 {
             return None;
         }
+
+        if numeric_parts >= 1 || month_parts >= 1 {
+            return Some(Err(ExcelError::Value));
+        }
+
+        return None;
     }
 
     None
@@ -410,21 +443,21 @@ fn parse_month_name_parts(parts: &[&str], now_year: i32) -> Option<ExcelResult<(
     }
 }
 
-fn parse_month_name_sequence(
-    tokens: &[&str],
-    start: usize,
+fn parse_month_name_sequence_opt(
+    token0: &str,
+    token1: Option<&str>,
+    token2: Option<&str>,
     now_year: i32,
 ) -> Option<ExcelResult<(i32, u8, u8)>> {
-    let month_token = tokens.get(start)?;
-    let month_token_clean = month_token.trim_matches(|c: char| matches!(c, ',' | '.'));
+    let month_token_clean = token0.trim_matches(|c: char| matches!(c, ',' | '.'));
     if let Some(month) = parse_month_name(month_token_clean) {
-        let day_token = tokens.get(start + 1)?;
+        let day_token = token1?;
         let day = match parse_u8_component(day_token.trim_matches(',')) {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
 
-        if let Some(year_token) = tokens.get(start + 2) {
+        if let Some(year_token) = token2 {
             if year_token.chars().all(|c| c.is_ascii_digit() || c == ',') {
                 let year = match parse_year_component(year_token.trim_matches(',')) {
                     Ok(v) => v,
@@ -437,20 +470,19 @@ fn parse_month_name_sequence(
         return Some(Ok((now_year, month, day)));
     }
 
-    let day_token = tokens.get(start)?;
-    if !is_ascii_digit_str(day_token.trim_matches(',')) {
+    if !is_ascii_digit_str(token0.trim_matches(',')) {
         return None;
     }
-    let day = match parse_u8_component(day_token.trim_matches(',')) {
+    let day = match parse_u8_component(token0.trim_matches(',')) {
         Ok(v) => v,
         Err(e) => return Some(Err(e)),
     };
 
-    let month_token = tokens.get(start + 1)?;
+    let month_token = token1?;
     let month_token_clean = month_token.trim_matches(|c: char| matches!(c, ',' | '.'));
     let month = parse_month_name(month_token_clean)?;
 
-    if let Some(year_token) = tokens.get(start + 2) {
+    if let Some(year_token) = token2 {
         if year_token.chars().all(|c| c.is_ascii_digit() || c == ',') {
             let year = match parse_year_component(year_token.trim_matches(',')) {
                 Ok(v) => v,
@@ -541,23 +573,25 @@ fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
         return None;
     }
 
-    let tokens: Vec<&str> = raw.split_whitespace().collect();
-
-    for (idx, token) in tokens.iter().enumerate() {
+    let mut tokens = raw.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
         let token = token.trim_matches(',');
         if token.is_empty() {
             continue;
         }
 
         if token.contains(':') {
-            let mut combined = token.to_string();
-            if let Some(next) = tokens.get(idx + 1) {
+            if let Some(&next) = tokens.peek() {
                 let suffix = next.trim_matches(',');
                 if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
-                    combined = format!("{combined} {suffix}");
+                    let mut combined = String::with_capacity(token.len() + 1 + suffix.len());
+                    combined.push_str(token);
+                    combined.push(' ');
+                    combined.push_str(suffix);
+                    return Some(parse_time_candidate(&combined));
                 }
             }
-            return Some(parse_time_candidate(&combined));
+            return Some(parse_time_candidate(token));
         }
 
         if looks_like_ampm_suffix(token) {
@@ -565,10 +599,14 @@ fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
         }
 
         if is_ascii_digit_str(token) {
-            if let Some(next) = tokens.get(idx + 1) {
+            if let Some(&next) = tokens.peek() {
                 let suffix = next.trim_matches(',');
                 if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
-                    return Some(parse_time_candidate(&format!("{token} {suffix}")));
+                    let mut combined = String::with_capacity(token.len() + 1 + suffix.len());
+                    combined.push_str(token);
+                    combined.push(' ');
+                    combined.push_str(suffix);
+                    return Some(parse_time_candidate(&combined));
                 }
             }
         }
@@ -645,17 +683,23 @@ fn parse_time_candidate(candidate: &str) -> ExcelResult<f64> {
 }
 
 fn parse_colon_time(s: &str) -> ExcelResult<(i32, i32, f64)> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() < 2 || parts.len() > 3 {
+    let mut it = s.split(':');
+    let Some(hour_s) = it.next() else {
+        return Err(ExcelError::Value);
+    };
+    let Some(minute_s) = it.next() else {
+        return Err(ExcelError::Value);
+    };
+    let second_s = it.next();
+    if it.next().is_some() {
         return Err(ExcelError::Value);
     }
 
-    let hour: i32 = parts[0].trim().parse().map_err(|_| ExcelError::Value)?;
-    let minute: i32 = parts[1].trim().parse().map_err(|_| ExcelError::Value)?;
-    let second = if parts.len() == 3 {
-        parse_seconds_component(parts[2].trim())?
-    } else {
-        0.0
+    let hour: i32 = hour_s.trim().parse().map_err(|_| ExcelError::Value)?;
+    let minute: i32 = minute_s.trim().parse().map_err(|_| ExcelError::Value)?;
+    let second = match second_s {
+        Some(s) => parse_seconds_component(s.trim())?,
+        None => 0.0,
     };
 
     Ok((hour, minute, second))

@@ -51,34 +51,49 @@ impl FunctionTranslations {
 
                 let mut parts = raw_line.split('\t');
                 let canon = parts.next().unwrap_or("");
-                let loc = parts.next().unwrap_or_else(|| {
-                    panic!("invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}")
-                });
+                let Some(loc) = parts.next() else {
+                    if cfg!(debug_assertions) {
+                        panic!("invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}");
+                    }
+                    continue;
+                };
                 if parts.next().is_some() {
-                    panic!(
-                        "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
-                    panic!(
-                        "invalid function translation line (empty entry) at line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid function translation line (empty entry) at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
 
                 let canon_key = casefold(canon);
                 let loc_key = casefold(loc);
 
                 if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
-                    panic!(
-                        "duplicate canonical function translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "duplicate canonical function translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                        );
+                    }
+                    continue;
                 }
                 if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
-                    panic!(
-                        "duplicate localized function translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "duplicate localized function translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                        );
+                    }
+                    continue;
                 }
 
                 canon_line.insert(canon_key.clone(), (line_no, line));
@@ -172,37 +187,52 @@ impl ErrorTranslations {
 
                 let mut parts = raw_line.split('\t');
                 let canon = parts.next().unwrap_or("");
-                let loc = parts.next().unwrap_or_else(|| {
-                    panic!(
-                        "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
-                    )
-                });
+                let Some(loc) = parts.next() else {
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
+                };
                 if parts.next().is_some() {
-                    panic!(
-                        "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
 
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
-                    panic!(
-                        "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
                 if !canon.starts_with('#') || !loc.starts_with('#') {
-                    panic!(
-                        "invalid error translation line (expected error literals to start with '#') at line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "invalid error translation line (expected error literals to start with '#') at line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
 
                 let canon_key = casefold(canon);
                 let loc_key = casefold(loc);
 
                 if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
-                    panic!(
-                        "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {raw_line:?}"
-                    );
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {raw_line:?}"
+                        );
+                    }
+                    continue;
                 }
                 loc_line.insert(loc_key.clone(), (line_no, raw_line));
 

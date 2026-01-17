@@ -10,8 +10,8 @@ use crate::functions::{
 };
 use crate::locale::ValueLocaleConfig;
 use crate::value::{
-    casefold, casefold_owned, cmp_case_insensitive, with_casefolded_key, Array, ErrorKind, Lambda,
-    NumberLocale, Value,
+    casefold, casefold_owned, casefolded_key_arc_if, cmp_case_insensitive, with_casefolded_key,
+    Array, ErrorKind, Lambda, NumberLocale, Value,
 };
 use crate::LocaleConfig;
 use formula_model::HorizontalAlignment;
@@ -508,8 +508,8 @@ pub struct Evaluator<'a, R: ValueResolver> {
     ctx: EvalContext,
     recalc_ctx: &'a RecalcContext,
     tracer: Option<&'a RefCell<DependencyTrace>>,
-    name_stack: Rc<RefCell<Vec<(usize, String)>>>,
-    lexical_scopes: Rc<RefCell<Vec<HashMap<String, Value>>>>,
+    name_stack: Rc<RefCell<Vec<(usize, Arc<str>)>>>,
+    lexical_scopes: Rc<RefCell<Vec<LexicalScope>>>,
     lambda_depth: Rc<Cell<u32>>,
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
@@ -518,8 +518,24 @@ pub struct Evaluator<'a, R: ValueResolver> {
     text_codepage: u16,
 }
 
+enum LexicalScope {
+    Mutable(HashMap<String, Value>),
+    Shared(Arc<HashMap<String, Value>>),
+}
+
 struct LexicalScopeGuard {
-    stack: Rc<RefCell<Vec<HashMap<String, Value>>>>,
+    stack: Rc<RefCell<Vec<LexicalScope>>>,
+}
+
+// Keep the lexical-call resolution lightweight and avoid re-borrowing lexical scopes while
+// evaluating arguments.
+enum LexicalCallTarget {
+    Lambda {
+        call_key: String,
+        lambda: crate::value::Lambda,
+    },
+    Error(ErrorKind),
+    NotCallable,
 }
 
 impl Drop for LexicalScopeGuard {
@@ -697,7 +713,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn with_lexical_scopes(&self, scopes: Vec<HashMap<String, Value>>) -> Self {
+    fn with_lexical_scopes(&self, scopes: Vec<LexicalScope>) -> Self {
         Self {
             resolver: self.resolver,
             ctx: self.ctx,
@@ -714,7 +730,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn push_lexical_scope(&self, scope: HashMap<String, Value>) -> LexicalScopeGuard {
+    fn push_lexical_scope(&self, scope: LexicalScope) -> LexicalScopeGuard {
         self.lexical_scopes.borrow_mut().push(scope);
         LexicalScopeGuard {
             stack: Rc::clone(&self.lexical_scopes),
@@ -726,8 +742,36 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let name = name.trim();
         with_casefolded_key(name, |key| {
             for scope in scopes.iter().rev() {
-                if let Some(value) = scope.get(key) {
+                let value = match scope {
+                    LexicalScope::Mutable(scope) => scope.get(key),
+                    LexicalScope::Shared(scope) => scope.get(key),
+                };
+                if let Some(value) = value {
                     return Some(value.clone());
+                }
+            }
+            None
+        })
+    }
+
+    fn resolve_lexical_call_target(&self, name: &str) -> Option<LexicalCallTarget> {
+        let scopes = self.lexical_scopes.borrow();
+        let name = name.trim();
+        with_casefolded_key(name, |key| {
+            for scope in scopes.iter().rev() {
+                let value = match scope {
+                    LexicalScope::Mutable(scope) => scope.get(key),
+                    LexicalScope::Shared(scope) => scope.get(key),
+                };
+                if let Some(value) = value {
+                    return Some(match value {
+                        Value::Lambda(lambda) => LexicalCallTarget::Lambda {
+                            call_key: key.to_string(),
+                            lambda: lambda.clone(),
+                        },
+                        Value::Error(e) => LexicalCallTarget::Error(*e),
+                        _ => LexicalCallTarget::NotCallable,
+                    });
                 }
             }
             None
@@ -736,10 +780,26 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
     fn capture_lexical_env_map(&self) -> HashMap<String, Value> {
         let scopes = self.lexical_scopes.borrow();
-        let mut out = HashMap::new();
+        let cap: usize = scopes
+            .iter()
+            .map(|s| match s {
+                LexicalScope::Mutable(scope) => scope.len(),
+                LexicalScope::Shared(scope) => scope.len(),
+            })
+            .sum();
+        let mut out = HashMap::with_capacity(cap);
         for scope in scopes.iter() {
-            for (k, v) in scope {
-                out.insert(k.clone(), v.clone());
+            match scope {
+                LexicalScope::Mutable(scope) => {
+                    for (k, v) in scope {
+                        out.insert(k.clone(), v.clone());
+                    }
+                }
+                LexicalScope::Shared(scope) => {
+                    for (k, v) in scope.iter() {
+                        out.insert(k.clone(), v.clone());
+                    }
+                }
             }
         }
         out
@@ -1072,7 +1132,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         if ranges.len() != 1 {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
-                        let range = ranges.pop().expect("checked len() above");
+                        let Some(range) = ranges.pop() else {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Value));
+                        };
                         if !range.is_single_cell() {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
@@ -1134,6 +1196,56 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 self.function_result_to_eval_value(value)
             }
             Expr::Call { callee, args } => {
+                if let Expr::NameRef(nref) = callee.as_ref() {
+                    if matches!(nref.sheet, SheetReference::Current) {
+                        if let Some(target) = self.resolve_lexical_call_target(&nref.name) {
+                            let value = match target {
+                                LexicalCallTarget::Lambda { call_key, lambda } => {
+                                    self.call_lambda_with_key(call_key, lambda, args)
+                                }
+                                LexicalCallTarget::Error(e) => Value::Error(e),
+                                LexicalCallTarget::NotCallable => Value::Error(ErrorKind::Value),
+                            };
+                            return self.function_result_to_eval_value(value);
+                        }
+                    }
+
+                    // If the call target is a defined-name lambda, reuse the already-folded name
+                    // key produced during name resolution instead of folding the call name again.
+                    // We already scanned lexical scopes above; avoid re-scanning the scope stack.
+                    let (value, key_name) = if matches!(nref.sheet, SheetReference::Current) {
+                        self.eval_current_sheet_name_with_key_name(nref.name.as_str(), true)
+                    } else {
+                        self.eval_name_ref_with_key_name(nref)
+                    };
+                    return match value {
+                        EvalValue::Scalar(Value::Lambda(lambda)) => {
+                            let out = match key_name {
+                                Some(key_name) => {
+                                    self.call_lambda_with_key(key_name.to_string(), lambda, args)
+                                }
+                                None => self.call_lambda(nref.name.as_str(), lambda, args),
+                            };
+                            self.function_result_to_eval_value(out)
+                        }
+                        EvalValue::Scalar(v) => {
+                            self.function_result_to_eval_value(self.call_value_as_function(
+                                nref.name.as_str(),
+                                v,
+                                args,
+                            ))
+                        }
+                        EvalValue::Reference(ranges) => {
+                            let v = self.deref_reference_scalar(&ranges);
+                            self.function_result_to_eval_value(self.call_value_as_function(
+                                nref.name.as_str(),
+                                v,
+                                args,
+                            ))
+                        }
+                    };
+                }
+
                 let call_name = match callee.as_ref() {
                     Expr::NameRef(nref) => nref.name.as_str(),
                     _ => ANON_LAMBDA_CALL_NAME,
@@ -1170,15 +1282,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return (spec.implementation)(self, args);
         }
 
-        if let Some(value) = self.lookup_lexical_value(name) {
-            return self.call_value_as_function(name, value, args);
+        if let Some(target) = self.resolve_lexical_call_target(name) {
+            return match target {
+                LexicalCallTarget::Lambda { call_key, lambda } => {
+                    self.call_lambda_with_key(call_key, lambda, args)
+                }
+                LexicalCallTarget::Error(e) => Value::Error(e),
+                LexicalCallTarget::NotCallable => Value::Error(ErrorKind::Value),
+            };
         }
 
-        let nref = crate::eval::NameRef {
-            sheet: SheetReference::Current,
-            name: name.to_string(),
-        };
-        match self.eval_name_ref(&nref) {
+        // Defined-name fallback (workbook/sheet scope) for function-like calls.
+        //
+        // This avoids allocating a temporary `NameRef { name: name.to_string() }` on a hot path.
+        let (value, key_name) = self.eval_current_sheet_name_with_key_name(name, true);
+        match value {
+            EvalValue::Scalar(Value::Lambda(lambda)) => match key_name {
+                Some(key_name) => self.call_lambda_with_key(key_name.to_string(), lambda, args),
+                None => self.call_lambda(name, lambda, args),
+            },
             EvalValue::Scalar(v) => self.call_value_as_function(name, v, args),
             EvalValue::Reference(_) => Value::Error(ErrorKind::Value),
         }
@@ -1204,6 +1326,16 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn call_lambda(
         &self,
         call_name: &str,
+        lambda: crate::value::Lambda,
+        args: &[CompiledExpr],
+    ) -> Value {
+        let call_key = casefold(call_name.trim());
+        self.call_lambda_with_key(call_key, lambda, args)
+    }
+
+    fn call_lambda_with_key(
+        &self,
+        call_key: String,
         lambda: crate::value::Lambda,
         args: &[CompiledExpr],
     ) -> Value {
@@ -1236,62 +1368,57 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return Value::Error(ErrorKind::Value);
         }
 
-        let mut evaluated_args = Vec::with_capacity(args.len());
-        for arg in args {
-            let v = match self.eval_value(arg) {
-                EvalValue::Scalar(v) => v,
-                EvalValue::Reference(mut ranges) => {
-                    self.sort_resolved_ranges(&mut ranges);
-
-                    match ranges.as_slice() {
-                        [only] => Value::Reference(FnReference {
-                            sheet_id: only.sheet_id.clone(),
-                            start: only.start,
-                            end: only.end,
-                        }),
-                        _ => Value::ReferenceUnion(
-                            ranges
-                                .into_iter()
-                                .map(|r| FnReference {
-                                    sheet_id: r.sheet_id,
-                                    start: r.start,
-                                    end: r.end,
-                                })
-                                .collect(),
-                        ),
+        let mut call_scope =
+            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
+        call_scope.insert(call_key, Value::Lambda(lambda.clone()));
+        for (idx, param) in lambda.params.iter().enumerate() {
+            let value = if idx >= args.len() {
+                Value::Blank
+            } else {
+                match self.eval_value(&args[idx]) {
+                    EvalValue::Scalar(v) => v,
+                    EvalValue::Reference(mut ranges) => {
+                        self.sort_resolved_ranges(&mut ranges);
+                        match ranges.as_slice() {
+                            [only] => Value::Reference(FnReference {
+                                sheet_id: only.sheet_id.clone(),
+                                start: only.start,
+                                end: only.end,
+                            }),
+                            _ => Value::ReferenceUnion(
+                                ranges
+                                    .into_iter()
+                                    .map(|r| FnReference {
+                                        sheet_id: r.sheet_id,
+                                        start: r.start,
+                                        end: r.end,
+                                    })
+                                    .collect(),
+                            ),
+                        }
                     }
                 }
             };
-            evaluated_args.push(v);
-        }
-
-        let mut call_scope =
-            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
-        call_scope.insert(casefold(call_name.trim()), Value::Lambda(lambda.clone()));
-        for (idx, param) in lambda.params.iter().enumerate() {
-            let value = evaluated_args.get(idx).cloned().unwrap_or(Value::Blank);
-            let param_key = if param.len() == param.trim().len() {
-                // `make_lambda` stores params in canonical (casefolded) form, so we can reuse
-                // them directly in the common case.
-                param.clone()
-            } else {
-                casefold(param.trim())
-            };
-            call_scope.insert(param_key.clone(), value);
-
+            // `make_lambda` and `LAMBDA()` store params in canonical (casefolded) form.
+            // Avoid re-folding during invocation.
+            let param_key = param.clone();
             if idx >= args.len() {
-                call_scope.insert(
-                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param_key),
-                    Value::Bool(true),
-                );
+                let mut omitted_key =
+                    String::with_capacity(crate::eval::LAMBDA_OMITTED_PREFIX.len() + param_key.len());
+                omitted_key.push_str(crate::eval::LAMBDA_OMITTED_PREFIX);
+                omitted_key.push_str(&param_key);
+                call_scope.insert(param_key, value);
+                call_scope.insert(omitted_key, Value::Bool(true));
+            } else {
+                call_scope.insert(param_key, value);
             }
         }
 
-        let mut scopes = Vec::new();
+        let mut scopes: Vec<LexicalScope> = Vec::new();
         if !lambda.env.is_empty() {
-            scopes.push((*lambda.env).clone());
+            scopes.push(LexicalScope::Shared(Arc::clone(&lambda.env)));
         }
-        scopes.push(call_scope);
+        scopes.push(LexicalScope::Mutable(call_scope));
 
         let evaluator = self.with_lexical_scopes(scopes);
         match evaluator.eval_value(lambda.body.as_ref()) {
@@ -1329,61 +1456,81 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn eval_name_ref(&self, nref: &crate::eval::NameRef<usize>) -> EvalValue {
-        let Some(sheet_id) = self.resolve_sheet_id(&nref.sheet) else {
-            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-        };
-        let FnSheetId::Local(sheet_id) = sheet_id else {
-            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-        };
+    fn eval_name_ref_with_key_name(&self, nref: &crate::eval::NameRef<usize>) -> (EvalValue, Option<Arc<str>>) {
+        self.eval_name_ref_with_key_name_inner(nref, false)
+    }
+
+    fn eval_current_sheet_name_with_key_name(
+        &self,
+        name: &str,
+        skip_lexical: bool,
+    ) -> (EvalValue, Option<Arc<str>>) {
+        let sheet_id = self.ctx.current_sheet;
         if !self.resolver.sheet_exists(sheet_id) {
-            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None);
         }
 
-        if matches!(nref.sheet, SheetReference::Current) {
-            if let Some(value) = self.lookup_lexical_value(&nref.name) {
+        if !skip_lexical {
+            if let Some(value) = self.lookup_lexical_value(name) {
                 match value {
                     Value::Reference(r) => {
-                        return EvalValue::Reference(vec![ResolvedRange {
-                            sheet_id: r.sheet_id,
-                            start: r.start,
-                            end: r.end,
-                        }]);
-                    }
-                    Value::ReferenceUnion(ranges) => {
-                        return EvalValue::Reference(
-                            ranges
-                                .into_iter()
-                                .map(|r| ResolvedRange {
-                                    sheet_id: r.sheet_id,
-                                    start: r.start,
-                                    end: r.end,
-                                })
-                                .collect(),
+                        return (
+                            EvalValue::Reference(vec![ResolvedRange {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            }]),
+                            None,
                         );
                     }
-                    other => return EvalValue::Scalar(other),
+                    Value::ReferenceUnion(ranges) => {
+                        return (
+                            EvalValue::Reference(
+                                ranges
+                                    .into_iter()
+                                    .map(|r| ResolvedRange {
+                                        sheet_id: r.sheet_id,
+                                        start: r.start,
+                                        end: r.end,
+                                    })
+                                    .collect(),
+                            ),
+                            None,
+                        );
+                    }
+                    other => return (EvalValue::Scalar(other), None),
                 }
             }
         }
 
-        let Some(def) = self.resolver.resolve_name(sheet_id, &nref.name) else {
-            return EvalValue::Scalar(Value::Error(ErrorKind::Name));
+        self.eval_defined_name_in_sheet_with_key_name(sheet_id, name)
+    }
+
+    fn eval_defined_name_in_sheet_with_key_name(
+        &self,
+        sheet_id: usize,
+        name: &str,
+    ) -> (EvalValue, Option<Arc<str>>) {
+        let Some(def) = self.resolver.resolve_name(sheet_id, name) else {
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Name)), None);
         };
 
         // Prevent infinite recursion from self-referential name chains.
-        let key = (sheet_id, casefold(nref.name.trim()));
-        {
-            let mut stack = self.name_stack.borrow_mut();
-            if stack.contains(&key) {
-                return EvalValue::Scalar(Value::Error(ErrorKind::Name));
-            }
-            stack.push(key.clone());
-        }
+        let name = name.trim();
+        let Some(key_name) = casefolded_key_arc_if(name, |folded| {
+            let stack = self.name_stack.borrow();
+            !stack.iter().any(|(sid, k)| *sid == sheet_id && k.as_ref() == folded)
+        }) else {
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Name)), None);
+        };
+        self.name_stack
+            .borrow_mut()
+            .push((sheet_id, Arc::clone(&key_name)));
+        let key_name_for_return = Arc::clone(&key_name);
 
         struct NameGuard {
-            stack: Rc<RefCell<Vec<(usize, String)>>>,
-            key: (usize, String),
+            stack: Rc<RefCell<Vec<(usize, Arc<str>)>>>,
+            key: (usize, Arc<str>),
         }
 
         impl Drop for NameGuard {
@@ -1396,10 +1543,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         let _guard = NameGuard {
             stack: Rc::clone(&self.name_stack),
-            key,
+            key: (sheet_id, key_name),
         };
 
-        match def {
+        let value = match def {
             ResolvedName::Constant(v) => EvalValue::Scalar(v),
             ResolvedName::Expr(expr) => {
                 let evaluator = self.with_ctx(EvalContext {
@@ -1408,7 +1555,63 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 });
                 evaluator.eval_value(&expr)
             }
+        };
+        (value, Some(key_name_for_return))
+    }
+
+    fn eval_name_ref_with_key_name_inner(
+        &self,
+        nref: &crate::eval::NameRef<usize>,
+        skip_lexical: bool,
+    ) -> (EvalValue, Option<Arc<str>>) {
+        let Some(sheet_id) = self.resolve_sheet_id(&nref.sheet) else {
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None);
+        };
+        let FnSheetId::Local(sheet_id) = sheet_id else {
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None);
+        };
+        if !self.resolver.sheet_exists(sheet_id) {
+            return (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None);
         }
+
+        if !skip_lexical && matches!(nref.sheet, SheetReference::Current) {
+            if let Some(value) = self.lookup_lexical_value(&nref.name) {
+                match value {
+                    Value::Reference(r) => {
+                        return (
+                            EvalValue::Reference(vec![ResolvedRange {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            }]),
+                            None,
+                        );
+                    }
+                    Value::ReferenceUnion(ranges) => {
+                        return (
+                            EvalValue::Reference(
+                                ranges
+                                    .into_iter()
+                                    .map(|r| ResolvedRange {
+                                        sheet_id: r.sheet_id,
+                                        start: r.start,
+                                        end: r.end,
+                                    })
+                                    .collect(),
+                            ),
+                            None,
+                        );
+                    }
+                    other => return (EvalValue::Scalar(other), None),
+                }
+            }
+        }
+
+        self.eval_defined_name_in_sheet_with_key_name(sheet_id, &nref.name)
+    }
+
+    fn eval_name_ref(&self, nref: &crate::eval::NameRef<usize>) -> EvalValue {
+        self.eval_name_ref_with_key_name(nref).0
     }
 
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value {
@@ -1904,7 +2107,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             };
             scope.insert(key, v.clone());
         }
-        let _guard = self.push_lexical_scope(scope);
+        let _guard = self.push_lexical_scope(LexicalScope::Mutable(scope));
         self.eval_formula(expr)
     }
 
@@ -1997,7 +2200,9 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn push_local_scope(&self) {
-        self.lexical_scopes.borrow_mut().push(HashMap::new());
+        self.lexical_scopes
+            .borrow_mut()
+            .push(LexicalScope::Mutable(HashMap::new()));
     }
 
     fn pop_local_scope(&self) {
@@ -2007,16 +2212,20 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn set_local_key(&self, key: String, value: FnArgValue) {
         let mut scopes = self.lexical_scopes.borrow_mut();
         if scopes.is_empty() {
-            scopes.push(HashMap::new());
+            scopes.push(LexicalScope::Mutable(HashMap::new()));
         }
-        if let Some(scope) = scopes.last_mut() {
-            let value = match value {
-                FnArgValue::Scalar(v) => v,
-                FnArgValue::Reference(r) => Value::Reference(r),
-                FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
-            };
-            scope.insert(key, value);
+        if !matches!(scopes.last(), Some(LexicalScope::Mutable(_))) {
+            scopes.push(LexicalScope::Mutable(HashMap::new()));
         }
+        let Some(LexicalScope::Mutable(scope)) = scopes.last_mut() else {
+            return;
+        };
+        let value = match value {
+            FnArgValue::Scalar(v) => v,
+            FnArgValue::Reference(r) => Value::Reference(r),
+            FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
+        };
+        scope.insert(key, value);
     }
 
     fn set_local(&self, name: &str, value: FnArgValue) {
@@ -2025,17 +2234,15 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value {
-        let params: Vec<String> = params
-            .into_iter()
-            .map(|p| {
-                let trimmed = p.trim();
-                if trimmed.len() == p.len() {
-                    casefold_owned(p)
-                } else {
-                    casefold(trimmed)
-                }
-            })
-            .collect();
+        let mut params = params;
+        for p in &mut params {
+            let trimmed = p.trim();
+            if trimmed.len() == p.len() {
+                *p = casefold_owned(std::mem::take(p));
+            } else {
+                *p = casefold(trimmed);
+            }
+        }
 
         let mut env = self.capture_lexical_env_map();
         env.retain(|k, _| !k.starts_with(crate::eval::LAMBDA_OMITTED_PREFIX));
@@ -2094,28 +2301,24 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
                 FnArgValue::Reference(r) => Value::Reference(r),
                 FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
             };
-            let param_key = if param.len() == param.trim().len() {
-                param.clone()
-            } else {
-                casefold(param.trim())
-            };
+            let param_key = param.clone();
             if idx >= args.len() {
-                call_scope.insert(param_key.clone(), value);
                 let mut omitted_key =
                     String::with_capacity(crate::eval::LAMBDA_OMITTED_PREFIX.len() + param_key.len());
                 omitted_key.push_str(crate::eval::LAMBDA_OMITTED_PREFIX);
                 omitted_key.push_str(&param_key);
+                call_scope.insert(param_key, value);
                 call_scope.insert(omitted_key, Value::Bool(true));
             } else {
                 call_scope.insert(param_key, value);
             }
         }
 
-        let mut scopes = Vec::new();
+        let mut scopes: Vec<LexicalScope> = Vec::new();
         if !lambda.env.is_empty() {
-            scopes.push((*lambda.env).clone());
+            scopes.push(LexicalScope::Shared(Arc::clone(&lambda.env)));
         }
-        scopes.push(call_scope);
+        scopes.push(LexicalScope::Mutable(call_scope));
 
         let evaluator = self.with_lexical_scopes(scopes);
         match evaluator.eval_value(lambda.body.as_ref()) {
@@ -2398,18 +2601,9 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (l, r) => (l, r),
     };
 
-    fn text_like_str(v: &Value) -> Option<&str> {
-        match v {
-            Value::Text(s) => Some(s),
-            _ => None,
-        }
-    }
-
     Ok(match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
-        }
+        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a, b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         // Type precedence (approximate Excel): numbers < text < booleans.
         (
@@ -2445,7 +2639,6 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
-        _ => Ordering::Equal,
     })
 }
 

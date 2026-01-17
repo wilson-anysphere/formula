@@ -228,20 +228,11 @@ fn coord_to_index_opt(coord: &crate::Coord, origin: Option<u32>, max: u32) -> Op
 
 fn lower_structured_ref(r: &crate::StructuredRef) -> Expr<String> {
     let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
-    let mut text = String::new();
-    if let Some(table) = &r.table {
-        text.push_str(table);
-    }
-    text.push('[');
-    text.push_str(&r.spec);
-    text.push(']');
-
-    match crate::structured_refs::parse_structured_ref(&text, 0) {
-        Some((sref, end)) if end == text.len() => {
-            Expr::StructuredRef(StructuredRefExpr { sheet, sref })
-        }
-        _ => Expr::Error(ErrorKind::Name),
-    }
+    let Some(sref) = crate::structured_refs::parse_structured_ref_parts(r.table.as_deref(), &r.spec)
+    else {
+        return Expr::Error(ErrorKind::Name);
+    };
+    Expr::StructuredRef(StructuredRefExpr { sheet, sref })
 }
 
 fn lower_array_literal(arr: &crate::ArrayLiteral, origin: Option<crate::CellAddr>) -> Expr<String> {
@@ -477,19 +468,12 @@ fn compile_expr_inner(
         crate::Expr::StructuredRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let mut text = String::new();
-            if let Some(table) = &r.table {
-                text.push_str(table);
-            }
-            text.push('[');
-            text.push_str(&r.spec);
-            text.push(']');
-            match crate::structured_refs::parse_structured_ref(&text, 0) {
-                Some((sref, end)) if end == text.len() => {
-                    Expr::StructuredRef(StructuredRefExpr { sheet, sref })
-                }
-                _ => Expr::Error(ErrorKind::Name),
-            }
+            let Some(sref) =
+                crate::structured_refs::parse_structured_ref_parts(r.table.as_deref(), &r.spec)
+            else {
+                return Expr::Error(ErrorKind::Name);
+            };
+            Expr::StructuredRef(StructuredRefExpr { sheet, sref })
         }
         crate::Expr::Array(arr) => compile_array_literal(
             arr,

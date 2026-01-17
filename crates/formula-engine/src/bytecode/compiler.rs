@@ -388,10 +388,11 @@ impl<'a> CompileCtx<'a> {
 
         body_ctx.compile_expr(body);
 
-        let closure = body_ctx
-            .closure
-            .take()
-            .expect("lambda body compilation should have closure context");
+        let Some(closure) = body_ctx.closure.take() else {
+            debug_assert!(false, "lambda body compilation should have closure context");
+            self.push_error_const(ErrorKind::Value);
+            return;
+        };
 
         let template = Arc::new(LambdaTemplate {
             params: params.clone(),
@@ -488,10 +489,11 @@ impl<'a> CompileCtx<'a> {
                             }
 
                             let kind = infer_kind(ctx, &pair[1], scopes);
-                            scopes
-                                .last_mut()
-                                .expect("pushed scope")
-                                .insert(name.clone(), kind);
+                            let Some(scope) = scopes.last_mut() else {
+                                debug_assert!(false, "LET inference: expected an active scope");
+                                return LocalKind::Scalar;
+                            };
+                            scope.insert(name.clone(), kind);
                         }
 
                         let kind = infer_kind(ctx, &args[args.len() - 1], scopes);
@@ -561,8 +563,11 @@ impl<'a> CompileCtx<'a> {
                 .push(Instruction::new(OpCode::StoreLocal, idx, 0));
             self.lexical_scopes
                 .last_mut()
-                .expect("pushed scope")
-                .insert(name.clone(), LocalInfo { idx, kind });
+                .map(|scope| scope.insert(name.clone(), LocalInfo { idx, kind }))
+                .unwrap_or_else(|| {
+                    debug_assert!(false, "LET compile: expected an active scope");
+                    None
+                });
         }
 
         self.compile_expr_inner(&args[last], allow_range);

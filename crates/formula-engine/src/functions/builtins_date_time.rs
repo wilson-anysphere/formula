@@ -1299,20 +1299,8 @@ fn parse_weekend_mask(ctx: &dyn FunctionContext, v: &Value) -> Result<u8, ErrorK
             return Ok((1 << 5) | (1 << 6));
         }
         // Weekend strings are a 7-char mask (Mon..Sun) using '0' and '1'. If the text isn't
-        // a valid mask, fall back to numeric coercion (e.g. "1" -> weekend code 1).
-        let chars: Vec<char> = s.chars().collect();
-        if chars.len() == 7 {
-            let mut mask: u8 = 0;
-            for (idx, ch) in chars.into_iter().enumerate() {
-                match ch {
-                    '0' => {}
-                    '1' => mask |= 1 << idx,
-                    _ => return Err(ErrorKind::Value),
-                }
-            }
-            if mask == 0b111_1111 {
-                return Err(ErrorKind::Num);
-            }
+        // *exactly* a 7-char mask, fall back to numeric coercion (e.g. "1" -> weekend code 1).
+        if let Some(mask) = parse_weekend_text_mask(s)? {
             return Ok(mask);
         }
     }
@@ -1339,6 +1327,34 @@ fn parse_weekend_mask(ctx: &dyn FunctionContext, v: &Value) -> Result<u8, ErrorK
         return Err(ErrorKind::Num);
     }
     Ok(mask)
+}
+
+fn parse_weekend_text_mask(s: &str) -> Result<Option<u8>, ErrorKind> {
+    let mut chars = s.chars();
+    let mut mask: u8 = 0;
+    let mut invalid = false;
+
+    for idx in 0..7 {
+        let Some(ch) = chars.next() else {
+            return Ok(None);
+        };
+        match ch {
+            '0' => {}
+            '1' => mask |= 1 << idx,
+            _ => invalid = true,
+        }
+    }
+
+    if chars.next().is_some() {
+        return Ok(None);
+    }
+    if invalid {
+        return Err(ErrorKind::Value);
+    }
+    if mask == 0b111_1111 {
+        return Err(ErrorKind::Num);
+    }
+    Ok(Some(mask))
 }
 
 fn normalize_year_month(year: i64, month: i64) -> (i64, i64) {

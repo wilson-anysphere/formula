@@ -63,6 +63,8 @@ fn push_numbers_from_reference(
     out: &mut Vec<f64>,
     reference: crate::functions::Reference,
 ) -> Result<(), ErrorKind> {
+    let reference = reference.normalized();
+    ctx.record_reference(&reference);
     for addr in ctx.iter_reference_cells(&reference) {
         let v = ctx.get_cell_value(&reference.sheet_id, addr);
         match v {
@@ -90,6 +92,8 @@ fn push_numbers_from_reference_union(
 ) -> Result<(), ErrorKind> {
     let mut seen = HashSet::new();
     for reference in ranges {
+        let reference = reference.normalized();
+        ctx.record_reference(&reference);
         for addr in ctx.iter_reference_cells(&reference) {
             if !seen.insert((reference.sheet_id.clone(), addr)) {
                 continue;
@@ -2530,16 +2534,14 @@ fn t_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         }
     } else {
-        let left = match arg_to_numeric_sequence(ctx, ctx.eval_arg(&args[0])) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let right = match arg_to_numeric_sequence(ctx, ctx.eval_arg(&args[1])) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let xs: Vec<f64> = left.into_iter().flatten().collect();
-        let ys: Vec<f64> = right.into_iter().flatten().collect();
+        let mut xs = Vec::new();
+        if let Err(e) = push_numbers_from_arg(ctx, &mut xs, ctx.eval_arg(&args[0])) {
+            return Value::Error(e);
+        }
+        let mut ys = Vec::new();
+        if let Err(e) = push_numbers_from_arg(ctx, &mut ys, ctx.eval_arg(&args[1])) {
+            return Value::Error(e);
+        }
         (xs, ys)
     };
 

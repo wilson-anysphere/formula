@@ -899,6 +899,10 @@ fn workday_and_networkdays_skip_weekends_and_holidays() {
         sheet.eval("=WORKDAY.INTL(DATE(2020,1,3),1,\"abc\")"),
         Value::Error(ErrorKind::Value)
     );
+    assert_eq!(
+        sheet.eval("=WORKDAY.INTL(DATE(2020,1,3),1,\"0000011x\")"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
