@@ -104,6 +104,8 @@ pub enum EngineError {
         actual_rows: usize,
         actual_cols: usize,
     },
+    #[error("allocation failed: {0}")]
+    AllocationFailure(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -424,7 +426,13 @@ enum WorkbookRenameSheetError {
 impl Workbook {
     fn sheet_key_nfkc_uppercase(name: &str) -> String {
         debug_assert!(!name.is_ascii());
-        let mut out = String::with_capacity(name.len());
+        let mut out = String::new();
+        if out.try_reserve_exact(name.len()).is_err() {
+            // Best-effort: sheet keys are derived from user input and are typically tiny.
+            // If reserving fails, attempt to build the key without pre-reserving to avoid an
+            // immediate abort-on-OOM.
+            debug_assert!(false, "allocation failed (sheet_key_nfkc_uppercase)");
+        }
         for ch in name.nfkc() {
             out.extend(ch.to_uppercase());
         }
@@ -688,8 +696,21 @@ impl Workbook {
     #[cfg(test)]
     fn set_sheet_order(&mut self, new_order: Vec<SheetId>) {
         // Keep invariants explicit: sheet order is a permutation of the currently-live sheets.
-        let existing: HashSet<SheetId> = self.sheet_order.iter().copied().collect();
-        let mut seen: HashSet<SheetId> = HashSet::with_capacity(new_order.len());
+        let mut existing: HashSet<SheetId> = HashSet::new();
+        if existing.try_reserve(self.sheet_order.len()).is_err() {
+            panic!(
+                "allocation failed (set_sheet_order existing set, len={})",
+                self.sheet_order.len()
+            );
+        }
+        existing.extend(self.sheet_order.iter().copied());
+        let mut seen: HashSet<SheetId> = HashSet::new();
+        if seen.try_reserve(new_order.len()).is_err() {
+            panic!(
+                "allocation failed (set_sheet_order seen set, len={})",
+                new_order.len()
+            );
+        }
         for &id in &new_order {
             assert!(
                 self.sheet_exists(id),
@@ -972,7 +993,16 @@ impl RecalcValueChangeCollector {
     fn into_sorted_changes(self, workbook: &Workbook) -> Vec<RecalcValueChange> {
         let mut out = Vec::new();
         let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
-        let mut after: Vec<(CellKey, Value)> = self.after.into_iter().collect();
+        let mut after: Vec<(CellKey, Value)> = Vec::new();
+        if after.try_reserve_exact(self.after.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (recalc change sorting buffer, len={})",
+                self.after.len()
+            );
+            return Vec::new();
+        }
+        after.extend(self.after);
         after.sort_by(|(a_key, _), (b_key, _)| {
             sheet_tab_key(a_key.sheet, tab_index_by_sheet)
                 .cmp(&sheet_tab_key(b_key.sheet, tab_index_by_sheet))
@@ -1317,37 +1347,64 @@ impl Engine {
     /// display names (tab names). Sheet keys remain stable across renames and are used by hosts
     /// (like the desktop DocumentController) to address worksheets consistently.
     pub fn sheet_keys_in_order(&self) -> Vec<String> {
-        self.workbook
-            .sheet_ids_in_order()
-            .iter()
-            .filter_map(|&id| {
-                self.workbook
-                    .sheet_key_name(id)
-                    .map(|name| name.to_string())
-            })
-            .collect()
+        let ids = self.workbook.sheet_ids_in_order();
+        let mut out: Vec<String> = Vec::new();
+        if out.try_reserve_exact(ids.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (sheet_keys_in_order, sheets={})",
+                ids.len()
+            );
+            return Vec::new();
+        }
+        for &id in ids {
+            let Some(name) = self.workbook.sheet_key_name(id) else {
+                debug_assert!(false, "missing sheet key for live sheet id {id}");
+                continue;
+            };
+            out.push(name.to_string());
+        }
+        out
     }
 
     /// Returns worksheet display names in the current workbook tab order.
     pub fn sheet_names_in_order(&self) -> Vec<String> {
-        self.workbook
-            .sheet_ids_in_order()
-            .iter()
-            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
-            .collect()
+        let ids = self.workbook.sheet_ids_in_order();
+        let mut out: Vec<String> = Vec::new();
+        if out.try_reserve_exact(ids.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (sheet_names_in_order, sheets={})",
+                ids.len()
+            );
+            return Vec::new();
+        }
+        for &id in ids {
+            let Some(name) = self.workbook.sheet_name(id) else {
+                debug_assert!(false, "missing sheet name for live sheet id {id}");
+                continue;
+            };
+            out.push(name.to_string());
+        }
+        out
     }
 
     /// Returns `(sheet_id, display_name)` pairs in the current workbook tab order.
     pub fn sheets_in_order(&self) -> Vec<(SheetId, String)> {
-        self.workbook
-            .sheet_ids_in_order()
-            .iter()
-            .filter_map(|&id| {
-                self.workbook
-                    .sheet_name(id)
-                    .map(|name| (id, name.to_string()))
-            })
-            .collect()
+        let ids = self.workbook.sheet_ids_in_order();
+        let mut out: Vec<(SheetId, String)> = Vec::new();
+        if out.try_reserve_exact(ids.len()).is_err() {
+            debug_assert!(false, "allocation failed (sheets_in_order, sheets={})", ids.len());
+            return Vec::new();
+        }
+        for &id in ids {
+            let Some(name) = self.workbook.sheet_name(id) else {
+                debug_assert!(false, "missing sheet name for live sheet id {id}");
+                continue;
+            };
+            out.push((id, name.to_string()));
+        }
+        out
     }
 
     /// Rename a worksheet by its stable [`SheetId`].
@@ -2145,12 +2202,15 @@ impl Engine {
         // refreshing a pivot can silently resurrect the deleted sheet via `ensure_sheet`.
         //
         // Also drop table-backed pivots that referenced tables from the deleted sheet.
-        let deleted_table_ids: HashSet<u32> = self
-            .workbook
-            .sheets
-            .get(deleted_sheet_id)
-            .map(|sheet_state| sheet_state.tables.iter().map(|t| t.id).collect())
-            .unwrap_or_default();
+        let mut deleted_table_ids: HashSet<u32> = HashSet::new();
+        if let Some(sheet_state) = self.workbook.sheets.get(deleted_sheet_id) {
+            if deleted_table_ids.try_reserve(sheet_state.tables.len()).is_err() {
+                return Err(EngineError::AllocationFailure("delete sheet table ids"));
+            }
+            for t in sheet_state.tables.iter() {
+                deleted_table_ids.insert(t.id);
+            }
+        }
         self.workbook.pivots.retain(|_, def| {
             let destination_matches =
                 Workbook::with_sheet_key_lookup(&def.destination.sheet, |dest_key| {
@@ -2177,22 +2237,30 @@ impl Engine {
         // the engine also supports referencing sheets by their stable key. We capture *both* so we
         // can invalidate references regardless of which name form appears in the stored formula
         // text.
-        let sheet_order_keys: Vec<String> = self
-            .workbook
-            .sheet_ids_in_order()
-            .iter()
-            .filter_map(|&id| {
-                self.workbook
-                    .sheet_key_name(id)
-                    .map(|name| name.to_string())
-            })
-            .collect();
-        let sheet_order_display_names: Vec<String> = self
-            .workbook
-            .sheet_ids_in_order()
-            .iter()
-            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
-            .collect();
+        let sheet_ids_in_order = self.workbook.sheet_ids_in_order();
+        let mut sheet_order_keys: Vec<String> = Vec::new();
+        let mut sheet_order_display_names: Vec<String> = Vec::new();
+        if sheet_order_keys
+            .try_reserve_exact(sheet_ids_in_order.len())
+            .is_err()
+            || sheet_order_display_names
+                .try_reserve_exact(sheet_ids_in_order.len())
+                .is_err()
+        {
+            return Err(EngineError::AllocationFailure("delete sheet order aliases"));
+        }
+        for &id in sheet_ids_in_order {
+            if let Some(key) = self.workbook.sheet_key_name(id) {
+                sheet_order_keys.push(key.to_string());
+            } else {
+                debug_assert!(false, "missing sheet key for live sheet id {id}");
+            }
+            if let Some(name) = self.workbook.sheet_name(id) {
+                sheet_order_display_names.push(name.to_string());
+            } else {
+                debug_assert!(false, "missing sheet name for live sheet id {id}");
+            }
+        }
         // Formulas can reference sheets by either their user-visible display name (Excel semantics)
         // or by their stable sheet key (backward compatibility / host-provided identifiers). When
         // deleting a sheet, rewrite both forms so references cannot resurrect if a sheet with the
@@ -2425,7 +2493,11 @@ impl Engine {
     ) -> Result<Vec<(PivotTableId, PivotRefreshOutput)>, PivotRefreshError> {
         // Determine refresh order before mutating the pivot map.
         let tab_index = self.workbook.tab_index_by_sheet_id();
-        let mut ids: Vec<PivotTableId> = self.workbook.pivots.keys().copied().collect();
+        let mut ids: Vec<PivotTableId> = Vec::new();
+        if ids.try_reserve_exact(self.workbook.pivots.len()).is_err() {
+            return Err(crate::pivot::PivotError::AllocationFailure("pivot refresh ids").into());
+        }
+        ids.extend(self.workbook.pivots.keys().copied());
         ids.sort_by_key(|id| {
             let Some(pivot) = self.workbook.pivots.get(id) else {
                 return (usize::MAX, u32::MAX, u32::MAX, *id);
@@ -2451,7 +2523,11 @@ impl Engine {
             self.set_calc_settings(manual);
         }
 
-        let mut outputs = Vec::with_capacity(ids.len());
+        let mut outputs: Vec<(PivotTableId, PivotRefreshOutput)> = Vec::new();
+        if outputs.try_reserve_exact(ids.len()).is_err() {
+            debug_assert!(false, "allocation failed (pivot refresh outputs)");
+            return Err(crate::pivot::PivotError::AllocationFailure("pivot refresh outputs").into());
+        }
         for id in ids {
             let out = self.refresh_pivot_table_internal(id)?;
             outputs.push((id, out));
@@ -2688,15 +2764,20 @@ impl Engine {
                 return Ok(());
             }
             sheet_state.origin = origin;
-            sheet_state
-                .origin_dependents
-                .iter()
-                .copied()
-                .map(|addr| CellKey {
+            let mut out: Vec<CellKey> = Vec::new();
+            if out
+                .try_reserve_exact(sheet_state.origin_dependents.len())
+                .is_err()
+            {
+                return Err(EngineError::AllocationFailure("sheet origin dependents"));
+            }
+            for addr in sheet_state.origin_dependents.iter().copied() {
+                out.push(CellKey {
                     sheet: sheet_id,
                     addr,
-                })
-                .collect()
+                });
+            }
+            out
         };
 
         for key in dependents {
@@ -3314,57 +3395,64 @@ impl Engine {
 
         // Refresh per-cell volatile flags and dependency-graph volatile roots. This is a rare,
         // engine-wide configuration knob, so scanning formula cells is acceptable.
-        let tables_by_sheet: Vec<Vec<Table>> = self
-            .workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
+        let tables_by_sheet: Vec<Vec<Table>> = {
+            let mut out: Vec<Vec<Table>> = Vec::new();
+            let _ = out.try_reserve_exact(self.workbook.sheets.len());
+            for (sheet_id, s) in self.workbook.sheets.iter().enumerate() {
                 if self.workbook.sheet_exists(sheet_id) {
-                    s.tables.clone()
+                    out.push(s.tables.clone());
                 } else {
-                    Vec::new()
+                    out.push(Vec::new());
                 }
-            })
-            .collect();
+            }
+            out
+        };
 
-        let mut updates: Vec<(CellKey, bool)> = Vec::new();
-        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+        let external_refs_volatile = self.external_refs_volatile;
+        let sheet_count = self.workbook.sheets.len();
+        let mut updates: Vec<(CellAddr, bool)> = Vec::new();
+        for sheet_id in 0..sheet_count {
             if !self.workbook.sheet_exists(sheet_id) {
                 continue;
             }
-            for (addr, cell) in &sheet.cells {
-                let Some(compiled) = cell.compiled.as_ref() else {
+            updates.clear();
+            {
+                let Some(sheet) = self.workbook.sheets.get(sheet_id) else {
                     continue;
                 };
-                let key = CellKey {
-                    sheet: sheet_id,
-                    addr: *addr,
-                };
-                let (_, is_volatile, _, _, _) = analyze_expr_flags(
-                    compiled.ast(),
-                    key,
-                    &tables_by_sheet,
-                    &self.workbook,
-                    self.external_refs_volatile,
-                );
-                if is_volatile != cell.volatile {
-                    updates.push((key, is_volatile));
+                for (addr, cell) in sheet.cells.iter() {
+                    let Some(compiled) = cell.compiled.as_ref() else {
+                        continue;
+                    };
+                    let key = CellKey {
+                        sheet: sheet_id,
+                        addr: *addr,
+                    };
+                    let (_, is_volatile, _, _, _) = analyze_expr_flags(
+                        compiled.ast(),
+                        key,
+                        &tables_by_sheet,
+                        &self.workbook,
+                        external_refs_volatile,
+                    );
+                    if is_volatile != cell.volatile {
+                        updates.push((*addr, is_volatile));
+                    }
                 }
             }
-        }
-
-        for (key, is_volatile) in updates {
-            if let Some(cell) = self
-                .workbook
-                .sheets
-                .get_mut(key.sheet)
-                .and_then(|s| s.cells.get_mut(&key.addr))
-            {
-                cell.volatile = is_volatile;
+            if updates.is_empty() {
+                continue;
             }
-            self.calc_graph
-                .set_cell_volatile(cell_id_from_key(key), is_volatile);
+            let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+                continue;
+            };
+            for (addr, is_volatile) in updates.iter().copied() {
+                if let Some(cell) = sheet.cells.get_mut(&addr) {
+                    cell.volatile = is_volatile;
+                }
+                self.calc_graph
+                    .set_cell_volatile(cell_id_from_key(CellKey { sheet: sheet_id, addr }), is_volatile);
+            }
         }
 
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
@@ -4437,19 +4525,15 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         self.workbook.set_tables(sheet_id, tables);
 
-        let tables_by_sheet: Vec<Vec<Table>> = self
-            .workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if self.workbook.sheet_exists(sheet_id) {
-                    s.tables.clone()
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
+        let mut tables_by_sheet: Vec<Vec<Table>> = Vec::new();
+        let _ = tables_by_sheet.try_reserve_exact(self.workbook.sheets.len());
+        for (sheet_id, s) in self.workbook.sheets.iter().enumerate() {
+            if self.workbook.sheet_exists(sheet_id) {
+                tables_by_sheet.push(s.tables.clone());
+            } else {
+                tables_by_sheet.push(Vec::new());
+            }
+        }
 
         // Structured reference resolution can change which cells a formula depends on, so refresh
         // dependencies for all formulas.
@@ -4500,7 +4584,9 @@ impl Engine {
 
             let calc_precedents =
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
-            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            let mut calc_vec: Vec<Precedent> = Vec::new();
+            let _ = calc_vec.try_reserve_exact(calc_precedents.len());
+            calc_vec.extend(calc_precedents);
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
                 Precedent::Range(r) => (
@@ -4727,19 +4813,15 @@ impl Engine {
 
     #[allow(dead_code)]
     fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
-        let tables_by_sheet: Vec<Vec<Table>> = self
-            .workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if self.workbook.sheet_exists(sheet_id) {
-                    s.tables.clone()
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
+        let mut tables_by_sheet: Vec<Vec<Table>> = Vec::new();
+        let _ = tables_by_sheet.try_reserve_exact(self.workbook.sheets.len());
+        for (sheet_id, s) in self.workbook.sheets.iter().enumerate() {
+            if self.workbook.sheet_exists(sheet_id) {
+                tables_by_sheet.push(s.tables.clone());
+            } else {
+                tables_by_sheet.push(Vec::new());
+            }
+        }
 
         // Collect formula cells up-front to avoid borrow conflicts while recompiling.
         let mut formulas: Vec<(CellKey, String)> = Vec::new();
@@ -4810,7 +4892,9 @@ impl Engine {
                 &self.workbook,
                 &self.spills,
             );
-            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            let mut calc_vec: Vec<Precedent> = Vec::new();
+            let _ = calc_vec.try_reserve_exact(calc_precedents.len());
+            calc_vec.extend(calc_precedents);
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
                 Precedent::Range(r) => (
@@ -4949,7 +5033,17 @@ impl Engine {
         if name.is_empty() {
             return Ok(());
         }
-        let name_key = normalize_defined_name(name);
+        let name_key = match crate::value::try_casefold(name) {
+            Ok(key) => key,
+            Err(_) => {
+                debug_assert!(
+                    false,
+                    "allocation failed (define name key, len={}, name={name:?})",
+                    name.len()
+                );
+                return Err(EngineError::AllocationFailure("define name key"));
+            }
+        };
 
         let compiled = match &definition {
             NameDefinition::Constant(_) => None,
@@ -5091,12 +5185,11 @@ impl Engine {
             &mut resolve_sheet,
             &mut sheet_dims,
         );
-        let tables_by_sheet: Vec<Vec<Table>> = self
-            .workbook
-            .sheets
-            .iter()
-            .map(|s| s.tables.clone())
-            .collect();
+        let mut tables_by_sheet: Vec<Vec<Table>> = Vec::new();
+        let _ = tables_by_sheet.try_reserve_exact(self.workbook.sheets.len());
+        for s in self.workbook.sheets.iter() {
+            tables_by_sheet.push(s.tables.clone());
+        }
         let (names, volatile, thread_safe, dynamic_deps, origin_deps) = analyze_expr_flags(
             &compiled,
             key,
@@ -5121,7 +5214,9 @@ impl Engine {
             &self.workbook,
             &self.spills,
         );
-        let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+        let mut calc_vec: Vec<Precedent> = Vec::new();
+        let _ = calc_vec.try_reserve_exact(calc_precedents.len());
+        calc_vec.extend(calc_precedents);
         calc_vec.sort_by_key(|p| match p {
             Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
             Precedent::Range(r) => (
@@ -5327,9 +5422,19 @@ impl Engine {
         let width = range.width() as usize;
         let height = range.height() as usize;
 
-        let mut out: Vec<Vec<Value>> = Vec::with_capacity(height);
+        let mut out: Vec<Vec<Value>> = Vec::new();
+        if out.try_reserve_exact(height).is_err() {
+            debug_assert!(false, "allocation failed (get_range_values rows)");
+            return Err(EngineError::AllocationFailure("get_range_values rows"));
+        }
         for _ in 0..height {
-            out.push(vec![Value::Blank; width]);
+            let mut row: Vec<Value> = Vec::new();
+            if row.try_reserve_exact(width).is_err() {
+                debug_assert!(false, "allocation failed (get_range_values row)");
+                return Err(EngineError::AllocationFailure("get_range_values row"));
+            }
+            row.resize(width, Value::Blank);
+            out.push(row);
         }
 
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
@@ -6315,11 +6420,20 @@ impl Engine {
 
         let sheet_count = self.workbook.sheets.len();
         let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
-        let empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> =
-            vec![HashMap::new(); sheet_count];
+        let mut empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::new();
+        if empty_cols_by_sheet.try_reserve_exact(sheet_count).is_ok() {
+            for _ in 0..sheet_count {
+                empty_cols_by_sheet.push(HashMap::new());
+            }
+        } else {
+            debug_assert!(
+                false,
+                "allocation failed (empty_cols_by_sheet, sheet_count={sheet_count})"
+            );
+        }
         let cols_by_sheet = empty_cols_by_sheet.as_slice();
 
-        let mut vm = bytecode::Vm::with_capacity(32);
+        let mut vm = bytecode::Vm::new_with_default_stack();
         let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
             date_system,
             value_locale,
@@ -6436,19 +6550,33 @@ impl Engine {
         let text_codepage = self.text_codepage;
         let sheet_count = self.workbook.sheets.len();
         let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
-        let empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> =
-            vec![HashMap::new(); sheet_count];
+        let mut empty_cols_by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::new();
+        if empty_cols_by_sheet.try_reserve_exact(sheet_count).is_ok() {
+            for _ in 0..sheet_count {
+                empty_cols_by_sheet.push(HashMap::new());
+            }
+        } else {
+            debug_assert!(
+                false,
+                "allocation failed (empty_cols_by_sheet, sheet_count={sheet_count})"
+            );
+        }
 
-        for level in levels {
-            let mut keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
-            keys.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+        for mut level in levels {
+            // Avoid building an intermediate `Vec<CellKey>` for sorting: `level` is already owned
+            // and can be sorted in-place by its decoded coordinates.
+            level.sort_by_key(|&cell_id| {
+                let k = cell_key_from_id(cell_id);
+                (k.sheet, k.addr.row, k.addr.col)
+            });
 
             let mut parallel_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut serial_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut dynamic_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut needs_column_cache = false;
 
-            for &k in &keys {
+            for cell_id in level {
+                let k = cell_key_from_id(cell_id);
                 let Some(cell) = self.workbook.get_cell(k) else {
                     continue;
                 };
@@ -6486,18 +6614,18 @@ impl Engine {
                 }
             }
 
+            let tasks_len = parallel_tasks.len() + serial_tasks.len() + dynamic_tasks.len();
             let column_cache = if needs_column_cache {
-                let mut all_tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(
-                    parallel_tasks.len() + serial_tasks.len() + dynamic_tasks.len(),
-                );
-                all_tasks.extend(parallel_tasks.iter().cloned());
-                all_tasks.extend(serial_tasks.iter().cloned());
-                all_tasks.extend(dynamic_tasks.iter().cloned());
-                Some(BytecodeColumnCache::build(
-                    sheet_count,
-                    &snapshot,
-                    &all_tasks,
-                ))
+                let mut all_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+                if all_tasks.try_reserve_exact(tasks_len).is_err() {
+                    debug_assert!(false, "allocation failed (bytecode column cache tasks)");
+                    None
+                } else {
+                    all_tasks.extend(parallel_tasks.iter().cloned());
+                    all_tasks.extend(serial_tasks.iter().cloned());
+                    all_tasks.extend(dynamic_tasks.iter().cloned());
+                    BytecodeColumnCache::build(sheet_count, &snapshot, &all_tasks)
+                }
             } else {
                 None
             };
@@ -6506,40 +6634,54 @@ impl Engine {
                 .map(|cache| cache.by_sheet.as_slice())
                 .unwrap_or(empty_cols_by_sheet.as_slice());
 
-            let mut results: Vec<(CellKey, Value)> =
-                Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
-            let eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
-                let mut vm = bytecode::Vm::with_capacity(32);
-                let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
-                    date_system,
-                    value_locale,
-                    recalc_ctx.now_utc.clone(),
-                    recalc_ctx.recalc_id,
-                );
-                for (k, compiled) in &parallel_tasks {
-                    let ctx = crate::eval::EvalContext {
-                        current_sheet: k.sheet,
-                        current_cell: k.addr,
-                    };
-                    let value = match compiled {
-                        CompiledFormula::Ast(expr) => {
-                            let evaluator =
-                                crate::eval::Evaluator::new_with_date_system_and_locales(
-                                    &snapshot,
-                                    ctx,
-                                    recalc_ctx,
-                                    date_system,
-                                    value_locale,
-                                    locale_config.clone(),
-                                )
-                                .with_text_codepage(text_codepage);
-                            evaluator.eval_formula(expr)
-                        }
-                        CompiledFormula::Bytecode(bc) => {
+            let mut results: Vec<(CellKey, Value)> = Vec::new();
+            let mut buffer_results = true;
+            if results.try_reserve_exact(parallel_tasks.len() + serial_tasks.len()).is_err() {
+                debug_assert!(false, "allocation failed (recalc results buffer)");
+                buffer_results = false;
+            }
+
+            let eval_non_dynamic_task = |snapshot: &Snapshot,
+                                        vm: &mut bytecode::Vm,
+                                        k: &CellKey,
+                                        compiled: &CompiledFormula|
+             -> Value {
+                let ctx = crate::eval::EvalContext {
+                    current_sheet: k.sheet,
+                    current_cell: k.addr,
+                };
+                match compiled {
+                    CompiledFormula::Ast(expr) => {
+                        let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                            snapshot,
+                            ctx,
+                            recalc_ctx,
+                            date_system,
+                            value_locale,
+                            locale_config.clone(),
+                        )
+                        .with_text_codepage(text_codepage);
+                        evaluator.eval_formula(expr)
+                    }
+                    CompiledFormula::Bytecode(bc) => {
+                        let needs_cache =
+                            !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty();
+                        if needs_cache && column_cache.is_none() {
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            )
+                            .with_text_codepage(text_codepage);
+                            evaluator.eval_formula(&bc.ast)
+                        } else {
                             let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                             let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
-                                snapshot: &snapshot,
+                                snapshot,
                                 sheet_id: k.sheet,
                                 cols,
                                 cols_by_sheet,
@@ -6553,83 +6695,99 @@ impl Engine {
                             let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                             bytecode_value_to_engine(v)
                         }
-                    };
+                    }
+                }
+            };
+
+            let eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
+                let mut vm = bytecode::Vm::new_with_default_stack();
+                let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
+                    date_system,
+                    value_locale,
+                    recalc_ctx.now_utc.clone(),
+                    recalc_ctx.recalc_id,
+                );
+                for (k, compiled) in &parallel_tasks {
+                    let value = eval_non_dynamic_task(&snapshot, &mut vm, k, compiled);
                     results.push((*k, value));
                 }
             };
 
-            if mode == RecalcMode::MultiThreaded {
+            if !buffer_results {
+                // Best-effort: if we can't buffer all results, evaluate and apply values directly
+                // in deterministic order (merge-parallel + serial task streams by cell position).
+                let mut vm = bytecode::Vm::new_with_default_stack();
+                let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
+                    date_system,
+                    value_locale,
+                    recalc_ctx.now_utc.clone(),
+                    recalc_ctx.recalc_id,
+                );
+                let mut parallel_idx = 0usize;
+                let mut serial_idx = 0usize;
+                while parallel_idx < parallel_tasks.len() || serial_idx < serial_tasks.len() {
+                    let (k, compiled) = match (parallel_tasks.get(parallel_idx), serial_tasks.get(serial_idx)) {
+                        (Some((pk, pc)), Some((sk, sc))) => {
+                            if pk <= sk {
+                                parallel_idx += 1;
+                                (pk, pc)
+                            } else {
+                                serial_idx += 1;
+                                (sk, sc)
+                            }
+                        }
+                        (Some((pk, pc)), None) => {
+                            parallel_idx += 1;
+                            (pk, pc)
+                        }
+                        (None, Some((sk, sc))) => {
+                            serial_idx += 1;
+                            (sk, sc)
+                        }
+                        (None, None) => break,
+                    };
+                    let value = eval_non_dynamic_task(&snapshot, &mut vm, k, compiled);
+                    self.apply_eval_result(
+                        *k,
+                        value,
+                        &mut snapshot,
+                        &mut spill_dirty_roots,
+                        value_changes.as_deref_mut(),
+                    );
+                }
+            } else if mode == RecalcMode::MultiThreaded {
                 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
                 {
                     if let Some(pool) = crate::parallel::rayon_pool() {
-                        results.extend(pool.install(|| {
-                            let mut out: Vec<(CellKey, Value)> =
-                                Vec::with_capacity(parallel_tasks.len());
-                            parallel_tasks
-                                .par_iter()
-                                .map_init(
-                                    || {
-                                        (
-                                            bytecode::Vm::with_capacity(32),
-                                            bytecode::runtime::set_thread_eval_context(
-                                                date_system,
-                                                value_locale,
-                                                recalc_ctx.now_utc.clone(),
-                                                recalc_ctx.recalc_id,
-                                            ),
-                                        )
-                                    },
-                                    |(vm, _eval_ctx_guard), (k, compiled)| {
-                                        let ctx = crate::eval::EvalContext {
-                                            current_sheet: k.sheet,
-                                            current_cell: k.addr,
-                                        };
-
-                                        match compiled {
-                                            CompiledFormula::Ast(expr) => {
-                                                let evaluator =
-                                                    crate::eval::Evaluator::new_with_date_system_and_locales(
-                                                        &snapshot,
-                                                        ctx,
-                                                        recalc_ctx,
-                                                        date_system,
-                                                        value_locale,
-                                                        locale_config.clone(),
-                                                    )
-                                                    .with_text_codepage(text_codepage);
-                                                (*k, evaluator.eval_formula(expr))
-                                            }
-                                            CompiledFormula::Bytecode(bc) => {
-                                                let cols =
-                                                    cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                                                let slice_mode = slice_mode_for_program(&bc.program);
-                                                let grid = EngineBytecodeGrid {
-                                                    snapshot: &snapshot,
-                                                    sheet_id: k.sheet,
-                                                    cols,
-                                                    cols_by_sheet,
-                                                    slice_mode,
-                                                    trace: None,
-                                                };
-                                                let base = bytecode::CellCoord {
-                                                    row: k.addr.row as i32,
-                                                    col: k.addr.col as i32,
-                                                };
-                                                let v = vm.eval(
-                                                    &bc.program,
-                                                    &grid,
-                                                    k.sheet,
-                                                    base,
-                                                    &locale_config,
-                                                );
-                                                (*k, bytecode_value_to_engine(v))
-                                            }
-                                        }
-                                    },
-                                )
-                                .collect_into_vec(&mut out);
-                            out
-                        }));
+                        let mut out: Vec<(CellKey, Value)> = Vec::new();
+                        if out.try_reserve_exact(parallel_tasks.len()).is_err() {
+                            debug_assert!(false, "allocation failed (parallel eval results)");
+                            eval_parallel_tasks_serial(&mut results);
+                        } else {
+                            pool.install(|| {
+                                parallel_tasks
+                                    .par_iter()
+                                    .map_init(
+                                        || {
+                                            (
+                                                bytecode::Vm::new_with_default_stack(),
+                                                bytecode::runtime::set_thread_eval_context(
+                                                    date_system,
+                                                    value_locale,
+                                                    recalc_ctx.now_utc.clone(),
+                                                    recalc_ctx.recalc_id,
+                                                ),
+                                            )
+                                        },
+                                        |(vm, _eval_ctx_guard), (k, compiled)| {
+                                            let value = eval_non_dynamic_task(&snapshot, vm, k, compiled);
+                                            (*k, value)
+                                        },
+                                    )
+                                    .collect_into_vec(&mut out);
+                            });
+                            results.extend(out);
+                        }
                     } else {
                         // If we can't initialize a thread pool (e.g. under thread-constrained CI
                         // environments), fall back to single-threaded evaluation rather than
@@ -6646,68 +6804,42 @@ impl Engine {
                 eval_parallel_tasks_serial(&mut results);
             }
 
-            // Non-thread-safe tasks are always serialized.
-            let mut vm = bytecode::Vm::with_capacity(32);
+            if buffer_results {
+                // Non-thread-safe tasks are always serialized.
+                let mut vm = bytecode::Vm::new_with_default_stack();
+                let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
+                    date_system,
+                    value_locale,
+                    recalc_ctx.now_utc.clone(),
+                    recalc_ctx.recalc_id,
+                );
+                for (k, compiled) in &serial_tasks {
+                    let value = eval_non_dynamic_task(&snapshot, &mut vm, k, compiled);
+                    results.push((*k, value));
+                }
+
+                results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
+
+                for (k, v) in results {
+                    self.apply_eval_result(
+                        k,
+                        v,
+                        &mut snapshot,
+                        &mut spill_dirty_roots,
+                        value_changes.as_deref_mut(),
+                    );
+                }
+            }
+
+            // Dynamic-reference formulas (e.g. INDIRECT/OFFSET) must be evaluated serially so we
+            // can trace their runtime precedents and update the dependency graph deterministically.
+            let mut vm = bytecode::Vm::new_with_default_stack();
             let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
                 date_system,
                 value_locale,
                 recalc_ctx.now_utc.clone(),
                 recalc_ctx.recalc_id,
             );
-            for (k, compiled) in &serial_tasks {
-                let ctx = crate::eval::EvalContext {
-                    current_sheet: k.sheet,
-                    current_cell: k.addr,
-                };
-                let value = match compiled {
-                    CompiledFormula::Ast(expr) => {
-                        let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                            &snapshot,
-                            ctx,
-                            recalc_ctx,
-                            date_system,
-                            value_locale,
-                            locale_config.clone(),
-                        )
-                        .with_text_codepage(text_codepage);
-                        evaluator.eval_formula(expr)
-                    }
-                    CompiledFormula::Bytecode(bc) => {
-                        let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                        let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet_id: k.sheet,
-                            cols,
-                            cols_by_sheet,
-                            slice_mode,
-                            trace: None,
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
-                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                        bytecode_value_to_engine(v)
-                    }
-                };
-                results.push((*k, value));
-            }
-
-            results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
-
-            for (k, v) in results {
-                self.apply_eval_result(
-                    k,
-                    v,
-                    &mut snapshot,
-                    &mut spill_dirty_roots,
-                    value_changes.as_deref_mut(),
-                );
-            }
-
-            // Dynamic-reference formulas (e.g. INDIRECT/OFFSET) must be evaluated serially so we
-            // can trace their runtime precedents and update the dependency graph deterministically.
             for (k, compiled) in &dynamic_tasks {
                 let ctx = crate::eval::EvalContext {
                     current_sheet: k.sheet,
@@ -6733,23 +6865,39 @@ impl Engine {
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
-                        used_bytecode_trace = true;
-                        let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                        let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet_id: k.sheet,
-                            cols,
-                            cols_by_sheet,
-                            slice_mode,
-                            trace: Some(&bytecode_trace),
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
-                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                        bytecode_value_to_engine(v)
+                        let needs_cache = !bc.program.range_refs.is_empty()
+                            || !bc.program.multi_range_refs.is_empty();
+                        if needs_cache && column_cache.is_none() {
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                &snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            )
+                            .with_text_codepage(text_codepage)
+                            .with_dependency_trace(&trace);
+                            evaluator.eval_formula(&bc.ast)
+                        } else {
+                            used_bytecode_trace = true;
+                            let cols = cols_by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                            let slice_mode = slice_mode_for_program(&bc.program);
+                            let grid = EngineBytecodeGrid {
+                                snapshot: &snapshot,
+                                sheet_id: k.sheet,
+                                cols,
+                                cols_by_sheet,
+                                slice_mode,
+                                trace: Some(&bytecode_trace),
+                            };
+                            let base = bytecode::CellCoord {
+                                row: k.addr.row as i32,
+                                col: k.addr.col as i32,
+                            };
+                            let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
+                            bytecode_value_to_engine(v)
+                        }
                     }
                 };
 
@@ -6786,8 +6934,7 @@ impl Engine {
                 let expr = compiled.ast();
 
                 let cell_id = cell_id_from_key(*k);
-                let old_precedents: HashSet<Precedent> =
-                    self.calc_graph.precedents_of(cell_id).into_iter().collect();
+                let old_precedents = self.calc_graph.precedents_of(cell_id);
 
                 let mut new_precedents: HashSet<Precedent> = analyze_calc_precedents(
                     expr,
@@ -6796,13 +6943,21 @@ impl Engine {
                     &self.workbook,
                     &self.spills,
                 );
-                let static_cell_precedents: HashSet<CellId> = new_precedents
-                    .iter()
-                    .filter_map(|p| match p {
-                        Precedent::Cell(c) => Some(*c),
-                        _ => None,
-                    })
-                    .collect();
+                // Preserve any direct cell references for auditing even when we later prune
+                // redundant traced cell precedents inside ranges.
+                let mut static_cell_precedents: HashSet<CellId> = HashSet::new();
+                if static_cell_precedents.try_reserve(new_precedents.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (dynamic deps static cell precedents)"
+                    );
+                } else {
+                    for p in new_precedents.iter() {
+                        if let Precedent::Cell(c) = p {
+                            static_cell_precedents.insert(*c);
+                        }
+                    }
+                }
                 let mut dynamic_external_precedents: HashSet<crate::functions::Reference> =
                     HashSet::new();
                 for reference in traced_precedents {
@@ -6854,13 +7009,16 @@ impl Engine {
                 // Once a range precedent exists, the contained cells are redundant for calculation.
                 // However, preserve any cell precedents that were present in the static analysis
                 // (direct references in the formula) so auditing remains informative.
-                let ranges: Vec<SheetRange> = new_precedents
-                    .iter()
-                    .filter_map(|p| match p {
-                        Precedent::Range(r) => Some(*r),
-                        _ => None,
-                    })
-                    .collect();
+                let mut ranges: Vec<SheetRange> = Vec::new();
+                if ranges.try_reserve(new_precedents.len()).is_err() {
+                    debug_assert!(false, "allocation failed (dynamic deps ranges)");
+                } else {
+                    for p in new_precedents.iter() {
+                        if let Precedent::Range(r) = p {
+                            ranges.push(*r);
+                        }
+                    }
+                }
                 if !ranges.is_empty() {
                     new_precedents.retain(|p| match p {
                         Precedent::Cell(cell) => {
@@ -6871,8 +7029,22 @@ impl Engine {
                     });
                 }
 
-                if new_precedents != old_precedents {
-                    let mut vec: Vec<Precedent> = new_precedents.into_iter().collect();
+                let deps_changed = new_precedents.len() != old_precedents.len()
+                    || !old_precedents
+                        .iter()
+                        .all(|p| new_precedents.contains(p));
+                if deps_changed {
+                    let mut vec: Vec<Precedent> = Vec::new();
+                    if vec.try_reserve_exact(new_precedents.len()).is_err() {
+                        // Avoid abort-on-OOM: if we can't materialize the new dependency list,
+                        // keep the existing dependencies and mark the cell volatile so it remains
+                        // conservative under future recalculation passes.
+                        debug_assert!(false, "allocation failed (dynamic deps vec)");
+                        self.calc_graph.set_cell_volatile(cell_id, true);
+                        dynamic_dirty_roots.push(cell_id);
+                        continue;
+                    }
+                    vec.extend(new_precedents.into_iter());
                     vec.sort_by_key(|p| match p {
                         Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
                         Precedent::Range(r) => (
@@ -6911,8 +7083,19 @@ impl Engine {
         _mode: RecalcMode,
         mut value_changes: Option<&mut RecalcValueChangeCollector>,
     ) {
-        let mut impacted_ids: HashSet<CellId> = self.calc_graph.dirty_cells().into_iter().collect();
-        impacted_ids.extend(self.calc_graph.volatile_cells());
+        let dirty_count = self.calc_graph.dirty_cell_count();
+        let volatile_cells = self.calc_graph.volatile_cells();
+
+        let mut impacted_ids: HashSet<CellId> = HashSet::new();
+        if impacted_ids
+            .try_reserve(dirty_count.saturating_add(volatile_cells.len()))
+            .is_err()
+        {
+            debug_assert!(false, "allocation failed (cycle recalc impacted ids)");
+            return;
+        }
+        impacted_ids.extend(self.calc_graph.dirty_cells_iter());
+        impacted_ids.extend(volatile_cells);
 
         if impacted_ids.is_empty() {
             return;
@@ -6922,20 +7105,42 @@ impl Engine {
 
         self.circular_references.clear();
 
-        let mut impacted: Vec<CellKey> = impacted_ids.into_iter().map(cell_key_from_id).collect();
+        let mut impacted: Vec<CellKey> = Vec::new();
+        if impacted.try_reserve_exact(impacted_ids.len()).is_err() {
+            debug_assert!(false, "allocation failed (cycle recalc impacted keys)");
+            return;
+        }
+        for id in impacted_ids {
+            impacted.push(cell_key_from_id(id));
+        }
         impacted.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
 
-        let impacted_set: HashSet<CellKey> = impacted.iter().copied().collect();
+        let mut impacted_set: HashSet<CellKey> = HashSet::new();
+        if impacted_set.try_reserve(impacted.len()).is_err() {
+            debug_assert!(false, "allocation failed (cycle recalc impacted set)");
+            return;
+        }
+        impacted_set.extend(impacted.iter().copied());
+
         let mut edges: HashMap<CellKey, Vec<CellKey>> = HashMap::new();
+        if edges.try_reserve(impacted.len()).is_err() {
+            debug_assert!(false, "allocation failed (cycle recalc edges)");
+            return;
+        }
         for &cell in &impacted {
             let cell_id = cell_id_from_key(cell);
-            let mut out: Vec<CellKey> = self
-                .calc_graph
-                .direct_dependents(cell_id)
-                .into_iter()
-                .map(cell_key_from_id)
-                .filter(|d| impacted_set.contains(d))
-                .collect();
+            let dependents = self.calc_graph.direct_dependents(cell_id);
+            let mut out: Vec<CellKey> = Vec::new();
+            if out.try_reserve(dependents.len()).is_err() {
+                debug_assert!(false, "allocation failed (cycle recalc dependents)");
+                return;
+            }
+            for dep_id in dependents {
+                let dep = cell_key_from_id(dep_id);
+                if impacted_set.contains(&dep) {
+                    out.push(dep);
+                }
+            }
             if out.is_empty() {
                 continue;
             }
@@ -6943,8 +7148,20 @@ impl Engine {
             edges.insert(cell, out);
         }
 
-        let sccs = iterative::strongly_connected_components(&impacted, &edges);
-        let order = iterative::topo_sort_sccs(&sccs, &edges);
+        let sccs = match iterative::strongly_connected_components(&impacted, &edges) {
+            Ok(sccs) => sccs,
+            Err(err) => {
+                debug_assert!(false, "cycle recalc SCC failed: {err}");
+                return;
+            }
+        };
+        let order = match iterative::topo_sort_sccs(&sccs, &edges) {
+            Ok(order) => order,
+            Err(err) => {
+                debug_assert!(false, "cycle recalc topo sort failed: {err}");
+                return;
+            }
+        };
 
         let mut snapshot = Snapshot::from_workbook(
             &self.workbook,
@@ -7357,12 +7574,24 @@ impl Engine {
     }
 
     fn mark_dirty_blocked_spill_origins_for_cell(&mut self, cell: CellKey) {
-        let Some(origins) = self.spills.blocked_origins_by_cell.get(&cell) else {
+        let Some(blocked_origins) = self.spills.blocked_origins_by_cell.get(&cell) else {
             return;
         };
 
         // Clone so we can freely mutate dirty bookkeeping while iterating.
-        let origins: Vec<CellKey> = origins.iter().copied().collect();
+        let mut origins: Vec<CellKey> = Vec::new();
+        if origins.try_reserve_exact(blocked_origins.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (blocked spill origins clone, len={})",
+                blocked_origins.len()
+            );
+            // Best-effort: if we can't track blocked origins precisely, fall back to forcing a
+            // full recalc so blocked spill roots are not missed.
+            self.mark_all_compiled_cells_dirty();
+            return;
+        }
+        origins.extend(blocked_origins.iter().copied());
         for origin in origins {
             let origin_id = cell_id_from_key(origin);
             self.calc_graph.mark_dirty(origin_id);
@@ -7571,12 +7800,16 @@ impl Engine {
         // workbook tables at compile time and rewrite into concrete cell/range references that
         // the bytecode lowering step understands.
         let maybe_structured_rewritten = if canonical_expr_contains_structured_refs(&expr) {
-            let tables_by_sheet: Vec<Vec<Table>> = self
-                .workbook
-                .sheets
-                .iter()
-                .map(|s| s.tables.clone())
-                .collect();
+            let mut tables_by_sheet: Vec<Vec<Table>> = Vec::new();
+            if tables_by_sheet
+                .try_reserve_exact(self.workbook.sheets.len())
+                .is_err()
+            {
+                return Err(BytecodeCompileReason::IneligibleExpr);
+            }
+            for s in self.workbook.sheets.iter() {
+                tables_by_sheet.push(s.tables.clone());
+            }
             Some(
                 rewrite_structured_refs_for_bytecode(&expr, key.sheet, key.addr, &tables_by_sheet)
                     .ok_or(BytecodeCompileReason::IneligibleExpr)?,
@@ -7748,22 +7981,30 @@ impl Engine {
                 .unwrap_or_else(|| expr.clone())
             }
             crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
-                rows: arr
-                    .rows
-                    .iter()
-                    .map(|r| {
-                        r.iter()
-                            .map(|e| {
-                                self.inline_static_defined_names_for_bytecode_inner(
-                                    e,
-                                    current_sheet,
-                                    visiting,
-                                    lexical_scopes,
-                                )
-                            })
-                            .collect()
-                    })
-                    .collect(),
+                rows: {
+                    let mut rows: Vec<Vec<crate::Expr>> = Vec::new();
+                    if rows.try_reserve_exact(arr.rows.len()).is_err() {
+                        debug_assert!(false, "allocation failed (array rows)");
+                        return expr.clone();
+                    }
+                    for r in arr.rows.iter() {
+                        let mut row: Vec<crate::Expr> = Vec::new();
+                        if row.try_reserve_exact(r.len()).is_err() {
+                            debug_assert!(false, "allocation failed (array row)");
+                            return expr.clone();
+                        }
+                        for e in r.iter() {
+                            row.push(self.inline_static_defined_names_for_bytecode_inner(
+                                e,
+                                current_sheet,
+                                visiting,
+                                lexical_scopes,
+                            ));
+                        }
+                        rows.push(row);
+                    }
+                    rows
+                },
             }),
             crate::Expr::FunctionCall(call) if call.name.name_upper == "LET" => {
                 if call.args.len() < 3 || call.args.len() % 2 == 0 {
@@ -7771,7 +8012,12 @@ impl Engine {
                 }
 
                 lexical_scopes.push(HashSet::new());
-                let mut args = Vec::with_capacity(call.args.len());
+                let mut args: Vec<crate::Expr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(false, "allocation failed (LET args)");
+                    lexical_scopes.pop();
+                    return expr.clone();
+                }
 
                 for pair in call.args[..call.args.len() - 1].chunks_exact(2) {
                     // LET binding identifiers are not evaluated; keep them as written.
@@ -7825,7 +8071,12 @@ impl Engine {
                 }
 
                 lexical_scopes.push(scope);
-                let mut args = Vec::with_capacity(call.args.len());
+                let mut args: Vec<crate::Expr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(false, "allocation failed (LAMBDA args)");
+                    lexical_scopes.pop();
+                    return expr.clone();
+                }
                 args.extend(call.args[..call.args.len() - 1].iter().cloned());
                 let body = self.inline_static_defined_names_for_bytecode_inner(
                     &call.args[call.args.len() - 1],
@@ -7843,18 +8094,22 @@ impl Engine {
             }
             crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
                 name: call.name.clone(),
-                args: call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        self.inline_static_defined_names_for_bytecode_inner(
+                args: {
+                    let mut args: Vec<crate::Expr> = Vec::new();
+                    if args.try_reserve_exact(call.args.len()).is_err() {
+                        debug_assert!(false, "allocation failed (call args)");
+                        return expr.clone();
+                    }
+                    for arg in call.args.iter() {
+                        args.push(self.inline_static_defined_names_for_bytecode_inner(
                             arg,
                             current_sheet,
                             visiting,
                             lexical_scopes,
-                        )
-                    })
-                    .collect(),
+                        ));
+                    }
+                    args
+                },
             }),
             crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
                 callee: Box::new(self.inline_static_defined_names_for_bytecode_inner(
@@ -7863,18 +8118,22 @@ impl Engine {
                     visiting,
                     lexical_scopes,
                 )),
-                args: call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        self.inline_static_defined_names_for_bytecode_inner(
+                args: {
+                    let mut args: Vec<crate::Expr> = Vec::new();
+                    if args.try_reserve_exact(call.args.len()).is_err() {
+                        debug_assert!(false, "allocation failed (call expr args)");
+                        return expr.clone();
+                    }
+                    for arg in call.args.iter() {
+                        args.push(self.inline_static_defined_names_for_bytecode_inner(
                             arg,
                             current_sheet,
                             visiting,
                             lexical_scopes,
-                        )
-                    })
-                    .collect(),
+                        ));
+                    }
+                    args
+                },
             }),
             crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
                 op: u.op,
@@ -8187,19 +8446,25 @@ impl Engine {
                 }),
                 crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
                     name: call.name.clone(),
-                    args: call
-                        .args
-                        .iter()
-                        .map(|arg| normalize_inner(arg, sheet_name, true))
-                        .collect(),
+                    args: {
+                        let mut args: Vec<crate::Expr> = Vec::new();
+                        let _ = args.try_reserve_exact(call.args.len());
+                        for arg in call.args.iter() {
+                            args.push(normalize_inner(arg, sheet_name, true));
+                        }
+                        args
+                    },
                 }),
                 crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
                     callee: Box::new(normalize_inner(&call.callee, sheet_name, true)),
-                    args: call
-                        .args
-                        .iter()
-                        .map(|arg| normalize_inner(arg, sheet_name, true))
-                        .collect(),
+                    args: {
+                        let mut args: Vec<crate::Expr> = Vec::new();
+                        let _ = args.try_reserve_exact(call.args.len());
+                        for arg in call.args.iter() {
+                            args.push(normalize_inner(arg, sheet_name, true));
+                        }
+                        args
+                    },
                 }),
                 crate::Expr::FieldAccess(access) => {
                     crate::Expr::FieldAccess(crate::FieldAccessExpr {
@@ -8208,15 +8473,19 @@ impl Engine {
                     })
                 }
                 crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
-                    rows: arr
-                        .rows
-                        .iter()
-                        .map(|row| {
-                            row.iter()
-                                .map(|el| normalize_inner(el, sheet_name, true))
-                                .collect()
-                        })
-                        .collect(),
+                    rows: {
+                        let mut rows: Vec<Vec<crate::Expr>> = Vec::new();
+                        let _ = rows.try_reserve_exact(arr.rows.len());
+                        for row in arr.rows.iter() {
+                            let mut out_row: Vec<crate::Expr> = Vec::new();
+                            let _ = out_row.try_reserve_exact(row.len());
+                            for el in row.iter() {
+                                out_row.push(normalize_inner(el, sheet_name, true));
+                            }
+                            rows.push(out_row);
+                        }
+                        rows
+                    },
                 }),
                 crate::Expr::NameRef(_)
                 | crate::Expr::StructuredRef(_)
@@ -8816,12 +9085,11 @@ impl Engine {
             return;
         };
 
-        let tables_by_sheet: Vec<Vec<Table>> = self
-            .workbook
-            .sheets
-            .iter()
-            .map(|s| s.tables.clone())
-            .collect();
+        let mut tables_by_sheet: Vec<Vec<Table>> = Vec::new();
+        let _ = tables_by_sheet.try_reserve_exact(self.workbook.sheets.len());
+        for s in self.workbook.sheets.iter() {
+            tables_by_sheet.push(s.tables.clone());
+        }
 
         for key in cells {
             let Some((ast, formula)) = self.workbook.get_cell(key).and_then(|c| {
@@ -8854,7 +9122,9 @@ impl Engine {
 
             let calc_precedents =
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
-            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            let mut calc_vec: Vec<Precedent> = Vec::new();
+            let _ = calc_vec.try_reserve_exact(calc_precedents.len());
+            calc_vec.extend(calc_precedents);
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
                 Precedent::Range(r) => (
@@ -9243,12 +9513,14 @@ impl Engine {
         }
 
         let cell_id = cell_id_from_key(key);
-        let mut out: Vec<PrecedentNode> = self
-            .calc_graph
-            .precedents_of(cell_id)
-            .into_iter()
-            .map(|precedent| precedent_to_node(precedent, &self.workbook))
-            .collect();
+        let precedents = self.calc_graph.precedents_of(cell_id);
+        let mut out: Vec<PrecedentNode> = Vec::new();
+        if out.try_reserve_exact(precedents.len()).is_err() {
+            return Err(EngineError::AllocationFailure("precedent nodes"));
+        }
+        for precedent in precedents {
+            out.push(precedent_to_node(precedent, &self.workbook));
+        }
         if let Some(cell) = self.workbook.get_cell(key) {
             if let Some(compiled) = cell.compiled.as_ref() {
                 out.extend(analyze_external_precedents(
@@ -9283,16 +9555,18 @@ impl Engine {
         }
 
         let cell_id = cell_id_from_key(key);
-        let mut out: Vec<PrecedentNode> = self
-            .calc_graph
-            .direct_dependents(cell_id)
-            .into_iter()
-            .map(cell_key_from_id)
-            .map(|key| PrecedentNode::Cell {
+        let dependents = self.calc_graph.direct_dependents(cell_id);
+        let mut out: Vec<PrecedentNode> = Vec::new();
+        if out.try_reserve_exact(dependents.len()).is_err() {
+            return Err(EngineError::AllocationFailure("dependent nodes"));
+        }
+        for dep in dependents {
+            let key = cell_key_from_id(dep);
+            out.push(PrecedentNode::Cell {
                 sheet: key.sheet,
                 addr: key.addr,
-            })
-            .collect();
+            });
+        }
         sort_and_dedup_nodes(&mut out, &self.workbook);
         Ok(out)
     }
@@ -9359,15 +9633,20 @@ impl Engine {
             }
         }
 
-        let mut out: Vec<PrecedentNode> = out
-            .into_iter()
-            .map(|k| PrecedentNode::Cell {
+        let keys = out;
+        let mut nodes: Vec<PrecedentNode> = Vec::new();
+        if nodes.try_reserve_exact(keys.len()).is_err() {
+            debug_assert!(false, "allocation failed (dependents transitive nodes)");
+            return Vec::new();
+        }
+        for k in keys {
+            nodes.push(PrecedentNode::Cell {
                 sheet: k.sheet,
                 addr: k.addr,
-            })
-            .collect();
-        sort_and_dedup_nodes(&mut out, &self.workbook);
-        out
+            });
+        }
+        sort_and_dedup_nodes(&mut nodes, &self.workbook);
+        nodes
     }
 
     fn precedents_transitive_nodes(&self, start: CellKey) -> Vec<PrecedentNode> {
@@ -9388,39 +9667,55 @@ impl Engine {
                 PrecedentNode::Cell { sheet, addr } => {
                     let key = CellKey { sheet, addr };
                     let cell_id = cell_id_from_key(key);
-                    let mut neighbors: Vec<PrecedentNode> = self
-                        .calc_graph
-                        .precedents_of(cell_id)
-                        .into_iter()
-                        .map(|precedent| precedent_to_node(precedent, &self.workbook))
-                        .collect();
+                    let precedents = self.calc_graph.precedents_of(cell_id);
+                    let mut neighbors: Vec<PrecedentNode> = Vec::new();
+                    if neighbors.try_reserve_exact(precedents.len()).is_err() {
+                        debug_assert!(false, "allocation failed (precedents transitive neighbors)");
+                        return Vec::new();
+                    }
+                    for precedent in precedents {
+                        neighbors.push(precedent_to_node(precedent, &self.workbook));
+                    }
                     if let Some(cell) = self.workbook.get_cell(key) {
                         if let Some(compiled) = cell.compiled.as_ref() {
-                            neighbors.extend(analyze_external_precedents(
+                            let external = analyze_external_precedents(
                                 compiled.ast(),
                                 key,
                                 &self.workbook,
                                 self.external_value_provider.as_deref(),
-                            ));
+                            );
+                            if neighbors.try_reserve(external.len()).is_ok() {
+                                neighbors.extend(external);
+                            } else {
+                                debug_assert!(false, "allocation failed (external precedents)");
+                            }
                         }
                     }
-                    neighbors.extend(self.dynamic_external_precedent_nodes(key));
+                    let dynamic = self.dynamic_external_precedent_nodes(key);
+                    if neighbors.try_reserve(dynamic.len()).is_ok() {
+                        neighbors.extend(dynamic);
+                    } else {
+                        debug_assert!(false, "allocation failed (dynamic external precedents)");
+                    }
                     neighbors
                 }
                 PrecedentNode::Range { sheet, start, end } => {
                     let range = Range::new(cell_ref_from_addr(start), cell_ref_from_addr(end));
                     let sheet_range = SheetRange::new(sheet_id_for_graph(sheet), range);
-                    self.calc_graph
-                        .formula_cells_in_range(sheet_range)
-                        .into_iter()
-                        .map(|id| {
-                            let key = cell_key_from_id(id);
-                            PrecedentNode::Cell {
-                                sheet: key.sheet,
-                                addr: key.addr,
-                            }
-                        })
-                        .collect()
+                    let ids = self.calc_graph.formula_cells_in_range(sheet_range);
+                    let mut out: Vec<PrecedentNode> = Vec::new();
+                    if out.try_reserve_exact(ids.len()).is_err() {
+                        debug_assert!(false, "allocation failed (range precedent nodes)");
+                        return Vec::new();
+                    }
+                    for id in ids {
+                        let key = cell_key_from_id(id);
+                        out.push(PrecedentNode::Cell {
+                            sheet: key.sheet,
+                            addr: key.addr,
+                        });
+                    }
+                    out
                 }
                 PrecedentNode::SpillRange { sheet, origin, .. } => vec![PrecedentNode::Cell {
                     sheet,
@@ -9444,7 +9739,7 @@ impl Engine {
     }
 
     fn sync_dirty_from_calc_graph(&mut self) {
-        for id in self.calc_graph.dirty_cells() {
+        for id in self.calc_graph.dirty_cells_iter() {
             self.dirty.insert(cell_key_from_id(id));
         }
     }
@@ -9548,12 +9843,22 @@ impl PivotRefreshContext for Engine {
 }
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
-    workbook
-        .sheet_keys
-        .iter()
-        .enumerate()
-        .filter_map(|(id, name)| name.as_ref().map(|name| (id, name.clone())))
-        .collect()
+    let mut out: HashMap<SheetId, String> = HashMap::new();
+    if out.try_reserve(workbook.sheet_keys.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (sheet_names_by_id, sheets={})",
+            workbook.sheet_keys.len()
+        );
+        return HashMap::new();
+    }
+    for (id, name) in workbook.sheet_keys.iter().enumerate() {
+        let Some(name) = name.as_ref() else {
+            continue;
+        };
+        out.insert(id, name.clone());
+    }
+    out
 }
 
 fn rewrite_table_names_in_defined_names(
@@ -9596,7 +9901,9 @@ fn rewrite_table_names_in_compiled_expr(expr: &mut CompiledExpr, renames: &[(Str
         Expr::ArrayLiteral { values, .. } => {
             // `Arc<[T]>` does not expose mutable iteration over the slice, so clone to a vec and
             // re-wrap if any entries were rewritten.
-            let mut out: Vec<Expr<usize>> = values.iter().cloned().collect();
+            let mut out: Vec<Expr<usize>> = Vec::new();
+            let _ = out.try_reserve_exact(values.len());
+            out.extend(values.iter().cloned());
             let mut changed = false;
             for el in &mut out {
                 let before = el.clone();
@@ -9686,8 +9993,14 @@ fn ranges_overlap(a: Range, b: Range) -> bool {
 
 fn shift_rows(sheet: &mut Sheet, row: u32, count: u32, insert: bool) {
     let del_end = row.saturating_add(count.saturating_sub(1));
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (shift_rows new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if insert {
             if addr.row >= row {
                 new_cells.insert(
@@ -9740,8 +10053,14 @@ fn shift_rows(sheet: &mut Sheet, row: u32, count: u32, insert: bool) {
 
 fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
     let del_end = col.saturating_add(count.saturating_sub(1));
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (shift_cols new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if insert {
             if addr.col >= col {
                 new_cells.insert(
@@ -9831,19 +10150,37 @@ fn normalize_table_columns(table: &mut Table) {
     // We only ever generate names of the form `Column{n}`. Track the `n` values that are already
     // taken (case-insensitively) so we can pick the next available one without allocating a
     // case-folded copy of every existing name.
-    let mut used_default_nums: HashSet<u32> = table
-        .columns
-        .iter()
-        .filter_map(|c| parse_default_column_number(&c.name))
-        .collect();
+    let mut used_default_nums: HashSet<u32> = HashSet::new();
+    let use_set = used_default_nums.try_reserve(table.columns.len()).is_ok();
+    if use_set {
+        for c in table.columns.iter() {
+            if let Some(n) = parse_default_column_number(&c.name) {
+                used_default_nums.insert(n);
+            }
+        }
+    }
     let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let mut next_default_num: u32 = 1;
 
     for _ in current..target {
         let name = loop {
             let n = next_default_num;
-            next_default_num = next_default_num.saturating_add(1);
-            if used_default_nums.insert(n) {
+            next_default_num = match next_default_num.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    debug_assert!(false, "default table column number overflow");
+                    return;
+                }
+            };
+            if use_set {
+                if used_default_nums.insert(n) {
+                    break format!("Column{n}");
+                }
+            } else if !table
+                .columns
+                .iter()
+                .any(|c| parse_default_column_number(&c.name) == Some(n))
+            {
                 break format!("Column{n}");
             }
         };
@@ -9881,34 +10218,50 @@ fn insert_default_table_columns(table: &mut Table, insert_idx: usize, count: u32
         return;
     }
 
-    let mut used_default_nums: HashSet<u32> = table
-        .columns
-        .iter()
-        .filter_map(|c| parse_default_column_number(&c.name))
-        .collect();
+    let mut used_default_nums: HashSet<u32> = HashSet::new();
+    if used_default_nums.try_reserve(table.columns.len()).is_err() {
+        debug_assert!(false, "allocation failed (table default-column name set)");
+        // Best-effort: continue without pre-reserving. Uniqueness is still enforced by `insert`,
+        // but individual inserts may allocate; in low-memory environments we may end up reusing
+        // default names rather than crashing.
+    }
+    for c in &table.columns {
+        if let Some(n) = parse_default_column_number(&c.name) {
+            used_default_nums.insert(n);
+        }
+    }
     let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let mut next_default_num: u32 = 1;
 
-    let mut inserted: Vec<TableColumn> = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let name = loop {
-            let n = next_default_num;
-            next_default_num = next_default_num.saturating_add(1);
-            if used_default_nums.insert(n) {
-                break format!("Column{n}");
-            }
-        };
-        inserted.push(TableColumn {
-            id: next_id,
-            name,
-            formula: None,
-            totals_formula: None,
-        });
-        next_id += 1;
+    let idx = insert_idx.min(table.columns.len());
+    let Ok(count) = usize::try_from(count) else {
+        debug_assert!(false, "table column insert count out of range");
+        return;
+    };
+    if table.columns.try_reserve_exact(count).is_err() {
+        debug_assert!(false, "allocation failed (table columns insert)");
+        return;
     }
 
-    let idx = insert_idx.min(table.columns.len());
-    table.columns.splice(idx..idx, inserted);
+    table
+        .columns
+        .splice(idx..idx, (0..count).map(|_| {
+            let name = loop {
+                let n = next_default_num;
+                next_default_num = next_default_num.saturating_add(1);
+                if used_default_nums.insert(n) {
+                    break format!("Column{n}");
+                }
+            };
+            let id = next_id;
+            next_id += 1;
+            TableColumn {
+                id,
+                name,
+                formula: None,
+                totals_formula: None,
+            }
+        }));
 }
 
 fn adjust_range_for_insert_cols(mut range: Range, col: u32, count: u32) -> Range {
@@ -10144,8 +10497,14 @@ fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
 }
 
 fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (insert_cells_shift_right new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if addr.row >= range.start.row && addr.row <= range.end.row && addr.col >= range.start.col {
             new_cells.insert(
                 CellAddr {
@@ -10162,8 +10521,14 @@ fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
 }
 
 fn insert_cells_shift_down(sheet: &mut Sheet, range: Range, height: u32) {
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (insert_cells_shift_down new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if addr.col >= range.start.col && addr.col <= range.end.col && addr.row >= range.start.row {
             new_cells.insert(
                 CellAddr {
@@ -10180,8 +10545,14 @@ fn insert_cells_shift_down(sheet: &mut Sheet, range: Range, height: u32) {
 }
 
 fn delete_cells_shift_left(sheet: &mut Sheet, range: Range, width: u32) {
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (delete_cells_shift_left new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if addr.row >= range.start.row && addr.row <= range.end.row {
             if addr.col >= range.start.col && addr.col <= range.end.col {
                 continue;
@@ -10205,8 +10576,14 @@ fn delete_cells_shift_left(sheet: &mut Sheet, range: Range, width: u32) {
 }
 
 fn delete_cells_shift_up(sheet: &mut Sheet, range: Range, height: u32) {
-    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
-    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+    let old_cells = std::mem::take(&mut sheet.cells);
+    let mut new_cells = HashMap::new();
+    if new_cells.try_reserve(old_cells.len()).is_err() {
+        debug_assert!(false, "allocation failed (delete_cells_shift_up new_cells)");
+        sheet.cells = old_cells;
+        return;
+    }
+    for (addr, cell) in old_cells {
         if addr.col >= range.start.col && addr.col <= range.end.col {
             if addr.row >= range.start.row && addr.row <= range.end.row {
                 continue;
@@ -10378,7 +10755,16 @@ fn build_sheet_order_indices(workbook: &Workbook) -> HashMap<String, usize> {
     // Note: Formulas may reference sheets by either their stable key or their user-visible display
     // name. Include both aliases so sheet-span rewrites and edit applicability checks can resolve
     // 3D spans regardless of which naming scheme appears in the formula text.
-    let mut out: HashMap<String, usize> = HashMap::with_capacity(workbook.sheet_order.len() * 2);
+    let mut out: HashMap<String, usize> = HashMap::new();
+    let out_len = workbook.sheet_order.len().saturating_mul(2);
+    if out.try_reserve(out_len).is_err() {
+        // Best-effort: sheet spans are usually short. If reserving fails, proceed without
+        // pre-reserving to avoid an immediate abort-on-OOM.
+        debug_assert!(
+            false,
+            "allocation failed (build_sheet_order_indices, len={out_len})"
+        );
+    }
     for (order_index, &sheet_id) in workbook.sheet_order.iter().enumerate() {
         if let Some(name) = workbook.sheet_key_name(sheet_id) {
             out.insert(Workbook::sheet_key(name), order_index);
@@ -10894,7 +11280,18 @@ fn expand_nodes_to_cells(
     let mut nodes: Vec<PrecedentNode> = nodes.to_vec();
     sort_and_dedup_nodes(&mut nodes, workbook);
 
-    let mut streams: Vec<Stream> = nodes.into_iter().map(Stream::from_node).collect();
+    let mut streams: Vec<Stream> = Vec::new();
+    if streams.try_reserve_exact(nodes.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (precedent streams, len={})",
+            nodes.len()
+        );
+        return Vec::new();
+    }
+    for node in nodes.into_iter() {
+        streams.push(Stream::from_node(node));
+    }
     let tab_index_by_sheet = workbook.tab_index_by_sheet_id();
     let mut heap: std::collections::BinaryHeap<
         std::cmp::Reverse<(usize, u32, u32, SheetId, usize)>,
@@ -10913,8 +11310,15 @@ fn expand_nodes_to_cells(
     }
 
     let mut seen: HashSet<CellKey> = HashSet::new();
+    if seen.try_reserve(limit.min(1024)).is_err() {
+        debug_assert!(false, "allocation failed (precedent seen set)");
+        return Vec::new();
+    }
     let mut out: Vec<(SheetId, CellAddr)> = Vec::new();
-    out.reserve(limit.min(1024));
+    if out.try_reserve(limit.min(1024)).is_err() {
+        debug_assert!(false, "allocation failed (precedent out vec)");
+        return Vec::new();
+    }
 
     while out.len() < limit {
         let Some(std::cmp::Reverse((_tab, row, col, sheet, idx))) = heap.pop() else {
@@ -11494,7 +11898,15 @@ fn rewrite_structured_refs_for_bytecode(
                 sref.items.as_slice(),
                 [crate::structured_refs::StructuredRefItem::ThisRow]
             ) {
-                let mut parts = Vec::with_capacity(ranges.len());
+                let mut parts: Vec<crate::Expr> = Vec::new();
+                if parts.try_reserve_exact(ranges.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (structured ref this-row parts, len={})",
+                        ranges.len()
+                    );
+                    return None;
+                }
                 for (sheet_id, start, end) in &ranges {
                     if *sheet_id != origin_sheet {
                         return None;
@@ -11520,7 +11932,15 @@ fn rewrite_structured_refs_for_bytecode(
                 };
             }
 
-            let mut parts = Vec::with_capacity(ranges.len());
+            let mut parts: Vec<crate::Expr> = Vec::new();
+            if parts.try_reserve_exact(ranges.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (structured ref parts, len={})",
+                    ranges.len()
+                );
+                return None;
+            }
             for (sheet_id, start, end) in &ranges {
                 if *sheet_id != origin_sheet {
                     return None;
@@ -11554,18 +11974,26 @@ fn rewrite_structured_refs_for_bytecode(
         }
         crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
             name: call.name.clone(),
-            args: call
-                .args
-                .iter()
-                .map(|arg| {
-                    rewrite_structured_refs_for_bytecode(
+            args: {
+                let mut out: Vec<crate::Expr> = Vec::new();
+                if out.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (structured ref rewrite args, len={})",
+                        call.args.len()
+                    );
+                    return None;
+                }
+                for arg in call.args.iter() {
+                    out.push(rewrite_structured_refs_for_bytecode(
                         arg,
                         origin_sheet,
                         origin_cell,
                         tables_by_sheet,
-                    )
-                })
-                .collect::<Option<Vec<_>>>()?,
+                    )?);
+                }
+                out
+            },
         })),
         crate::Expr::Call(call) => Some(crate::Expr::Call(crate::CallExpr {
             callee: Box::new(rewrite_structured_refs_for_bytecode(
@@ -11574,18 +12002,26 @@ fn rewrite_structured_refs_for_bytecode(
                 origin_cell,
                 tables_by_sheet,
             )?),
-            args: call
-                .args
-                .iter()
-                .map(|arg| {
-                    rewrite_structured_refs_for_bytecode(
+            args: {
+                let mut out: Vec<crate::Expr> = Vec::new();
+                if out.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (structured ref rewrite call args, len={})",
+                        call.args.len()
+                    );
+                    return None;
+                }
+                for arg in call.args.iter() {
+                    out.push(rewrite_structured_refs_for_bytecode(
                         arg,
                         origin_sheet,
                         origin_cell,
                         tables_by_sheet,
-                    )
-                })
-                .collect::<Option<Vec<_>>>()?,
+                    )?);
+                }
+                out
+            },
         })),
         crate::Expr::Unary(u) => Some(crate::Expr::Unary(crate::UnaryExpr {
             op: u.op,
@@ -11621,9 +12057,25 @@ fn rewrite_structured_refs_for_bytecode(
             )?),
         })),
         crate::Expr::Array(arr) => {
-            let mut rows: Vec<Vec<crate::Expr>> = Vec::with_capacity(arr.rows.len());
+            let mut rows: Vec<Vec<crate::Expr>> = Vec::new();
+            if rows.try_reserve_exact(arr.rows.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (structured ref rewrite array rows, len={})",
+                    arr.rows.len()
+                );
+                return None;
+            }
             for row in &arr.rows {
-                let mut out_row = Vec::with_capacity(row.len());
+                let mut out_row: Vec<crate::Expr> = Vec::new();
+                if out_row.try_reserve_exact(row.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (structured ref rewrite array row, len={})",
+                        row.len()
+                    );
+                    return None;
+                }
                 for el in row {
                     out_row.push(rewrite_structured_refs_for_bytecode(
                         el,
@@ -11717,93 +12169,52 @@ impl Snapshot {
         let tab_index_by_sheet_id = workbook.tab_index_by_sheet_id().to_vec();
         let workbook_directory = workbook.workbook_directory.clone();
         let workbook_filename = workbook.workbook_filename.clone();
-        let sheet_dimensions = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    (s.row_count, s.col_count)
-                } else {
-                    (0, 0)
-                }
-            })
-            .collect();
-        let sheet_default_style_ids = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.default_style_id
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let sheet_default_col_width = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.default_col_width
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let format_runs_by_col = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.format_runs_by_col.clone()
-                } else {
-                    BTreeMap::new()
-                }
-            })
-            .collect();
+        let mut sheet_dimensions: Vec<(u32, u32)> = Vec::new();
+        let mut sheet_default_style_ids: Vec<Option<u32>> = Vec::new();
+        let mut sheet_default_col_width: Vec<Option<f32>> = Vec::new();
+        let mut format_runs_by_col: Vec<BTreeMap<u32, Vec<FormatRun>>> = Vec::new();
+        let mut sheet_origin_cells: Vec<Option<CellAddr>> = Vec::new();
+        let mut dc_sheet_default_style_ids: Vec<u32> = Vec::new();
+        let mut dc_row_style_ids: Vec<HashMap<u32, u32>> = Vec::new();
+        let mut dc_col_style_ids: Vec<HashMap<u32, u32>> = Vec::new();
+        let mut dc_format_runs_by_col: Vec<HashMap<u32, Vec<crate::style_patch::FormatRun>>> =
+            Vec::new();
+        let mut dc_cell_style_ids: Vec<HashMap<CellAddr, u32>> = Vec::new();
 
-        let sheet_origin_cells = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.origin
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let _ = sheet_dimensions.try_reserve_exact(workbook.sheets.len());
+        let _ = sheet_default_style_ids.try_reserve_exact(workbook.sheets.len());
+        let _ = sheet_default_col_width.try_reserve_exact(workbook.sheets.len());
+        let _ = format_runs_by_col.try_reserve_exact(workbook.sheets.len());
+        let _ = sheet_origin_cells.try_reserve_exact(workbook.sheets.len());
+        let _ = dc_sheet_default_style_ids.try_reserve_exact(workbook.sheets.len());
+        let _ = dc_row_style_ids.try_reserve_exact(workbook.sheets.len());
+        let _ = dc_col_style_ids.try_reserve_exact(workbook.sheets.len());
+        let _ = dc_format_runs_by_col.try_reserve_exact(workbook.sheets.len());
+        let _ = dc_cell_style_ids.try_reserve_exact(workbook.sheets.len());
 
-        let dc_sheet_default_style_ids = workbook
-            .sheets
-            .iter()
-            .map(|s| s.dc_default_style_id)
-            .collect();
-        let dc_row_style_ids = workbook
-            .sheets
-            .iter()
-            .map(|s| s.dc_row_style_ids.clone())
-            .collect();
-        let dc_col_style_ids = workbook
-            .sheets
-            .iter()
-            .map(|s| s.dc_col_style_ids.clone())
-            .collect();
-        let dc_format_runs_by_col = workbook
-            .sheets
-            .iter()
-            .map(|s| s.dc_format_runs_by_col.clone())
-            .collect();
-        let dc_cell_style_ids = workbook
-            .sheets
-            .iter()
-            .map(|s| s.dc_cell_style_ids.clone())
-            .collect();
+        for (sheet_id, s) in workbook.sheets.iter().enumerate() {
+            if workbook.sheet_exists(sheet_id) {
+                sheet_dimensions.push((s.row_count, s.col_count));
+                sheet_default_style_ids.push(s.default_style_id);
+                sheet_default_col_width.push(s.default_col_width);
+                format_runs_by_col.push(s.format_runs_by_col.clone());
+                sheet_origin_cells.push(s.origin);
+            } else {
+                sheet_dimensions.push((0, 0));
+                sheet_default_style_ids.push(None);
+                sheet_default_col_width.push(None);
+                format_runs_by_col.push(BTreeMap::new());
+                sheet_origin_cells.push(None);
+            }
+
+            // DocumentController style metadata is stored even for non-live sheets. Mirror the
+            // workbook shape exactly so sheet ids remain stable.
+            dc_sheet_default_style_ids.push(s.dc_default_style_id);
+            dc_row_style_ids.push(s.dc_row_style_ids.clone());
+            dc_col_style_ids.push(s.dc_col_style_ids.clone());
+            dc_format_runs_by_col.push(s.dc_format_runs_by_col.clone());
+            dc_cell_style_ids.push(s.dc_cell_style_ids.clone());
+        }
 
         let mut cell_count = 0usize;
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
@@ -11816,10 +12227,22 @@ impl Snapshot {
             cell_count = cell_count.saturating_add(spill.array.values.len());
         }
 
-        let mut values = HashMap::with_capacity(cell_count);
-        let mut phonetics = HashMap::with_capacity(cell_count);
-        let mut style_ids = HashMap::with_capacity(cell_count);
-        let mut formulas = HashMap::with_capacity(cell_count);
+        let mut values = HashMap::new();
+        let mut phonetics = HashMap::new();
+        let mut style_ids = HashMap::new();
+        let mut formulas = HashMap::new();
+        if values.try_reserve(cell_count).is_err()
+            || phonetics.try_reserve(cell_count).is_err()
+            || style_ids.try_reserve(cell_count).is_err()
+            || formulas.try_reserve(cell_count).is_err()
+        {
+            // Best-effort: if we can't pre-reserve, proceed with incremental growth to avoid an
+            // immediate abort-on-OOM from a huge `with_capacity(cell_count)`.
+            debug_assert!(
+                false,
+                "allocation failed (snapshot cell maps reserve, cell_count={cell_count})"
+            );
+        }
         let mut number_formats = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
@@ -11882,49 +12305,37 @@ impl Snapshot {
             }
         }
         let spill_origin_by_cell = spills.origin_by_cell.clone();
-        let tables = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.tables.clone()
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
-        let row_properties = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.row_properties.clone()
-                } else {
-                    BTreeMap::new()
-                }
-            })
-            .collect();
-        let col_properties = workbook
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(sheet_id, s)| {
-                if workbook.sheet_exists(sheet_id) {
-                    s.col_properties.clone()
-                } else {
-                    BTreeMap::new()
-                }
-            })
-            .collect();
+        let mut tables: Vec<Vec<Table>> = Vec::new();
+        let mut row_properties: Vec<BTreeMap<u32, RowProperties>> = Vec::new();
+        let mut col_properties: Vec<BTreeMap<u32, ColProperties>> = Vec::new();
+        let _ = tables.try_reserve_exact(workbook.sheets.len());
+        let _ = row_properties.try_reserve_exact(workbook.sheets.len());
+        let _ = col_properties.try_reserve_exact(workbook.sheets.len());
+        for (sheet_id, s) in workbook.sheets.iter().enumerate() {
+            if workbook.sheet_exists(sheet_id) {
+                tables.push(s.tables.clone());
+                row_properties.push(s.row_properties.clone());
+                col_properties.push(s.col_properties.clone());
+            } else {
+                tables.push(Vec::new());
+                row_properties.push(BTreeMap::new());
+                col_properties.push(BTreeMap::new());
+            }
+        }
 
         let mut workbook_names = HashMap::new();
         for (name, def) in &workbook.names {
             workbook_names.insert(name.clone(), name_to_resolved(def));
         }
 
-        let mut sheet_names = Vec::with_capacity(workbook.sheets.len());
+        let mut sheet_names = Vec::new();
+        if sheet_names.try_reserve_exact(workbook.sheets.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (snapshot sheet names, len={})",
+                workbook.sheets.len()
+            );
+        }
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             let mut names = HashMap::new();
             if workbook.sheet_exists(sheet_id) {
@@ -12770,9 +13181,25 @@ fn rewrite_defined_name_constants_for_bytecode(
                     return None;
                 }
 
-                let mut rows = Vec::with_capacity(arr.rows);
+                let mut rows: Vec<Vec<crate::Expr>> = Vec::new();
+                if rows.try_reserve_exact(arr.rows).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (inline array rows, len={})",
+                        arr.rows
+                    );
+                    return None;
+                }
                 for r in 0..arr.rows {
-                    let mut row = Vec::with_capacity(arr.cols);
+                    let mut row: Vec<crate::Expr> = Vec::new();
+                    if row.try_reserve_exact(arr.cols).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (inline array row, len={})",
+                            arr.cols
+                        );
+                        return None;
+                    }
                     for c in 0..arr.cols {
                         let el = arr.get(r, c)?;
                         row.push(scalar_value_to_bytecode_literal_expr(el)?);
@@ -12852,7 +13279,16 @@ fn rewrite_defined_name_constants_for_bytecode(
 
                 lexical_scopes.push(HashSet::new());
                 let mut changed = false;
-                let mut args = Vec::with_capacity(call.args.len());
+                let mut args: Vec<crate::Expr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (inline LET args, len={})",
+                        call.args.len()
+                    );
+                    lexical_scopes.pop();
+                    return None;
+                }
 
                 for pair in call.args[..call.args.len() - 1].chunks_exact(2) {
                     let Some(name_key) = bare_identifier(&pair[0]) else {
@@ -12915,7 +13351,16 @@ fn rewrite_defined_name_constants_for_bytecode(
 
                 lexical_scopes.push(scope);
                 let mut changed = false;
-                let mut args = Vec::with_capacity(call.args.len());
+                let mut args: Vec<crate::Expr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (inline LAMBDA args, len={})",
+                        call.args.len()
+                    );
+                    lexical_scopes.pop();
+                    return None;
+                }
                 args.extend(call.args[..call.args.len() - 1].iter().cloned());
 
                 if let Some(rewritten) = rewrite_inner(
@@ -12948,12 +13393,27 @@ fn rewrite_defined_name_constants_for_bytecode(
                     if let Some(rewritten) =
                         rewrite_inner(arg, current_sheet, workbook, lexical_scopes)
                     {
-                        let vec = args.get_or_insert_with(|| {
-                            let mut out = Vec::with_capacity(call.args.len());
+                        if args.is_none() {
+                            let mut out: Vec<crate::Expr> = Vec::new();
+                            if out.try_reserve_exact(call.args.len()).is_err() {
+                                debug_assert!(
+                                    false,
+                                    "allocation failed (inline call args, len={})",
+                                    call.args.len()
+                                );
+                                return None;
+                            }
                             out.extend(call.args[..idx].iter().cloned());
-                            out
-                        });
-                        vec.push(rewritten);
+                            args = Some(out);
+                        }
+                        let Some(out) = args.as_mut() else {
+                            debug_assert!(
+                                false,
+                                "missing rewritten args buffer (inline call args, idx={idx})"
+                            );
+                            return None;
+                        };
+                        out.push(rewritten);
                     } else if let Some(vec) = args.as_mut() {
                         vec.push(arg.clone());
                     }
@@ -12998,9 +13458,25 @@ fn rewrite_defined_name_constants_for_bytecode(
             }
             crate::Expr::Array(arr) => {
                 let mut changed = false;
-                let mut rows: Vec<Vec<crate::Expr>> = Vec::with_capacity(arr.rows.len());
+                let mut rows: Vec<Vec<crate::Expr>> = Vec::new();
+                if rows.try_reserve_exact(arr.rows.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (inline array rewrite rows, len={})",
+                        arr.rows.len()
+                    );
+                    return None;
+                }
                 for row in &arr.rows {
-                    let mut out_row = Vec::with_capacity(row.len());
+                    let mut out_row: Vec<crate::Expr> = Vec::new();
+                    if out_row.try_reserve_exact(row.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (inline array rewrite row, len={})",
+                            row.len()
+                        );
+                        return None;
+                    }
                     for el in row {
                         if let Some(rewritten) =
                             rewrite_inner(el, current_sheet, workbook, lexical_scopes)
@@ -13294,7 +13770,8 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
             // `Value::Array` directly (e.g. via `set_cell_value`, rich-value fields, external value
             // providers, or tests). Bytecode evaluation should preserve these as materialized
             // arrays (bounded by `MAX_MATERIALIZED_ARRAY_CELLS`) rather than coercing them to
-            // `#SPILL!`.
+            // `#SPILL!`. If materialization would exceed the spill cap, return `#SPILL!`. If we
+            // cannot allocate the buffer, fail closed with `#NUM!`.
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
                 None => return bytecode::Value::Error(bytecode::ErrorKind::Spill),
@@ -13307,7 +13784,7 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
             }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
-                return bytecode::Value::Error(bytecode::ErrorKind::Spill);
+                return bytecode::Value::Error(bytecode::ErrorKind::Num);
             }
             for v in arr.iter() {
                 values.push(array_element_to_bytecode(v));
@@ -13344,7 +13821,7 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
             }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
-                return Value::Error(ErrorKind::Spill);
+                return Value::Error(ErrorKind::Num);
             }
             match Arc::try_unwrap(arr.values) {
                 Ok(values_vec) => {
@@ -13435,7 +13912,7 @@ impl BytecodeColumnCache {
         sheet_count: usize,
         snapshot: &Snapshot,
         tasks: &[(CellKey, CompiledFormula)],
-    ) -> Self {
+    ) -> Option<Self> {
         #[derive(Debug, Clone)]
         enum StackValue {
             Range(usize),
@@ -13443,10 +13920,20 @@ impl BytecodeColumnCache {
             Other,
         }
 
-        fn range_refs_used_by_functions(program: &bytecode::Program) -> Vec<bool> {
-            let mut used = vec![false; program.range_refs.len()];
+        fn range_refs_used_by_functions(program: &bytecode::Program) -> Option<Vec<bool>> {
+            let mut used: Vec<bool> = Vec::new();
+            if used.try_reserve_exact(program.range_refs.len()).is_err() {
+                debug_assert!(false, "allocation failed (bytecode range usage flags)");
+                return None;
+            }
+            used.resize(program.range_refs.len(), false);
             let mut stack: Vec<StackValue> = Vec::new();
-            let mut locals: Vec<StackValue> = vec![StackValue::Other; program.locals.len()];
+            let mut locals: Vec<StackValue> = Vec::new();
+            if locals.try_reserve_exact(program.locals.len()).is_err() {
+                debug_assert!(false, "allocation failed (bytecode locals stack)");
+                return None;
+            }
+            locals.resize(program.locals.len(), StackValue::Other);
 
             for inst in program.instrs() {
                 match inst.op() {
@@ -13566,14 +14053,20 @@ impl BytecodeColumnCache {
                 }
             }
 
-            used
+            Some(used)
         }
 
         // Collect row windows for each referenced column so the cache can build compact
         // columnar buffers. This avoids allocating/scanning from row 0 (e.g. `A900000:A900010`),
         // and also avoids spanning huge gaps when formulas reference multiple disjoint windows.
-        let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> =
-            vec![HashMap::new(); sheet_count];
+        let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> = Vec::new();
+        if row_ranges_by_col.try_reserve_exact(sheet_count).is_err() {
+            debug_assert!(false, "allocation failed (bytecode row ranges by column)");
+            return None;
+        }
+        for _ in 0..sheet_count {
+            row_ranges_by_col.push(HashMap::new());
+        }
 
         let mut range_usage_cache: HashMap<usize, Vec<bool>> = HashMap::new();
 
@@ -13588,9 +14081,13 @@ impl BytecodeColumnCache {
 
             let program_key = Arc::as_ptr(&bc.program) as usize;
             let has_multi_ranges = !bc.program.multi_range_refs.is_empty();
-            let used = range_usage_cache
-                .entry(program_key)
-                .or_insert_with(|| range_refs_used_by_functions(&bc.program));
+            let used = match range_usage_cache.entry(program_key) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let used = range_refs_used_by_functions(&bc.program)?;
+                    entry.insert(used)
+                }
+            };
             if !has_multi_ranges && !used.iter().any(|v| *v) {
                 // Ranges that are only used for implicit intersection don't require a columnar
                 // cache because evaluation can fetch a single cell via `get_value`.
@@ -13713,9 +14210,15 @@ impl BytecodeColumnCache {
         // stored values. This is a critical fast path for deep dependency chains where we may
         // evaluate many single-cell levels (each with no range args).
         if row_ranges_by_col.iter().all(|cols| cols.is_empty()) {
-            return Self {
-                by_sheet: vec![HashMap::new(); sheet_count],
-            };
+            let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::new();
+            if by_sheet.try_reserve_exact(sheet_count).is_err() {
+                debug_assert!(false, "allocation failed (bytecode column cache empty by_sheet)");
+                return None;
+            }
+            for _ in 0..sheet_count {
+                by_sheet.push(HashMap::new());
+            }
+            return Some(Self { by_sheet });
         }
 
         fn apply_value(seg: &mut BytecodeColumnSegment, value: &Value, row: i32) {
@@ -13741,7 +14244,11 @@ impl BytecodeColumnCache {
         }
 
         let has_provider = snapshot.external_value_provider.is_some();
-        let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::with_capacity(sheet_count);
+        let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::new();
+        if by_sheet.try_reserve_exact(sheet_count).is_err() {
+            debug_assert!(false, "allocation failed (bytecode column cache by_sheet)");
+            return None;
+        }
         for sheet_id in 0..sheet_count {
             let mut cols: HashMap<i32, BytecodeColumn> = HashMap::new();
             for (col, ranges) in row_ranges_by_col[sheet_id].iter() {
@@ -13762,8 +14269,11 @@ impl BytecodeColumnCache {
                 }
                 segments.push((cur_start, cur_end));
 
-                let mut col_segments: Vec<BytecodeColumnSegment> =
-                    Vec::with_capacity(segments.len());
+                let mut col_segments: Vec<BytecodeColumnSegment> = Vec::new();
+                if col_segments.try_reserve_exact(segments.len()).is_err() {
+                    debug_assert!(false, "allocation failed (bytecode column segments)");
+                    return None;
+                }
 
                 let sheet_name = snapshot
                     .sheet_keys_by_id
@@ -13775,9 +14285,15 @@ impl BytecodeColumnCache {
                     debug_assert!(row_start >= 0);
                     debug_assert!(row_end >= row_start);
                     let len = (row_end - row_start + 1) as usize;
+                    let mut values: Vec<f64> = Vec::new();
+                    if values.try_reserve_exact(len).is_err() {
+                        debug_assert!(false, "allocation failed (bytecode column segment values)");
+                        return None;
+                    }
+                    values.resize(len, f64::NAN);
                     let mut segment = BytecodeColumnSegment {
                         row_start,
-                        values: vec![f64::NAN; len],
+                        values,
                         blocked_rows_strict: Vec::new(),
                         blocked_rows_ignore_nonnumeric: Vec::new(),
                     };
@@ -13865,7 +14381,7 @@ impl BytecodeColumnCache {
             }
         }
 
-        Self { by_sheet }
+        Some(Self { by_sheet })
     }
 }
 
@@ -15972,7 +16488,8 @@ fn walk_expr_flags(
     fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
         match expr {
             Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
-                Some(normalize_defined_name(&nref.name))
+                let name_key = normalize_defined_name(&nref.name);
+                (!name_key.is_empty()).then_some(name_key)
             }
             _ => None,
         }
@@ -16473,7 +16990,13 @@ fn analyze_external_precedents(
         &mut visiting_names,
         &mut lexical_scopes,
     );
-    out.into_iter().collect()
+    let mut vec: Vec<PrecedentNode> = Vec::new();
+    if vec.try_reserve_exact(out.len()).is_err() {
+        debug_assert!(false, "allocation failed (external precedents)");
+        return Vec::new();
+    }
+    vec.extend(out);
+    vec
 }
 
 /// Expands an external workbook 3D sheet span key like `[Book.xlsx]Sheet1:Sheet3`
@@ -16531,7 +17054,8 @@ fn walk_external_dependencies(
     fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
         match expr {
             Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
-                Some(normalize_defined_name(&nref.name))
+                let name_key = normalize_defined_name(&nref.name);
+                (!name_key.is_empty()).then_some(name_key)
             }
             _ => None,
         }
@@ -17050,7 +17574,8 @@ fn walk_external_expr(
     fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
         match expr {
             Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
-                Some(normalize_defined_name(&nref.name))
+                let name_key = normalize_defined_name(&nref.name);
+                (!name_key.is_empty()).then_some(name_key)
             }
             _ => None,
         }
@@ -17493,7 +18018,8 @@ fn walk_calc_expr(
     fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
         match expr {
             Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
-                Some(normalize_defined_name(&nref.name))
+                let name_key = normalize_defined_name(&nref.name);
+                (!name_key.is_empty()).then_some(name_key)
             }
             _ => None,
         }
@@ -19159,7 +19685,21 @@ fn numeric_value(value: &Value) -> Option<f64> {
 }
 
 fn normalize_defined_name(name: &str) -> String {
-    crate::value::casefold(name.trim())
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+    match crate::value::try_casefold(name) {
+        Ok(key) => key,
+        Err(_) => {
+            debug_assert!(
+                false,
+                "allocation failed (defined name normalization, len={}, name={name:?})",
+                name.len()
+            );
+            String::new()
+        }
+    }
 }
 
 fn with_defined_name_key<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
@@ -21006,7 +21546,8 @@ mod tests {
             "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13",
             "B14", "B15", "B16", "B17",
         ];
-        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(formula_cells.len());
+        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+        assert!(tasks.try_reserve_exact(formula_cells.len()).is_ok());
         for cell in formula_cells {
             let addr = parse_a1(cell).unwrap();
             let compiled = bytecode_engine.workbook.sheets[sheet_id]
@@ -21039,8 +21580,12 @@ mod tests {
             bytecode_engine.info.clone(),
             bytecode_engine.pivot_registry.clone(),
         );
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
         assert!(
             column_cache.by_sheet[sheet_id].is_empty(),
             "expected full-column ranges to skip column-slice cache allocation"
@@ -21175,8 +21720,12 @@ mod tests {
             addr: b1,
         };
         let tasks = vec![(key_b1, cell_b1.clone())];
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
         assert!(
             !column_cache
                 .by_sheet
@@ -21251,8 +21800,12 @@ mod tests {
             addr: c1,
         };
         let tasks = vec![(key_c1, cell_c1.clone())];
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
         assert!(
             !column_cache
                 .by_sheet
@@ -21338,8 +21891,12 @@ mod tests {
             addr: b2,
         };
         let tasks = vec![(key_b1, cell_b1.clone()), (key_b2, cell_b2.clone())];
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
 
         for sheet_name in ["Sheet1", "Sheet2", "Sheet3"] {
             let sheet_id = bytecode_engine.workbook.sheet_id(sheet_name).unwrap();
@@ -21432,7 +21989,8 @@ mod tests {
         // Ensure the full-column formulas are actually bytecode-compiled.
         let sheet1_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
         let formula_cells = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"];
-        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(formula_cells.len());
+        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+        assert!(tasks.try_reserve_exact(formula_cells.len()).is_ok());
         for cell in formula_cells {
             let addr = parse_a1(cell).unwrap();
             let compiled = bytecode_engine.workbook.sheets[sheet1_id]
@@ -21464,8 +22022,12 @@ mod tests {
             bytecode_engine.info.clone(),
             bytecode_engine.pivot_registry.clone(),
         );
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
 
         for sheet_name in ["Sheet1", "Sheet2", "Sheet3"] {
             let sheet_id = bytecode_engine.workbook.sheet_id(sheet_name).unwrap();
@@ -21631,8 +22193,12 @@ mod tests {
             bytecode_engine.info.clone(),
             bytecode_engine.pivot_registry.clone(),
         );
-        let column_cache =
-            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache = BytecodeColumnCache::build(
+            bytecode_engine.workbook.sheets.len(),
+            &snapshot,
+            &tasks,
+        )
+        .expect("column cache");
         assert!(
             !column_cache
                 .by_sheet
@@ -21759,7 +22325,8 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 3);
-        let mut default_order: Vec<&str> = Vec::with_capacity(report.len());
+        let mut default_order: Vec<&str> = Vec::new();
+        assert!(default_order.try_reserve_exact(report.len()).is_ok());
         for e in &report {
             default_order.push(e.sheet.as_str());
         }
@@ -21778,7 +22345,8 @@ mod tests {
 
         let reordered = engine.bytecode_compile_report(10);
         assert_eq!(reordered.len(), 3);
-        let mut reordered_order: Vec<&str> = Vec::with_capacity(reordered.len());
+        let mut reordered_order: Vec<&str> = Vec::new();
+        assert!(reordered_order.try_reserve_exact(reordered.len()).is_ok());
         for e in &reordered {
             reordered_order.push(e.sheet.as_str());
         }
@@ -22600,7 +23168,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
@@ -22639,7 +23208,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
@@ -22680,7 +23250,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
@@ -22727,7 +23298,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
@@ -22798,7 +23370,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         assert!(
             column_cache.by_sheet[sheet_id].is_empty(),
@@ -22861,7 +23434,8 @@ mod tests {
             engine.pivot_registry.clone(),
         );
         let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)])
+                .expect("column cache");
 
         assert!(column_cache.by_sheet[sheet_id].is_empty());
     }
@@ -22995,6 +23569,9 @@ mod tests {
             &snapshot,
             &[(key_b1, compiled)],
         );
+        let Some(column_cache) = column_cache else {
+            panic!("expected column cache build to succeed for full-sheet sparse scan");
+        };
         assert!(
             column_cache.by_sheet[sheet2_id].is_empty(),
             "expected full-sheet range to skip column-slice cache allocation"

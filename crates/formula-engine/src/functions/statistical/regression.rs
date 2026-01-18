@@ -70,6 +70,11 @@ fn householder_qr_least_squares(
     }
 
     // Householder QR in-place (row-major).
+    let mut v: Vec<f64> = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "regression allocation failed (householder_v={n})");
+        return Err(ErrorKind::Num);
+    }
     for j in 0..k {
         // x = a[j..n, j]
         let mut norm = 0.0f64;
@@ -84,7 +89,7 @@ fn householder_qr_least_squares(
         let x0 = a[j * k + j];
         let sign = if x0 >= 0.0 { 1.0 } else { -1.0 };
         // v = x; v0 += sign * norm
-        let mut v = Vec::with_capacity(n - j);
+        v.clear();
         for i in j..n {
             v.push(a[i * k + j]);
         }
@@ -123,7 +128,12 @@ fn householder_qr_least_squares(
     }
 
     // Extract R (upper triangular kxk)
-    let mut r = vec![0.0f64; checked_usize_mul(k, k)?];
+    let r_len = checked_usize_mul(k, k)?;
+    let mut r: Vec<f64> = Vec::new();
+    if r.try_reserve_exact(r_len).is_err() {
+        return Err(ErrorKind::Num);
+    }
+    r.resize(r_len, 0.0);
     for i in 0..k {
         for j in i..k {
             r[i * k + j] = a[i * k + j];
@@ -131,7 +141,11 @@ fn householder_qr_least_squares(
     }
 
     // Solve R * beta = Q^T b (stored in b[0..k])
-    let mut beta = vec![0.0f64; k];
+    let mut beta: Vec<f64> = Vec::new();
+    if beta.try_reserve_exact(k).is_err() {
+        return Err(ErrorKind::Num);
+    }
+    beta.resize(k, 0.0);
     for i_rev in 0..k {
         let i = k - 1 - i_rev;
         let mut rhs = b[i];
@@ -161,7 +175,12 @@ fn householder_qr_least_squares(
 
 fn invert_upper_triangular(r: &[f64], k: usize) -> Result<Vec<f64>, ErrorKind> {
     debug_assert_eq!(r.len(), k.saturating_mul(k));
-    let mut inv = vec![0.0f64; checked_usize_mul(k, k)?];
+    let inv_len = checked_usize_mul(k, k)?;
+    let mut inv: Vec<f64> = Vec::new();
+    if inv.try_reserve_exact(inv_len).is_err() {
+        return Err(ErrorKind::Num);
+    }
+    inv.resize(inv_len, 0.0);
 
     // Compute inverse of upper triangular matrix with back-substitution.
     for i_rev in 0..k {
@@ -182,10 +201,14 @@ fn invert_upper_triangular(r: &[f64], k: usize) -> Result<Vec<f64>, ErrorKind> {
     Ok(inv)
 }
 
-fn diag_xtx_inv_from_r_inv(r_inv: &[f64], k: usize) -> Vec<f64> {
+fn diag_xtx_inv_from_r_inv(r_inv: &[f64], k: usize) -> Result<Vec<f64>, ErrorKind> {
     debug_assert_eq!(r_inv.len(), k.saturating_mul(k));
     // (X^T X)^{-1} = R^{-1} * (R^{-1})^T, so diag is row-wise squared norms of R^{-1}.
-    let mut diag = vec![0.0f64; k];
+    let mut diag: Vec<f64> = Vec::new();
+    if diag.try_reserve_exact(k).is_err() {
+        return Err(ErrorKind::Num);
+    }
+    diag.resize(k, 0.0);
     for i in 0..k {
         let mut acc = 0.0f64;
         for j in i..k {
@@ -194,7 +217,7 @@ fn diag_xtx_inv_from_r_inv(r_inv: &[f64], k: usize) -> Vec<f64> {
         }
         diag[i] = acc;
     }
-    diag
+    Ok(diag)
 }
 
 pub fn linest(
@@ -234,10 +257,13 @@ pub fn linest(
         }
     }
 
-    let b = y.to_vec();
+    let mut b: Vec<f64> = Vec::new();
+    b.try_reserve_exact(n).map_err(|_| ErrorKind::Num)?;
+    b.extend_from_slice(y);
     let fit = householder_qr_least_squares(a, b, n, k)?;
 
-    let mut slopes = Vec::with_capacity(p);
+    let mut slopes: Vec<f64> = Vec::new();
+    slopes.try_reserve_exact(p).map_err(|_| ErrorKind::Num)?;
     slopes.extend_from_slice(&fit.beta[..p]);
     let intercept = if include_intercept { fit.beta[p] } else { 0.0 };
 
@@ -285,9 +311,10 @@ pub fn linest(
             }
 
             let r_inv = invert_upper_triangular(&fit.r, k)?;
-            let diag = diag_xtx_inv_from_r_inv(&r_inv, k);
+            let diag = diag_xtx_inv_from_r_inv(&r_inv, k)?;
 
-            let mut ses = Vec::with_capacity(p);
+            let mut ses: Vec<f64> = Vec::new();
+            ses.try_reserve_exact(p).map_err(|_| ErrorKind::Num)?;
             for i in 0..p {
                 let se = (diag[i] * mse).sqrt();
                 if !se.is_finite() {
@@ -365,7 +392,11 @@ pub fn logest(
     }
 
     // Transform y via ln(y). LOGEST/GROWTH require y > 0.
-    let mut y_log = Vec::with_capacity(n);
+    let mut y_log: Vec<f64> = Vec::new();
+    if y_log.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "regression allocation failed (y_log={n})");
+        return Err(ErrorKind::Num);
+    }
     for &yi in y {
         if !(yi > 0.0) {
             return Err(ErrorKind::Num);
@@ -379,7 +410,11 @@ pub fn logest(
 
     let lin = linest(&y_log, x, n, p, include_intercept, include_stats)?;
 
-    let mut bases = Vec::with_capacity(p);
+    let mut bases: Vec<f64> = Vec::new();
+    if bases.try_reserve_exact(p).is_err() {
+        debug_assert!(false, "regression allocation failed (bases={p})");
+        return Err(ErrorKind::Num);
+    }
     for &a in &lin.slopes {
         let m = a.exp();
         if !m.is_finite() {
@@ -401,7 +436,11 @@ pub fn logest(
     let base_standard_errors = if include_stats {
         match &lin.slope_standard_errors {
             Some(ses) => {
-                let mut out = Vec::with_capacity(p);
+                let mut out: Vec<f64> = Vec::new();
+                if out.try_reserve_exact(p).is_err() {
+                    debug_assert!(false, "regression allocation failed (base_ses={p})");
+                    return Err(ErrorKind::Num);
+                }
                 for (m, se_a) in bases.iter().zip(ses.iter()) {
                     let se_m = m * se_a;
                     if !se_m.is_finite() {

@@ -70,9 +70,9 @@ fn intersect_resolved_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<Resol
     })
 }
 
-fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> Vec<ResolvedRange> {
+fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> SmallVec<[ResolvedRange; 4]> {
     let Some(i) = intersect_resolved_ranges(a, b) else {
-        return vec![a];
+        return smallvec::smallvec![a];
     };
 
     // Full coverage: subtraction yields an empty set.
@@ -81,10 +81,10 @@ fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> Vec<ResolvedRa
         && i.col_start == a.col_start
         && i.col_end == a.col_end
     {
-        return Vec::new();
+        return SmallVec::new();
     }
 
-    let mut out = Vec::new();
+    let mut out: SmallVec<[ResolvedRange; 4]> = SmallVec::new();
 
     // Emit disjoint pieces in row-major order (top -> middle left/right -> bottom).
     if a.row_start < i.row_start {
@@ -139,8 +139,20 @@ fn expand_external_spans_in_multirange(
     }
 
     let mut orders: HashMap<Arc<str>, Vec<String>> = HashMap::new();
+    if orders.try_reserve(ranges.areas.len()).is_err() {
+        debug_assert!(false, "allocation failed (external span orders)");
+        return Err(ErrorKind::Num);
+    }
     let mut spans: HashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<Arc<str>>> = HashMap::new();
-    let mut expanded: Vec<SheetRangeRef> = Vec::with_capacity(ranges.areas.len());
+    if spans.try_reserve(ranges.areas.len()).is_err() {
+        debug_assert!(false, "allocation failed (external span cache)");
+        return Err(ErrorKind::Num);
+    }
+    let mut expanded: Vec<SheetRangeRef> = Vec::new();
+    if expanded.try_reserve(ranges.areas.len()).is_err() {
+        debug_assert!(false, "allocation failed (external span expanded ranges)");
+        return Err(ErrorKind::Num);
+    }
 
     for area in ranges.areas.iter() {
         match &area.sheet {
@@ -170,19 +182,119 @@ fn expand_external_spans_in_multirange(
                             order,
                         )
                         .ok_or(ErrorKind::Ref)?;
-                        entry.insert(keys.into_iter().map(Arc::<str>::from).collect())
+                        let mut key_arcs: Vec<Arc<str>> = Vec::new();
+                        if key_arcs.try_reserve_exact(keys.len()).is_err() {
+                            debug_assert!(false, "allocation failed (external span keys)");
+                            return Err(ErrorKind::Num);
+                        }
+                        for key in keys {
+                            key_arcs.push(Arc::<str>::from(key));
+                        }
+                        entry.insert(key_arcs)
                     }
                 };
 
-                expanded.extend(keys.iter().map(|key| {
-                    SheetRangeRef::new(SheetId::External(key.clone()), area.range)
-                }));
+                if expanded.try_reserve(keys.len()).is_err() {
+                    debug_assert!(false, "allocation failed (external span expanded reserve)");
+                    return Err(ErrorKind::Num);
+                }
+                for key in keys.iter() {
+                    expanded.push(SheetRangeRef::new(
+                        SheetId::External(Arc::clone(key)),
+                        area.range,
+                    ));
+                }
             }
             SheetId::Local(_) | SheetId::External(_) => expanded.push(area.clone()),
         }
     }
 
     Ok(MultiRangeRef::new(expanded.into()))
+}
+
+fn sheet_name_casefold_cow(name: &str) -> Cow<'_, str> {
+    if name.is_ascii() {
+        if name.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+            let mut out = String::new();
+            if out.try_reserve_exact(name.len()).is_err() {
+                debug_assert!(false, "allocation failed (sheet name ascii casefold)");
+                return Cow::Borrowed(name);
+            }
+            for &b in name.as_bytes() {
+                out.push((b as char).to_ascii_uppercase());
+            }
+            Cow::Owned(out)
+        } else {
+            Cow::Borrowed(name)
+        }
+    } else {
+        Cow::Owned(formula_model::sheet_name_casefold(name))
+    }
+}
+
+fn external_sheet_tab_index(
+    grid: &dyn Grid,
+    indices_by_workbook: &mut HashMap<String, HashMap<String, usize>>,
+    workbook: &str,
+    sheet: &str,
+) -> Option<usize> {
+    if !indices_by_workbook.contains_key(workbook) {
+        let order = grid.external_sheet_order(workbook)?;
+        let mut indices: HashMap<String, usize> = HashMap::new();
+        if indices.try_reserve(order.len()).is_err() {
+            debug_assert!(false, "allocation failed (external sheet tab indices)");
+            return None;
+        }
+        for (idx, name) in order.iter().enumerate() {
+            indices.insert(formula_model::sheet_name_casefold(name), idx);
+        }
+        if indices_by_workbook.try_reserve(1).is_err() {
+            debug_assert!(false, "allocation failed (external sheet workbook indices)");
+            return None;
+        }
+        indices_by_workbook.insert(workbook.to_string(), indices);
+    }
+    let indices = indices_by_workbook.get(workbook)?;
+    let key = sheet_name_casefold_cow(sheet);
+    indices.get(key.as_ref()).copied()
+}
+
+fn cmp_sheet_ids_in_tab_order_cached(
+    grid: &dyn Grid,
+    indices_by_workbook: &mut HashMap<String, HashMap<String, usize>>,
+    a: &SheetId,
+    b: &SheetId,
+) -> Ordering {
+    if matches!(a, SheetId::ExternalSpan { .. }) || matches!(b, SheetId::ExternalSpan { .. }) {
+        return cmp_sheet_ids_in_tab_order(grid, a, b);
+    }
+
+    match (a, b) {
+        (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+            let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+            let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+            a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+        }
+        (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+        (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+        (SheetId::External(a_key), SheetId::External(b_key)) => match (
+            split_external_sheet_key_parts(a_key),
+            split_external_sheet_key_parts(b_key),
+        ) {
+            (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => match (
+                external_sheet_tab_index(grid, indices_by_workbook, a_wb, a_sheet),
+                external_sheet_tab_index(grid, indices_by_workbook, b_wb, b_sheet),
+            ) {
+                (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key)),
+                _ => a_key.cmp(b_key),
+            },
+            _ => a_key.cmp(b_key),
+        },
+        (SheetId::ExternalSpan { .. }, _) | (_, SheetId::ExternalSpan { .. }) => {
+            debug_assert!(false, "external sheet spans should have been handled above");
+            cmp_sheet_ids_in_tab_order(grid, a, b)
+        }
+    }
 }
 
 fn cmp_sheet_ids_in_tab_order(grid: &dyn Grid, a: &SheetId, b: &SheetId) -> Ordering {
@@ -271,20 +383,25 @@ fn multirange_unique_areas(
     let r = expand_external_spans_in_multirange(r, grid)?;
     let mut out = Vec::new();
     let mut seen_by_sheet: HashMap<SheetId, Vec<ResolvedRange>> = HashMap::new();
+    let mut external_sheet_indices: HashMap<String, HashMap<String, usize>> = HashMap::new();
 
     // Match `Evaluator::eval_arg`: ensure a stable ordering for deterministic behavior (and to
     // align error precedence with the AST backend).
-    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = r
-        .areas
-        .iter()
-        .cloned()
-        .map(|area| {
-            let resolved = area.range.resolve(base);
-            (area, resolved)
-        })
-        .collect();
+    let mut areas: Vec<(&SheetRangeRef, ResolvedRange)> = Vec::new();
+    if areas.try_reserve_exact(r.areas.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (multirange_unique_areas sort buffer, areas={})",
+            r.areas.len()
+        );
+        return Err(ErrorKind::Num);
+    }
+    for area in r.areas.iter() {
+        let resolved = area.range.resolve(base);
+        areas.push((area, resolved));
+    }
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-        cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
+        cmp_sheet_ids_in_tab_order_cached(grid, &mut external_sheet_indices, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
             .then_with(|| a_range.col_start.cmp(&b_range.col_start))
             .then_with(|| a_range.row_end.cmp(&b_range.row_end))
@@ -297,12 +414,14 @@ fn multirange_unique_areas(
         let seen = seen_by_sheet.entry(sheet.clone()).or_default();
 
         let mut pieces = vec![resolved];
+        let mut next: Vec<ResolvedRange> = Vec::new();
         for prev in seen.iter().copied() {
-            let mut next = Vec::new();
-            for piece in pieces {
+            next.clear();
+            next.reserve(pieces.len().saturating_mul(4));
+            for piece in pieces.drain(..) {
                 next.extend(subtract_resolved_range(piece, prev));
             }
-            pieces = next;
+            std::mem::swap(&mut pieces, &mut next);
             if pieces.is_empty() {
                 break;
             }
@@ -884,7 +1003,11 @@ fn eval_ast_inner(
             }
 
             // Evaluate arguments first (AST evaluation).
-            let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
+            let mut evaluated: SmallVec<[Value; 8]> = SmallVec::new();
+            if evaluated.try_reserve(args.len()).is_err() {
+                debug_assert!(false, "allocation failed (eval_ast args, count={})", args.len());
+                return Value::Error(ErrorKind::Num);
+            }
             for (arg_idx, arg) in args.iter().enumerate() {
                 // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
                 // syntactically omitted argument from a blank cell value.
@@ -1772,7 +1895,19 @@ pub fn apply_binary(
 fn value_into_reference_areas(value: Value, sheet_id: usize) -> Result<Vec<SheetRangeRef>, Value> {
     match value {
         Value::Range(r) => Ok(vec![SheetRangeRef::new(SheetId::Local(sheet_id), r)]),
-        Value::MultiRange(r) => Ok(r.areas.iter().cloned().collect()),
+        Value::MultiRange(r) => {
+            let mut out: Vec<SheetRangeRef> = Vec::new();
+            if out.try_reserve_exact(r.areas.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (reference areas, areas={})",
+                    r.areas.len()
+                );
+                return Err(Value::Error(ErrorKind::Num));
+            }
+            out.extend(r.areas.iter().cloned());
+            Ok(out)
+        }
         Value::Error(e) => Err(Value::Error(e)),
         _ => Err(Value::Error(ErrorKind::Value)),
     }
@@ -2163,7 +2298,10 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     match base_val {
         Value::Error(e) => Value::Error(e),
         Value::Array(arr) => {
-            let mut out = Vec::with_capacity(arr.values.len());
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(arr.values.len()).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
             for elem in arr.iter() {
                 out.push(fieldaccess_scalar(elem, field_key));
             }
@@ -4269,15 +4407,19 @@ fn and_multi_range(
     all_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
-    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = range
-        .areas
-        .iter()
-        .cloned()
-        .map(|area| {
-            let resolved = area.range.resolve(base);
-            (area, resolved)
-        })
-        .collect();
+    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = Vec::new();
+    if areas.try_reserve_exact(range.areas.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (and_multi_range sort buffer, areas={})",
+            range.areas.len()
+        );
+        return Some(ErrorKind::Num);
+    }
+    for area in range.areas.iter().cloned() {
+        let resolved = area.range.resolve(base);
+        areas.push((area, resolved));
+    }
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
         cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
@@ -4396,15 +4538,19 @@ fn or_multi_range(
     any_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
-    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = range
-        .areas
-        .iter()
-        .cloned()
-        .map(|area| {
-            let resolved = area.range.resolve(base);
-            (area, resolved)
-        })
-        .collect();
+    let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = Vec::new();
+    if areas.try_reserve_exact(range.areas.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (or_multi_range sort buffer, areas={})",
+            range.areas.len()
+        );
+        return Some(ErrorKind::Num);
+    }
+    for area in range.areas.iter().cloned() {
+        let resolved = area.range.resolve(base);
+        areas.push((area, resolved));
+    }
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
         cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
@@ -5779,12 +5925,15 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let mut out = String::with_capacity(
-        left_str
-            .as_ref()
-            .len()
-            .saturating_add(right_str.as_ref().len()),
-    );
+    let cap = left_str
+        .as_ref()
+        .len()
+        .saturating_add(right_str.as_ref().len());
+    let mut out = String::new();
+    if out.try_reserve_exact(cap).is_err() {
+        debug_assert!(false, "allocation failed (concat_binary bytes={cap})");
+        return Value::Error(ErrorKind::Num);
+    }
     out.push_str(left_str.as_ref());
     out.push_str(right_str.as_ref());
     Value::Text(out.into())
@@ -5831,7 +5980,11 @@ fn fn_concat_op(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     // Dereference any range arguments so `A1:A2&"c"` produces a spilled array.
     // Keep single-cell ranges scalar (deref returns the cell value directly).
-    let mut deref_args = Vec::with_capacity(args.len());
+    let mut deref_args: Vec<Value> = Vec::new();
+    if deref_args.try_reserve_exact(args.len()).is_err() {
+        debug_assert!(false, "allocation failed (concat deref args, count={})", args.len());
+        return Value::Error(ErrorKind::Num);
+    }
     let mut saw_array = false;
     for arg in args {
         let v = deref_value_dynamic(arg.clone(), grid, base);
@@ -5907,15 +6060,19 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
 
                 // Match `Evaluator::eval_arg`: ensure stable ordering for deterministic behavior.
-                let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = r
-                    .areas
-                    .iter()
-                    .cloned()
-                    .map(|area| {
-                        let resolved = area.range.resolve(base);
-                        (area, resolved)
-                    })
-                    .collect();
+                let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = Vec::new();
+                if areas.try_reserve_exact(r.areas.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (concat multirange sort buffer, areas={})",
+                        r.areas.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
+                for area in r.areas.iter().cloned() {
+                    let resolved = area.range.resolve(base);
+                    areas.push((area, resolved));
+                }
                 areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
                     cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
                         .then_with(|| a_range.row_start.cmp(&b_range.row_start))
@@ -7105,9 +7262,17 @@ fn fn_sumifs(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err()
+        || crits.try_reserve_exact(crit_count).is_err()
+        || numeric_crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (sumifs criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range_ref = match &pair[0] {
@@ -7235,7 +7400,15 @@ fn fn_sumifs(
                     slices_ok = false;
                     break;
                 };
-                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::new();
+                if crit_slices.try_reserve(crits.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (sumifs numeric slices, crits={})",
+                        crits.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
                     let Some(slice) =
@@ -7363,8 +7536,13 @@ fn sumifs_with_array_ranges(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err() || crits.try_reserve_exact(crit_count).is_err() {
+        debug_assert!(false, "allocation failed (sumifs array criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range = match range2d_from_value(&pair[0], grid, base) {
@@ -7445,9 +7623,17 @@ fn fn_countifs(
         return countifs_with_array_ranges(args, grid, base, locale);
     }
 
-    let mut ranges: Vec<ResolvedRange> = Vec::with_capacity(args.len() / 2);
-    let mut criteria: Vec<EngineCriteria> = Vec::with_capacity(args.len() / 2);
-    let mut numeric: Vec<NumericCriteria> = Vec::with_capacity(args.len() / 2);
+    let crit_count = args.len() / 2;
+    let mut ranges: Vec<ResolvedRange> = Vec::new();
+    let mut criteria: Vec<EngineCriteria> = Vec::new();
+    let mut numeric: Vec<NumericCriteria> = Vec::new();
+    if ranges.try_reserve_exact(crit_count).is_err()
+        || criteria.try_reserve_exact(crit_count).is_err()
+        || numeric.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (countifs criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args.chunks_exact(2) {
         let range_ref = match &pair[0] {
@@ -7554,7 +7740,15 @@ fn fn_countifs(
     let mut count = 0usize;
     for col_off in 0..cols {
         if all_numeric {
-            let mut slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(ranges.len());
+            let mut slices: SmallVec<[&[f64]; 4]> = SmallVec::new();
+            if slices.try_reserve(ranges.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (countifs numeric slices, ranges={})",
+                    ranges.len()
+                );
+                return Value::Error(ErrorKind::Num);
+            }
             for range in &ranges {
                 let col = range.col_start + col_off;
                 let Some(slice) =
@@ -7645,8 +7839,14 @@ fn countifs_with_array_ranges(
         Array(&'a ArrayValue),
     }
 
-    let mut ranges: Vec<CriteriaRange<'_>> = Vec::with_capacity(args.len() / 2);
-    let mut criteria: Vec<EngineCriteria> = Vec::with_capacity(args.len() / 2);
+    let crit_count = args.len() / 2;
+    let mut ranges: Vec<CriteriaRange<'_>> = Vec::new();
+    let mut criteria: Vec<EngineCriteria> = Vec::new();
+    if ranges.try_reserve_exact(crit_count).is_err() || criteria.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (countifs array criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
     let mut shape: Option<(usize, usize)> = None;
 
     for pair in args.chunks_exact(2) {
@@ -8107,9 +8307,17 @@ fn fn_averageifs(
         return Value::Error(ErrorKind::Div0);
     }
 
-    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err()
+        || crits.try_reserve_exact(crit_count).is_err()
+        || numeric_crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (averageifs criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range_ref = match &pair[0] {
@@ -8247,7 +8455,15 @@ fn fn_averageifs(
                     slices_ok = false;
                     break;
                 };
-                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::new();
+                if crit_slices.try_reserve(crits.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (averageifs numeric slices, crits={})",
+                        crits.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
                     let Some(slice) =
@@ -8390,8 +8606,14 @@ fn averageifs_with_array_ranges(
         return Value::Error(ErrorKind::Div0);
     }
 
-    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err() || crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (averageifs array criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range = match range2d_from_value(&pair[0], grid, base) {
@@ -8514,9 +8736,17 @@ fn fn_minifs(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err()
+        || crits.try_reserve_exact(crit_count).is_err()
+        || numeric_crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (minifs criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range_ref = match &pair[0] {
@@ -8620,7 +8850,15 @@ fn fn_minifs(
                 break;
             };
 
-            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::new();
+            if crit_slices.try_reserve(crits.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (minifs numeric slices, crits={})",
+                    crits.len()
+                );
+                return Value::Error(ErrorKind::Num);
+            }
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
                 let Some(slice) =
@@ -8739,8 +8977,14 @@ fn minifs_with_array_ranges(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err() || crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (minifs array criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range = match range2d_from_value(&pair[0], grid, base) {
@@ -8838,9 +9082,17 @@ fn fn_maxifs(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err()
+        || crits.try_reserve_exact(crit_count).is_err()
+        || numeric_crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (maxifs criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range_ref = match &pair[0] {
@@ -8944,7 +9196,15 @@ fn fn_maxifs(
                 break;
             };
 
-            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::new();
+            if crit_slices.try_reserve(crits.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (maxifs numeric slices, crits={})",
+                    crits.len()
+                );
+                return Value::Error(ErrorKind::Num);
+            }
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
                 let Some(slice) =
@@ -9063,8 +9323,14 @@ fn maxifs_with_array_ranges(
         return Value::Number(0.0);
     }
 
-    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
-    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let crit_count = (args.len() - 1) / 2;
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::new();
+    let mut crits: Vec<EngineCriteria> = Vec::new();
+    if crit_ranges.try_reserve_exact(crit_count).is_err() || crits.try_reserve_exact(crit_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (maxifs array criteria, count={crit_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for pair in args[1..].chunks_exact(2) {
         let range = match range2d_from_value(&pair[0], grid, base) {
@@ -9161,7 +9427,11 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             let rows = rows_i32 as usize;
             let cols = cols_i32 as usize;
-            let mut col_slices = Vec::with_capacity(cols);
+            let mut col_slices: Vec<Option<&'a [f64]>> = Vec::new();
+            if col_slices.try_reserve_exact(cols).is_err() {
+                debug_assert!(false, "allocation failed (sumproduct col_slices, cols={cols})");
+                return Err(ErrorKind::Num);
+            }
             for col in range.col_start..=range.col_end {
                 col_slices.push(grid.column_slice_strict_numeric(
                     col,
@@ -10171,7 +10441,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             col: return_range.col_start,
                         });
                     }
-                    let mut values = Vec::with_capacity(cols);
+                    let mut values: Vec<Value> = Vec::new();
+                    if values.try_reserve_exact(cols).is_err() {
+                        debug_assert!(false, "allocation failed (xlookup row values, cols={cols})");
+                        return Value::Error(ErrorKind::Num);
+                    }
                     for col_offset in 0..cols {
                         values.push(grid.get_value(CellCoord {
                             row,
@@ -10189,7 +10463,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             .cloned()
                             .unwrap_or(Value::Empty);
                     }
-                    let mut values = Vec::with_capacity(cols);
+                    let mut values: Vec<Value> = Vec::new();
+                    if values.try_reserve_exact(cols).is_err() {
+                        debug_assert!(false, "allocation failed (xlookup row array values, cols={cols})");
+                        return Value::Error(ErrorKind::Num);
+                    }
                     let row_start = idx.saturating_mul(cols);
                     for col_offset in 0..cols {
                         values.push(
@@ -10218,7 +10496,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             col,
                         });
                     }
-                    let mut values = Vec::with_capacity(rows);
+                    let mut values: Vec<Value> = Vec::new();
+                    if values.try_reserve_exact(rows).is_err() {
+                        debug_assert!(false, "allocation failed (xlookup col values, rows={rows})");
+                        return Value::Error(ErrorKind::Num);
+                    }
                     for row_offset in 0..rows {
                         values.push(grid.get_value(CellCoord {
                             row: return_range.row_start + row_offset as i32,
@@ -10232,7 +10514,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     if rows == 1 {
                         return arr.values.get(idx).cloned().unwrap_or(Value::Empty);
                     }
-                    let mut values = Vec::with_capacity(rows);
+                    let mut values: Vec<Value> = Vec::new();
+                    if values.try_reserve_exact(rows).is_err() {
+                        debug_assert!(false, "allocation failed (xlookup col array values, rows={rows})");
+                        return Value::Error(ErrorKind::Num);
+                    }
                     for row_offset in 0..rows {
                         let raw_idx = row_offset.saturating_mul(arr.cols).saturating_add(idx);
                         values.push(arr.values.get(raw_idx).cloned().unwrap_or(Value::Empty));
@@ -12657,8 +12943,36 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
     // non-numeric values disqualify strict numeric slices, so error precedence only matters on
     // the fallback path below.
     let cols_usize = cols as usize;
-    let mut slice_a: Vec<Option<&[f64]>> = Vec::with_capacity(cols_usize);
-    let mut slice_b: Vec<Option<&[f64]>> = Vec::with_capacity(cols_usize);
+    let mut slice_a: Vec<Option<&[f64]>> = Vec::new();
+    let mut slice_b: Vec<Option<&[f64]>> = Vec::new();
+    if slice_a.try_reserve_exact(cols_usize).is_err() || slice_b.try_reserve_exact(cols_usize).is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (sumproduct strict slices, cols={cols_usize})"
+        );
+        // If we can't allocate slice buffers, fall back to per-cell reads. This preserves
+        // semantics; the strict-slice path is an optimization only.
+        let mut sum = 0.0;
+        for row_offset in 0..rows {
+            for col_offset in 0..cols {
+                let col_a = a.col_start + col_offset;
+                let col_b = b.col_start + col_offset;
+                let ra = CellCoord {
+                    row: a.row_start + row_offset,
+                    col: col_a,
+                };
+                let rb = CellCoord {
+                    row: b.row_start + row_offset,
+                    col: col_b,
+                };
+                let x = coerce_sumproduct_number(&grid.get_value(ra))?;
+                let y = coerce_sumproduct_number(&grid.get_value(rb))?;
+                sum += x * y;
+            }
+        }
+        return Ok(sum);
+    }
     for col_offset in 0..cols {
         let col_a = a.col_start + col_offset;
         let col_b = b.col_start + col_offset;
@@ -12748,7 +13062,11 @@ mod tests {
         }
 
         fn record_reference(&self, sheet: usize, start: CellCoord, end: CellCoord) {
-            self.trace.lock().unwrap().push((sheet, start, end));
+            let mut trace = match self.trace.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            trace.push((sheet, start, end));
         }
 
         fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
@@ -12785,7 +13103,10 @@ mod tests {
             &crate::LocaleConfig::en_us(),
         );
 
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![(
@@ -12810,7 +13131,10 @@ mod tests {
         let out = fn_concat(&[Value::Range(range)], &grid, base);
 
         assert_eq!(out, Value::Text(Arc::from("ab")));
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![(
@@ -12848,7 +13172,10 @@ mod tests {
         );
 
         assert_eq!(out, Value::Number(10.0));
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![
@@ -12877,7 +13204,10 @@ mod tests {
         let base = CellCoord::new(0, 0);
         let _ = fn_isblank(&[Value::Range(range)], &grid, base);
 
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![(
@@ -12901,7 +13231,10 @@ mod tests {
         let base = CellCoord::new(0, 0);
         let _ = fn_isblank(&[Value::MultiRange(mr)], &grid, base);
 
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![(
@@ -12925,7 +13258,10 @@ mod tests {
         let out = fn_type(&[Value::Range(range)], &grid, base);
         assert_eq!(out, Value::Number(1.0));
 
-        let trace = grid.trace.lock().unwrap().clone();
+        let trace = match grid.trace.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         assert_eq!(
             trace,
             vec![(
@@ -13013,7 +13349,9 @@ mod tests {
         // Construct a range whose resolved cell count is just over the engine's materialization
         // limit and ensure the bytecode runtime returns #SPILL! without allocating or visiting
         // individual cells.
-        let end_row = i32::try_from(MAX_MATERIALIZED_ARRAY_CELLS).expect("limit fits in i32");
+        // `MAX_MATERIALIZED_ARRAY_CELLS` is intentionally small (millions), well within `i32`.
+        debug_assert!(MAX_MATERIALIZED_ARRAY_CELLS <= i32::MAX as usize);
+        let end_row = MAX_MATERIALIZED_ARRAY_CELLS as i32;
         let range = RangeRef::new(Ref::new(0, 0, true, true), Ref::new(end_row, 0, true, true));
 
         let grid = PanicGetGrid {
@@ -13569,7 +13907,12 @@ mod tests {
         let grid = ColumnarGrid::new(1, 1);
         let base = CellCoord { row: 0, col: 0 };
 
-        let mut values = vec![Value::Number(f64::NAN); SIMD_ARRAY_MIN_LEN + 4];
+        let mut values = Vec::new();
+        let len = SIMD_ARRAY_MIN_LEN + 4;
+        if values.try_reserve_exact(len).is_err() {
+            panic!("allocation failed (minmax nan values, len={len})");
+        }
+        values.resize(len, Value::Number(f64::NAN));
         // Mix in some ignored values to ensure they don't affect the result.
         values[0] = Value::Text(Arc::from("x"));
         values[1] = Value::Bool(true);
@@ -13585,7 +13928,12 @@ mod tests {
 
     #[test]
     fn countif_array_numeric_criteria_counts_nan_for_not_equal() {
-        let mut values = vec![Value::Text(Arc::from("x")); SIMD_ARRAY_MIN_LEN + 5];
+        let mut values = Vec::new();
+        let len = SIMD_ARRAY_MIN_LEN + 5;
+        if values.try_reserve_exact(len).is_err() {
+            panic!("allocation failed (countif nan values, len={len})");
+        }
+        values.resize(len, Value::Text(Arc::from("x")));
         values[0] = Value::Number(f64::NAN);
         values[1] = Value::Number(1.0);
         values[2] = Value::Empty; // coerces to 0.0
@@ -13610,9 +13958,14 @@ mod tests {
         let locale = crate::LocaleConfig::en_us();
         let len = SIMD_ARRAY_MIN_LEN + 17;
 
-        let mut crit_values = Vec::with_capacity(len);
-        let mut sum_values = Vec::with_capacity(len);
-        let mut avg_values = Vec::with_capacity(len);
+        let mut crit_values: Vec<Value> = Vec::new();
+        let mut sum_values: Vec<Value> = Vec::new();
+        let mut avg_values: Vec<Value> = Vec::new();
+        assert!(
+            crit_values.try_reserve_exact(len).is_ok()
+                && sum_values.try_reserve_exact(len).is_ok()
+                && avg_values.try_reserve_exact(len).is_ok()
+        );
         for i in 0..len {
             crit_values.push(Value::Number(i as f64));
             // Mix in some ignored values in sum/avg ranges.
@@ -13673,9 +14026,14 @@ mod tests {
         let locale = crate::LocaleConfig::en_us();
         let len = SIMD_ARRAY_MIN_LEN + 8;
 
-        let mut crit_values = Vec::with_capacity(len);
-        let mut sum_values = Vec::with_capacity(len);
-        let mut avg_values = Vec::with_capacity(len);
+        let mut crit_values: Vec<Value> = Vec::new();
+        let mut sum_values: Vec<Value> = Vec::new();
+        let mut avg_values: Vec<Value> = Vec::new();
+        assert!(
+            crit_values.try_reserve_exact(len).is_ok()
+                && sum_values.try_reserve_exact(len).is_ok()
+                && avg_values.try_reserve_exact(len).is_ok()
+        );
         for i in 0..len {
             crit_values.push(Value::Number(i as f64));
             sum_values.push(Value::Number(1.0));
@@ -13723,8 +14081,9 @@ mod tests {
         let locale = crate::LocaleConfig::en_us();
         let len = SIMD_ARRAY_MIN_LEN + 9;
 
-        let mut crit_values = Vec::with_capacity(len);
-        let mut sum_values = Vec::with_capacity(len);
+        let mut crit_values: Vec<Value> = Vec::new();
+        let mut sum_values: Vec<Value> = Vec::new();
+        assert!(crit_values.try_reserve_exact(len).is_ok() && sum_values.try_reserve_exact(len).is_ok());
         for i in 0..len {
             crit_values.push(Value::Number(i as f64));
             sum_values.push(Value::Number(1.0));

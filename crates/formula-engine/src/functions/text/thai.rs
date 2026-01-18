@@ -67,16 +67,23 @@ pub fn bahttext(number: f64) -> ExcelResult<String> {
 /// THAIDIGIT(text)
 ///
 /// Replace ASCII digits 0-9 with Thai digits ๐-๙.
-pub fn thai_digit(text: &str) -> String {
-    text.chars()
-        .map(|ch| match ch {
+pub fn thai_digit(text: &str) -> ExcelResult<String> {
+    let bytes = text.len().checked_mul(4).ok_or(ExcelError::Num)?;
+    let mut out = String::new();
+    if out.try_reserve_exact(bytes).is_err() {
+        debug_assert!(false, "allocation failed (thai_digit, len={})", text.len());
+        return Err(ExcelError::Num);
+    }
+    for ch in text.chars() {
+        out.push(match ch {
             '0'..='9' => {
                 let idx = (ch as u8 - b'0') as usize;
                 THAI_DIGITS[idx]
             }
-            _ => ch,
-        })
-        .collect()
+            other => other,
+        });
+    }
+    Ok(out)
 }
 
 /// ISTHAIDIGIT(text)
@@ -103,7 +110,7 @@ pub fn thainumstring(number: f64) -> ExcelResult<String> {
     if !number.is_finite() {
         return Err(ExcelError::Num);
     }
-    Ok(thai_digit(&format_number_fixed_trim(number)))
+    thai_digit(&format_number_fixed_trim(number))
 }
 
 /// THAINUMSOUND(number)

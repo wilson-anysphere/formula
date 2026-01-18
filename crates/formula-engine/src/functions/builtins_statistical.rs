@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::array_lift;
 use crate::functions::statistical::{RankMethod, RankOrder};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
@@ -385,7 +385,14 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
         }
 
         // Convert to half-open row slabs: [start, end+1)
-        let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
+        let mut row_bounds: Vec<u32> = Vec::new();
+        if row_bounds
+            .try_reserve_exact(rects.len().saturating_mul(2))
+            .is_err()
+        {
+            debug_assert!(false, "allocation failed (reference_union_size row_bounds)");
+            return u64::MAX;
+        }
         for r in rects {
             row_bounds.push(r.start.row);
             row_bounds.push(r.end.row.saturating_add(1));
@@ -402,6 +409,10 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
             }
 
             let mut intervals: Vec<(u32, u32)> = Vec::new();
+            if intervals.try_reserve(rects.len()).is_err() {
+                debug_assert!(false, "allocation failed (reference_union_size intervals)");
+                return u64::MAX;
+            }
             for r in rects {
                 let r_end = r.end.row.saturating_add(1);
                 if r.start.row <= y0 && r_end >= y1 {
@@ -444,6 +455,10 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
         crate::functions::SheetId,
         Vec<crate::functions::Reference>,
     > = std::collections::HashMap::new();
+    if by_sheet.try_reserve(ranges.len()).is_err() {
+        debug_assert!(false, "allocation failed (reference_union_size by_sheet)");
+        return u64::MAX;
+    }
     for r in ranges {
         by_sheet
             .entry(r.sheet_id.clone())
@@ -828,7 +843,19 @@ fn arg_to_numeric_sequence(
             Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)]),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.values.len());
+                let total = arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "numeric sequence exceeds materialization limit (cells={total})"
+                    );
+                    return Err(ErrorKind::Spill);
+                }
+                let mut out: Vec<Option<f64>> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "numeric sequence allocation failed (cells={total})");
+                    return Err(ErrorKind::Num);
+                }
                 for v in arr.iter() {
                     match v {
                         Value::Error(e) => return Err(*e),
@@ -857,7 +884,18 @@ fn arg_to_numeric_sequence(
             ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut out = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Err(ErrorKind::Spill),
+            };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut out: Vec<Option<f64>> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "numeric sequence allocation failed (cells={total})");
+                return Err(ErrorKind::Num);
+            }
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 match v {
@@ -885,7 +923,17 @@ fn arg_to_numeric_sequence(
                 ctx.record_reference(&r);
                 let rows = (r.end.row - r.start.row + 1) as usize;
                 let cols = (r.end.col - r.start.col + 1) as usize;
-                out.reserve(rows.saturating_mul(cols));
+                let reserve = match rows.checked_mul(cols) {
+                    Some(v) => v,
+                    None => return Err(ErrorKind::Spill),
+                };
+                if out.len().saturating_add(reserve) > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                if out.try_reserve(reserve).is_err() {
+                    debug_assert!(false, "numeric sequence allocation failed (reserve={reserve})");
+                    return Err(ErrorKind::Num);
+                }
                 for addr in r.iter_cells() {
                     if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;
@@ -933,6 +981,115 @@ fn collect_numeric_pairs(
         ys.push(y);
     }
     Ok((xs, ys))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::date::ExcelDateSystem;
+    use crate::functions::SheetId;
+    use crate::eval::CellAddr;
+    use crate::value::Lambda;
+    use chrono::{LocalResult, TimeZone};
+    use std::collections::HashMap;
+
+    struct PanicGetCellCtx;
+
+    impl FunctionContext for PanicGetCellCtx {
+        fn eval_arg(&self, _expr: &CompiledExpr) -> ArgValue {
+            ArgValue::Scalar(Value::Blank)
+        }
+
+        fn eval_scalar(&self, _expr: &CompiledExpr) -> Value {
+            Value::Blank
+        }
+
+        fn eval_formula(&self, _expr: &CompiledExpr) -> Value {
+            Value::Blank
+        }
+
+        fn eval_formula_with_bindings(
+            &self,
+            _expr: &CompiledExpr,
+            _bindings: &HashMap<String, Value>,
+        ) -> Value {
+            Value::Blank
+        }
+
+        fn capture_lexical_env(&self) -> HashMap<String, Value> {
+            HashMap::new()
+        }
+
+        fn apply_implicit_intersection(&self, _reference: &crate::functions::Reference) -> Value {
+            Value::Blank
+        }
+
+        fn get_cell_value(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Value {
+            panic!("unexpected get_cell_value call (materialization should have been guarded)");
+        }
+
+        fn iter_reference_cells<'a>(
+            &'a self,
+            _reference: &'a crate::functions::Reference,
+        ) -> Box<dyn Iterator<Item = CellAddr> + 'a> {
+            Box::new(std::iter::empty())
+        }
+
+        fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
+            match chrono::Utc.timestamp_opt(0, 0) {
+                LocalResult::Single(dt) => dt,
+                other => {
+                    debug_assert!(false, "expected epoch timestamp to be valid, got {other:?}");
+                    chrono::DateTime::<chrono::Utc>::MIN_UTC
+                }
+            }
+        }
+
+        fn date_system(&self) -> ExcelDateSystem {
+            ExcelDateSystem::EXCEL_1900
+        }
+
+        fn current_sheet_id(&self) -> usize {
+            0
+        }
+
+        fn current_cell_addr(&self) -> CellAddr {
+            CellAddr { row: 0, col: 0 }
+        }
+
+        fn push_local_scope(&self) {}
+
+        fn pop_local_scope(&self) {}
+
+        fn set_local(&self, _name: &str, _value: ArgValue) {}
+
+        fn make_lambda(&self, _params: Vec<String>, _body: CompiledExpr) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn eval_lambda(&self, _lambda: &Lambda, _args: Vec<ArgValue>) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn volatile_rand_u64(&self) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn arg_to_numeric_sequence_bails_out_before_materializing_oversize_reference() {
+        let r = crate::functions::Reference {
+            sheet_id: SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr {
+                row: MAX_MATERIALIZED_ARRAY_CELLS as u32,
+                col: 0,
+            },
+        };
+        let ctx = PanicGetCellCtx;
+        let err = arg_to_numeric_sequence(&ctx, ArgValue::Reference(r)).unwrap_err();
+        assert_eq!(err, ErrorKind::Spill);
+    }
 }
 
 inventory::submit! {
@@ -1280,7 +1437,18 @@ fn mode_mult_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let array_values: Vec<Value> = modes.into_iter().map(Value::Number).collect();
+    let mut array_values: Vec<Value> = Vec::new();
+    if array_values.try_reserve_exact(modes.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (MODE.MULT output, len={})",
+            modes.len()
+        );
+        return Value::Error(ErrorKind::Num);
+    }
+    for value in modes {
+        array_values.push(Value::Number(value));
+    }
     Value::Array(Array::new(array_values.len(), 1, array_values))
 }
 
@@ -2399,8 +2567,20 @@ fn prob_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     }
     let len = rows_x.saturating_mul(cols_x);
-    let mut xs = Vec::with_capacity(len);
-    let mut ps = Vec::with_capacity(len);
+    if len > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let mut xs: Vec<f64> = Vec::new();
+    if xs.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (PROB xs={len})");
+        return Value::Error(ErrorKind::Num);
+    }
+    let mut ps: Vec<f64> = Vec::new();
+    if ps.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (PROB ps={len})");
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows_x {
         for c in 0..cols_x {
             let x = x_range.get(ctx, r, c).coerce_to_number_with_ctx(ctx);
@@ -2641,8 +2821,20 @@ fn chisq_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     }
     let len = rows_a.saturating_mul(cols_a);
-    let mut actual_vals = Vec::with_capacity(len);
-    let mut expected_vals = Vec::with_capacity(len);
+    if len > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let mut actual_vals: Vec<f64> = Vec::new();
+    if actual_vals.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (CHISQ.TEST actual={len})");
+        return Value::Error(ErrorKind::Num);
+    }
+    let mut expected_vals: Vec<f64> = Vec::new();
+    if expected_vals.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (CHISQ.TEST expected={len})");
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows_a {
         for c in 0..cols_a {
             let a = match actual.get(ctx, r, c).coerce_to_number_with_ctx(ctx) {

@@ -149,7 +149,15 @@ pub fn permutationa(number: f64, number_chosen: f64) -> ExcelResult<f64> {
 
 /// MULTINOMIAL(number1, [number2], ...)
 pub fn multinomial(numbers: &[f64]) -> ExcelResult<f64> {
-    let mut parts: Vec<u64> = Vec::with_capacity(numbers.len());
+    let mut parts: Vec<u64> = Vec::new();
+    if parts.try_reserve_exact(numbers.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (multinomial parts, len={})",
+            numbers.len()
+        );
+        return Err(ExcelError::Num);
+    }
     let mut total: u64 = 0;
     for &n in numbers {
         let v = trunc_to_u64_nonnegative(n)?;

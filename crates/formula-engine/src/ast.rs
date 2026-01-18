@@ -212,7 +212,11 @@ impl LocaleConfig {
             decimal = None;
         }
 
-        let mut out = String::with_capacity(raw.len());
+        let mut out = String::new();
+        if out.try_reserve_exact(raw.len()).is_err() {
+            debug_assert!(false, "allocation failed (parse_number, len={})", raw.len());
+            return None;
+        }
         if let Some(sign) = sign {
             out.push(sign);
         }
@@ -375,7 +379,13 @@ impl Ast {
     /// Stable JSON serialization useful for debugging/tests.
     #[must_use]
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("Ast should be JSON-serializable")
+        match serde_json::to_string(self) {
+            Ok(s) => s,
+            Err(err) => {
+                debug_assert!(false, "Ast should be JSON-serializable: {err:?}");
+                "null".to_string()
+            }
+        }
     }
 }
 
@@ -424,19 +434,39 @@ impl Expr {
             Expr::Array(arr) => Expr::Array(arr.clone()),
             Expr::FunctionCall(call) => Expr::FunctionCall(FunctionCall {
                 name: call.name.clone(),
-                args: call
-                    .args
-                    .iter()
-                    .map(|e| e.normalize_relative(origin))
-                    .collect(),
+                args: {
+                    let mut args = Vec::new();
+                    if args.try_reserve_exact(call.args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (normalize_relative function args, len={})",
+                            call.args.len()
+                        );
+                        return Expr::Error("#NUM!".to_string());
+                    }
+                    for e in &call.args {
+                        args.push(e.normalize_relative(origin));
+                    }
+                    args
+                },
             }),
             Expr::Call(call) => Expr::Call(CallExpr {
                 callee: Box::new(call.callee.normalize_relative(origin)),
-                args: call
-                    .args
-                    .iter()
-                    .map(|e| e.normalize_relative(origin))
-                    .collect(),
+                args: {
+                    let mut args = Vec::new();
+                    if args.try_reserve_exact(call.args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (normalize_relative call args, len={})",
+                            call.args.len()
+                        );
+                        return Expr::Error("#NUM!".to_string());
+                    }
+                    for e in &call.args {
+                        args.push(e.normalize_relative(origin));
+                    }
+                    args
+                },
             }),
             Expr::Unary(u) => Expr::Unary(UnaryExpr {
                 op: u.op,

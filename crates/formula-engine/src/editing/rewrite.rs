@@ -410,18 +410,39 @@ where
         }
         Expr::FunctionCall(FunctionCall { name, args }) => {
             let mut changed = false;
-            let args: Vec<Expr> = args
-                .iter()
-                .map(|arg| {
-                    let (expr, c) = f(arg);
-                    changed |= c;
-                    expr
-                })
-                .collect();
+            let mut out_args: Option<Vec<Expr>> = None;
+            for (idx, arg) in args.iter().enumerate() {
+                let (rewritten, c) = f(arg);
+                if c {
+                    changed = true;
+                }
+                match out_args.as_mut() {
+                    Some(vec) => vec.push(rewritten),
+                    None if c => {
+                        let mut vec: Vec<Expr> = Vec::new();
+                        if vec.try_reserve_exact(args.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (rewrite function args, len={})",
+                                args.len()
+                            );
+                            return (Expr::Error(REF_ERROR.to_string()), true);
+                        }
+                        vec.extend(args[..idx].iter().cloned());
+                        vec.push(rewritten);
+                        out_args = Some(vec);
+                    }
+                    None => {}
+                }
+            }
 
             if !changed {
                 return (expr.clone(), false);
             }
+            let Some(args) = out_args else {
+                debug_assert!(false, "changed implies out_args is populated");
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            };
 
             (
                 Expr::FunctionCall(FunctionCall {
@@ -437,18 +458,52 @@ where
             let (callee, callee_changed) = f(callee);
             changed |= callee_changed;
 
-            let args: Vec<Expr> = args
-                .iter()
-                .map(|arg| {
-                    let (expr, c) = f(arg);
-                    changed |= c;
-                    expr
-                })
-                .collect();
+            let mut out_args: Option<Vec<Expr>> = None;
+            for (idx, arg) in args.iter().enumerate() {
+                let (rewritten, c) = f(arg);
+                if c {
+                    changed = true;
+                }
+                match out_args.as_mut() {
+                    Some(vec) => vec.push(rewritten),
+                    None if c => {
+                        let mut vec: Vec<Expr> = Vec::new();
+                        if vec.try_reserve_exact(args.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (rewrite call args, len={})",
+                                args.len()
+                            );
+                            return (Expr::Error(REF_ERROR.to_string()), true);
+                        }
+                        vec.extend(args[..idx].iter().cloned());
+                        vec.push(rewritten);
+                        out_args = Some(vec);
+                    }
+                    None => {}
+                }
+            }
 
             if !changed {
                 return (expr.clone(), false);
             }
+
+            let args = match out_args {
+                Some(args) => args,
+                None => {
+                    let mut vec: Vec<Expr> = Vec::new();
+                    if vec.try_reserve_exact(args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (rewrite call args, len={})",
+                            args.len()
+                        );
+                        return (Expr::Error(REF_ERROR.to_string()), true);
+                    }
+                    vec.extend(args.iter().cloned());
+                    vec
+                }
+            };
 
             (
                 Expr::Call(CallExpr {
@@ -507,23 +562,69 @@ where
         }
         Expr::Array(ArrayLiteral { rows }) => {
             let mut changed = false;
-            let rows: Vec<Vec<Expr>> = rows
-                .iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|el| {
-                            let (expr, c) = f(el);
-                            changed |= c;
-                            expr
-                        })
-                        .collect()
-                })
-                .collect();
+            let mut out_rows: Option<Vec<Vec<Expr>>> = None;
+            for (row_idx, row) in rows.iter().enumerate() {
+                let mut out_row: Option<Vec<Expr>> = None;
+                for (col_idx, el) in row.iter().enumerate() {
+                    let (rewritten, c) = f(el);
+                    if c {
+                        changed = true;
+                    }
+                    match out_row.as_mut() {
+                        Some(vec) => vec.push(rewritten),
+                        None if c => {
+                            let mut vec: Vec<Expr> = Vec::new();
+                            if vec.try_reserve_exact(row.len()).is_err() {
+                                debug_assert!(
+                                    false,
+                                    "allocation failed (rewrite array row, len={})",
+                                    row.len()
+                                );
+                                return (Expr::Error(REF_ERROR.to_string()), true);
+                            }
+                            vec.extend(row[..col_idx].iter().cloned());
+                            vec.push(rewritten);
+                            out_row = Some(vec);
+                        }
+                        None => {}
+                    }
+                }
+
+                let out = match out_rows.as_mut() {
+                    Some(vec) => vec,
+                    None => {
+                        let Some(out_row) = out_row.take() else {
+                            continue;
+                        };
+                        let mut vec: Vec<Vec<Expr>> = Vec::new();
+                        if vec.try_reserve_exact(rows.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (rewrite array rows, len={})",
+                                rows.len()
+                            );
+                            return (Expr::Error(REF_ERROR.to_string()), true);
+                        }
+                        vec.extend(rows[..row_idx].iter().cloned());
+                        vec.push(out_row);
+                        out_rows = Some(vec);
+                        continue;
+                    }
+                };
+
+                // Once any element changes, we must rebuild the entire literal; push either the
+                // rewritten row (when it had a change) or the original row.
+                out.push(out_row.unwrap_or_else(|| row.clone()));
+            }
 
             if !changed {
                 return (expr.clone(), false);
             }
 
+            let rows = out_rows.unwrap_or_else(|| {
+                debug_assert!(false, "changed implies out_rows is populated");
+                Vec::new()
+            });
             (Expr::Array(ArrayLiteral { rows }), true)
         }
         _ => (expr.clone(), false),
@@ -2062,11 +2163,33 @@ fn rewrite_cell_range_for_range_map(
         return Some((Expr::Error(REF_ERROR.to_string()), true));
     }
 
-    let exprs: Vec<Expr> = areas
-        .into_iter()
-        .map(|area| {
-            if area.start_row == area.end_row && area.start_col == area.end_col {
-                expr_ref(AstCellRef {
+    let mut exprs: Vec<Expr> = Vec::new();
+    if exprs.try_reserve_exact(areas.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (rewrite_range_ref exprs, len={})",
+            areas.len()
+        );
+        return Some((Expr::Error(REF_ERROR.to_string()), true));
+    }
+    for area in areas.into_iter() {
+        exprs.push(if area.start_row == area.end_row && area.start_col == area.end_col {
+            expr_ref(AstCellRef {
+                workbook: start.workbook.clone(),
+                sheet: start.sheet.clone(),
+                col: Coord::A1 {
+                    index: area.start_col,
+                    abs: start_col_abs,
+                },
+                row: Coord::A1 {
+                    index: area.start_row,
+                    abs: start_row_abs,
+                },
+            })
+        } else {
+            Expr::Binary(BinaryExpr {
+                op: BinaryOp::Range,
+                left: Box::new(expr_ref(AstCellRef {
                     workbook: start.workbook.clone(),
                     sheet: start.sheet.clone(),
                     col: Coord::A1 {
@@ -2077,61 +2200,46 @@ fn rewrite_cell_range_for_range_map(
                         index: area.start_row,
                         abs: start_row_abs,
                     },
-                })
-            } else {
-                Expr::Binary(BinaryExpr {
-                    op: BinaryOp::Range,
-                    left: Box::new(expr_ref(AstCellRef {
-                        workbook: start.workbook.clone(),
-                        sheet: start.sheet.clone(),
-                        col: Coord::A1 {
-                            index: area.start_col,
-                            abs: start_col_abs,
-                        },
-                        row: Coord::A1 {
-                            index: area.start_row,
-                            abs: start_row_abs,
-                        },
-                    })),
-                    right: Box::new(expr_ref(AstCellRef {
-                        workbook: end.workbook.clone(),
-                        sheet: end.sheet.clone(),
-                        col: Coord::A1 {
-                            index: area.end_col,
-                            abs: end_col_abs,
-                        },
-                        row: Coord::A1 {
-                            index: area.end_row,
-                            abs: end_row_abs,
-                        },
-                    })),
-                })
-            }
-        })
-        .collect();
+                })),
+                right: Box::new(expr_ref(AstCellRef {
+                    workbook: end.workbook.clone(),
+                    sheet: end.sheet.clone(),
+                    col: Coord::A1 {
+                        index: area.end_col,
+                        abs: end_col_abs,
+                    },
+                    row: Coord::A1 {
+                        index: area.end_row,
+                        abs: end_row_abs,
+                    },
+                })),
+            })
+        });
+    }
 
     let out = union_expr(exprs);
     let changed = out != *original;
     Some((out, changed))
 }
 
-fn union_expr(mut exprs: Vec<Expr>) -> Expr {
-    match exprs.len() {
-        0 => Expr::Error(REF_ERROR.to_string()),
-        1 => exprs.pop().expect("len == 1"),
-        _ => {
-            let mut iter = exprs.into_iter();
-            let mut out = iter.next().expect("len > 1");
-            for next in iter {
-                out = Expr::Binary(BinaryExpr {
-                    op: BinaryOp::Union,
-                    left: Box::new(out),
-                    right: Box::new(next),
-                });
-            }
-            out
-        }
+fn union_expr(exprs: Vec<Expr>) -> Expr {
+    if exprs.is_empty() {
+        return Expr::Error(REF_ERROR.to_string());
     }
+
+    let mut iter = exprs.into_iter();
+    let Some(mut out) = iter.next() else {
+        debug_assert!(false, "checked exprs.is_empty()");
+        return Expr::Error(REF_ERROR.to_string());
+    };
+    for next in iter {
+        out = Expr::Binary(BinaryExpr {
+            op: BinaryOp::Union,
+            left: Box::new(out),
+            right: Box::new(next),
+        });
+    }
+    out
 }
 
 fn expr_ref(r: AstCellRef) -> Expr {

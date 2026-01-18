@@ -1,10 +1,11 @@
 use crate::locale::ValueLocaleConfig;
 use crate::sort_filter::sort::{
     compute_header_rows_with_value_locale, compute_row_permutation_with_value_locale,
+    identity_permutation, SortError,
 };
 use crate::sort_filter::{
-    apply_autofilter_with_value_locale, AutoFilter, CellValue, FilterResult, RowPermutation,
-    SortSpec,
+    apply_autofilter_with_value_locale, AutoFilter, CellValue, FilterError, FilterResult,
+    RowPermutation, SortSpec,
 };
 use crate::{parse_formula, CellAddr, LocaleConfig, ParseOptions, SerializeOptions};
 use formula_model::{
@@ -15,7 +16,7 @@ pub fn sort_worksheet_range(
     sheet: &mut Worksheet,
     range: Range,
     spec: &SortSpec,
-) -> RowPermutation {
+) -> Result<RowPermutation, SortError> {
     sort_worksheet_range_with_value_locale(sheet, range, spec, ValueLocaleConfig::en_us())
 }
 
@@ -24,13 +25,10 @@ pub fn sort_worksheet_range_with_value_locale(
     range: Range,
     spec: &SortSpec,
     value_locale: ValueLocaleConfig,
-) -> RowPermutation {
+) -> Result<RowPermutation, SortError> {
     let row_count = range.height() as usize;
     if row_count <= 1 || spec.keys.is_empty() {
-        return RowPermutation {
-            new_to_old: (0..row_count).collect(),
-            old_to_new: (0..row_count).collect(),
-        };
+        return identity_permutation(row_count);
     }
 
     let start_row = range.start.row;
@@ -59,16 +57,16 @@ pub fn sort_worksheet_range_with_value_locale(
         &spec.keys,
         value_locale,
         |r, c| cell_at(sheet, r, c),
-    );
+    )?;
 
     // Nothing to permute (e.g. header-only range).
     if header_rows >= row_count {
-        return perm;
+        return Ok(perm);
     }
 
     let data_start_row = start_row + header_rows as u32;
     if data_start_row > range.end.row {
-        return perm;
+        return Ok(perm);
     }
 
     let data_range = Range::new(
@@ -77,7 +75,11 @@ pub fn sort_worksheet_range_with_value_locale(
     );
 
     let it = sheet.iter_cells_in_range(data_range);
-    let mut moved_cells = Vec::with_capacity(it.size_hint().0);
+    let mut moved_cells = Vec::new();
+    if moved_cells.try_reserve(it.size_hint().0).is_err() {
+        debug_assert!(false, "allocation failed (worksheet moved cells)");
+        return Err(SortError::AllocationFailure("worksheet moved cells"));
+    }
     for (cell_ref, cell) in it {
         moved_cells.push((cell_ref, cell.clone()));
     }
@@ -102,9 +104,9 @@ pub fn sort_worksheet_range_with_value_locale(
         sheet.set_cell(CellRef::new(new_row, cell_ref.col), cell);
     }
 
-    permute_row_properties(sheet, start_row, header_rows, range.end.row, &perm);
+    permute_row_properties(sheet, start_row, header_rows, range.end.row, &perm)?;
 
-    perm
+    Ok(perm)
 }
 
 pub fn apply_autofilter_to_outline(
@@ -112,7 +114,7 @@ pub fn apply_autofilter_to_outline(
     outline: &mut Outline,
     range: Range,
     filter: Option<&SheetAutoFilter>,
-) -> FilterResult {
+) -> Result<FilterResult, FilterError> {
     apply_autofilter_to_outline_with_value_locale(
         sheet,
         outline,
@@ -128,15 +130,15 @@ pub fn apply_autofilter_to_outline_with_value_locale(
     range: Range,
     filter: Option<&SheetAutoFilter>,
     value_locale: ValueLocaleConfig,
-) -> FilterResult {
+) -> Result<FilterResult, FilterError> {
     let row_count = range.height() as usize;
     let col_count = range.width() as usize;
 
     if row_count == 0 || col_count == 0 {
-        return FilterResult {
+        return Ok(FilterResult {
             visible_rows: Vec::new(),
             hidden_sheet_rows: Vec::new(),
-        };
+        });
     }
 
     // Always clear any existing filter-hidden flags for the data rows within the range.
@@ -154,17 +156,29 @@ pub fn apply_autofilter_to_outline_with_value_locale(
     }
 
     let Some(filter) = filter else {
-        return FilterResult {
-            visible_rows: vec![true; row_count],
+        let mut visible_rows: Vec<bool> = Vec::new();
+        if visible_rows.try_reserve_exact(row_count).is_err() {
+            debug_assert!(false, "allocation failed (worksheet visible rows={row_count})");
+            return Err(FilterError::AllocationFailure("worksheet visible rows"));
+        }
+        visible_rows.resize(row_count, true);
+        return Ok(FilterResult {
+            visible_rows,
             hidden_sheet_rows: Vec::new(),
-        };
+        });
     };
 
     let Ok(filter) = AutoFilter::try_from_model_with_value_locale(filter, value_locale) else {
-        return FilterResult {
-            visible_rows: vec![true; row_count],
+        let mut visible_rows: Vec<bool> = Vec::new();
+        if visible_rows.try_reserve_exact(row_count).is_err() {
+            debug_assert!(false, "allocation failed (worksheet visible rows={row_count})");
+            return Err(FilterError::AllocationFailure("worksheet visible rows"));
+        }
+        visible_rows.resize(row_count, true);
+        return Ok(FilterResult {
+            visible_rows,
             hidden_sheet_rows: Vec::new(),
-        };
+        });
     };
 
     let range_ref = crate::sort_filter::RangeRef {
@@ -174,10 +188,18 @@ pub fn apply_autofilter_to_outline_with_value_locale(
         end_col: range.end.col as usize,
     };
 
-    let mut rows = Vec::with_capacity(row_count);
+    let mut rows: Vec<Vec<CellValue>> = Vec::new();
+    if rows.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (worksheet rows={row_count})");
+        return Err(FilterError::AllocationFailure("worksheet filter rows"));
+    }
     for local_row in 0..row_count {
         let row_idx = range.start.row + local_row as u32;
-        let mut row = Vec::with_capacity(col_count);
+        let mut row: Vec<CellValue> = Vec::new();
+        if row.try_reserve_exact(col_count).is_err() {
+            debug_assert!(false, "allocation failed (worksheet row cols={col_count})");
+            return Err(FilterError::AllocationFailure("worksheet filter row"));
+        }
         for local_col in 0..col_count {
             let col_idx = range.start.col + local_col as u32;
             let value = sheet.value(CellRef::new(row_idx, col_idx));
@@ -186,10 +208,24 @@ pub fn apply_autofilter_to_outline_with_value_locale(
         rows.push(row);
     }
 
-    let range_data = crate::sort_filter::RangeData::new(range_ref, rows)
-        .expect("worksheet range should always produce rectangular RangeData");
+    let Ok(range_data) = crate::sort_filter::RangeData::new(range_ref, rows) else {
+        debug_assert!(
+            false,
+            "worksheet range should always produce rectangular RangeData"
+        );
+        let mut visible_rows: Vec<bool> = Vec::new();
+        if visible_rows.try_reserve_exact(row_count).is_err() {
+            debug_assert!(false, "allocation failed (worksheet visible rows={row_count})");
+            return Err(FilterError::AllocationFailure("worksheet visible rows"));
+        }
+        visible_rows.resize(row_count, true);
+        return Ok(FilterResult {
+            visible_rows,
+            hidden_sheet_rows: Vec::new(),
+        });
+    };
 
-    let result = apply_autofilter_with_value_locale(&range_data, &filter, value_locale);
+    let result = apply_autofilter_with_value_locale(&range_data, &filter, value_locale)?;
 
     for hidden_row_0based in &result.hidden_sheet_rows {
         let row_1based = u32::try_from(*hidden_row_0based)
@@ -198,7 +234,7 @@ pub fn apply_autofilter_to_outline_with_value_locale(
         outline.rows.set_filter_hidden(row_1based, true);
     }
 
-    result
+    Ok(result)
 }
 
 fn permute_row_properties(
@@ -207,13 +243,20 @@ fn permute_row_properties(
     header_rows: usize,
     end_row: u32,
     perm: &RowPermutation,
-) {
+) -> Result<(), SortError> {
     let data_start = start_row + header_rows as u32;
     if data_start > end_row {
-        return;
+        return Ok(());
     }
 
     let mut extracted: Vec<(u32, RowProperties)> = Vec::new();
+    if extracted
+        .try_reserve((end_row - data_start) as usize + 1)
+        .is_err()
+    {
+        debug_assert!(false, "allocation failed (worksheet row props)");
+        return Err(SortError::AllocationFailure("worksheet row props"));
+    }
     for row in data_start..=end_row {
         if let Some(props) = sheet.row_properties.remove(&row) {
             extracted.push((row, props));
@@ -226,6 +269,8 @@ fn permute_row_properties(
         let new_row = start_row + local_new as u32;
         sheet.row_properties.insert(new_row, props);
     }
+
+    Ok(())
 }
 
 fn rewrite_formula_for_move(formula: &str, from: CellAddr, to: CellAddr) -> Option<String> {

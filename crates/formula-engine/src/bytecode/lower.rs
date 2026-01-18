@@ -184,7 +184,7 @@ fn expand_sheet_span(
     let Some(b) = resolve_sheet_id(end) else {
         return Err(LowerError::UnknownSheet);
     };
-    expand_sheet_span_ids(a, b).ok_or(LowerError::UnknownSheet)
+    expand_sheet_span_ids(a, b).ok_or(LowerError::Unsupported)
 }
 
 fn lower_coord(coord: &crate::Coord, origin: u32) -> Result<(i32, bool), LowerError> {
@@ -255,10 +255,18 @@ fn lower_cell_ref_expr(
         Some(crate::SheetRef::SheetRange { start, end }) => {
             let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
             let range = RangeRef::new(cell, cell);
-            let areas: Vec<SheetRangeRef> = sheets
-                .into_iter()
-                .map(|sheet| SheetRangeRef::new(SheetId::Local(sheet), range))
-                .collect();
+            let mut areas: Vec<SheetRangeRef> = Vec::new();
+            if areas.try_reserve_exact(sheets.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (bytecode lower sheet span areas, len={})",
+                    sheets.len()
+                );
+                return Err(LowerError::Unsupported);
+            }
+            for sheet in sheets {
+                areas.push(SheetRangeRef::new(SheetId::Local(sheet), range));
+            }
             Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
                 areas.into(),
             )))
@@ -412,7 +420,15 @@ fn lower_range_ref(
         }
         Some(crate::SheetRef::SheetRange { start, end }) => {
             let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
-            let mut areas: Vec<SheetRangeRef> = Vec::with_capacity(sheets.len());
+            let mut areas: Vec<SheetRangeRef> = Vec::new();
+            if areas.try_reserve_exact(sheets.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (lower sheet span areas, len={})",
+                    sheets.len()
+                );
+                return Err(LowerError::Unsupported);
+            }
             for sheet_id in sheets {
                 let sheet = SheetId::Local(sheet_id);
                 let range = build_range(sheet.clone())?;
@@ -478,7 +494,12 @@ fn lower_array_literal(arr: &crate::ArrayLiteral) -> Result<Value, LowerError> {
         return Err(LowerError::Unsupported);
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let len = rows.checked_mul(cols).ok_or(LowerError::Unsupported)?;
+    let mut values: Vec<Value> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (bytecode lower array literal, len={len})");
+        return Err(LowerError::Unsupported);
+    }
     for row in &arr.rows {
         for el in row {
             values.push(lower_array_literal_element(el)?);
@@ -528,6 +549,10 @@ impl LexicalScopes {
 
 fn value_error_literal() -> BytecodeExpr {
     BytecodeExpr::Literal(Value::Error(super::value::ErrorKind::Value))
+}
+
+fn num_error_literal() -> BytecodeExpr {
+    BytecodeExpr::Literal(Value::Error(super::value::ErrorKind::Num))
 }
 
 fn bare_identifier(expr: &crate::Expr) -> Option<&str> {
@@ -674,7 +699,17 @@ pub fn lower_canonical_expr(
 ) -> Result<BytecodeExpr, LowerError> {
     let mut expand_numeric = |a: usize, b: usize| {
         let (start, end) = if a <= b { (a, b) } else { (b, a) };
-        Some((start..=end).collect())
+        let len = end.checked_sub(start)?.checked_add(1)?;
+        let mut out: Vec<usize> = Vec::new();
+        if out.try_reserve_exact(len).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (bytecode lower numeric sheet span, len={len})"
+            );
+            return None;
+        }
+        out.extend(start..=end);
+        Some(out)
     };
     lower_canonical_expr_with_sheet_span(
         expr,
@@ -745,7 +780,15 @@ fn lower_canonical_expr_inner(
                 Some(crate::SheetRef::SheetRange { start, end }) => {
                     let sheets =
                         expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
-                    let mut areas: Vec<SheetRangeRef> = Vec::with_capacity(sheets.len());
+                    let mut areas: Vec<SheetRangeRef> = Vec::new();
+                    if areas.try_reserve_exact(sheets.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (lower sheet span areas, len={})",
+                            sheets.len()
+                        );
+                        return Err(LowerError::Unsupported);
+                    }
                     for sheet_id in sheets {
                         let sheet = SheetId::Local(sheet_id);
                         let range = build_range(sheet.clone())?;
@@ -777,7 +820,15 @@ fn lower_canonical_expr_inner(
                 let mut operands = Vec::new();
                 collect_concat_operands(&b.left, &mut operands);
                 collect_concat_operands(&b.right, &mut operands);
-                let mut args = Vec::with_capacity(operands.len());
+                let mut args: Vec<BytecodeExpr> = Vec::new();
+                if args.try_reserve_exact(operands.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (lower concat args, len={})",
+                        operands.len()
+                    );
+                    return Err(LowerError::Unsupported);
+                }
                 for expr in operands {
                     args.push(lower_canonical_expr_inner(
                         expr,
@@ -1099,7 +1150,15 @@ fn lower_let(
 ) -> Result<BytecodeExpr, LowerError> {
     scopes.push_scope();
     let result = (|| {
-        let mut args_out: Vec<BytecodeExpr> = Vec::with_capacity(call.args.len());
+        let mut args_out: Vec<BytecodeExpr> = Vec::new();
+        if args_out.try_reserve_exact(call.args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (lower LET args, len={})",
+                call.args.len()
+            );
+            return Err(LowerError::Unsupported);
+        }
         if call.args.len() < 3 || call.args.len() % 2 == 0 {
             // Invalid LET arity: still lower into a LET call so bytecode eligibility can reject it
             // (ensuring we fall back to the AST evaluator for validation + error semantics).
@@ -1193,7 +1252,15 @@ fn lower_lambda(
         return Ok(value_error_literal());
     }
 
-    let mut params: Vec<Arc<str>> = Vec::with_capacity(call.args.len().saturating_sub(1));
+    let param_len = call.args.len().saturating_sub(1);
+    let mut params: Vec<Arc<str>> = Vec::new();
+    if params.try_reserve_exact(param_len).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (lower LAMBDA params, len={param_len})"
+        );
+        return Ok(num_error_literal());
+    }
     let mut seen: HashSet<Arc<str>> = HashSet::new();
 
     for param_expr in &call.args[..call.args.len() - 1] {

@@ -1083,7 +1083,14 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
         ArgValue::ReferenceUnion(ranges) => {
             if let Some(numeric) = numeric {
-                let union_size = blank_matches.then(|| reference_union_size(&ranges));
+                let union_size = if blank_matches {
+                    match reference_union_size(&ranges) {
+                        Ok(v) => Some(v),
+                        Err(e) => return Value::Error(e),
+                    }
+                } else {
+                    None
+                };
                 let mut count: u64 = 0;
                 let mut seen_count: u64 = 0;
                 let mut seen = std::collections::HashSet::new();
@@ -1125,7 +1132,14 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Number(count as f64);
             }
 
-            let union_size = blank_matches.then(|| reference_union_size(&ranges));
+            let union_size = if blank_matches {
+                match reference_union_size(&ranges) {
+                    Ok(v) => Some(v),
+                    Err(e) => return Value::Error(e),
+                }
+            } else {
+                None
+            };
             let mut count: u64 = 0;
             let mut seen_count: u64 = 0;
             let mut seen = std::collections::HashSet::new();
@@ -1272,8 +1286,14 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    let mut ranges: Vec<CriteriaRange> = Vec::with_capacity(args.len() / 2);
-    let mut criteria: Vec<Criteria> = Vec::with_capacity(args.len() / 2);
+    let pair_count = args.len() / 2;
+    let mut ranges: Vec<CriteriaRange> = Vec::new();
+    let mut criteria: Vec<Criteria> = Vec::new();
+    if ranges.try_reserve_exact(pair_count).is_err() || criteria.try_reserve_exact(pair_count).is_err()
+    {
+        debug_assert!(false, "allocation failed (countifs criteria buffers, pairs={pair_count})");
+        return Value::Error(ErrorKind::Num);
+    }
     let mut shape: Option<(usize, usize)> = None;
     let date_system = ctx.date_system();
 
@@ -1318,10 +1338,18 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Number(0.0);
     }
 
-    let blank_matches: Vec<bool> = criteria
-        .iter()
-        .map(|crit| crit.matches(&Value::Blank))
-        .collect();
+    let mut blank_matches: Vec<bool> = Vec::new();
+    if blank_matches.try_reserve_exact(criteria.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (countifs blank_matches, len={})",
+            criteria.len()
+        );
+        return Value::Error(ErrorKind::Num);
+    }
+    for crit in criteria.iter() {
+        blank_matches.push(crit.matches(&Value::Blank));
+    }
 
     // When all criteria match blank cells and all ranges are references, implicit blanks contribute
     // to the result. Avoid scanning the full shape by counting total cells minus the set of
@@ -1481,10 +1509,16 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let locale = ctx.number_locale();
             match &sum_range {
                 None => {
-                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
-                    let mut sum_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
                     let mut sum = 0.0;
                     let mut can_simd = true;
+                    let mut crit_buf: Vec<f64> = Vec::new();
+                    let mut sum_buf: Vec<f64> = Vec::new();
+                    if crit_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                        || sum_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                    {
+                        debug_assert!(false, "allocation failed (sumif simd buffers)");
+                        can_simd = false;
+                    }
 
                     for v in criteria_arr.iter() {
                         let Some(n) = coerce_countif_value_to_number(v, locale) else {
@@ -1527,10 +1561,16 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
                 Some(Range2D::Array(sum_arr)) => {
-                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
-                    let mut sum_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
                     let mut sum = 0.0;
                     let mut can_simd = true;
+                    let mut crit_buf: Vec<f64> = Vec::new();
+                    let mut sum_buf: Vec<f64> = Vec::new();
+                    if crit_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                        || sum_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                    {
+                        debug_assert!(false, "allocation failed (sumif simd buffers)");
+                        can_simd = false;
+                    }
 
                     for (crit_v, sum_v) in criteria_arr.iter().zip(sum_arr.iter()) {
                         let Some(n) = coerce_countif_value_to_number(crit_v, locale) else {
@@ -1819,11 +1859,17 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let locale = ctx.number_locale();
             match &average_range {
                 None => {
-                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
-                    let mut avg_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
                     let mut sum = 0.0;
                     let mut count = 0u64;
                     let mut can_simd = true;
+                    let mut crit_buf: Vec<f64> = Vec::new();
+                    let mut avg_buf: Vec<f64> = Vec::new();
+                    if crit_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                        || avg_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                    {
+                        debug_assert!(false, "allocation failed (averageif simd buffers)");
+                        can_simd = false;
+                    }
 
                     for v in criteria_arr.iter() {
                         let Some(n) = coerce_countif_value_to_number(v, locale) else {
@@ -1873,11 +1919,17 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
                 Some(Range2D::Array(avg_arr)) => {
-                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
-                    let mut avg_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
                     let mut sum = 0.0;
                     let mut count = 0u64;
                     let mut can_simd = true;
+                    let mut crit_buf: Vec<f64> = Vec::new();
+                    let mut avg_buf: Vec<f64> = Vec::new();
+                    if crit_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                        || avg_buf.try_reserve_exact(SIMD_AGGREGATE_BLOCK).is_err()
+                    {
+                        debug_assert!(false, "allocation failed (averageif simd buffers)");
+                        can_simd = false;
+                    }
 
                     for (crit_v, avg_v) in criteria_arr.iter().zip(avg_arr.iter()) {
                         let Some(n) = coerce_countif_value_to_number(crit_v, locale) else {
@@ -2680,7 +2732,10 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 } else if len_a == 1 && len_b == len {
-                    let addr_a0 = ra.iter_cells().next().expect("len_a validated > 0");
+                    let Some(addr_a0) = ra.iter_cells().next() else {
+                        debug_assert!(false, "len_a validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
                     let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
                     let xa = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
                     saw_nan = xa.is_nan();
@@ -2707,8 +2762,14 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 } else if len_b == 1 && len_a == len {
                     let mut iter_a = ra.iter_cells();
-                    let addr_a0 = iter_a.next().expect("len_a validated > 0");
-                    let addr_b0 = rb.iter_cells().next().expect("len_b validated > 0");
+                    let Some(addr_a0) = iter_a.next() else {
+                        debug_assert!(false, "len_a validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
+                    let Some(addr_b0) = rb.iter_cells().next() else {
+                        debug_assert!(false, "len_b validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
 
                     let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
                     let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
@@ -2772,7 +2833,10 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 } else if len_a == 1 && len_b == len {
-                    let addr_a0 = ra.iter_cells().next().expect("len_a validated > 0");
+                    let Some(addr_a0) = ra.iter_cells().next() else {
+                        debug_assert!(false, "len_a validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
                     let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
                     let xa = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
                     saw_nan = xa.is_nan();
@@ -2797,7 +2861,10 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 } else if len_b == 1 && len_a == len {
                     let mut iter_a = ra.iter_cells();
-                    let addr_a0 = iter_a.next().expect("len_a validated > 0");
+                    let Some(addr_a0) = iter_a.next() else {
+                        debug_assert!(false, "len_a validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
                     let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
                     let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
                     let xb = crate::functions::math::coerce_sumproduct_number(&vb[0], locale)?;
@@ -2839,7 +2906,10 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             (SumproductOperand::Reference(ra), SumproductOperand::Scalar(vb)) => {
                 let mut iter_a = ra.iter_cells();
-                let addr_a0 = iter_a.next().expect("len_a validated > 0");
+                let Some(addr_a0) = iter_a.next() else {
+                    debug_assert!(false, "len_a validated > 0 but iter_cells was empty");
+                    return Err(ErrorKind::Value);
+                };
                 let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
                 let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
                 let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
@@ -2920,7 +2990,10 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 } else if len_b == 1 && len_a == len {
                     // Preserve error precedence: for idx=0 we must coerce `va[0]` before the scalar.
                     let mut iter_b = rb.iter_cells();
-                    let addr_b0 = iter_b.next().expect("len_b validated > 0");
+                    let Some(addr_b0) = iter_b.next() else {
+                        debug_assert!(false, "len_b validated > 0 but iter_cells was empty");
+                        return Err(ErrorKind::Value);
+                    };
                     let xa0 = crate::functions::math::coerce_sumproduct_number(&va[0], locale)?;
                     let vb0 = ctx.get_cell_value(&rb.sheet_id, addr_b0);
                     let xb = crate::functions::math::coerce_sumproduct_number(&vb0, locale)?;
@@ -3120,7 +3193,10 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 total += size.saturating_sub(non_blank);
             }
             ArgValue::ReferenceUnion(ranges) => {
-                let size = reference_union_size(&ranges);
+                let size = match reference_union_size(&ranges) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                };
                 let mut seen = std::collections::HashSet::new();
                 let mut non_blank = 0u64;
                 for r in ranges {
@@ -3143,14 +3219,22 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     Value::Number(total as f64)
 }
 
-fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
-    fn size_for_rects(rects: &[crate::functions::Reference]) -> u64 {
+fn reference_union_size(ranges: &[crate::functions::Reference]) -> Result<u64, ErrorKind> {
+    fn size_for_rects(rects: &[crate::functions::Reference]) -> Result<u64, ErrorKind> {
         if rects.is_empty() {
-            return 0;
+            return Ok(0);
         }
 
         // Convert to half-open row slabs: [start, end+1)
-        let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
+        let row_bound_len = rects.len().saturating_mul(2);
+        let mut row_bounds: Vec<u32> = Vec::new();
+        if row_bounds.try_reserve_exact(row_bound_len).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (reference_union_size row_bounds, len={row_bound_len})"
+            );
+            return Err(ErrorKind::Num);
+        }
         for r in rects {
             row_bounds.push(r.start.row);
             row_bounds.push(r.end.row.saturating_add(1));
@@ -3167,6 +3251,10 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
             }
 
             let mut intervals: Vec<(u32, u32)> = Vec::new();
+            if intervals.try_reserve(rects.len()).is_err() {
+                debug_assert!(false, "allocation failed (reference_union_size intervals)");
+                return Err(ErrorKind::Num);
+            }
             for r in rects {
                 let r_end = r.end.row.saturating_add(1);
                 if r.start.row <= y0 && r_end >= y1 {
@@ -3197,11 +3285,11 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
             total += (y1 - y0) as u64 * len;
         }
 
-        total
+        Ok(total)
     }
 
     if ranges.is_empty() {
-        return 0;
+        return Ok(0);
     }
 
     let mut total: u64 = 0;
@@ -3217,10 +3305,10 @@ fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
     }
 
     for rects in by_sheet.into_values() {
-        total += size_for_rects(&rects);
+        total = total.saturating_add(size_for_rects(&rects)?);
     }
 
-    total
+    Ok(total)
 }
 
 inventory::submit! {

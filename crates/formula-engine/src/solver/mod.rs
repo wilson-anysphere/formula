@@ -303,7 +303,13 @@ impl Solver {
             }
         }
 
-        let mut original_vars = vec![0.0; model.num_vars()];
+        let n = model.num_vars();
+        let mut original_vars: Vec<f64> = Vec::new();
+        if original_vars.try_reserve_exact(n).is_err() {
+            debug_assert!(false, "solver allocation failed (original_vars={n})");
+            return Err(SolverError::new("allocation failed"));
+        }
+        original_vars.resize(n, 0.0);
         model.get_vars(&mut original_vars);
 
         // Normalize variable bounds for integer/binary vars.
@@ -320,8 +326,6 @@ impl Solver {
             }
         };
 
-        outcome.original_vars = original_vars.clone();
-
         if options.apply_solution && !outcome.best_vars.is_empty() {
             model.set_vars(&outcome.best_vars)?;
             model.recalc()?;
@@ -331,6 +335,7 @@ impl Solver {
             model.recalc()?;
         }
 
+        outcome.original_vars = original_vars;
         Ok(outcome)
     }
 }

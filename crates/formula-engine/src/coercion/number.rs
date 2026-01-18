@@ -70,7 +70,11 @@ fn parse_number_nonempty(
         break;
     }
 
-    let mut normalized = String::with_capacity(s.len());
+    let mut normalized = String::new();
+    if normalized.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(false, "allocation failed (parse_number_nonempty, len={})", s.len());
+        return Err(ExcelError::Num);
+    }
     for c in s.chars() {
         if c.is_whitespace() {
             continue;

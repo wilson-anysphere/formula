@@ -5,7 +5,7 @@ use crate::eval::{
 };
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{ArgValue, FunctionContext};
-use crate::value::{casefold, with_casefolded_key, Array, ErrorKind, Value};
+use crate::value::{try_casefold, with_casefolded_key, Array, ErrorKind, Value};
 use crate::{CellAddr as ParserCellAddr, ParseOptions, ReferenceStyle};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
@@ -129,7 +129,7 @@ fn parse_database_range(
                 // owned string in-place on ASCII (and avoid allocating a second `String`).
                 crate::value::casefold_owned(label)
             } else {
-                casefold(trimmed)
+                try_casefold(trimmed)?
             };
             header_map.entry(key).or_insert(col);
         }
@@ -211,7 +211,15 @@ fn parse_criteria_range(
     // Excel supports "computed criteria" by placing a formula in the criteria range whose header
     // does *not* match any database field name. A blank header is the most common pattern, but
     // any non-matching header label should be treated as computed criteria.
-    let mut col_map: Vec<CriteriaColumn> = Vec::with_capacity(array.cols);
+    let mut col_map: Vec<CriteriaColumn> = Vec::new();
+    if col_map.try_reserve_exact(array.cols).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (database criteria column map, cols={})",
+            array.cols
+        );
+        return Err(ErrorKind::Num);
+    }
     for col in 0..array.cols {
         let header_cell = array.get(0, col).unwrap_or(&Value::Blank);
         let label = header_label(ctx, header_cell)?;
@@ -233,7 +241,16 @@ fn parse_criteria_range(
         }
     }
 
-    let mut clauses = Vec::with_capacity(array.rows - 1);
+    let mut clauses: Vec<CriteriaClause> = Vec::new();
+    let clause_count = array.rows.saturating_sub(1);
+    if clauses.try_reserve_exact(clause_count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (database criteria clauses, rows={})",
+            array.rows
+        );
+        return Err(ErrorKind::Num);
+    }
     for row in 1..array.rows {
         let mut conditions = Vec::new();
         let mut computed = Vec::new();
@@ -296,7 +313,7 @@ fn parse_criteria_range(
                             }
                             let (workbook, sheet) =
                                 split_external_sheet_key_parts(key).ok_or(ErrorKind::Value)?;
-                            expr = qualify_unprefixed_sheet_references(&expr, workbook, sheet);
+                            expr = qualify_unprefixed_sheet_references(&expr, workbook, sheet)?;
                         }
                         computed.push(ComputedCriteria { expr });
                         continue;
@@ -432,30 +449,30 @@ fn qualify_unprefixed_sheet_references(
     expr: &crate::Expr,
     workbook: &str,
     sheet: &str,
-) -> crate::Expr {
+) -> Result<crate::Expr, ErrorKind> {
     match expr {
-        crate::Expr::Number(v) => crate::Expr::Number(v.clone()),
-        crate::Expr::String(v) => crate::Expr::String(v.clone()),
-        crate::Expr::Boolean(v) => crate::Expr::Boolean(*v),
-        crate::Expr::Error(v) => crate::Expr::Error(v.clone()),
-        crate::Expr::Missing => crate::Expr::Missing,
-        crate::Expr::NameRef(n) => crate::Expr::NameRef(n.clone()),
-        crate::Expr::StructuredRef(r) => crate::Expr::StructuredRef(r.clone()),
-        crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
+        crate::Expr::Number(v) => Ok(crate::Expr::Number(v.clone())),
+        crate::Expr::String(v) => Ok(crate::Expr::String(v.clone())),
+        crate::Expr::Boolean(v) => Ok(crate::Expr::Boolean(*v)),
+        crate::Expr::Error(v) => Ok(crate::Expr::Error(v.clone())),
+        crate::Expr::Missing => Ok(crate::Expr::Missing),
+        crate::Expr::NameRef(n) => Ok(crate::Expr::NameRef(n.clone())),
+        crate::Expr::StructuredRef(r) => Ok(crate::Expr::StructuredRef(r.clone())),
+        crate::Expr::FieldAccess(access) => Ok(crate::Expr::FieldAccess(crate::FieldAccessExpr {
             base: Box::new(qualify_unprefixed_sheet_references(
                 &access.base,
                 workbook,
                 sheet,
-            )),
+            )?),
             field: access.field.clone(),
-        }),
+        })),
         crate::Expr::CellRef(r) => {
             let mut r = r.clone();
             if r.workbook.is_none() && r.sheet.is_none() {
                 r.workbook = Some(workbook.to_string());
                 r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
             }
-            crate::Expr::CellRef(r)
+            Ok(crate::Expr::CellRef(r))
         }
         crate::Expr::ColRef(r) => {
             let mut r = r.clone();
@@ -463,7 +480,7 @@ fn qualify_unprefixed_sheet_references(
                 r.workbook = Some(workbook.to_string());
                 r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
             }
-            crate::Expr::ColRef(r)
+            Ok(crate::Expr::ColRef(r))
         }
         crate::Expr::RowRef(r) => {
             let mut r = r.clone();
@@ -471,60 +488,96 @@ fn qualify_unprefixed_sheet_references(
                 r.workbook = Some(workbook.to_string());
                 r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
             }
-            crate::Expr::RowRef(r)
+            Ok(crate::Expr::RowRef(r))
         }
-        crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
-            rows: arr
-                .rows
-                .iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|el| qualify_unprefixed_sheet_references(el, workbook, sheet))
-                        .collect()
-                })
-                .collect(),
-        }),
-        crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
-            name: call.name.clone(),
-            args: call
-                .args
-                .iter()
-                .map(|arg| qualify_unprefixed_sheet_references(arg, workbook, sheet))
-                .collect(),
-        }),
-        crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
-            callee: Box::new(qualify_unprefixed_sheet_references(
-                &call.callee,
-                workbook,
-                sheet,
-            )),
-            args: call
-                .args
-                .iter()
-                .map(|arg| qualify_unprefixed_sheet_references(arg, workbook, sheet))
-                .collect(),
-        }),
-        crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
+        crate::Expr::Array(arr) => {
+            let mut rows_out: Vec<Vec<crate::Expr>> = Vec::new();
+            if rows_out.try_reserve_exact(arr.rows.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (database qualify array rows, len={})",
+                    arr.rows.len()
+                );
+                return Err(ErrorKind::Num);
+            }
+            for row in &arr.rows {
+                let mut row_out: Vec<crate::Expr> = Vec::new();
+                if row_out.try_reserve_exact(row.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (database qualify array row, len={})",
+                        row.len()
+                    );
+                    return Err(ErrorKind::Num);
+                }
+                for el in row {
+                    row_out.push(qualify_unprefixed_sheet_references(el, workbook, sheet)?);
+                }
+                rows_out.push(row_out);
+            }
+            Ok(crate::Expr::Array(crate::ArrayLiteral { rows: rows_out }))
+        }
+        crate::Expr::FunctionCall(call) => {
+            let mut args_out: Vec<crate::Expr> = Vec::new();
+            if args_out.try_reserve_exact(call.args.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (database qualify function args, len={})",
+                    call.args.len()
+                );
+                return Err(ErrorKind::Num);
+            }
+            for arg in &call.args {
+                args_out.push(qualify_unprefixed_sheet_references(arg, workbook, sheet)?);
+            }
+            Ok(crate::Expr::FunctionCall(crate::FunctionCall {
+                name: call.name.clone(),
+                args: args_out,
+            }))
+        }
+        crate::Expr::Call(call) => {
+            let mut args_out: Vec<crate::Expr> = Vec::new();
+            if args_out.try_reserve_exact(call.args.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (database qualify call args, len={})",
+                    call.args.len()
+                );
+                return Err(ErrorKind::Num);
+            }
+            for arg in &call.args {
+                args_out.push(qualify_unprefixed_sheet_references(arg, workbook, sheet)?);
+            }
+            Ok(crate::Expr::Call(crate::CallExpr {
+                callee: Box::new(qualify_unprefixed_sheet_references(
+                    &call.callee,
+                    workbook,
+                    sheet,
+                )?),
+                args: args_out,
+            }))
+        }
+        crate::Expr::Unary(u) => Ok(crate::Expr::Unary(crate::UnaryExpr {
             op: u.op,
             expr: Box::new(qualify_unprefixed_sheet_references(
                 &u.expr, workbook, sheet,
-            )),
-        }),
-        crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
+            )?),
+        })),
+        crate::Expr::Postfix(p) => Ok(crate::Expr::Postfix(crate::PostfixExpr {
             op: p.op,
             expr: Box::new(qualify_unprefixed_sheet_references(
                 &p.expr, workbook, sheet,
-            )),
-        }),
-        crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
+            )?),
+        })),
+        crate::Expr::Binary(b) => Ok(crate::Expr::Binary(crate::BinaryExpr {
             op: b.op,
             left: Box::new(qualify_unprefixed_sheet_references(
                 &b.left, workbook, sheet,
-            )),
+            )?),
             right: Box::new(qualify_unprefixed_sheet_references(
                 &b.right, workbook, sheet,
-            )),
-        }),
+            )?),
+        })),
     }
 }
 

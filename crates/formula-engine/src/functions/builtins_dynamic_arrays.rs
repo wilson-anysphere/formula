@@ -6,7 +6,10 @@ use crate::functions::{
     eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{casefold, casefold_owned, Array, ErrorKind, Lambda, RecordValue, Value};
+use crate::value::{
+    casefold_owned, try_casefold, try_vec_with_capacity, Array, ErrorKind, Lambda, RecordValue,
+    Value,
+};
 
 fn checked_array_cells(rows: usize, cols: usize) -> Result<usize, ErrorKind> {
     let total = rows.checked_mul(cols).ok_or(ErrorKind::Spill)?;
@@ -16,9 +19,9 @@ fn checked_array_cells(rows: usize, cols: usize) -> Result<usize, ErrorKind> {
     Ok(total)
 }
 
-fn try_vec_with_capacity<T>(len: usize) -> Result<Vec<T>, ErrorKind> {
-    let mut out = Vec::new();
-    out.try_reserve_exact(len).map_err(|_| ErrorKind::Num)?;
+fn try_index_vec(len: usize) -> Result<Vec<usize>, ErrorKind> {
+    let mut out = try_vec_with_capacity(len)?;
+    out.extend(0..len);
     Ok(out)
 }
 
@@ -190,15 +193,19 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Err(e) => return Value::Error(e),
             };
             for col in 0..array.cols {
-                out.push(sort_key(
-                    ctx,
-                    array.get(row_idx, col).unwrap_or(&Value::Blank),
-                ));
+                let key = match sort_key(ctx, array.get(row_idx, col).unwrap_or(&Value::Blank)) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                };
+                out.push(key);
             }
             keys.push(out);
         }
 
-        let mut order: Vec<usize> = (0..array.cols).collect();
+        let mut order: Vec<usize> = match try_index_vec(array.cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         order.sort_by(|&a, &b| {
             for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
                 let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
@@ -236,15 +243,19 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         };
         for row in 0..array.rows {
-            out.push(sort_key(
-                ctx,
-                array.get(row, col_idx).unwrap_or(&Value::Blank),
-            ));
+            let key = match sort_key(ctx, array.get(row, col_idx).unwrap_or(&Value::Blank)) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            out.push(key);
         }
         keys.push(out);
     }
 
-    let mut order: Vec<usize> = (0..array.rows).collect();
+    let mut order: Vec<usize> = match try_index_vec(array.rows) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     order.sort_by(|&a, &b| {
         for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
             let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
@@ -320,10 +331,13 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // We must only evaluate each argument once to preserve volatility semantics. We also need to
     // preserve whether the argument was omitted (`Expr::Blank`) so that blank *values* can still
     // be distinguished from omitted optional `sort_order` arguments.
-    let evaluated: Vec<(bool, ArgValue)> = args[1..]
-        .iter()
-        .map(|expr| (matches!(expr, Expr::Blank), ctx.eval_arg(expr)))
-        .collect();
+    let mut evaluated: Vec<(bool, ArgValue)> = match try_vec_with_capacity(args.len().saturating_sub(1)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    for expr in &args[1..] {
+        evaluated.push((matches!(expr, Expr::Blank), ctx.eval_arg(expr)));
+    }
 
     let mut idx = 0usize;
     while idx < evaluated.len() {
@@ -393,12 +407,19 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 VectorOrientation::Row => key.get(0, idx).unwrap_or(&Value::Blank),
                 VectorOrientation::Column => key.get(idx, 0).unwrap_or(&Value::Blank),
             };
-            out.push(sort_key(ctx, v));
+            let key = match sort_key(ctx, v) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            out.push(key);
         }
         keys.push(out);
     }
 
-    let mut order: Vec<usize> = (0..axis_len).collect();
+    let mut order: Vec<usize> = match try_index_vec(axis_len) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     order.sort_by(|&a, &b| {
         for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
             let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
@@ -472,34 +493,34 @@ fn record_display_key_text(
     if record.display.is_empty() {
         return Ok(None);
     }
-    Ok(Some(casefold(&record.display)))
+    Ok(Some(try_casefold(&record.display)?))
 }
 
-pub(super) fn sort_key(ctx: &dyn FunctionContext, value: &Value) -> SortKeyValue {
+pub(super) fn sort_key(ctx: &dyn FunctionContext, value: &Value) -> Result<SortKeyValue, ErrorKind> {
     match value {
-        Value::Number(n) => SortKeyValue::Number(*n),
-        Value::Text(s) => SortKeyValue::Text(casefold(s)),
-        Value::Bool(b) => SortKeyValue::Bool(*b),
-        Value::Entity(entity) if entity.display.is_empty() => SortKeyValue::Blank,
-        Value::Entity(entity) => SortKeyValue::Text(casefold(&entity.display)),
+        Value::Number(n) => Ok(SortKeyValue::Number(*n)),
+        Value::Text(s) => Ok(SortKeyValue::Text(try_casefold(s)?)),
+        Value::Bool(b) => Ok(SortKeyValue::Bool(*b)),
+        Value::Entity(entity) if entity.display.is_empty() => Ok(SortKeyValue::Blank),
+        Value::Entity(entity) => Ok(SortKeyValue::Text(try_casefold(&entity.display)?)),
         Value::Record(record) => match record_display_key_text(ctx, record) {
-            Ok(None) => SortKeyValue::Blank,
-            Ok(Some(s)) => SortKeyValue::Text(s),
-            Err(e) => SortKeyValue::Error(e),
+            Ok(None) => Ok(SortKeyValue::Blank),
+            Ok(Some(s)) => Ok(SortKeyValue::Text(s)),
+            Err(e) => Ok(SortKeyValue::Error(e)),
         },
-        Value::Blank => SortKeyValue::Blank,
-        Value::Error(e) => SortKeyValue::Error(*e),
+        Value::Blank => Ok(SortKeyValue::Blank),
+        Value::Error(e) => Ok(SortKeyValue::Error(*e)),
         other => {
             // Treat any future scalar-ish values as their display string for stable ordering.
             // For non-scalar values, fall back to the existing #VALUE! behavior.
             let display = match other.coerce_to_string() {
                 Ok(s) => s,
-                Err(_) => return SortKeyValue::Error(ErrorKind::Value),
+                Err(_) => return Ok(SortKeyValue::Error(ErrorKind::Value)),
             };
             if display.is_empty() {
-                SortKeyValue::Blank
+                Ok(SortKeyValue::Blank)
             } else {
-                SortKeyValue::Text(casefold_owned(display))
+                Ok(SortKeyValue::Text(casefold_owned(display)))
             }
         }
     }
@@ -587,26 +608,26 @@ enum UniqueKeyCell {
     Error(ErrorKind),
 }
 
-fn unique_key_cell(ctx: &dyn FunctionContext, value: &Value) -> UniqueKeyCell {
+fn unique_key_cell(ctx: &dyn FunctionContext, value: &Value) -> Result<UniqueKeyCell, ErrorKind> {
     match value {
-        Value::Blank => UniqueKeyCell::Blank,
-        Value::Bool(b) => UniqueKeyCell::Bool(*b),
-        Value::Number(n) => UniqueKeyCell::Number(canonical_number_bits(*n)),
-        Value::Text(s) if s.is_empty() => UniqueKeyCell::Blank,
-        Value::Text(s) => UniqueKeyCell::Text(casefold(s)),
-        Value::Entity(entity) if entity.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Entity(entity) => UniqueKeyCell::Text(casefold(&entity.display)),
+        Value::Blank => Ok(UniqueKeyCell::Blank),
+        Value::Bool(b) => Ok(UniqueKeyCell::Bool(*b)),
+        Value::Number(n) => Ok(UniqueKeyCell::Number(canonical_number_bits(*n))),
+        Value::Text(s) if s.is_empty() => Ok(UniqueKeyCell::Blank),
+        Value::Text(s) => Ok(UniqueKeyCell::Text(try_casefold(s)?)),
+        Value::Entity(entity) if entity.display.is_empty() => Ok(UniqueKeyCell::Blank),
+        Value::Entity(entity) => Ok(UniqueKeyCell::Text(try_casefold(&entity.display)?)),
         Value::Record(record) => match record_display_key_text(ctx, record) {
-            Ok(None) => UniqueKeyCell::Blank,
-            Ok(Some(s)) => UniqueKeyCell::Text(s),
-            Err(e) => UniqueKeyCell::Error(e),
+            Ok(None) => Ok(UniqueKeyCell::Blank),
+            Ok(Some(s)) => Ok(UniqueKeyCell::Text(s)),
+            Err(e) => Ok(UniqueKeyCell::Error(e)),
         },
-        Value::Error(e) => UniqueKeyCell::Error(*e),
+        Value::Error(e) => Ok(UniqueKeyCell::Error(*e)),
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
-        | Value::Spill { .. } => UniqueKeyCell::Error(ErrorKind::Value),
+        | Value::Spill { .. } => Ok(UniqueKeyCell::Error(ErrorKind::Value)),
     }
 }
 
@@ -634,7 +655,11 @@ fn unique_rows(ctx: &dyn FunctionContext, array: Array, exactly_once: bool) -> V
         };
         for col in 0..array.cols {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
-            key.push(unique_key_cell(ctx, v));
+            let cell = match unique_key_cell(ctx, v) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            key.push(cell);
         }
         *counts.entry(key.clone()).or_insert(0) += 1;
         keys_by_row.push(key);
@@ -692,7 +717,11 @@ fn unique_columns(ctx: &dyn FunctionContext, array: Array, exactly_once: bool) -
         };
         for row in 0..array.rows {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
-            key.push(unique_key_cell(ctx, v));
+            let cell = match unique_key_cell(ctx, v) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            key.push(cell);
         }
         *counts.entry(key.clone()).or_insert(0) += 1;
         keys_by_col.push(key);
@@ -882,7 +911,10 @@ fn choosecols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let mut cols = Vec::with_capacity(args.len().saturating_sub(1));
+    let mut cols = match try_vec_with_capacity::<usize>(args.len().saturating_sub(1)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for expr in &args[1..] {
         let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
@@ -931,7 +963,10 @@ fn chooserows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let mut rows = Vec::with_capacity(args.len().saturating_sub(1));
+    let mut rows = match try_vec_with_capacity::<usize>(args.len().saturating_sub(1)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for expr in &args[1..] {
         let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
@@ -975,7 +1010,10 @@ inventory::submit! {
 }
 
 fn hstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let mut arrays = Vec::with_capacity(args.len());
+    let mut arrays = match try_vec_with_capacity::<Array>(args.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for expr in args {
         let array = match eval_array_arg(ctx, expr) {
             Ok(v) => v,
@@ -1029,7 +1067,10 @@ inventory::submit! {
 }
 
 fn vstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let mut arrays = Vec::with_capacity(args.len());
+    let mut arrays = match try_vec_with_capacity::<Array>(args.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for expr in args {
         let array = match eval_array_arg(ctx, expr) {
             Ok(v) => v,
@@ -1365,14 +1406,20 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lambda_expr = args.last().expect("checked args is non-empty");
+    let Some(lambda_expr) = args.last() else {
+        debug_assert!(false, "checked args is non-empty");
+        return Value::Error(ErrorKind::Value);
+    };
     let call_name = lambda_call_name(lambda_expr, "__MAP_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, lambda_expr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
-    let mut arrays = Vec::with_capacity(args.len().saturating_sub(1));
+    let mut arrays = match try_vec_with_capacity::<Array>(args.len().saturating_sub(1)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for expr in &args[..args.len() - 1] {
         match eval_array_arg(ctx, expr) {
             Ok(v) => arrays.push(v),
@@ -1389,7 +1436,14 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => return Value::Error(ErrorKind::Value),
     };
 
-    let call = prepare_lambda_call(&call_name, arrays.len());
+    let call = match prepare_lambda_call(&call_name, arrays.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
 
     let total = match checked_array_cells(out_rows, out_cols) {
         Ok(v) => v,
@@ -1401,22 +1455,46 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     for row in 0..out_rows {
         for col in 0..out_cols {
-            let mut arg_values = Vec::with_capacity(arrays.len());
-            for arr in &arrays {
+            for (name, arr) in call.arg_names.iter().zip(arrays.iter()) {
                 let v = if arr.rows == 1 && arr.cols == 1 {
                     arr.get(0, 0).cloned().unwrap_or(Value::Blank)
                 } else {
                     arr.get(row, col).cloned().unwrap_or(Value::Blank)
                 };
-                arg_values.push(v);
+                let Some(slot) = bindings.get_mut(name) else {
+                    debug_assert!(false, "call bindings should contain arg name {name:?}");
+                    return Value::Error(ErrorKind::Value);
+                };
+                *slot = v;
             }
 
-            let value = invoke_lambda(ctx, &lambda, &call, &arg_values);
-            out.push(value);
+            let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+            out.push(match scalarize_value(value) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            });
         }
     }
 
     Value::Array(Array::new(out_rows, out_cols, out))
+}
+
+fn prepare_lambda_bindings(
+    call: &LambdaCall,
+    lambda: &Lambda,
+) -> Result<HashMap<String, Value>, ErrorKind> {
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    if bindings
+        .try_reserve(call.arg_names.len().saturating_add(1))
+        .is_err()
+    {
+        return Err(ErrorKind::Num);
+    }
+    bindings.insert(call.name.clone(), Value::Lambda(lambda.clone()));
+    for name in &call.arg_names {
+        bindings.insert(name.clone(), Value::Blank);
+    }
+    Ok(bindings)
 }
 
 inventory::submit! {
@@ -1449,21 +1527,43 @@ fn byrow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call(&call_name, 1);
+    let call = match prepare_lambda_call(&call_name, 1) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let Some(arg_name) = call.arg_names.first() else {
+        debug_assert!(false, "call arg names should be non-empty for BYROW");
+        return Value::Error(ErrorKind::Value);
+    };
     let mut values = match try_vec_with_capacity::<Value>(array.rows) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    for row in 0..array.rows {
-        let mut row_values = match try_vec_with_capacity::<Value>(array.cols) {
+    let cols = array.cols;
+    let mut iter = array.values.into_iter();
+    for _ in 0..array.rows {
+        let mut row_values = match try_vec_with_capacity::<Value>(cols) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        for col in 0..array.cols {
-            row_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        for _ in 0..cols {
+            row_values.push(iter.next().unwrap_or(Value::Blank));
         }
-        let arg = Value::Array(Array::new(1, array.cols, row_values));
-        values.push(invoke_lambda(ctx, &lambda, &call, &[arg]));
+        let arg = Value::Array(Array::new(1, cols, row_values));
+        let Some(slot) = bindings.get_mut(arg_name) else {
+            debug_assert!(false, "call bindings should contain arg name {arg_name:?}");
+            return Value::Error(ErrorKind::Value);
+        };
+        *slot = arg;
+        let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+        values.push(match scalarize_value(value) {
+            Ok(v) => v,
+            Err(e) => Value::Error(e),
+        });
     }
 
     Value::Array(Array::new(array.rows, 1, values))
@@ -1499,24 +1599,56 @@ fn bycol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call(&call_name, 1);
+    let call = match prepare_lambda_call(&call_name, 1) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let Some(arg_name) = call.arg_names.first() else {
+        debug_assert!(false, "call arg names should be non-empty for BYCOL");
+        return Value::Error(ErrorKind::Value);
+    };
     let mut values = match try_vec_with_capacity::<Value>(array.cols) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    for col in 0..array.cols {
-        let mut col_values = match try_vec_with_capacity::<Value>(array.rows) {
+    let rows = array.rows;
+    let cols = array.cols;
+    let mut cols_values = match try_vec_with_capacity::<Vec<Value>>(cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    for _ in 0..cols {
+        let col = match try_vec_with_capacity::<Value>(rows) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        for row in 0..array.rows {
-            col_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        cols_values.push(col);
+    }
+    let mut iter = array.values.into_iter();
+    for _ in 0..rows {
+        for col in 0..cols {
+            cols_values[col].push(iter.next().unwrap_or(Value::Blank));
         }
-        let arg = Value::Array(Array::new(array.rows, 1, col_values));
-        values.push(invoke_lambda(ctx, &lambda, &call, &[arg]));
+    }
+    for col_values in cols_values {
+        let arg = Value::Array(Array::new(rows, 1, col_values));
+        let Some(slot) = bindings.get_mut(arg_name) else {
+            debug_assert!(false, "call bindings should contain arg name {arg_name:?}");
+            return Value::Error(ErrorKind::Value);
+        };
+        *slot = arg;
+        let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+        values.push(match scalarize_value(value) {
+            Ok(v) => v,
+            Err(e) => Value::Error(e),
+        });
     }
 
-    Value::Array(Array::new(1, array.cols, values))
+    Value::Array(Array::new(1, cols, values))
 }
 
 inventory::submit! {
@@ -1572,18 +1704,44 @@ fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
-    let call = prepare_lambda_call(&call_name, 2);
+    let call = match prepare_lambda_call(&call_name, 2) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let Some(row_name) = call.arg_names.first() else {
+        debug_assert!(false, "call arg names should be non-empty for MAKEARRAY");
+        return Value::Error(ErrorKind::Value);
+    };
+    let Some(col_name) = call.arg_names.get(1) else {
+        debug_assert!(false, "call arg names should have 2 entries for MAKEARRAY");
+        return Value::Error(ErrorKind::Value);
+    };
     let mut values = Vec::new();
     if values.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
     }
     for row in 0..rows_usize {
         for col in 0..cols_usize {
-            let arg_values = [
-                Value::Number((row as f64) + 1.0),
-                Value::Number((col as f64) + 1.0),
-            ];
-            values.push(invoke_lambda(ctx, &lambda, &call, &arg_values));
+            let Some(row_slot) = bindings.get_mut(row_name) else {
+                debug_assert!(false, "call bindings should contain arg name {row_name:?}");
+                return Value::Error(ErrorKind::Value);
+            };
+            *row_slot = Value::Number((row as f64) + 1.0);
+            let Some(col_slot) = bindings.get_mut(col_name) else {
+                debug_assert!(false, "call bindings should contain arg name {col_name:?}");
+                return Value::Error(ErrorKind::Value);
+            };
+            *col_slot = Value::Number((col as f64) + 1.0);
+
+            let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+            values.push(match scalarize_value(value) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            });
         }
     }
 
@@ -1625,19 +1783,43 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call(&call_name, 2);
-    let mut iter = array.values.iter();
+    let call = match prepare_lambda_call(&call_name, 2) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let Some(acc_name) = call.arg_names.first() else {
+        debug_assert!(false, "call arg names should be non-empty for REDUCE");
+        return Value::Error(ErrorKind::Value);
+    };
+    let Some(value_name) = call.arg_names.get(1) else {
+        debug_assert!(false, "call arg names should have 2 entries for REDUCE");
+        return Value::Error(ErrorKind::Value);
+    };
+    let mut iter = array.values.into_iter();
     let mut acc = match initial {
         Some(initial) => initial,
         None => match iter.next() {
-            Some(v) => v.clone(),
+            Some(v) => v,
             None => return Value::Error(ErrorKind::Calc),
         },
     };
 
     for cell in iter {
-        let args = [acc.clone(), cell.clone()];
-        acc = invoke_lambda_value(ctx, &lambda, &call, &args);
+        let Some(acc_slot) = bindings.get_mut(acc_name) else {
+            debug_assert!(false, "call bindings should contain arg name {acc_name:?}");
+            return Value::Error(ErrorKind::Value);
+        };
+        *acc_slot = std::mem::replace(&mut acc, Value::Blank);
+        let Some(value_slot) = bindings.get_mut(value_name) else {
+            debug_assert!(false, "call bindings should contain arg name {value_name:?}");
+            return Value::Error(ErrorKind::Value);
+        };
+        *value_slot = cell;
+        acc = ctx.eval_formula_with_bindings(&call.expr, &bindings);
     }
 
     acc
@@ -1678,8 +1860,26 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call(&call_name, 2);
-    let mut values = match try_vec_with_capacity::<Value>(array.values.len()) {
+    let call = match prepare_lambda_call(&call_name, 2) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut bindings = match prepare_lambda_bindings(&call, &lambda) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let Some(acc_name) = call.arg_names.first() else {
+        debug_assert!(false, "call arg names should be non-empty for SCAN");
+        return Value::Error(ErrorKind::Value);
+    };
+    let Some(value_name) = call.arg_names.get(1) else {
+        debug_assert!(false, "call arg names should have 2 entries for SCAN");
+        return Value::Error(ErrorKind::Value);
+    };
+    let rows = array.rows;
+    let cols = array.cols;
+    let input_values = array.values;
+    let mut values = match try_vec_with_capacity::<Value>(input_values.len()) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1691,31 +1891,60 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Err(e) => return Value::Error(e),
             };
 
-            for cell in &array.values {
-                let args = [acc.clone(), cell.clone()];
-                acc = invoke_lambda(ctx, &lambda, &call, &args);
+            for cell in input_values {
+                let Some(acc_slot) = bindings.get_mut(acc_name) else {
+                    debug_assert!(false, "call bindings should contain arg name {acc_name:?}");
+                    return Value::Error(ErrorKind::Value);
+                };
+                *acc_slot = std::mem::replace(&mut acc, Value::Blank);
+                let Some(value_slot) = bindings.get_mut(value_name) else {
+                    debug_assert!(false, "call bindings should contain arg name {value_name:?}");
+                    return Value::Error(ErrorKind::Value);
+                };
+                *value_slot = cell;
+
+                let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+                acc = match scalarize_value(value) {
+                    Ok(v) => v,
+                    Err(e) => Value::Error(e),
+                };
                 values.push(acc.clone());
             }
         }
         None => {
-            let Some((first, rest)) = array.values.split_first() else {
+            let mut iter = input_values.into_iter();
+            let Some(first) = iter.next() else {
                 return Value::Error(ErrorKind::Calc);
             };
-            let mut acc = match scalarize_value(first.clone()) {
+            let mut acc = match scalarize_value(first) {
                 Ok(v) => v,
                 Err(e) => Value::Error(e),
             };
             values.push(acc.clone());
 
-            for cell in rest {
-                let args = [acc.clone(), cell.clone()];
-                acc = invoke_lambda(ctx, &lambda, &call, &args);
+            for cell in iter {
+                let Some(acc_slot) = bindings.get_mut(acc_name) else {
+                    debug_assert!(false, "call bindings should contain arg name {acc_name:?}");
+                    return Value::Error(ErrorKind::Value);
+                };
+                *acc_slot = std::mem::replace(&mut acc, Value::Blank);
+                let Some(value_slot) = bindings.get_mut(value_name) else {
+                    debug_assert!(false, "call bindings should contain arg name {value_name:?}");
+                    return Value::Error(ErrorKind::Value);
+                };
+                *value_slot = cell;
+
+                let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+                acc = match scalarize_value(value) {
+                    Ok(v) => v,
+                    Err(e) => Value::Error(e),
+                };
                 values.push(acc.clone());
             }
         }
     }
 
-    Value::Array(Array::new(array.rows, array.cols, values))
+    Value::Array(Array::new(rows, cols, values))
 }
 
 fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Array, ErrorKind> {
@@ -1809,9 +2038,9 @@ struct LambdaCall {
     expr: CompiledExpr,
 }
 
-fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
-    let mut arg_names = Vec::with_capacity(arg_count);
-    let mut args = Vec::with_capacity(arg_count);
+fn prepare_lambda_call(call_name: &str, arg_count: usize) -> Result<LambdaCall, ErrorKind> {
+    let mut arg_names = try_vec_with_capacity::<String>(arg_count)?;
+    let mut args = try_vec_with_capacity::<CompiledExpr>(arg_count)?;
     for idx in 0..arg_count {
         let name = format!("__ARG{idx}");
         args.push(Expr::NameRef(NameRef {
@@ -1821,7 +2050,7 @@ fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
         arg_names.push(name);
     }
 
-    LambdaCall {
+    Ok(LambdaCall {
         name: call_name.to_string(),
         arg_names,
         expr: Expr::Call {
@@ -1831,7 +2060,7 @@ fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
             })),
             args,
         },
-    }
+    })
 }
 
 fn lambda_call_name(expr: &CompiledExpr, fallback: &str) -> String {
@@ -1839,38 +2068,6 @@ fn lambda_call_name(expr: &CompiledExpr, fallback: &str) -> String {
         Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => nref.name.clone(),
         _ => fallback.to_string(),
     }
-}
-
-fn invoke_lambda(
-    ctx: &dyn FunctionContext,
-    lambda: &Lambda,
-    call: &LambdaCall,
-    args: &[Value],
-) -> Value {
-    let value = invoke_lambda_value(ctx, lambda, call, args);
-    match scalarize_value(value) {
-        Ok(v) => v,
-        Err(e) => Value::Error(e),
-    }
-}
-
-fn invoke_lambda_value(
-    ctx: &dyn FunctionContext,
-    lambda: &Lambda,
-    call: &LambdaCall,
-    args: &[Value],
-) -> Value {
-    if args.len() != call.arg_names.len() {
-        return Value::Error(ErrorKind::Value);
-    }
-
-    let mut bindings: HashMap<String, Value> = HashMap::with_capacity(call.arg_names.len() + 1);
-    bindings.insert(call.name.clone(), Value::Lambda(lambda.clone()));
-    for (name, value) in call.arg_names.iter().zip(args.iter()) {
-        bindings.insert(name.clone(), value.clone());
-    }
-
-    ctx.eval_formula_with_bindings(&call.expr, &bindings)
 }
 
 fn scalarize_value(value: Value) -> Result<Value, ErrorKind> {
@@ -1929,10 +2126,14 @@ fn sort_vector_orders(
     key_len: usize,
 ) -> Result<Vec<bool>, ErrorKind> {
     let Some(expr) = expr else {
-        return Ok(vec![false; key_len]);
+        let mut out = try_vec_with_capacity::<bool>(key_len)?;
+        out.resize(key_len, false);
+        return Ok(out);
     };
     if matches!(expr, Expr::Blank) {
-        return Ok(vec![false; key_len]);
+        let mut out = try_vec_with_capacity::<bool>(key_len)?;
+        out.resize(key_len, false);
+        return Ok(out);
     }
 
     let arr = arg_value_to_array(ctx, ctx.eval_arg(expr))?;
@@ -1949,7 +2150,9 @@ fn sort_vector_orders(
     }
 
     if orders.len() == 1 {
-        Ok(vec![orders[0]; key_len])
+        let mut out = try_vec_with_capacity::<bool>(key_len)?;
+        out.resize(key_len, orders[0]);
+        Ok(out)
     } else if orders.len() == key_len {
         Ok(orders)
     } else {
@@ -2251,20 +2454,21 @@ mod tests {
     use crate::date::ExcelDateSystem;
     use crate::functions::{Reference, SheetId};
     use crate::value::{EntityValue, RecordValue};
+    use chrono::LocalResult;
     use chrono::TimeZone;
     struct DummyContext;
 
     impl FunctionContext for DummyContext {
         fn eval_arg(&self, _expr: &CompiledExpr) -> ArgValue {
-            unreachable!("not needed for sort_key tests")
+            ArgValue::Scalar(Value::Blank)
         }
 
         fn eval_scalar(&self, _expr: &CompiledExpr) -> Value {
-            unreachable!("not needed for sort_key tests")
+            Value::Blank
         }
 
         fn eval_formula(&self, _expr: &CompiledExpr) -> Value {
-            unreachable!("not needed for sort_key tests")
+            Value::Blank
         }
 
         fn eval_formula_with_bindings(
@@ -2272,7 +2476,7 @@ mod tests {
             _expr: &CompiledExpr,
             _bindings: &std::collections::HashMap<String, Value>,
         ) -> Value {
-            unreachable!("not needed for sort_key tests")
+            Value::Blank
         }
 
         fn capture_lexical_env(&self) -> std::collections::HashMap<String, Value> {
@@ -2295,7 +2499,13 @@ mod tests {
         }
 
         fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
-            chrono::Utc.timestamp_opt(0, 0).single().unwrap()
+            match chrono::Utc.timestamp_opt(0, 0) {
+                LocalResult::Single(dt) => dt,
+                other => {
+                    debug_assert!(false, "expected epoch timestamp to be valid, got {other:?}");
+                    chrono::DateTime::<chrono::Utc>::MIN_UTC
+                }
+            }
         }
 
         fn date_system(&self) -> ExcelDateSystem {
@@ -2331,8 +2541,16 @@ mod tests {
 
     fn stable_sort_order(values: &[Value]) -> Vec<usize> {
         let ctx = DummyContext;
-        let keys: Vec<_> = values.iter().map(|v| sort_key(&ctx, v)).collect();
-        let mut order: Vec<usize> = (0..values.len()).collect();
+        let mut keys: Vec<SortKeyValue> = super::try_vec_with_capacity(values.len())
+            .unwrap_or_else(|_| panic!("test allocation failed (keys)"));
+        for v in values {
+            keys.push(sort_key(&ctx, v).unwrap_or_else(|e| {
+                panic!("sort_key failed unexpectedly in test (error={e:?}, value={v:?})")
+            }));
+        }
+
+        let mut order: Vec<usize> = super::try_index_vec(values.len())
+            .unwrap_or_else(|_| panic!("test allocation failed (order)"));
         order.sort_by(|&a, &b| {
             let ord = compare_sort_keys(&keys[a], &keys[b], false);
             if ord == Ordering::Equal {
@@ -2353,13 +2571,14 @@ mod tests {
         ];
 
         let order = stable_sort_order(&values);
-        let sorted: Vec<ErrorKind> = order
-            .into_iter()
-            .map(|idx| match values[idx] {
-                Value::Error(e) => e,
-                _ => unreachable!("expected error value"),
-            })
-            .collect();
+        let mut sorted: Vec<ErrorKind> = super::try_vec_with_capacity(order.len())
+            .unwrap_or_else(|_| panic!("test allocation failed (sorted)"));
+        for idx in order {
+            match &values[idx] {
+                Value::Error(e) => sorted.push(*e),
+                other => panic!("expected error value, got {other:?}"),
+            }
+        }
 
         assert_eq!(
             sorted,

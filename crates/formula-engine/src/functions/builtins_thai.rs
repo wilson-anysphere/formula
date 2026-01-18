@@ -74,7 +74,10 @@ fn thaidigit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |v| {
         let text = v.coerce_to_string_with_ctx(ctx)?;
-        Ok(Value::Text(crate::functions::text::thai::thai_digit(&text)))
+        match crate::functions::text::thai::thai_digit(&text) {
+            Ok(s) => Ok(Value::Text(s)),
+            Err(e) => Err(excel_error_to_kind(e)),
+        }
     })
 }
 

@@ -1,12 +1,13 @@
 use crate::locale::ValueLocaleConfig;
 use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
-use crate::value::{casefold, casefold_owned};
+use crate::value::cmp_case_insensitive;
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
 use formula_format::{DateSystem, FormatOptions, Value as FormatValue};
 use formula_model::ErrorValue;
 use std::cmp::Ordering;
 use std::borrow::Cow;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -44,6 +45,21 @@ pub struct RowPermutation {
     pub old_to_new: Vec<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortError {
+    AllocationFailure(&'static str),
+}
+
+impl fmt::Display for SortError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SortError::AllocationFailure(ctx) => write!(f, "allocation failed ({ctx})"),
+        }
+    }
+}
+
+impl std::error::Error for SortError {}
+
 #[derive(Debug, Clone)]
 enum SortKeyValue {
     Blank,
@@ -80,7 +96,7 @@ struct SortRow {
     key_values: Vec<SortKeyValue>,
 }
 
-pub fn sort_range(range: &mut RangeData, spec: &SortSpec) -> RowPermutation {
+pub fn sort_range(range: &mut RangeData, spec: &SortSpec) -> Result<RowPermutation, SortError> {
     sort_range_with_value_locale(range, spec, ValueLocaleConfig::en_us())
 }
 
@@ -88,7 +104,7 @@ pub fn sort_range_with_value_locale(
     range: &mut RangeData,
     spec: &SortSpec,
     value_locale: ValueLocaleConfig,
-) -> RowPermutation {
+) -> Result<RowPermutation, SortError> {
     let row_count = range.rows.len();
     if row_count <= 1 || spec.keys.is_empty() {
         return identity_permutation(row_count);
@@ -109,7 +125,7 @@ pub fn sort_range_with_value_locale(
         },
     );
 
-    let perm = compute_row_permutation_with_value_locale(
+    let mut perm = compute_row_permutation_with_value_locale(
         row_count,
         header_rows,
         &spec.keys,
@@ -122,16 +138,10 @@ pub fn sort_range_with_value_locale(
                 .cloned()
                 .unwrap_or(CellValue::Blank)
         },
-    );
+    )?;
 
-    range.rows = perm
-        .new_to_old
-        .iter()
-        .copied()
-        .map(|old_row| range.rows[old_row].clone())
-        .collect();
-
-    perm
+    apply_permutation_in_place(&mut range.rows, &mut perm)?;
+    Ok(perm)
 }
 
 fn compare_rows(a: &SortRow, b: &SortRow, keys: &[SortKey]) -> Ordering {
@@ -156,7 +166,13 @@ fn compare_key_value(a: &SortKeyValue, b: &SortKeyValue, key: &SortKey) -> Order
     let ord = match (a, b) {
         (SortKeyValue::Blank, SortKeyValue::Blank) => Ordering::Equal,
         (SortKeyValue::Error(a), SortKeyValue::Error(b)) => a.code().cmp(&b.code()),
-        (SortKeyValue::Text(a), SortKeyValue::Text(b)) => a.cmp(b),
+        (SortKeyValue::Text(a), SortKeyValue::Text(b)) => {
+            if key.case_sensitive {
+                a.cmp(b)
+            } else {
+                cmp_case_insensitive(a, b)
+            }
+        }
         (SortKeyValue::Bool(a), SortKeyValue::Bool(b)) => a.cmp(b),
         _ => {
             let a = a.as_number().unwrap_or(f64::NAN);
@@ -191,34 +207,52 @@ pub(crate) fn compute_row_permutation_with_value_locale(
     keys: &[SortKey],
     value_locale: ValueLocaleConfig,
     mut cell_at: impl FnMut(usize, usize) -> CellValue,
-) -> RowPermutation {
+) -> Result<RowPermutation, SortError> {
     if row_count == 0 {
-        return RowPermutation {
+        return Ok(RowPermutation {
             new_to_old: Vec::new(),
             old_to_new: Vec::new(),
-        };
+        });
     }
 
     if row_count <= 1 || keys.is_empty() {
         return identity_permutation(row_count);
     }
 
-    let mut sortable: Vec<SortRow> = (header_rows..row_count)
-        .map(|row_index| SortRow {
+    let header_rows = header_rows.min(row_count);
+    let data_rows = row_count - header_rows;
+
+    let mut sortable: Vec<SortRow> = Vec::new();
+    if sortable.try_reserve_exact(data_rows).is_err() {
+        debug_assert!(false, "allocation failed (sort rows={data_rows})");
+        return Err(SortError::AllocationFailure("sort rows"));
+    }
+
+    for row_index in header_rows..row_count {
+        let mut key_values: Vec<SortKeyValue> = Vec::new();
+        if key_values.try_reserve_exact(keys.len()).is_err() {
+            debug_assert!(false, "allocation failed (sort keys={})", keys.len());
+            return Err(SortError::AllocationFailure("sort keys"));
+        }
+
+        for key in keys {
+            let cell = cell_at(row_index, key.column);
+            key_values.push(detect_key_value(&cell, key, value_locale));
+        }
+
+        sortable.push(SortRow {
             original_index: row_index,
-            key_values: keys
-                .iter()
-                .map(|key| {
-                    let cell = cell_at(row_index, key.column);
-                    detect_key_value(&cell, key, value_locale)
-                })
-                .collect(),
-        })
-        .collect();
+            key_values,
+        });
+    }
 
     sortable.sort_by(|a, b| compare_rows(a, b, keys));
 
-    let mut new_to_old: Vec<usize> = Vec::with_capacity(row_count);
+    let mut new_to_old: Vec<usize> = Vec::new();
+    if new_to_old.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (sort permutation rows={row_count})");
+        return Err(SortError::AllocationFailure("sort permutation"));
+    }
 
     for row in 0..header_rows {
         new_to_old.push(row);
@@ -227,15 +261,20 @@ pub(crate) fn compute_row_permutation_with_value_locale(
         new_to_old.push(entry.original_index);
     }
 
-    let mut old_to_new = vec![0usize; row_count];
+    let mut old_to_new: Vec<usize> = Vec::new();
+    if old_to_new.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (sort inverse permutation rows={row_count})");
+        return Err(SortError::AllocationFailure("sort inverse permutation"));
+    }
+    old_to_new.resize(row_count, 0);
     for (new_index, old_index) in new_to_old.iter().copied().enumerate() {
         old_to_new[old_index] = new_index;
     }
 
-    RowPermutation {
+    Ok(RowPermutation {
         new_to_old,
         old_to_new,
-    }
+    })
 }
 
 fn detect_header_row(
@@ -288,23 +327,14 @@ fn detect_key_value(
     }
 
     match key.value_type {
-        SortValueType::Text => SortKeyValue::Text(fold_text(
-            cell_to_string(cell, value_locale),
-            key.case_sensitive,
-        )),
+        SortValueType::Text => SortKeyValue::Text(cell_to_string(cell, value_locale).into_owned()),
         SortValueType::Number => match coerce_number(cell, value_locale) {
             Some(n) => SortKeyValue::Number(n),
-            None => SortKeyValue::Text(fold_text(
-                cell_to_string(cell, value_locale),
-                key.case_sensitive,
-            )),
+            None => SortKeyValue::Text(cell_to_string(cell, value_locale).into_owned()),
         },
         SortValueType::DateTime => match coerce_datetime(cell, value_locale) {
             Some(dt) => SortKeyValue::DateTime(dt),
-            None => SortKeyValue::Text(fold_text(
-                cell_to_string(cell, value_locale),
-                key.case_sensitive,
-            )),
+            None => SortKeyValue::Text(cell_to_string(cell, value_locale).into_owned()),
         },
         SortValueType::Auto => {
             if let CellValue::Bool(b) = cell {
@@ -318,23 +348,9 @@ fn detect_key_value(
                 return SortKeyValue::DateTime(dt);
             }
             match cell {
-                _ => SortKeyValue::Text(fold_text(
-                    cell_to_string(cell, value_locale),
-                    key.case_sensitive,
-                )),
+                _ => SortKeyValue::Text(cell_to_string(cell, value_locale).into_owned()),
             }
         }
-    }
-}
-
-fn fold_text(s: Cow<'_, str>, case_sensitive: bool) -> String {
-    if case_sensitive {
-        return s.into_owned();
-    }
-
-    match s {
-        Cow::Borrowed(s) => casefold(s),
-        Cow::Owned(s) => casefold_owned(s),
     }
 }
 
@@ -380,21 +396,78 @@ fn coerce_datetime(cell: &CellValue, value_locale: ValueLocaleConfig) -> Option<
 pub(crate) fn datetime_to_excel_serial_1900(dt: NaiveDateTime) -> f64 {
     // Excel 1900 date system with the 1900 leap year bug.
     // See: https://support.microsoft.com/en-us/office/date-systems-in-excel-e7fe7167-48a9-4b96-bb53-5612a800b487
-    let base = NaiveDate::from_ymd_opt(1899, 12, 31).unwrap();
+    let Some(base) = NaiveDate::from_ymd_opt(1899, 12, 31) else {
+        debug_assert!(false, "expected 1899-12-31 to be a valid date");
+        return 0.0;
+    };
     let date = dt.date();
     let mut days = (date - base).num_days() as f64;
-    if date >= NaiveDate::from_ymd_opt(1900, 3, 1).unwrap() {
+    let Some(mar_1_1900) = NaiveDate::from_ymd_opt(1900, 3, 1) else {
+        debug_assert!(false, "expected 1900-03-01 to be a valid date");
+        return 0.0;
+    };
+    if date >= mar_1_1900 {
         days += 1.0;
     }
     let seconds = dt.time().num_seconds_from_midnight() as f64;
     days + (seconds / 86_400.0)
 }
 
-fn identity_permutation(row_count: usize) -> RowPermutation {
-    RowPermutation {
-        new_to_old: (0..row_count).collect(),
-        old_to_new: (0..row_count).collect(),
+pub(crate) fn identity_permutation(row_count: usize) -> Result<RowPermutation, SortError> {
+    let mut new_to_old: Vec<usize> = Vec::new();
+    if new_to_old.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (identity permutation rows={row_count})");
+        return Err(SortError::AllocationFailure("identity permutation"));
     }
+    for i in 0..row_count {
+        new_to_old.push(i);
+    }
+
+    let mut old_to_new: Vec<usize> = Vec::new();
+    if old_to_new.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (identity permutation rows={row_count})");
+        return Err(SortError::AllocationFailure("identity permutation"));
+    }
+    for i in 0..row_count {
+        old_to_new.push(i);
+    }
+
+    Ok(RowPermutation {
+        new_to_old,
+        old_to_new,
+    })
+}
+
+fn apply_permutation_in_place(
+    rows: &mut Vec<Vec<CellValue>>,
+    perm: &mut RowPermutation,
+) -> Result<(), SortError> {
+    debug_assert_eq!(rows.len(), perm.new_to_old.len());
+    debug_assert_eq!(rows.len(), perm.old_to_new.len());
+
+    // Apply the permutation in-place by swapping rows, using `old_to_new` as the working
+    // "current position -> target position" mapping. This avoids cloning row vectors (and their
+    // contents) and bounds extra memory to the already-allocated permutation buffers.
+    //
+    // Correctness sketch:
+    // - Initially, row `i` is the old row `i` and must move to `old_to_new[i]`.
+    // - When we swap positions `i` and `j`, we also swap their target destinations in the mapping.
+    // - Once `old_to_new[i] == i`, the row currently at position `i` is at its final destination.
+    for i in 0..rows.len() {
+        while perm.old_to_new[i] != i {
+            let j = perm.old_to_new[i];
+            rows.swap(i, j);
+            perm.old_to_new.swap(i, j);
+        }
+    }
+
+    // Restore `old_to_new` for the returned `RowPermutation`.
+    perm.old_to_new.fill(0);
+    for (new_index, old_index) in perm.new_to_old.iter().copied().enumerate() {
+        perm.old_to_new[old_index] = new_index;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -476,7 +549,7 @@ mod tests {
                 case_sensitive: false,
             }],
         };
-        let perm = sort_range(&mut data, &spec);
+        let perm = sort_range(&mut data, &spec).expect("sort should succeed");
 
         // Excel-style case folding treats ß like SS, so the two keys compare equal and the sort is
         // stable (preserves original order).
@@ -520,9 +593,10 @@ mod tests {
             ],
         };
 
-        let perm = sort_range(&mut data, &spec);
+        let perm = sort_range(&mut data, &spec).expect("sort should succeed");
 
-        let mut names: Vec<&str> = Vec::with_capacity(data.rows.len());
+        let mut names: Vec<&str> = Vec::new();
+        assert!(names.try_reserve_exact(data.rows.len()).is_ok());
         for r in &data.rows {
             names.push(match &r[0] {
                 CellValue::Text(s) => s.as_str(),
@@ -556,9 +630,10 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
-        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        let mut values: Vec<&str> = Vec::new();
+        assert!(values.try_reserve_exact(data.rows.len().saturating_sub(1)).is_ok());
         for r in data.rows.iter().skip(1) {
             values.push(match &r[0] {
                 CellValue::Text(s) => s.as_str(),
@@ -589,9 +664,11 @@ mod tests {
             }],
         };
 
-        sort_range_with_value_locale(&mut data, &spec, ValueLocaleConfig::de_de());
+        sort_range_with_value_locale(&mut data, &spec, ValueLocaleConfig::de_de())
+            .expect("sort should succeed");
 
-        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        let mut values: Vec<&str> = Vec::new();
+        assert!(values.try_reserve_exact(data.rows.len().saturating_sub(1)).is_ok());
         for r in data.rows.iter().skip(1) {
             values.push(match &r[0] {
                 CellValue::Text(s) => s.as_str(),
@@ -622,9 +699,10 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
-        let mut values: Vec<&str> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        let mut values: Vec<&str> = Vec::new();
+        assert!(values.try_reserve_exact(data.rows.len().saturating_sub(1)).is_ok());
         for r in data.rows.iter().skip(1) {
             values.push(match &r[0] {
                 CellValue::Text(s) => s.as_str(),
@@ -656,7 +734,7 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
         assert_eq!(data.rows[3][0], CellValue::Blank);
     }
@@ -680,7 +758,7 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
         assert_eq!(data.rows[3][0], CellValue::Text("".into()));
     }
@@ -703,7 +781,7 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
         assert_eq!(data.rows[0][0], CellValue::Text("Amount".into()));
         assert_eq!(data.rows[1][0], CellValue::Number(2.0));
@@ -731,9 +809,10 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
-        let mut sorted: Vec<CellValue> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        let mut sorted: Vec<CellValue> = Vec::new();
+        assert!(sorted.try_reserve_exact(data.rows.len().saturating_sub(1)).is_ok());
         for r in data.rows.iter().skip(1) {
             sorted.push(r[0].clone());
         }
@@ -769,9 +848,10 @@ mod tests {
             }],
         };
 
-        sort_range(&mut data, &spec);
+        sort_range(&mut data, &spec).expect("sort should succeed");
 
-        let mut sorted: Vec<CellValue> = Vec::with_capacity(data.rows.len().saturating_sub(1));
+        let mut sorted: Vec<CellValue> = Vec::new();
+        assert!(sorted.try_reserve_exact(data.rows.len().saturating_sub(1)).is_ok());
         for r in data.rows.iter().skip(1) {
             sorted.push(r[0].clone());
         }

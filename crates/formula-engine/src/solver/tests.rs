@@ -294,6 +294,31 @@ fn evolutionary_handles_nonsmooth_integer_problem() {
 }
 
 #[test]
+fn evolutionary_handles_nan_objectives_without_panicking() {
+    let model = FnModel::new(vec![0.0], |_vars| (f64::NAN, Vec::new()));
+
+    let mut model = model;
+    let problem = SolverProblem {
+        objective: Objective::minimize(),
+        variables: vec![VarSpec::continuous(-1.0, 1.0)],
+        constraints: Vec::new(),
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::Evolutionary;
+    options.max_iterations = 10;
+    options.tolerance = 1e-8;
+    options.apply_solution = false;
+    options.evolutionary.population_size = 20;
+    options.evolutionary.elite_count = 2;
+    options.evolutionary.seed = 123;
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert!(matches!(outcome.status, SolveStatus::IterationLimit));
+    assert!(outcome.best_objective.is_nan());
+}
+
+#[test]
 fn simplex_integrates_with_engine_recalc() {
     // Same LP as `simplex_solves_linear_lp`, but evaluated through the real
     // `Engine` formula + dependency graph.

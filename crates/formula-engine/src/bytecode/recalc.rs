@@ -73,12 +73,35 @@ pub struct CalcGraph {
 
 impl CalcGraph {
     pub fn build(cells: Vec<FormulaCell>, cache: &BytecodeCache) -> Self {
-        let mut nodes = Vec::with_capacity(cells.len());
-        let mut index: AHashMap<(i32, i32), usize> = AHashMap::with_capacity(cells.len());
+        let mut nodes: Vec<CellNode> = Vec::new();
+        if nodes.try_reserve_exact(cells.len()).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph nodes)");
+            return Self {
+                nodes: Vec::new(),
+                levels: Vec::new(),
+                max_level_width: 0,
+            };
+        }
+        let mut index: AHashMap<(i32, i32), usize> = AHashMap::new();
+        if index.try_reserve(cells.len()).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph index)");
+            return Self {
+                nodes: Vec::new(),
+                levels: Vec::new(),
+                max_level_width: 0,
+            };
+        }
 
+        let mut deps_failed = false;
         for (i, cell) in cells.into_iter().enumerate() {
             let program = cache.get_or_compile(&cell.expr);
-            let deps = collect_deps(&cell.expr, cell.coord);
+            let deps = match collect_deps(&cell.expr, cell.coord) {
+                Some(deps) => deps,
+                None => {
+                    deps_failed = true;
+                    Vec::new()
+                }
+            };
             nodes.push(CellNode {
                 coord: cell.coord,
                 program,
@@ -86,9 +109,24 @@ impl CalcGraph {
             });
             index.insert((cell.coord.row, cell.coord.col), i);
         }
+        if deps_failed {
+            debug_assert!(false, "allocation failed (CalcGraph deps)");
+            return Self::sequential(nodes);
+        }
 
-        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
-        let mut indegree: Vec<usize> = vec![0; nodes.len()];
+        let mut dependents: Vec<Vec<usize>> = Vec::new();
+        if dependents.try_reserve_exact(nodes.len()).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph dependents)");
+            return Self::sequential(nodes);
+        }
+        dependents.resize_with(nodes.len(), Vec::new);
+
+        let mut indegree: Vec<usize> = Vec::new();
+        if indegree.try_reserve_exact(nodes.len()).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph indegree)");
+            return Self::sequential(nodes);
+        }
+        indegree.resize(nodes.len(), 0);
 
         for (i, node) in nodes.iter().enumerate() {
             for dep in &node.deps {
@@ -100,11 +138,16 @@ impl CalcGraph {
         }
 
         let mut levels: Vec<Vec<usize>> = Vec::new();
-        let mut current: Vec<usize> = indegree
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &deg)| if deg == 0 { Some(i) } else { None })
-            .collect();
+        let mut current: Vec<usize> = Vec::new();
+        if current.try_reserve_exact(indegree.len()).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph current)");
+            return Self::sequential(nodes);
+        }
+        for (i, &deg) in indegree.iter().enumerate() {
+            if deg == 0 {
+                current.push(i);
+            }
+        }
 
         let mut remaining = nodes.len();
         while !current.is_empty() {
@@ -127,8 +170,7 @@ impl CalcGraph {
 
         if remaining != 0 {
             // Cycle detected; fall back to a single sequential level.
-            levels.clear();
-            levels.push((0..nodes.len()).collect());
+            return Self::sequential(nodes);
         }
 
         let max_level_width = levels.iter().map(|l| l.len()).max().unwrap_or(0);
@@ -137,6 +179,37 @@ impl CalcGraph {
             nodes,
             levels,
             max_level_width,
+        }
+    }
+
+    fn sequential(nodes: Vec<CellNode>) -> Self {
+        let len = nodes.len();
+        let mut level: Vec<usize> = Vec::new();
+        if level.try_reserve_exact(len).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph sequential level)");
+            return Self {
+                nodes: Vec::new(),
+                levels: Vec::new(),
+                max_level_width: 0,
+            };
+        }
+        level.extend(0..len);
+
+        let mut levels: Vec<Vec<usize>> = Vec::new();
+        if levels.try_reserve_exact(1).is_err() {
+            debug_assert!(false, "allocation failed (CalcGraph sequential levels)");
+            return Self {
+                nodes: Vec::new(),
+                levels: Vec::new(),
+                max_level_width: 0,
+            };
+        }
+        levels.push(level);
+
+        Self {
+            nodes,
+            levels,
+            max_level_width: len,
         }
     }
 }
@@ -168,7 +241,15 @@ impl RecalcEngine {
 
     pub fn recalc(&self, graph: &CalcGraph, grid: &mut dyn GridMut) {
         let locale = crate::LocaleConfig::en_us();
-        let mut results: Vec<Value> = Vec::with_capacity(graph.max_level_width);
+        let mut results: Vec<Value> = Vec::new();
+        if results.try_reserve_exact(graph.max_level_width).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (recalc results, max_level_width={})",
+                graph.max_level_width
+            );
+            return;
+        }
         let now_utc = chrono::Utc::now();
         let date_system = ExcelDateSystem::EXCEL_1900;
         let value_locale = ValueLocaleConfig::en_us();
@@ -180,7 +261,7 @@ impl RecalcEngine {
             {
                 let g: &dyn Grid = &*grid;
                 let eval_level_serial = |results: &mut [Value]| {
-                    let mut vm = Vm::with_capacity(32);
+                    let mut vm = Vm::new_with_default_stack();
                     let _guard = super::runtime::set_thread_eval_context(
                         date_system,
                         value_locale,
@@ -201,7 +282,7 @@ impl RecalcEngine {
                             results.par_iter_mut().zip(level.par_iter()).for_each_init(
                                 || {
                                     (
-                                        Vm::with_capacity(32),
+                                        Vm::new_with_default_stack(),
                                         super::runtime::set_thread_eval_context(
                                             date_system,
                                             value_locale,
@@ -235,12 +316,18 @@ impl RecalcEngine {
     }
 }
 
-fn collect_deps(expr: &Expr, base: CellCoord) -> Vec<CellCoord> {
+fn collect_deps(expr: &Expr, base: CellCoord) -> Option<Vec<CellCoord>> {
     let mut out: AHashSet<(i32, i32)> = AHashSet::new();
     collect_deps_inner(expr, base, &mut out);
-    out.into_iter()
-        .map(|(row, col)| CellCoord { row, col })
-        .collect()
+    let mut deps: Vec<CellCoord> = Vec::new();
+    if deps.try_reserve_exact(out.len()).is_err() {
+        debug_assert!(false, "allocation failed (collect_deps, len={})", out.len());
+        return None;
+    }
+    for (row, col) in out {
+        deps.push(CellCoord { row, col });
+    }
+    Some(deps)
 }
 
 fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32)>) {
@@ -318,7 +405,7 @@ mod tests {
         // Keep the bytecode function runtime's locale config in sync with the value-locale
         // configured above so any criteria parsing inside quoted strings matches Excel.
         let locale_config = crate::LocaleConfig::de_de();
-        let mut vm = Vm::with_capacity(32);
+        let mut vm = Vm::new_with_default_stack();
         let de_de_value = vm.eval(&program, &empty_grid, 0, origin, &locale_config);
         let en_us_value = vm.eval_with_coercion_context(
             &program,

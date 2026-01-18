@@ -63,7 +63,15 @@ fn column_intervals_ci(
             Ok(vec![normalize_column_interval(start_idx, end_idx)])
         }
         StructuredColumns::Multi(parts) => {
-            let mut out = Vec::with_capacity(parts.len());
+            let mut out: Vec<(u32, u32)> = Vec::new();
+            if out.try_reserve_exact(parts.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (structured refs column intervals, len={})",
+                    parts.len()
+                );
+                return Err(ErrorKind::Num);
+            }
             for part in parts {
                 out.push(column_interval_ci(table, part)?);
             }
@@ -114,10 +122,19 @@ pub fn resolve_structured_ref(
     }
 
     let ranges = resolve_structured_ref_in_table(table, origin_cell, sref)?;
-    Ok(ranges
-        .into_iter()
-        .map(|(start, end)| (sheet_id, start, end))
-        .collect())
+    let mut out: Vec<(usize, CellAddr, CellAddr)> = Vec::new();
+    if out.try_reserve_exact(ranges.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (structured refs sheet mapping, len={})",
+            ranges.len()
+        );
+        return Err(ErrorKind::Num);
+    }
+    for (start, end) in ranges {
+        out.push((sheet_id, start, end));
+    }
+    Ok(out)
 }
 
 /// Resolve a structured reference against a specific table.
@@ -187,8 +204,14 @@ pub fn resolve_structured_ref_in_table(
     }
 
     let row_intervals = merge_intervals(row_intervals);
-    let mut out: Vec<(CellAddr, CellAddr)> =
-        Vec::with_capacity(row_intervals.len().saturating_mul(col_intervals.len()));
+    let out_len = row_intervals
+        .len()
+        .saturating_mul(col_intervals.len());
+    let mut out: Vec<(CellAddr, CellAddr)> = Vec::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        debug_assert!(false, "allocation failed (structured refs out, len={out_len})");
+        return Err(ErrorKind::Num);
+    }
     for (row_start, row_end) in row_intervals {
         for (left_idx, right_idx) in &col_intervals {
             out.push((

@@ -58,19 +58,79 @@ struct LpSolution {
     objective: f64,
 }
 
+fn try_clone_f64_slice(src: &[f64]) -> Result<Vec<f64>, SolverError> {
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(src.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (len={})", src.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    out.extend_from_slice(src);
+    Ok(out)
+}
+
+fn try_zeros_f64(len: usize) -> Result<Vec<f64>, SolverError> {
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "solver allocation failed (len={len})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    out.resize(len, 0.0);
+    Ok(out)
+}
+
+fn try_clone_lp(lp: &LinearProgram) -> Result<LinearProgram, SolverError> {
+    let objective = try_clone_f64_slice(&lp.objective)?;
+
+    let mut constraints: Vec<LinearConstraint> = Vec::new();
+    if constraints.try_reserve_exact(lp.constraints.len()).is_err() {
+        debug_assert!(
+            false,
+            "solver allocation failed (constraints={})",
+            lp.constraints.len()
+        );
+        return Err(SolverError::new("allocation failed"));
+    }
+    for c in &lp.constraints {
+        let coeffs = try_clone_f64_slice(&c.coeffs)?;
+        constraints.push(LinearConstraint {
+            coeffs,
+            relation: c.relation,
+            rhs: c.rhs,
+        });
+    }
+
+    Ok(LinearProgram {
+        objective,
+        constraints,
+    })
+}
+
 pub(crate) fn solve_simplex<M: SolverModel>(
     model: &mut M,
     problem: &SolverProblem,
     options: &mut SolveOptions<'_>,
 ) -> Result<SolveOutcome, SolverError> {
     // Evaluate at current values to define the sampling base point.
-    let mut vars = vec![0.0; model.num_vars()];
+    let n_vars = model.num_vars();
+    let mut vars: Vec<f64> = Vec::new();
+    if vars.try_reserve_exact(n_vars).is_err() {
+        debug_assert!(false, "solver allocation failed (vars={n_vars})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    vars.resize(n_vars, 0.0);
     model.get_vars(&mut vars);
     clamp_vars(&mut vars, &problem.variables);
 
     let (objective_fn, constraint_fns) = infer_linear_functions(model, problem, &vars)?;
 
-    let mut bounds_lower: Vec<f64> = problem.variables.iter().map(|v| v.lower).collect();
+    let mut bounds_lower: Vec<f64> = Vec::new();
+    if bounds_lower.try_reserve_exact(problem.variables.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (bounds_lower)");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for v in &problem.variables {
+        bounds_lower.push(v.lower);
+    }
     for (idx, v) in problem.variables.iter().enumerate() {
         if !bounds_lower[idx].is_finite() {
             // In Excel, "Make Unconstrained Variables Non-Negative" is the default for simplex.
@@ -92,15 +152,19 @@ pub(crate) fn solve_simplex<M: SolverModel>(
     let (lp, shift, decision_len) =
         build_lp(problem, &objective_fn, &constraint_fns, &bounds_lower)?;
 
-    let integer_indices: Vec<usize> = problem
-        .variables
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, v)| match v.var_type {
-            VarType::Continuous => None,
-            VarType::Integer | VarType::Binary => Some(idx),
-        })
-        .collect();
+    let mut integer_indices: Vec<usize> = Vec::new();
+    if integer_indices
+        .try_reserve_exact(problem.variables.len())
+        .is_err()
+    {
+        debug_assert!(false, "solver allocation failed (integer_indices)");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for (idx, v) in problem.variables.iter().enumerate() {
+        if matches!(v.var_type, VarType::Integer | VarType::Binary) {
+            integer_indices.push(idx);
+        }
+    }
 
     let mut nodes_searched = 0usize;
     let mut best_lp_solution: Option<LpSolution> = None;
@@ -119,7 +183,7 @@ pub(crate) fn solve_simplex<M: SolverModel>(
         &mut best_lp_solution,
         &mut options.progress,
         &mut cancelled,
-    );
+    )?;
 
     let best_lp_solution = best_lp_solution.unwrap_or(LpSolution {
         status: LpStatus::Infeasible,
@@ -153,16 +217,25 @@ pub(crate) fn solve_simplex<M: SolverModel>(
         });
     }
 
-    let mut best_vars: Vec<f64> = best_lp_solution.x[..decision_len]
-        .iter()
-        .zip(shift.iter())
-        .map(|(y, l)| y + l)
-        .collect();
+    let mut best_vars: Vec<f64> = Vec::new();
+    if best_vars.try_reserve_exact(decision_len).is_err() {
+        debug_assert!(false, "solver allocation failed (best_vars={decision_len})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for (y, l) in best_lp_solution.x[..decision_len].iter().zip(shift.iter()) {
+        best_vars.push(y + l);
+    }
 
     // Project back into bounds / variable domains.
     clamp_vars(&mut best_vars, &problem.variables);
 
-    let mut constraint_values = vec![0.0; model.num_constraints()];
+    let m_constraints = model.num_constraints();
+    let mut constraint_values: Vec<f64> = Vec::new();
+    if constraint_values.try_reserve_exact(m_constraints).is_err() {
+        debug_assert!(false, "solver allocation failed (constraints={m_constraints})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    constraint_values.resize(m_constraints, 0.0);
     model.set_vars(&best_vars)?;
     model.recalc()?;
     let best_objective = model.objective();
@@ -211,7 +284,12 @@ fn infer_linear_functions<M: SolverModel>(
     let n = model.num_vars();
     let m = model.num_constraints();
 
-    let mut base_constraints = vec![0.0; m];
+    let mut base_constraints: Vec<f64> = Vec::new();
+    if base_constraints.try_reserve_exact(m).is_err() {
+        debug_assert!(false, "solver allocation failed (constraints={m})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    base_constraints.resize(m, 0.0);
     model.set_vars(base_vars)?;
     model.recalc()?;
     let base_obj = model.objective();
@@ -232,12 +310,36 @@ fn infer_linear_functions<M: SolverModel>(
         )));
     }
 
-    let mut obj_coeffs = vec![0.0; n];
-    let mut constraint_coeffs: Vec<Vec<f64>> = vec![vec![0.0; n]; m];
+    let mut obj_coeffs: Vec<f64> = Vec::new();
+    if obj_coeffs.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "solver allocation failed (obj_coeffs={n})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    obj_coeffs.resize(n, 0.0);
+
+    let mut constraint_coeffs: Vec<Vec<f64>> = Vec::new();
+    if constraint_coeffs.try_reserve_exact(m).is_err() {
+        debug_assert!(false, "solver allocation failed (constraint_coeffs={m})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for _ in 0..m {
+        let mut row: Vec<f64> = Vec::new();
+        if row.try_reserve_exact(n).is_err() {
+            debug_assert!(false, "solver allocation failed (constraint_row={n})");
+            return Err(SolverError::new("allocation failed"));
+        }
+        row.resize(n, 0.0);
+        constraint_coeffs.push(row);
+    }
 
     for j in 0..n {
         let step = choose_step(base_vars[j], &problem.variables[j]);
-        let mut vars = base_vars.to_vec();
+        let mut vars: Vec<f64> = Vec::new();
+        if vars.try_reserve_exact(base_vars.len()).is_err() {
+            debug_assert!(false, "solver allocation failed (vars={})", base_vars.len());
+            return Err(SolverError::new("allocation failed"));
+        }
+        vars.extend_from_slice(base_vars);
         vars[j] += step;
         clamp_vars(&mut vars, &problem.variables);
 
@@ -252,7 +354,12 @@ fn infer_linear_functions<M: SolverModel>(
             continue;
         }
 
-        let mut constraints = vec![0.0; m];
+        let mut constraints: Vec<f64> = Vec::new();
+        if constraints.try_reserve_exact(m).is_err() {
+            debug_assert!(false, "solver allocation failed (constraints={m})");
+            return Err(SolverError::new("allocation failed"));
+        }
+        constraints.resize(m, 0.0);
         model.set_vars(&vars)?;
         model.recalc()?;
         let obj = model.objective();
@@ -280,13 +387,14 @@ fn infer_linear_functions<M: SolverModel>(
         constant: obj_constant,
     };
 
-    let mut constraint_fns = Vec::with_capacity(m);
-    for i in 0..m {
-        let cst = base_constraints[i] - dot(&constraint_coeffs[i], base_vars);
-        constraint_fns.push(LinearFunction {
-            coeffs: constraint_coeffs[i].clone(),
-            constant: cst,
-        });
+    let mut constraint_fns: Vec<LinearFunction> = Vec::new();
+    if constraint_fns.try_reserve_exact(m).is_err() {
+        debug_assert!(false, "solver allocation failed (constraint_fns={m})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for (i, coeffs) in constraint_coeffs.into_iter().enumerate() {
+        let cst = base_constraints[i] - dot(&coeffs, base_vars);
+        constraint_fns.push(LinearFunction { coeffs, constant: cst });
     }
 
     Ok((objective_fn, constraint_fns))
@@ -319,10 +427,20 @@ fn build_lp(
     lower_bounds: &[f64],
 ) -> Result<(LinearProgram, Vec<f64>, usize), SolverError> {
     let n = problem.variables.len();
-    let shift: Vec<f64> = lower_bounds.to_vec();
+    let mut shift: Vec<f64> = Vec::new();
+    if shift.try_reserve_exact(lower_bounds.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (shift={})", lower_bounds.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    shift.extend_from_slice(lower_bounds);
 
     // Decision variables are shifted so they are all >= 0.
-    let mut obj = vec![0.0; n];
+    let mut obj: Vec<f64> = Vec::new();
+    if obj.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "solver allocation failed (obj={n})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    obj.resize(n, 0.0);
     match problem.objective.kind {
         ObjectiveKind::Maximize => obj.clone_from_slice(&objective_fn.coeffs),
         ObjectiveKind::Minimize => {
@@ -332,17 +450,42 @@ fn build_lp(
         }
         ObjectiveKind::Target => {
             // We'll add an auxiliary variable `t` and minimize it (by maximizing -t).
-            obj = vec![0.0; n + 1];
+            let mut tmp: Vec<f64> = Vec::new();
+            if tmp.try_reserve_exact(n + 1).is_err() {
+                debug_assert!(false, "solver allocation failed (obj={})", n + 1);
+                return Err(SolverError::new("allocation failed"));
+            }
+            tmp.resize(n + 1, 0.0);
+            obj = tmp;
             obj[n] = -1.0;
         }
     }
 
+    let upper_bound_constraints = problem
+        .variables
+        .iter()
+        .filter(|v| v.upper.is_finite())
+        .count();
+    let target_constraints = if problem.objective.kind == ObjectiveKind::Target {
+        2
+    } else {
+        0
+    };
+    let expected_constraints = problem.constraints.len() + upper_bound_constraints + target_constraints;
+
     let mut constraints: Vec<LinearConstraint> = Vec::new();
+    if constraints.try_reserve_exact(expected_constraints).is_err() {
+        debug_assert!(
+            false,
+            "solver allocation failed (constraints={expected_constraints})"
+        );
+        return Err(SolverError::new("allocation failed"));
+    }
 
     // User constraints.
     for constraint in &problem.constraints {
         let f = &constraint_fns[constraint.index];
-        let mut coeffs = f.coeffs.clone();
+        let mut coeffs = try_clone_f64_slice(&f.coeffs)?;
         let mut rhs = constraint.rhs - f.constant - dot(&coeffs, &shift);
         let mut relation = constraint.relation;
 
@@ -370,7 +513,12 @@ fn build_lp(
     for (j, var) in problem.variables.iter().enumerate() {
         if var.upper.is_finite() {
             let ub = var.upper - shift[j];
-            let mut coeffs = vec![0.0; n];
+            let mut coeffs: Vec<f64> = Vec::new();
+            if coeffs.try_reserve_exact(n).is_err() {
+                debug_assert!(false, "solver allocation failed (coeffs={n})");
+                return Err(SolverError::new("allocation failed"));
+            }
+            coeffs.resize(n, 0.0);
             coeffs[j] = 1.0;
             constraints.push(LinearConstraint {
                 coeffs,
@@ -391,7 +539,16 @@ fn build_lp(
         let constant_y = objective_fn.constant + dot(&objective_fn.coeffs, &shift);
         let target_rhs = problem.objective.target_value - constant_y;
 
-        let mut c1 = objective_fn.coeffs.clone();
+        let mut c1: Vec<f64> = Vec::new();
+        if c1.try_reserve_exact(objective_fn.coeffs.len() + 1).is_err() {
+            debug_assert!(
+                false,
+                "solver allocation failed (coeffs={})",
+                objective_fn.coeffs.len() + 1
+            );
+            return Err(SolverError::new("allocation failed"));
+        }
+        c1.extend_from_slice(&objective_fn.coeffs);
         c1.push(-1.0); // -t
         constraints.push(LinearConstraint {
             coeffs: c1,
@@ -399,7 +556,18 @@ fn build_lp(
             rhs: target_rhs,
         });
 
-        let mut c2: Vec<f64> = objective_fn.coeffs.iter().map(|v| -*v).collect();
+        let mut c2: Vec<f64> = Vec::new();
+        if c2.try_reserve_exact(objective_fn.coeffs.len() + 1).is_err() {
+            debug_assert!(
+                false,
+                "solver allocation failed (coeffs={})",
+                objective_fn.coeffs.len() + 1
+            );
+            return Err(SolverError::new("allocation failed"));
+        }
+        for v in &objective_fn.coeffs {
+            c2.push(-*v);
+        }
         c2.push(-1.0); // -t
         constraints.push(LinearConstraint {
             coeffs: c2,
@@ -413,6 +581,14 @@ fn build_lp(
     // Make all constraints have the right coefficient length.
     for c in &mut constraints {
         if c.coeffs.len() < decision_len {
+            let additional = decision_len - c.coeffs.len();
+            if c.coeffs.try_reserve_exact(additional).is_err() {
+                debug_assert!(
+                    false,
+                    "solver allocation failed (coeffs resize -> {decision_len})"
+                );
+                return Err(SolverError::new("allocation failed"));
+            }
             c.coeffs.resize(decision_len, 0.0);
         }
     }
@@ -440,22 +616,22 @@ fn branch_and_bound(
     best_solution: &mut Option<LpSolution>,
     progress: &mut Option<&mut dyn FnMut(Progress) -> bool>,
     cancelled: &mut bool,
-) {
+) -> Result<(), SolverError> {
     if *cancelled || *nodes_searched >= options.max_bnb_nodes {
-        return;
+        return Ok(());
     }
     *nodes_searched += 1;
 
-    let mut lp_solution = solve_lp(lp, options.max_pivots);
+    let mut lp_solution = solve_lp(lp, options.max_pivots)?;
 
     if lp_solution.status != LpStatus::Optimal || *cancelled {
-        return;
+        return Ok(());
     }
 
     // Prune using relaxation bound.
     if let Some(best) = best_solution {
         if lp_solution.objective <= best.objective + 1e-10 {
-            return;
+            return Ok(());
         }
     }
 
@@ -507,7 +683,7 @@ fn branch_and_bound(
     }
 
     if *cancelled {
-        return;
+        return Ok(());
     }
 
     if let Some((idx, value)) = fractional_var {
@@ -516,8 +692,12 @@ fn branch_and_bound(
 
         // Branch 1: x_idx <= floor_v
         if floor_v.is_finite() {
-            let mut lp1 = lp.clone();
-            let mut coeffs = vec![0.0; decision_len];
+            let mut lp1 = try_clone_lp(lp)?;
+            if lp1.constraints.try_reserve_exact(1).is_err() {
+                debug_assert!(false, "solver allocation failed (constraints +1)");
+                return Err(SolverError::new("allocation failed"));
+            }
+            let mut coeffs = try_zeros_f64(decision_len)?;
             coeffs[idx] = 1.0;
             lp1.constraints.push(LinearConstraint {
                 coeffs,
@@ -537,13 +717,17 @@ fn branch_and_bound(
                 best_solution,
                 progress,
                 cancelled,
-            );
+            )?;
         }
 
         // Branch 2: x_idx >= ceil_v  ->  -x_idx <= -ceil_v
         if ceil_v.is_finite() {
-            let mut lp2 = lp.clone();
-            let mut coeffs = vec![0.0; decision_len];
+            let mut lp2 = try_clone_lp(lp)?;
+            if lp2.constraints.try_reserve_exact(1).is_err() {
+                debug_assert!(false, "solver allocation failed (constraints +1)");
+                return Err(SolverError::new("allocation failed"));
+            }
+            let mut coeffs = try_zeros_f64(decision_len)?;
             coeffs[idx] = -1.0;
             lp2.constraints.push(LinearConstraint {
                 coeffs,
@@ -563,48 +747,61 @@ fn branch_and_bound(
                 best_solution,
                 progress,
                 cancelled,
-            );
+            )?;
         }
     }
+
+    Ok(())
 }
 
-fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> LpSolution {
+fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> Result<LpSolution, SolverError> {
     let n = lp.objective.len();
-    let mut constraints = lp.constraints.clone();
 
-    // Ensure RHS >= 0 for tableau construction.
-    for c in &mut constraints {
-        if c.rhs < 0.0 {
-            c.rhs = -c.rhs;
-            for v in &mut c.coeffs {
-                *v = -*v;
-            }
-            c.relation = match c.relation {
+    let mut slack_count = 0usize;
+    let mut surplus_count = 0usize;
+    let mut artificial_count = 0usize;
+    for c in &lp.constraints {
+        let relation = if c.rhs < 0.0 {
+            match c.relation {
                 Relation::LessEqual => Relation::GreaterEqual,
                 Relation::GreaterEqual => Relation::LessEqual,
                 Relation::Equal => Relation::Equal,
-            };
+            }
+        } else {
+            c.relation
+        };
+
+        match relation {
+            Relation::LessEqual => slack_count += 1,
+            Relation::GreaterEqual => {
+                surplus_count += 1;
+                artificial_count += 1;
+            }
+            Relation::Equal => artificial_count += 1,
         }
     }
 
-    let slack_count = constraints
-        .iter()
-        .filter(|c| c.relation == Relation::LessEqual)
-        .count();
-    let surplus_count = constraints
-        .iter()
-        .filter(|c| c.relation == Relation::GreaterEqual)
-        .count();
-    let artificial_count = constraints
-        .iter()
-        .filter(|c| matches!(c.relation, Relation::GreaterEqual | Relation::Equal))
-        .count();
-
     let total_vars = n + slack_count + surplus_count + artificial_count;
-    let m = constraints.len();
+    let m = lp.constraints.len();
 
-    let mut tableau = vec![vec![0.0; total_vars + 1]; m + 1];
-    let mut basis = vec![0usize; m];
+    let cols = total_vars + 1;
+    let rows = m + 1;
+
+    let mut tableau: Vec<Vec<f64>> = Vec::new();
+    if tableau.try_reserve_exact(rows).is_err() {
+        debug_assert!(false, "solver allocation failed (tableau rows={rows})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    for _ in 0..rows {
+        tableau.push(try_zeros_f64(cols)?);
+    }
+
+    let mut basis: Vec<usize> = Vec::new();
+    if basis.try_reserve_exact(m).is_err() {
+        debug_assert!(false, "solver allocation failed (basis={m})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    basis.resize(m, 0);
 
     let slack_offset = n;
     let surplus_offset = slack_offset + slack_count;
@@ -614,13 +811,24 @@ fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> LpSolution {
     let mut surplus_idx = 0usize;
     let mut artificial_idx = 0usize;
 
-    for (row, c) in constraints.iter().enumerate() {
-        for j in 0..n {
-            tableau[row][j] = c.coeffs[j];
-        }
-        tableau[row][total_vars] = c.rhs;
+    for (row, c) in lp.constraints.iter().enumerate() {
+        let (coeff_sign, rhs, relation) = if c.rhs < 0.0 {
+            let relation = match c.relation {
+                Relation::LessEqual => Relation::GreaterEqual,
+                Relation::GreaterEqual => Relation::LessEqual,
+                Relation::Equal => Relation::Equal,
+            };
+            (-1.0, -c.rhs, relation)
+        } else {
+            (1.0, c.rhs, c.relation)
+        };
 
-        match c.relation {
+        for j in 0..n {
+            tableau[row][j] = coeff_sign * c.coeffs[j];
+        }
+        tableau[row][total_vars] = rhs;
+
+        match relation {
             Relation::LessEqual => {
                 let col = slack_offset + slack_idx;
                 slack_idx += 1;
@@ -673,21 +881,21 @@ fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> LpSolution {
     ) {
         LpStatus::Optimal => {}
         status => {
-            return LpSolution {
+            return Ok(LpSolution {
                 status,
-                x: vec![0.0; n],
+                x: Vec::new(),
                 objective: f64::NAN,
-            };
+            });
         }
     }
 
     let phase1_obj = tableau[m][total_vars];
     if phase1_obj < -1e-8 {
-        return LpSolution {
+        return Ok(LpSolution {
             status: LpStatus::Infeasible,
-            x: vec![0.0; n],
+            x: Vec::new(),
             objective: f64::NAN,
-        };
+        });
     }
 
     // Phase II: set real objective.
@@ -717,7 +925,7 @@ fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> LpSolution {
         |col| col < artificial_offset, // do not allow artificial vars to enter
     );
 
-    let mut x = vec![0.0; n];
+    let mut x = try_zeros_f64(n)?;
     for row in 0..m {
         let basic = basis[row];
         if basic < n {
@@ -725,11 +933,11 @@ fn solve_lp(lp: &LinearProgram, max_pivots: usize) -> LpSolution {
         }
     }
 
-    LpSolution {
+    Ok(LpSolution {
         status: phase2_status,
         x,
         objective: tableau[m][total_vars],
-    }
+    })
 }
 
 fn simplex_iterate<F: Fn(usize) -> bool>(

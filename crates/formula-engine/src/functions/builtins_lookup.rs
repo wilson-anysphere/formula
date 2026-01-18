@@ -1516,7 +1516,11 @@ fn getpivotdata_from_registry(
         .copied()
         .ok_or(ErrorKind::Ref)?;
 
-    let mut criteria_indices: Vec<(usize, Value)> = Vec::with_capacity(criteria.len());
+    let mut criteria_indices: Vec<(usize, Value)> = Vec::new();
+    if criteria_indices.try_reserve_exact(criteria.len()).is_err() {
+        debug_assert!(false, "GETPIVOTDATA criteria allocation failed");
+        return Err(ErrorKind::Num);
+    }
     for (field, item) in criteria {
         let field_trimmed = field.trim();
         if field_trimmed.is_empty() {
@@ -1556,21 +1560,28 @@ fn getpivotdata_from_registry(
     }
 
     let mut acc = PivotAccumulator::new();
-    let pivot_filter_indices: Vec<(usize, &std::collections::HashSet<PivotKeyPart>)> = pivot
-        .config
-        .filter_fields
-        .iter()
-        .filter_map(|filter| {
-            let allowed = filter.allowed.as_ref()?;
-            let field_name = filter.source_field.canonical_name();
-            let field_name =
-                crate::pivot_registry::normalize_pivot_cache_field_name(field_name.as_ref());
-            let idx = with_casefolded_key(field_name.as_ref(), |key| {
-                entry.field_indices.get(key).copied()
-            })?;
-            Some((idx, allowed))
-        })
-        .collect();
+    let mut pivot_filter_indices: Vec<(usize, &std::collections::HashSet<PivotKeyPart>)> =
+        Vec::new();
+    if pivot_filter_indices
+        .try_reserve(pivot.config.filter_fields.len())
+        .is_err()
+    {
+        debug_assert!(false, "GETPIVOTDATA filter allocation failed");
+        return Err(ErrorKind::Num);
+    }
+    for filter in &pivot.config.filter_fields {
+        let Some(allowed) = filter.allowed.as_ref() else {
+            continue;
+        };
+        let field_name = filter.source_field.canonical_name();
+        let field_name = crate::pivot_registry::normalize_pivot_cache_field_name(field_name.as_ref());
+        let Some(idx) = with_casefolded_key(field_name.as_ref(), |key| {
+            entry.field_indices.get(key).copied()
+        }) else {
+            continue;
+        };
+        pivot_filter_indices.push((idx, allowed));
+    }
 
     'records: for record in &pivot.cache.records {
         // Apply pivot-config filter fields (report filters / slicers).
@@ -1863,11 +1874,22 @@ fn parse_pivot_value_header(header: &str) -> ParsedPivotValueHeader {
     // - no column fields: `<value name>`
     // - with column fields: `<col item> - <value name>` or `<a> / <b> - <value name>`
     if let Some((prefix, value_name)) = header.split_once(" - ") {
-        let column_items = prefix
-            .split(" / ")
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        let count = prefix.split(" / ").filter(|s| !s.is_empty()).count();
+        let mut column_items: Vec<String> = Vec::new();
+        if column_items.try_reserve_exact(count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot header column items, len={count})"
+            );
+            return ParsedPivotValueHeader {
+                kind: PivotValueColKind::Regular,
+                value_name: value_name.to_string(),
+                column_items: Vec::new(),
+            };
+        }
+        for item in prefix.split(" / ").filter(|s| !s.is_empty()) {
+            column_items.push(item.to_string());
+        }
         return ParsedPivotValueHeader {
             kind: PivotValueColKind::Regular,
             value_name: value_name.to_string(),
@@ -1896,7 +1918,11 @@ fn select_pivot_value_col(
     });
 
     if !col_criteria.is_empty() {
-        let mut col_items = Vec::with_capacity(col_criteria.len());
+        let mut col_items: Vec<String> = Vec::new();
+        if col_items.try_reserve_exact(col_criteria.len()).is_err() {
+            debug_assert!(false, "GETPIVOTDATA column-criteria allocation failed");
+            return Err(ErrorKind::Num);
+        }
         for v in col_criteria {
             col_items.push(v.coerce_to_string_with_ctx(ctx)?);
         }
@@ -2507,34 +2533,33 @@ fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
                 }
             }
 
+            if let (Some(a), Some(b)) = (text_like_str(ctx, a), text_like_str(ctx, b)) {
+                return crate::value::eq_case_insensitive(a.as_ref(), b.as_ref());
+            }
+
+            // Excel parses numeric text for comparisons, but does not treat empty strings as zero.
+            if let (Value::Number(num), other) | (other, Value::Number(num)) = (a, b) {
+                if let Some(other) = text_like_str(ctx, other) {
+                    let trimmed = other.trim();
+                    if trimmed.is_empty() {
+                        return false;
+                    }
+                    return parse_value_text(
+                        trimmed,
+                        ctx.value_locale(),
+                        ctx.now_utc(),
+                        ctx.date_system(),
+                    )
+                    .is_ok_and(|parsed| parsed == *num);
+                }
+            }
+
             match (a, b) {
                 (Value::Bool(x), Value::Bool(y)) => x == y,
                 (Value::Blank, Value::Blank) => true,
                 (Value::Error(x), Value::Error(y)) => x == y,
-                (Value::Number(num), other) | (other, Value::Number(num))
-                    if text_like_str(ctx, other).is_some() =>
-                {
-                    let other = text_like_str(ctx, other).unwrap();
-                    let trimmed = other.trim();
-                    if trimmed.is_empty() {
-                        false
-                    } else {
-                        parse_value_text(
-                            trimmed,
-                            ctx.value_locale(),
-                            ctx.now_utc(),
-                            ctx.date_system(),
-                        )
-                        .is_ok_and(|parsed| parsed == *num)
-                    }
-                }
                 (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
                     (*n == 0.0 && !b) || (*n == 1.0 && *b)
-                }
-                (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
-                    let a = text_like_str(ctx, a).unwrap();
-                    let b = text_like_str(ctx, b).unwrap();
-                    crate::value::eq_case_insensitive(a.as_ref(), b.as_ref())
                 }
                 _ => false,
             }

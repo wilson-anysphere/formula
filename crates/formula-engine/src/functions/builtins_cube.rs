@@ -33,7 +33,12 @@ fn rtd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let mut topics = Vec::with_capacity(args.len().saturating_sub(2));
+    let topic_len = args.len().saturating_sub(2);
+    let mut topics: Vec<String> = Vec::new();
+    if topics.try_reserve_exact(topic_len).is_err() {
+        debug_assert!(false, "allocation failed (rtd topics, len={topic_len})");
+        return Value::Error(ErrorKind::Num);
+    }
     for expr in &args[2..] {
         match eval_scalar_arg(ctx, expr).coerce_to_string_with_ctx(ctx) {
             Ok(v) => topics.push(v),
@@ -68,7 +73,12 @@ fn cubevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let mut tuples = Vec::with_capacity(args.len().saturating_sub(1));
+    let tuple_len = args.len().saturating_sub(1);
+    let mut tuples: Vec<String> = Vec::new();
+    if tuples.try_reserve_exact(tuple_len).is_err() {
+        debug_assert!(false, "allocation failed (cubevalue tuples, len={tuple_len})");
+        return Value::Error(ErrorKind::Num);
+    }
     for expr in &args[1..] {
         match eval_scalar_arg(ctx, expr).coerce_to_string_with_ctx(ctx) {
             Ok(v) => tuples.push(v),

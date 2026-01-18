@@ -345,7 +345,14 @@ impl Distribution {
                     }
                 }
                 // Due to floating-point rounding, fall back to the last entry.
-                *values.last().unwrap()
+                let Some(last) = values.last() else {
+                    debug_assert!(
+                        false,
+                        "Discrete distribution should have been validated as non-empty"
+                    );
+                    return f64::NAN;
+                };
+                *last
             }
             Distribution::Beta {
                 alpha,
@@ -546,13 +553,35 @@ impl MonteCarloEngine {
         };
 
         let mut output_samples: HashMap<CellRef, Vec<f64>> = HashMap::new();
+        if output_samples
+            .try_reserve(config.output_cells.len())
+            .is_err()
+        {
+            debug_assert!(false, "monte carlo allocation failed (output_cells)");
+            return Err(WhatIfError::NumericalFailure(
+                "allocation failed (output cells)",
+            ));
+        }
         for cell in &config.output_cells {
-            output_samples.insert(cell.clone(), Vec::with_capacity(config.iterations));
+            let mut samples: Vec<f64> = Vec::new();
+            if samples.try_reserve_exact(config.iterations).is_err() {
+                debug_assert!(
+                    false,
+                    "monte carlo allocation failed (iterations={})",
+                    config.iterations
+                );
+                return Err(WhatIfError::NumericalFailure(
+                    "allocation failed (output samples)",
+                ));
+            }
+            output_samples.insert(cell.clone(), samples);
         }
 
         for i in 0..config.iterations {
             if let Some(l) = &correlated {
-                let z = generate_correlated_normals(&mut rng, l);
+                let z = generate_correlated_normals(&mut rng, l).map_err(|_| {
+                    WhatIfError::NumericalFailure("allocation failed (correlated normals)")
+                })?;
                 for (input, zi) in config.input_distributions.iter().zip(z.into_iter()) {
                     let value = input.distribution.from_standard_normal(zi);
                     model.set_cell_value(&input.cell, CellValue::Number(value))?;
@@ -575,10 +604,16 @@ impl MonteCarloEngine {
                         value,
                     })?;
 
-                output_samples
-                    .get_mut(cell)
-                    .expect("output cell vector preallocated")
-                    .push(number);
+                let Some(samples) = output_samples.get_mut(cell) else {
+                    debug_assert!(
+                        false,
+                        "Missing output samples buffer for configured output cell {cell}"
+                    );
+                    return Err(WhatIfError::NumericalFailure(
+                        "missing output samples buffer",
+                    ));
+                };
+                samples.push(number);
             }
 
             // Report progress roughly every 1% (and always on the last iteration).
@@ -593,9 +628,15 @@ impl MonteCarloEngine {
 
         let mut output_stats = HashMap::new();
         for cell in &config.output_cells {
-            let samples = output_samples
-                .get(cell)
-                .expect("output cell vector preallocated");
+            let Some(samples) = output_samples.get(cell) else {
+                debug_assert!(
+                    false,
+                    "Missing output samples buffer for configured output cell {cell}"
+                );
+                return Err(WhatIfError::NumericalFailure(
+                    "missing output samples buffer",
+                ));
+            };
             output_stats.insert(
                 cell.clone(),
                 analyze_samples(samples, config.histogram_bins),
@@ -612,7 +653,20 @@ impl MonteCarloEngine {
 
 fn cholesky_decomposition(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, &'static str> {
     let n = matrix.len();
-    let mut l = vec![vec![0.0_f64; n]; n];
+    let mut l: Vec<Vec<f64>> = Vec::new();
+    if l.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "cholesky allocation failed (n={n})");
+        return Err("allocation failed");
+    }
+    for _ in 0..n {
+        let mut row: Vec<f64> = Vec::new();
+        if row.try_reserve_exact(n).is_err() {
+            debug_assert!(false, "cholesky allocation failed (n={n})");
+            return Err("allocation failed");
+        }
+        row.resize(n, 0.0);
+        l.push(row);
+    }
 
     for i in 0..n {
         for j in 0..=i {
@@ -639,14 +693,27 @@ fn cholesky_decomposition(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, &'static
     Ok(l)
 }
 
-fn generate_correlated_normals(rng: &mut SeededRng, l: &[Vec<f64>]) -> Vec<f64> {
+fn generate_correlated_normals(
+    rng: &mut SeededRng,
+    l: &[Vec<f64>],
+) -> Result<Vec<f64>, &'static str> {
     let n = l.len();
-    let mut z = vec![0.0_f64; n];
+    let mut z: Vec<f64> = Vec::new();
+    if z.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "correlated normals allocation failed (n={n})");
+        return Err("allocation failed");
+    }
+    z.resize(n, 0.0);
     for zi in &mut z {
         *zi = standard_normal(rng);
     }
 
-    let mut out = vec![0.0_f64; n];
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "correlated normals allocation failed (n={n})");
+        return Err("allocation failed");
+    }
+    out.resize(n, 0.0);
     for i in 0..n {
         let mut sum = 0.0;
         for j in 0..=i {
@@ -654,7 +721,7 @@ fn generate_correlated_normals(rng: &mut SeededRng, l: &[Vec<f64>]) -> Vec<f64> 
         }
         out[i] = sum;
     }
-    out
+    Ok(out)
 }
 
 fn analyze_samples(samples: &[f64], histogram_bins: usize) -> OutputStatistics {
@@ -734,17 +801,26 @@ fn build_histogram(samples: &[f64], min: f64, max: f64, bins: usize) -> Histogra
     }
 
     if min == max {
-        return Histogram {
-            bins: vec![HistogramBin {
-                start: min,
-                end: max,
-                count: samples.len(),
-            }],
-        };
+        let mut out: Vec<HistogramBin> = Vec::new();
+        if out.try_reserve_exact(1).is_err() {
+            debug_assert!(false, "histogram allocation failed (bins=1)");
+            return Histogram { bins: Vec::new() };
+        }
+        out.push(HistogramBin {
+            start: min,
+            end: max,
+            count: samples.len(),
+        });
+        return Histogram { bins: out };
     }
 
     let width = (max - min) / bins as f64;
-    let mut counts = vec![0_usize; bins];
+    let mut counts: Vec<usize> = Vec::new();
+    if counts.try_reserve_exact(bins).is_err() {
+        debug_assert!(false, "histogram allocation failed (bins={bins})");
+        return Histogram { bins: Vec::new() };
+    }
+    counts.resize(bins, 0);
     for v in samples {
         let mut idx = ((*v - min) / width) as isize;
         if idx < 0 {
@@ -756,7 +832,11 @@ fn build_histogram(samples: &[f64], min: f64, max: f64, bins: usize) -> Histogra
         counts[idx as usize] += 1;
     }
 
-    let mut bin_defs = Vec::with_capacity(bins);
+    let mut bin_defs: Vec<HistogramBin> = Vec::new();
+    if bin_defs.try_reserve_exact(bins).is_err() {
+        debug_assert!(false, "histogram allocation failed (bins={bins})");
+        return Histogram { bins: Vec::new() };
+    }
     for (i, count) in counts.into_iter().enumerate() {
         let start = min + i as f64 * width;
         let end = if i + 1 == bins {

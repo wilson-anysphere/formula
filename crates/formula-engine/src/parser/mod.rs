@@ -352,10 +352,20 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_partial(self) -> PartialLex {
-        let (tokens, error) = self
-            .lex_with_mode(LexMode::BestEffort)
-            .expect("best-effort lexer should not return an error");
-        PartialLex { tokens, error }
+        let src_len = self.src.len();
+        match self.lex_with_mode(LexMode::BestEffort) {
+            Ok((tokens, error)) => PartialLex { tokens, error },
+            Err(err) => {
+                debug_assert!(false, "best-effort lexer should not return an error: {err:?}");
+                PartialLex {
+                    tokens: vec![Token {
+                        kind: TokenKind::Eof,
+                        span: Span::new(src_len, src_len),
+                    }],
+                    error: Some(err),
+                }
+            }
+        }
     }
 
     fn lex_with_mode(
@@ -974,7 +984,11 @@ impl<'a> Lexer<'a> {
         }
         if decimal_sep.is_some_and(|dec| self.peek_char() == Some(dec)) {
             self.bump();
-            out.push(decimal_sep.expect("is_some_and ensured decimal_sep is Some"));
+            if let Some(dec) = decimal_sep {
+                out.push(dec);
+            } else {
+                debug_assert!(false, "decimal_sep should be Some when is_some_and returned true");
+            }
             while let Some(ch) = self.peek_char() {
                 if is_digit(ch) {
                     self.bump();
@@ -990,8 +1004,11 @@ impl<'a> Lexer<'a> {
             self.bump();
             out.push('E');
             if matches!(self.peek_char(), Some('+' | '-')) {
-                let sign = self.bump().unwrap();
-                out.push(sign);
+                if let Some(sign) = self.bump() {
+                    out.push(sign);
+                } else {
+                    debug_assert!(false, "peek_char reported a sign but bump returned None");
+                }
             }
             let digits_start_len = out.len();
             while let Some(ch) = self.peek_char() {
@@ -2104,16 +2121,29 @@ impl<'a> Parser<'a> {
         }
 
         let name = if should_pop_stack {
-            let (name, _) = self
-                .func_stack
-                .pop()
-                .expect("parse_function_call_best_effort should balance func_stack");
-            name
+            match self.func_stack.pop() {
+                Some((name, _)) => name,
+                None => {
+                    debug_assert!(
+                        false,
+                        "parse_function_call_best_effort should balance func_stack"
+                    );
+                    self.call_depth = self.call_depth.saturating_sub(1);
+                    return Expr::Missing;
+                }
+            }
         } else {
-            self.func_stack
-                .last()
-                .map(|(name, _idx)| name.clone())
-                .expect("parse_function_call_best_effort should push func_stack entry")
+            match self.func_stack.last() {
+                Some((name, _idx)) => name.clone(),
+                None => {
+                    debug_assert!(
+                        false,
+                        "parse_function_call_best_effort should push func_stack entry"
+                    );
+                    self.call_depth = self.call_depth.saturating_sub(1);
+                    return Expr::Missing;
+                }
+            }
         };
         let out = Expr::FunctionCall(FunctionCall {
             name: FunctionName::new(name),
@@ -2670,6 +2700,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LParen)?;
         self.call_depth += 1;
+        let name_for_call = name.clone();
         self.func_stack.push((name, 0));
         let result: Result<Vec<Expr>, ParseError> = (|| {
             let mut args = Vec::new();
@@ -2717,10 +2748,13 @@ impl<'a> Parser<'a> {
             Ok(args)
         })();
 
-        let (name, _) = self
-            .func_stack
-            .pop()
-            .expect("parse_function_call should balance func_stack");
+        let name = match self.func_stack.pop() {
+            Some((name, _)) => name,
+            None => {
+                debug_assert!(false, "parse_function_call should balance func_stack");
+                name_for_call
+            }
+        };
         self.call_depth = self.call_depth.saturating_sub(1);
         result.map(|args| {
             Expr::FunctionCall(FunctionCall {
@@ -3796,15 +3830,26 @@ mod tests {
     use super::*;
     use crate::{CellRef, Coord, Expr, FunctionCall, ParseOptions, SerializeOptions, SheetRef};
 
+    fn token_kinds(tokens: Vec<Token>) -> Vec<TokenKind> {
+        let mut out: Vec<TokenKind> = Vec::new();
+        if out.try_reserve_exact(tokens.len()).is_err() {
+            panic!("allocation failed (token_kinds, tokens={})", tokens.len());
+        }
+        for token in tokens {
+            out.push(token.kind);
+        }
+        out
+    }
+
     #[test]
     fn true_false_lex_as_boolean_literals_when_not_followed_by_paren() {
         let opts = ParseOptions::default();
         let tokens = lex("TRUE", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(kinds, vec![TokenKind::Boolean(true), TokenKind::Eof]);
 
         let tokens = lex("FALSE", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(kinds, vec![TokenKind::Boolean(false), TokenKind::Eof]);
     }
 
@@ -3813,7 +3858,7 @@ mod tests {
         let opts = ParseOptions::default();
 
         let tokens = lex("TRUE()", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(
             kinds,
             vec![
@@ -3826,7 +3871,7 @@ mod tests {
 
         // Whitespace between the name and `(` still counts as a call.
         let tokens = lex("FALSE \t()", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(
             kinds,
             vec![
@@ -3870,7 +3915,7 @@ mod tests {
         };
 
         let tokens = lex("RC[-1].Price", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(
             kinds,
             vec![
@@ -3891,7 +3936,7 @@ mod tests {
         // names like `A1FOO` (it is not a complete A1 reference).
         let opts = ParseOptions::default();
         let tokens = lex("A1FOO", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(kinds, vec![TokenKind::Ident("A1FOO".to_string()), TokenKind::Eof]);
     }
 
@@ -3901,7 +3946,7 @@ mod tests {
         // later evaluate to `#REF!` (rather than being treated as names).
         let opts = ParseOptions::default();
         let tokens = lex("XFE1", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(
             kinds,
             vec![
@@ -3922,7 +3967,7 @@ mod tests {
         // treated as identifiers.
         let opts = ParseOptions::default();
         let tokens = lex("AAAA1", &opts).unwrap();
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        let kinds = token_kinds(tokens);
         assert_eq!(kinds, vec![TokenKind::Ident("AAAA1".to_string()), TokenKind::Eof]);
     }
 

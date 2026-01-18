@@ -246,7 +246,11 @@ fn coupon_schedule_from_maturity(
     if dates_rev[0] != first_coupon {
         return Err(ExcelError::Num);
     }
-    if *dates_rev.last().unwrap() != maturity {
+    let Some(&last) = dates_rev.last() else {
+        debug_assert!(false, "coupon schedule should be non-empty after validation");
+        return Err(ExcelError::Num);
+    };
+    if last != maturity {
         // This can only happen if `first_coupon > maturity` (validated elsewhere) or if date
         // stepping failed to hit maturity due to an inconsistent input schedule.
         return Err(ExcelError::Num);
@@ -453,7 +457,15 @@ fn oddf_equation(
     let odd_first_coupon = c * (dfc / e);
     validate_finite(odd_first_coupon)?;
 
-    let mut payments = Vec::with_capacity(coupon_dates.len());
+    let mut payments: Vec<(f64, f64)> = Vec::new();
+    if payments.try_reserve_exact(coupon_dates.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (odd coupon payments={})",
+            coupon_dates.len()
+        );
+        return Err(ExcelError::Num);
+    }
     for (idx, date) in coupon_dates.iter().copied().enumerate() {
         let t = t0 + idx as f64;
         validate_finite(t)?;
@@ -566,7 +578,13 @@ fn oddl_equation(
         let t = dsm / e_last;
         validate_finite(t)?;
 
-        BondEquation::new(freq, accrued_interest, vec![(t, maturity_amount)])
+        let mut payments: Vec<(f64, f64)> = Vec::new();
+        if payments.try_reserve_exact(1).is_err() {
+            debug_assert!(false, "allocation failed (odd last payments=1)");
+            return Err(ExcelError::Num);
+        }
+        payments.push((t, maturity_amount));
+        BondEquation::new(freq, accrued_interest, payments)
     } else {
         // Settlement before the last coupon date: PV remaining regular coupons through
         // `last_interest` plus the final odd stub cashflow at maturity.
@@ -618,7 +636,12 @@ fn oddl_equation(
             return Err(ExcelError::Num);
         }
 
-        let mut payments = Vec::with_capacity(n_reg.saturating_add(1));
+        let expected = n_reg.saturating_add(1);
+        let mut payments: Vec<(f64, f64)> = Vec::new();
+        if payments.try_reserve_exact(expected).is_err() {
+            debug_assert!(false, "allocation failed (odd last payments={expected})");
+            return Err(ExcelError::Num);
+        }
         for idx in 0..n_reg {
             let t = frac + idx as f64;
             validate_finite(t)?;

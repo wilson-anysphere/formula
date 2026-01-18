@@ -361,8 +361,19 @@ impl<'a> CompileCtx<'a> {
             self_local = Some(idx);
         }
 
-        let mut param_locals: Vec<u32> = Vec::with_capacity(params.len());
-        let mut omitted_param_locals: Vec<u32> = Vec::with_capacity(params.len());
+        let mut param_locals: Vec<u32> = Vec::new();
+        let mut omitted_param_locals: Vec<u32> = Vec::new();
+        if param_locals.try_reserve_exact(params.len()).is_err()
+            || omitted_param_locals.try_reserve_exact(params.len()).is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (lambda param locals, len={})",
+                params.len()
+            );
+            self.push_error_const(ErrorKind::Num);
+            return;
+        }
         let mut omitted_param_map: HashMap<Arc<str>, u32> = HashMap::new();
         for p in params.iter() {
             let idx = body_ctx.alloc_local(p.clone());
@@ -690,7 +701,15 @@ impl<'a> CompileCtx<'a> {
         // treat NaN as "equal" for ordering purposes, which can incorrectly select a branch and
         // eagerly evaluate a choice expression.
         self.compile_expr_inner(&args[0], false);
-        let mut selector_consts: Vec<u32> = Vec::with_capacity(choice_count);
+        let mut selector_consts: Vec<u32> = Vec::new();
+        if selector_consts.try_reserve_exact(choice_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (choose selector consts, len={choice_count})"
+            );
+            self.push_error_const(ErrorKind::Num);
+            return;
+        }
         for i in 1..=choice_count {
             let idx = self.program.consts.len() as u32;
             self.program

@@ -4,7 +4,7 @@ use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
 use crate::functions::{
     ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
-use crate::value::{casefold, with_casefolded_key, ErrorKind, Lambda, Value};
+use crate::value::{try_casefold, with_casefolded_key, ErrorKind, Lambda, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -42,7 +42,10 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let Some(name) = bare_identifier(&pair[0]) else {
             return Value::Error(ErrorKind::Value);
         };
-        let name_key = casefold(name.trim());
+        let name_key = match try_casefold(name.trim()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
 
         let value = ctx.eval_arg(&pair[1]);
         ctx.set_local_key(name_key, value);
@@ -70,20 +73,31 @@ fn lambda_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut params: Vec<String> = Vec::with_capacity(args.len().saturating_sub(1));
+    let param_count = args.len().saturating_sub(1);
+    let mut params: Vec<String> = Vec::new();
+    if params.try_reserve_exact(param_count).is_err() {
+        debug_assert!(false, "allocation failed (lambda params, len={param_count})");
+        return Value::Error(ErrorKind::Num);
+    }
 
     for param_expr in &args[..args.len() - 1] {
         let Some(name) = bare_identifier(param_expr) else {
             return Value::Error(ErrorKind::Value);
         };
-        let name_key = casefold(name.trim());
+        let name_key = match try_casefold(name.trim()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         if params.iter().any(|p| p == &name_key) {
             return Value::Error(ErrorKind::Value);
         }
         params.push(name_key);
     }
 
-    let body = args.last().expect("checked args is non-empty");
+    let Some(body) = args.last() else {
+        debug_assert!(false, "checked args is non-empty");
+        return Value::Error(ErrorKind::Value);
+    };
     let mut env = ctx.capture_lexical_env();
     env.retain(|k, _| !k.starts_with(LAMBDA_OMITTED_PREFIX));
 
@@ -113,12 +127,19 @@ fn isomitted_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     };
 
-    let key = with_casefolded_key(name.trim(), |folded| {
-        let mut key = String::with_capacity(LAMBDA_OMITTED_PREFIX.len() + folded.len());
+    let Some(key) = with_casefolded_key(name.trim(), |folded| {
+        let mut key = String::new();
+        let len = LAMBDA_OMITTED_PREFIX.len() + folded.len();
+        if key.try_reserve_exact(len).is_err() {
+            debug_assert!(false, "allocation failed (isomitted key, len={len})");
+            return None;
+        }
         key.push_str(LAMBDA_OMITTED_PREFIX);
         key.push_str(folded);
-        key
-    });
+        Some(key)
+    }) else {
+        return Value::Error(ErrorKind::Num);
+    };
     let env = ctx.capture_lexical_env();
     Value::Bool(matches!(env.get(&key), Some(Value::Bool(true))))
 }

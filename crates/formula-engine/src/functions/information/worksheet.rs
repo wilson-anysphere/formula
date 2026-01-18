@@ -80,7 +80,12 @@ fn workbook_dir_for_excel(dir: &str) -> String {
         (None, None) => '/',
     };
 
-    let mut out = String::with_capacity(dir.len() + 1);
+    let out_len = dir.len() + 1;
+    let mut out = String::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        debug_assert!(false, "allocation failed (workbook_dir_for_excel, len={out_len})");
+        return String::new();
+    }
     out.push_str(dir);
     out.push(sep);
     out
@@ -233,7 +238,12 @@ fn quote_sheet_name(name: &str) -> String {
     if name.is_empty() {
         return String::new();
     }
-    let mut out = String::with_capacity(name.len().saturating_add(2));
+    let out_len = name.len().saturating_add(2);
+    let mut out = String::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        debug_assert!(false, "allocation failed (quote_sheet_name, len={out_len})");
+        return String::new();
+    }
     formula_model::push_sheet_name_a1(&mut out, name);
     out
 }

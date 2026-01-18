@@ -38,10 +38,24 @@ where
     ValueAt: FnMut(usize, usize) -> PivotValue,
     NumFmtAt: FnMut(usize, usize) -> Option<&'a str>,
 {
-    let mut out = Vec::with_capacity(row_count);
+    let mut out: Vec<Vec<PivotValue>> = Vec::new();
+    if out.try_reserve_exact(row_count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (pivot source rows={row_count}, cols={col_count})"
+        );
+        return Vec::new();
+    }
 
     for r in 0..row_count {
-        let mut row = Vec::with_capacity(col_count);
+        let mut row: Vec<PivotValue> = Vec::new();
+        if row.try_reserve_exact(col_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot source row cols={col_count})"
+            );
+            return Vec::new();
+        }
         for c in 0..col_count {
             let value = value_at(r, c);
             let value =

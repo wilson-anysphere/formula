@@ -1,6 +1,8 @@
 use crate::date::ExcelDateSystem;
+use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::date_time;
 use crate::value::ErrorKind;
+use smallvec::SmallVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggregationMethod {
@@ -174,8 +176,15 @@ pub fn prepare_series(
     if values.len() < 2 {
         return Err(ErrorKind::Num);
     }
+    if values.len() > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Num);
+    }
 
-    let mut pairs: Vec<(f64, f64)> = Vec::with_capacity(values.len());
+    let mut pairs: Vec<(f64, f64)> = Vec::new();
+    if pairs.try_reserve_exact(values.len()).is_err() {
+        debug_assert!(false, "ETS series allocation failed (pairs={})", values.len());
+        return Err(ErrorKind::Num);
+    }
     for (&t, &v) in timeline.iter().zip(values.iter()) {
         if !t.is_finite() || !v.is_finite() {
             return Err(ErrorKind::Num);
@@ -188,15 +197,34 @@ pub fn prepare_series(
     // Aggregate duplicates by timeline.
     let mut uniq_timeline: Vec<f64> = Vec::new();
     let mut uniq_values: Vec<f64> = Vec::new();
+    if uniq_timeline.try_reserve_exact(pairs.len()).is_err()
+        || uniq_values.try_reserve_exact(pairs.len()).is_err()
+    {
+        debug_assert!(
+            false,
+            "ETS unique-series allocation failed (pairs={})",
+            pairs.len()
+        );
+        return Err(ErrorKind::Num);
+    }
 
     let mut i = 0usize;
     while i < pairs.len() {
         let t = pairs[i].0;
-        let mut group: Vec<f64> = Vec::new();
-        while i < pairs.len() && pairs[i].0 == t {
-            group.push(pairs[i].1);
-            i += 1;
+        let mut end = i + 1;
+        while end < pairs.len() && pairs[end].0 == t {
+            end += 1;
         }
+        let group_len = end - i;
+        let mut group: Vec<f64> = Vec::new();
+        if group.try_reserve_exact(group_len).is_err() {
+            debug_assert!(false, "ETS group allocation failed (len={group_len})");
+            return Err(ErrorKind::Num);
+        }
+        for k in i..end {
+            group.push(pairs[k].1);
+        }
+        i = end;
         let agg = aggregate_group(&group, aggregation)?;
         uniq_timeline.push(t);
         uniq_values.push(agg);
@@ -209,8 +237,36 @@ pub fn prepare_series(
     if let Ok(step) = base_step(&uniq_timeline) {
         let start = uniq_timeline[0];
 
-        let mut out_values = Vec::new();
-        out_values.reserve(uniq_values.len());
+        fn compute_multiple(t0: f64, t1: f64, step: f64) -> Result<usize, ErrorKind> {
+            let diff = t1 - t0;
+            let multiple_f = diff / step;
+            let multiple_i64 = multiple_f.round() as i64;
+            if multiple_i64 < 1 {
+                return Err(ErrorKind::Num);
+            }
+            if multiple_i64 > MAX_MATERIALIZED_ARRAY_CELLS as i64 {
+                return Err(ErrorKind::Num);
+            }
+            Ok(multiple_i64 as usize)
+        }
+
+        let mut total_points = 1usize;
+        for idx in 0..uniq_timeline.len() - 1 {
+            let multiple = compute_multiple(uniq_timeline[idx], uniq_timeline[idx + 1], step)?;
+            total_points = total_points.checked_add(multiple).ok_or(ErrorKind::Num)?;
+            if total_points > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Num);
+            }
+        }
+
+        let mut out_values: Vec<f64> = Vec::new();
+        if out_values.try_reserve_exact(total_points).is_err() {
+            debug_assert!(
+                false,
+                "ETS expanded-series allocation failed (points={total_points})"
+            );
+            return Err(ErrorKind::Num);
+        }
 
         for idx in 0..uniq_timeline.len() - 1 {
             let t0 = uniq_timeline[idx];
@@ -219,13 +275,7 @@ pub fn prepare_series(
             let v1 = uniq_values[idx + 1];
             out_values.push(v0);
 
-            let diff = t1 - t0;
-            let multiple_f = diff / step;
-            let multiple = multiple_f.round() as i64;
-            if multiple < 1 {
-                return Err(ErrorKind::Num);
-            }
-            let multiple = multiple as usize;
+            let multiple = compute_multiple(t0, t1, step)?;
             if multiple <= 1 {
                 continue;
             }
@@ -241,7 +291,11 @@ pub fn prepare_series(
                 out_values.push(filled);
             }
         }
-        out_values.push(*uniq_values.last().unwrap());
+        let Some(&last) = uniq_values.last() else {
+            debug_assert!(false, "uniq_timeline.len() >= 2 implies uniq_values is non-empty");
+            return Err(ErrorKind::Num);
+        };
+        out_values.push(last);
 
         return Ok(PreparedSeries {
             step: TimelineStep::Fixed { start, step },
@@ -281,19 +335,50 @@ fn prepare_series_month_step(
         return Err(ErrorKind::Num);
     }
 
-    let mut serials = Vec::with_capacity(timeline.len());
+    if timeline.len() > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut serials: Vec<i32> = Vec::new();
+    if serials.try_reserve_exact(timeline.len()).is_err() {
+        debug_assert!(
+            false,
+            "ETS month-step allocation failed (serials={})",
+            timeline.len()
+        );
+        return Err(ErrorKind::Num);
+    }
     for &t in timeline {
         serials.push(as_integer_day(t).ok_or(ErrorKind::Num)?);
     }
 
     // Compute the base step in calendar months.
-    let mut month_ids = Vec::with_capacity(serials.len());
+    let mut month_ids: Vec<i32> = Vec::new();
+    if month_ids.try_reserve_exact(serials.len()).is_err() {
+        debug_assert!(
+            false,
+            "ETS month-step allocation failed (month_ids={})",
+            serials.len()
+        );
+        return Err(ErrorKind::Num);
+    }
     for &s in &serials {
         month_ids.push(month_index(s, system)?);
     }
 
     let mut months_step = i32::MAX;
-    let mut diffs = Vec::with_capacity(month_ids.len().saturating_sub(1));
+    let mut diffs: Vec<i32> = Vec::new();
+    if diffs
+        .try_reserve_exact(month_ids.len().saturating_sub(1))
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "ETS month-step allocation failed (diffs={})",
+            month_ids.len().saturating_sub(1)
+        );
+        return Err(ErrorKind::Num);
+    }
     for w in month_ids.windows(2) {
         let d = w[1] - w[0];
         if d <= 0 {
@@ -389,7 +474,16 @@ fn prepare_series_month_step(
 
     // Expand to the full set of periods [0..=max_k], filling missing values according to
     // `data_completion` (interpolate or zero-fill).
-    let mut out = vec![f64::NAN; max_k + 1];
+    let total = max_k.saturating_add(1);
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Num);
+    }
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "ETS expanded-series allocation failed (points={total})");
+        return Err(ErrorKind::Num);
+    }
+    out.resize(total, f64::NAN);
     for (&k, &v) in &known {
         out[k] = v;
     }
@@ -528,6 +622,9 @@ pub fn detect_seasonality(values: &[f64]) -> Result<usize, ErrorKind> {
     if n < 2 {
         return Err(ErrorKind::Num);
     }
+    if n > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Num);
+    }
 
     // Need at least two full seasons to estimate seasonality reliably.
     let max_m = (n / 2).min(8760);
@@ -550,7 +647,11 @@ pub fn detect_seasonality(values: &[f64]) -> Result<usize, ErrorKind> {
     let slope = if var_t == 0.0 { 0.0 } else { cov / var_t };
     let intercept = mean_y - slope * mean_t;
 
-    let mut residuals = Vec::with_capacity(n);
+    let mut residuals: Vec<f64> = Vec::new();
+    if residuals.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "ETS residual allocation failed (n={n})");
+        return Err(ErrorKind::Num);
+    }
     for (i, &y) in values.iter().enumerate() {
         residuals.push(y - (intercept + slope * (i as f64)));
     }
@@ -620,7 +721,16 @@ fn aggregate_group(values: &[f64], method: AggregationMethod) -> Result<f64, Err
         AggregationMethod::Min => Ok(values.iter().copied().fold(f64::INFINITY, |a, b| a.min(b))),
         AggregationMethod::Sum => Ok(values.iter().sum::<f64>()),
         AggregationMethod::Median => {
-            let mut sorted = values.to_vec();
+            let mut sorted: Vec<f64> = Vec::new();
+            if sorted.try_reserve_exact(values.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "ETS median allocation failed (len={})",
+                    values.len()
+                );
+                return Err(ErrorKind::Num);
+            }
+            sorted.extend_from_slice(values);
             sorted.sort_by(|a, b| a.total_cmp(b));
             let mid = sorted.len() / 2;
             if sorted.len() % 2 == 1 {
@@ -637,13 +747,11 @@ fn base_step(timeline: &[f64]) -> Result<f64, ErrorKind> {
         return Err(ErrorKind::Num);
     }
     let mut step = f64::INFINITY;
-    let mut diffs = Vec::with_capacity(timeline.len() - 1);
     for w in timeline.windows(2) {
         let d = w[1] - w[0];
         if !(d > 0.0) || !d.is_finite() {
             return Err(ErrorKind::Num);
         }
-        diffs.push(d);
         step = step.min(d);
     }
     if !(step > 0.0) || !step.is_finite() {
@@ -654,7 +762,8 @@ fn base_step(timeline: &[f64]) -> Result<f64, ErrorKind> {
     // This supports missing timeline points (filled via data completion) but rejects irregular
     // spacing.
     const TOL: f64 = 1e-6;
-    for d in diffs {
+    for w in timeline.windows(2) {
+        let d = w[1] - w[0];
         let ratio = d / step;
         let rounded = ratio.round();
         if rounded < 1.0 {
@@ -690,29 +799,26 @@ fn autocorr(values: &[f64], lag: usize) -> (f64, bool) {
 
 #[derive(Clone)]
 struct Vertex {
-    x: Vec<f64>,
+    x: [f64; 4],
     f: f64,
 }
 
 fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
     let dims = if seasonality > 1 { 4 } else { 3 };
     let x0 = if seasonality > 1 {
-        vec![0.5, 0.1, 0.1, 1.0]
+        [0.5, 0.1, 0.1, 1.0]
     } else {
         // (alpha, beta, phi) when there is no seasonality.
-        vec![0.5, 0.1, 1.0]
+        [0.5, 0.1, 1.0, 0.0]
     };
 
-    let mut simplex: Vec<Vertex> = Vec::with_capacity(dims + 1);
+    let mut simplex: SmallVec<[Vertex; 5]> = SmallVec::new();
     let f0 = objective(values, seasonality, &x0);
-    simplex.push(Vertex {
-        x: x0.clone(),
-        f: f0,
-    });
+    simplex.push(Vertex { x: x0, f: f0 });
 
     let steps = [0.05, 0.05, 0.05, 0.02];
     for i in 0..dims {
-        let mut x = x0.clone();
+        let mut x = x0;
         x[i] = clamp01(x[i] + steps[i]);
         let f = objective(values, seasonality, &x);
         simplex.push(Vertex { x, f });
@@ -736,7 +842,7 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
         }
 
         // Centroid of best dims vertices (exclude worst).
-        let mut centroid = vec![0.0; dims];
+        let mut centroid = [0.0; 4];
         for v in simplex.iter().take(dims) {
             for i in 0..dims {
                 centroid[i] += v.x[i];
@@ -746,10 +852,10 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
             centroid[i] /= dims as f64;
         }
 
-        let worst = simplex[dims].x.clone();
+        let worst = simplex[dims].x;
 
         // Reflection
-        let mut xr = vec![0.0; dims];
+        let mut xr = [0.0; 4];
         for i in 0..dims {
             xr[i] = clamp01(centroid[i] + ALPHA * (centroid[i] - worst[i]));
         }
@@ -757,7 +863,7 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
 
         if fr < simplex[0].f {
             // Expansion
-            let mut xe = vec![0.0; dims];
+            let mut xe = [0.0; 4];
             for i in 0..dims {
                 xe[i] = clamp01(centroid[i] + GAMMA * (xr[i] - centroid[i]));
             }
@@ -776,7 +882,7 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
         }
 
         // Contraction
-        let mut xc = vec![0.0; dims];
+        let mut xc = [0.0; 4];
         if fr < simplex[dims].f {
             // Outside contraction
             for i in 0..dims {
@@ -795,7 +901,7 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
         }
 
         // Shrink
-        let best = simplex[0].x.clone();
+        let best = simplex[0].x;
         for i in 1..=dims {
             for j in 0..dims {
                 simplex[i].x[j] = clamp01(best[j] + SIGMA * (simplex[i].x[j] - best[j]));
@@ -813,7 +919,7 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
     (alpha, beta, gamma, phi)
 }
 
-fn objective(values: &[f64], seasonality: usize, x: &[f64]) -> f64 {
+fn objective(values: &[f64], seasonality: usize, x: &[f64; 4]) -> f64 {
     let (alpha, beta, gamma, phi) = if seasonality > 1 {
         (x[0], x[1], x[2], x[3])
     } else {
@@ -879,7 +985,13 @@ fn simulate(
 
     let mut level;
     let mut trend;
-    let mut seasonals = vec![0.0; seasonality.max(1)];
+    let total = seasonality.max(1);
+    let mut seasonals: Vec<f64> = Vec::new();
+    if seasonals.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "ETS seasonal allocation failed (len={total})");
+        return Err(ErrorKind::Num);
+    }
+    seasonals.resize(total, 0.0);
 
     if seasonality > 1 {
         let m = seasonality;

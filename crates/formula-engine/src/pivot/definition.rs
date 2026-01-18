@@ -801,11 +801,17 @@ pub(crate) fn refresh_pivot(
     // formats when we write values below.
     let mut style_cache: HashMap<String, u32> = HashMap::new();
     let date_system = ctx.date_system();
-    let mut values: Vec<Vec<crate::value::Value>> = Vec::with_capacity(rows as usize);
+    let mut values: Vec<Vec<crate::value::Value>> = Vec::new();
+    if values.try_reserve_exact(rows as usize).is_err() {
+        return Err(PivotError::AllocationFailure("pivot refresh values").into());
+    }
     let mut style_writes: Vec<(CellRef, u32)> = Vec::new();
 
     for r in 0..rows as usize {
-        let mut row_out: Vec<crate::value::Value> = Vec::with_capacity(cols as usize);
+        let mut row_out: Vec<crate::value::Value> = Vec::new();
+        if row_out.try_reserve_exact(cols as usize).is_err() {
+            return Err(PivotError::AllocationFailure("pivot refresh row values").into());
+        }
         let src_row = result.data.get(r);
         for c in 0..cols as usize {
             let pv = src_row

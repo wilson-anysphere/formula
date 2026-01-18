@@ -165,7 +165,11 @@ pub fn xirr(values: &[f64], dates: &[f64], guess: Option<f64>) -> ExcelResult<f6
     }
 
     let base = dates[0];
-    let mut exponents: SmallVec<[f64; 16]> = SmallVec::with_capacity(dates.len());
+    let mut exponents: SmallVec<[f64; 16]> = SmallVec::new();
+    if exponents.try_reserve(dates.len()).is_err() {
+        debug_assert!(false, "allocation failed (xirr exponents, len={})", dates.len());
+        return Err(ExcelError::Num);
+    }
     for d in dates {
         exponents.push((*d - base) / 365.0);
     }

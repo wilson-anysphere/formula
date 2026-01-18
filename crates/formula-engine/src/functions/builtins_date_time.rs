@@ -3,7 +3,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use crate::coercion::ValueLocaleConfig;
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::array_lift;
 use crate::functions::date_time;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
@@ -997,7 +997,22 @@ fn map_unary(v: Value, mut f: impl FnMut(Value) -> Value) -> Value {
                 let el = arr.values.into_iter().next().unwrap_or(Value::Blank);
                 return f(el);
             }
-            let mut out = Vec::with_capacity(arr.values.len());
+            let total = arr.values.len();
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                debug_assert!(
+                    false,
+                    "date/time unary map exceeds materialization limit (cells={total})"
+                );
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(
+                    false,
+                    "date/time unary map allocation failed (cells={total})"
+                );
+                return Value::Error(ErrorKind::Num);
+            }
             for el in arr.values {
                 out.push(f(el));
             }
@@ -1020,7 +1035,18 @@ fn broadcast_map2(a: Value, b: Value, mut f: impl FnMut(Value, Value) -> Value) 
         return f(broadcast_get(&a, 0, 0), broadcast_get(&b, 0, 0));
     }
 
-    let mut out = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out: Vec<Value> = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "date/time broadcast allocation failed (cells={total})");
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows {
         for c in 0..cols {
             let va = broadcast_get(&a, r, c);
@@ -1056,7 +1082,18 @@ fn broadcast_map3(
         );
     }
 
-    let mut out = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out: Vec<Value> = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "date/time broadcast allocation failed (cells={total})");
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows {
         for c_idx in 0..cols {
             let va = broadcast_get(&a, r, c_idx);
@@ -1086,6 +1123,77 @@ fn broadcast_shape(values: &[&Value]) -> Result<(usize, usize), ErrorKind> {
         }
     }
     Ok(shape.unwrap_or((1, 1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_map2_maps_pairwise_for_same_shape_arrays() {
+        let a = Value::Array(Array::new(
+            2,
+            2,
+            vec![
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0),
+                Value::Number(4.0),
+            ],
+        ));
+        let b = Value::Array(Array::new(
+            2,
+            2,
+            vec![
+                Value::Number(10.0),
+                Value::Number(20.0),
+                Value::Number(30.0),
+                Value::Number(40.0),
+            ],
+        ));
+
+        let out = broadcast_map2(a, b, |x, y| match (x, y) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+            _ => Value::Error(ErrorKind::Value),
+        });
+        assert_eq!(
+            out,
+            Value::Array(Array::new(
+                2,
+                2,
+                vec![
+                    Value::Number(11.0),
+                    Value::Number(22.0),
+                    Value::Number(33.0),
+                    Value::Number(44.0),
+                ]
+            ))
+        );
+    }
+
+    #[test]
+    fn broadcast_map3_broadcasts_scalars_to_array_shape() {
+        let a = Value::Number(1.0);
+        let b = Value::Number(2.0);
+        let c = Value::Array(Array::new(
+            1,
+            3,
+            vec![Value::Number(10.0), Value::Number(20.0), Value::Number(30.0)],
+        ));
+
+        let out = broadcast_map3(a, b, c, |x, y, z| match (x, y, z) {
+            (Value::Number(a), Value::Number(b), Value::Number(c)) => Value::Number(a + b + c),
+            _ => Value::Error(ErrorKind::Value),
+        });
+        assert_eq!(
+            out,
+            Value::Array(Array::new(
+                1,
+                3,
+                vec![Value::Number(13.0), Value::Number(23.0), Value::Number(33.0)]
+            ))
+        );
+    }
 }
 
 fn is_broadcastable(v: &Value, rows: usize, cols: usize) -> bool {

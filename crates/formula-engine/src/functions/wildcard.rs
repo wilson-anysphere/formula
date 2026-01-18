@@ -68,15 +68,29 @@ impl WildcardPattern {
 
     /// Returns the literal representation of this pattern with wildcard operators expressed as
     /// `*` / `?` and escape sequences resolved.
-    pub(crate) fn literal_pattern(&self) -> String {
-        self.tokens
-            .iter()
-            .map(|t| match t {
+    pub(crate) fn literal_pattern(&self) -> Result<String, crate::ErrorKind> {
+        let bytes = self
+            .tokens
+            .len()
+            .checked_mul(4)
+            .ok_or(crate::ErrorKind::Num)?;
+        let mut out = String::new();
+        if out.try_reserve_exact(bytes).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (wildcard literal_pattern, tokens={})",
+                self.tokens.len()
+            );
+            return Err(crate::ErrorKind::Num);
+        }
+        for t in &self.tokens {
+            out.push(match t {
                 Token::Star => '*',
                 Token::QMark => '?',
                 Token::Literal(c) => *c,
-            })
-            .collect()
+            });
+        }
+        Ok(out)
     }
 }
 

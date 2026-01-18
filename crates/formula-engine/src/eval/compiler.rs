@@ -108,11 +108,39 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
         crate::Expr::FunctionCall(call) => Expr::FunctionCall {
             name: call.name.name_upper.clone(),
             original_name: call.name.original.clone(),
-            args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
+            args: {
+                let mut args: Vec<Expr<String>> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (lower_expr function args, len={})",
+                        call.args.len()
+                    );
+                    return Expr::Error(ErrorKind::Num);
+                }
+                for a in call.args.iter() {
+                    args.push(lower_expr(a, origin));
+                }
+                args
+            },
         },
         crate::Expr::Call(call) => Expr::Call {
             callee: Box::new(lower_expr(call.callee.as_ref(), origin)),
-            args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
+            args: {
+                let mut args: Vec<Expr<String>> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (lower_expr call args, len={})",
+                        call.args.len()
+                    );
+                    return Expr::Error(ErrorKind::Num);
+                }
+                for a in call.args.iter() {
+                    args.push(lower_expr(a, origin));
+                }
+                args
+            },
         },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
@@ -238,7 +266,15 @@ fn lower_array_literal(arr: &crate::ArrayLiteral, origin: Option<crate::CellAddr
         return Expr::Error(ErrorKind::Value);
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let len = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Expr::Error(ErrorKind::Num),
+    };
+    let mut values: Vec<Expr<String>> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (lower_array_literal, len={len})");
+        return Expr::Error(ErrorKind::Num);
+    }
     for row in &arr.rows {
         for el in row {
             values.push(lower_expr(el, origin));
@@ -476,19 +512,24 @@ fn compile_expr_inner(
         crate::Expr::FunctionCall(call) => {
             let name = call.name.name_upper.clone();
             let original_name = call.name.original.clone();
-            let args = call
-                .args
-                .iter()
-                .map(|a| {
-                    compile_expr_inner(
-                        a,
-                        current_sheet,
-                        current_cell,
-                        resolve_sheet,
-                        sheet_dimensions,
-                    )
-                })
-                .collect();
+            let mut args: Vec<Expr<usize>> = Vec::new();
+            if args.try_reserve_exact(call.args.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (compile function args, len={})",
+                    call.args.len()
+                );
+                return Expr::Error(ErrorKind::Num);
+            }
+            for a in call.args.iter() {
+                args.push(compile_expr_inner(
+                    a,
+                    current_sheet,
+                    current_cell,
+                    resolve_sheet,
+                    sheet_dimensions,
+                ));
+            }
             Expr::FunctionCall {
                 name,
                 original_name,
@@ -503,19 +544,27 @@ fn compile_expr_inner(
                 resolve_sheet,
                 sheet_dimensions,
             )),
-            args: call
-                .args
-                .iter()
-                .map(|a| {
-                    compile_expr_inner(
+            args: {
+                let mut args: Vec<Expr<usize>> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (compile call args, len={})",
+                        call.args.len()
+                    );
+                    return Expr::Error(ErrorKind::Num);
+                }
+                for a in call.args.iter() {
+                    args.push(compile_expr_inner(
                         a,
                         current_sheet,
                         current_cell,
                         resolve_sheet,
                         sheet_dimensions,
-                    )
-                })
-                .collect(),
+                    ));
+                }
+                args
+            },
         },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
@@ -595,7 +644,15 @@ fn compile_array_literal(
         return Expr::Error(ErrorKind::Value);
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let len = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Expr::Error(ErrorKind::Num),
+    };
+    let mut values: Vec<CompiledExpr> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (compile_array_literal, len={len})");
+        return Expr::Error(ErrorKind::Num);
+    }
     for row in &arr.rows {
         for el in row {
             values.push(compile_expr_inner(

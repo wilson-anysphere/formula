@@ -1,4 +1,4 @@
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
@@ -47,7 +47,15 @@ fn arg_to_matrix(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<MatrixArg, 
     match arg {
         ArgValue::Scalar(v) => match v {
             Value::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.values.len());
+                let total = arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut out: Vec<Option<f64>> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "regression matrix allocation failed (cells={total})");
+                    return Err(ErrorKind::Num);
+                }
                 for el in arr.iter() {
                     match el {
                         Value::Error(e) => return Err(*e),
@@ -81,7 +89,15 @@ fn arg_to_matrix(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<MatrixArg, 
             ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut out = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = r.size() as usize;
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut out: Vec<Option<f64>> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "regression matrix allocation failed (cells={total})");
+                return Err(ErrorKind::Num);
+            }
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 out.push(value_to_optional_number_in_range(v)?);
@@ -175,6 +191,9 @@ fn build_filtered_xy(
         .map_err(|_| ErrorKind::Num)?;
     kept.try_reserve_exact(n_obs).map_err(|_| ErrorKind::Num)?;
 
+    let mut row: Vec<f64> = Vec::new();
+    row.try_reserve_exact(p).map_err(|_| ErrorKind::Num)?;
+
     for obs in 0..n_obs {
         let Some(yv) = y[obs] else {
             continue;
@@ -183,7 +202,7 @@ fn build_filtered_xy(
             return Err(ErrorKind::Num);
         }
 
-        let mut row = Vec::with_capacity(p);
+        row.clear();
         let mut row_ok = true;
         match x_orientation {
             XOrientation::Vector => match x.get(obs).copied().flatten() {
@@ -251,7 +270,8 @@ fn parse_known_xy(
         let arg = ctx.eval_arg(expr);
         // Treat a literal blank (omitted arg) as missing and default to 1..n.
         if matches!(arg, ArgValue::Scalar(Value::Blank)) {
-            let mut xs = Vec::with_capacity(n_obs);
+            let mut xs: Vec<Option<f64>> = Vec::new();
+            xs.try_reserve_exact(n_obs).map_err(|_| ErrorKind::Num)?;
             for i in 0..n_obs {
                 xs.push(Some((i + 1) as f64));
             }
@@ -262,7 +282,8 @@ fn parse_known_xy(
             (orient, p, vals, x_mat.cols)
         }
     } else {
-        let mut xs = Vec::with_capacity(n_obs);
+        let mut xs: Vec<Option<f64>> = Vec::new();
+        xs.try_reserve_exact(n_obs).map_err(|_| ErrorKind::Num)?;
         for i in 0..n_obs {
             xs.push(Some((i + 1) as f64));
         }
@@ -488,7 +509,12 @@ fn logest_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 fn predict_for_known_xy(parsed: &ParsedXY, predict_row: impl Fn(&[f64]) -> f64) -> Value {
     let (out_rows, out_cols) = parsed.y_shape;
     let total = out_rows.saturating_mul(out_cols);
-    let mut out = vec![Value::Error(ErrorKind::NA); total];
+    let mut out: Vec<Value> = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "allocation failed (regression predict out, len={total})");
+        return Value::Error(ErrorKind::Num);
+    }
+    out.resize(total, Value::Error(ErrorKind::NA));
 
     for (row_idx, &obs_idx) in parsed.kept_obs_indices.iter().enumerate() {
         let base = row_idx * parsed.p;
@@ -525,8 +551,15 @@ fn trend_predict_with_arg(
 
     if p == 1 {
         // Single predictor: preserve shape.
-        let total = new_x.rows.saturating_mul(new_x.cols);
-        let mut out = Vec::with_capacity(total);
+        let total = new_x.values.len();
+        if total > MAX_MATERIALIZED_ARRAY_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let mut out: Vec<Value> = Vec::new();
+        if out.try_reserve_exact(total).is_err() {
+            debug_assert!(false, "TREND allocation failed (cells={total})");
+            return Value::Error(ErrorKind::Num);
+        }
         for el in new_x.values {
             let Some(xv) = el else {
                 out.push(Value::Error(ErrorKind::Value));
@@ -553,9 +586,21 @@ fn trend_predict_with_arg(
                 return Value::Error(ErrorKind::Ref);
             }
             let n_new = new_x.rows;
-            let mut out = Vec::with_capacity(n_new);
+            if n_new > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(n_new).is_err() {
+                debug_assert!(false, "TREND allocation failed (cells={n_new})");
+                return Value::Error(ErrorKind::Num);
+            }
+            let mut row: Vec<f64> = Vec::new();
+            if row.try_reserve_exact(p).is_err() {
+                debug_assert!(false, "TREND row allocation failed (p={p})");
+                return Value::Error(ErrorKind::Num);
+            }
             for obs in 0..n_new {
-                let mut row = Vec::with_capacity(p);
+                row.clear();
                 let mut ok = true;
                 for pred in 0..p {
                     let idx = obs * new_x.cols + pred;
@@ -587,9 +632,21 @@ fn trend_predict_with_arg(
                 return Value::Error(ErrorKind::Ref);
             }
             let n_new = new_x.cols;
-            let mut out = Vec::with_capacity(n_new);
+            if n_new > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(n_new).is_err() {
+                debug_assert!(false, "TREND allocation failed (cells={n_new})");
+                return Value::Error(ErrorKind::Num);
+            }
+            let mut row: Vec<f64> = Vec::new();
+            if row.try_reserve_exact(p).is_err() {
+                debug_assert!(false, "TREND row allocation failed (p={p})");
+                return Value::Error(ErrorKind::Num);
+            }
             for obs in 0..n_new {
-                let mut row = Vec::with_capacity(p);
+                row.clear();
                 let mut ok = true;
                 for pred in 0..p {
                     let idx = pred * new_x.cols + obs;

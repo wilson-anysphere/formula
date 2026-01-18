@@ -95,7 +95,17 @@ fn translate_formula_with_style(
     };
     let tokens = lex(expr_src, &parse_opts).map_err(map_lex_error)?;
 
-    let mut out = String::with_capacity(trimmed.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(trimmed.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (translate_formula_with_style, len={})",
+            trimmed.len()
+        );
+        return Err(FormulaParseError::UnexpectedToken(
+            "allocation failed".to_string(),
+        ));
+    }
     if has_equals {
         out.push('=');
     }
@@ -219,18 +229,12 @@ fn translate_formula_with_style(
                 idx += 1;
             }
             TokenKind::Number(raw) => {
-                match dir {
-                    Direction::ToCanonical => out.push_str(&translate_number(
-                        raw,
-                        src_config.decimal_separator,
-                        dst_config.decimal_separator,
-                    )),
-                    Direction::ToLocalized => out.push_str(&localize_number(
-                        raw,
-                        src_config.decimal_separator,
-                        dst_config,
-                    )),
-                }
+                push_translated_number(
+                    &mut out,
+                    raw,
+                    src_config.decimal_separator,
+                    dst_config.decimal_separator,
+                )?;
                 idx += 1;
             }
             TokenKind::Ident(raw)
@@ -469,24 +473,30 @@ fn is_table_name_ident(tokens: &[Token], idx: usize) -> bool {
     matches!(next_non_trivia_kind(tokens, idx), Some(TokenKind::LBracket))
 }
 
-fn translate_number(raw: &str, decimal_in: char, decimal_out: char) -> String {
+fn push_translated_number(
+    out: &mut String,
+    raw: &str,
+    decimal_in: char,
+    decimal_out: char,
+) -> Result<(), FormulaParseError> {
     if decimal_in == decimal_out {
-        return raw.to_string();
+        out.push_str(raw);
+        return Ok(());
     }
-    raw.chars()
-        .map(|ch| if ch == decimal_in { decimal_out } else { ch })
-        .collect()
-}
-
-fn localize_number(raw: &str, decimal_in: char, dst: &LocaleConfig) -> String {
-    // Excel accepts locale-specific thousands separators *in input*, but `FormulaLocal` does not
-    // insert/group numeric literals when serializing formulas. It only rewrites the decimal
-    // separator (and other surrounding syntax like argument separators and function names).
-    //
-    // To verify against a real Excel install, see:
-    // - `tools/excel-oracle/extract-formula-local-number-formatting.ps1`
-    // - `tools/excel-oracle/extract-number-literal-formatting.ps1`
-    translate_number(raw, decimal_in, dst.decimal_separator)
+    if out.try_reserve_exact(raw.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (translate_number, len={})",
+            raw.len()
+        );
+        return Err(FormulaParseError::UnexpectedToken(
+            "allocation failed".to_string(),
+        ));
+    }
+    for ch in raw.chars() {
+        out.push(if ch == decimal_in { decimal_out } else { ch });
+    }
+    Ok(())
 }
 
 fn token_slice<'a>(src: &'a str, tok: &Token) -> Result<&'a str, FormulaParseError> {

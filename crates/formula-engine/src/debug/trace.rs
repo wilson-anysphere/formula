@@ -138,10 +138,39 @@ impl<S: Clone> SpannedExpr<S> {
             SpannedExprKind::Blank => SpannedExprKind::Blank,
             SpannedExprKind::Error(e) => SpannedExprKind::Error(*e),
             SpannedExprKind::ArrayLiteral { rows } => SpannedExprKind::ArrayLiteral {
-                rows: rows
-                    .iter()
-                    .map(|row| row.iter().map(|e| e.map_sheets(f)).collect())
-                    .collect(),
+                rows: {
+                    let mut out_rows: Vec<Vec<SpannedExpr<T>>> = Vec::new();
+                    if out_rows.try_reserve_exact(rows.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace map_sheets array rows, len={})",
+                            rows.len()
+                        );
+                        return SpannedExpr {
+                            span: self.span,
+                            kind: SpannedExprKind::Error(ErrorKind::Num),
+                        };
+                    }
+                    for row in rows.iter() {
+                        let mut out_row: Vec<SpannedExpr<T>> = Vec::new();
+                        if out_row.try_reserve_exact(row.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (trace map_sheets array row, len={})",
+                                row.len()
+                            );
+                            return SpannedExpr {
+                                span: self.span,
+                                kind: SpannedExprKind::Error(ErrorKind::Num),
+                            };
+                        }
+                        for e in row.iter() {
+                            out_row.push(e.map_sheets(f));
+                        }
+                        out_rows.push(out_row);
+                    }
+                    out_rows
+                },
             },
             SpannedExprKind::CellRef(r) => SpannedExprKind::CellRef(crate::eval::CellRef {
                 sheet: f(&r.sheet),
@@ -183,7 +212,24 @@ impl<S: Clone> SpannedExpr<S> {
             },
             SpannedExprKind::FunctionCall { name, args } => SpannedExprKind::FunctionCall {
                 name: name.clone(),
-                args: args.iter().map(|a| a.map_sheets(f)).collect(),
+                args: {
+                    let mut out_args: Vec<SpannedExpr<T>> = Vec::new();
+                    if out_args.try_reserve_exact(args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace map_sheets call args, len={})",
+                            args.len()
+                        );
+                        return SpannedExpr {
+                            span: self.span,
+                            kind: SpannedExprKind::Error(ErrorKind::Num),
+                        };
+                    }
+                    for a in args.iter() {
+                        out_args.push(a.map_sheets(f));
+                    }
+                    out_args
+                },
             },
             SpannedExprKind::ImplicitIntersection(inner) => {
                 SpannedExprKind::ImplicitIntersection(Box::new(inner.map_sheets(f)))
@@ -2312,7 +2358,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
         let rows = rows_u64 as usize;
         let cols = cols_u64 as usize;
-        let mut values = Vec::with_capacity(cell_count as usize);
+        let cell_count = cell_count as usize;
+        let mut values: Vec<Value> = Vec::new();
+        if values.try_reserve_exact(cell_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace deref reference values, len={cell_count})"
+            );
+            return Value::Error(ErrorKind::Num);
+        }
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
                 values.push(self.get_sheet_cell_value(&range.sheet_id, CellAddr { row, col }));
@@ -2416,8 +2470,31 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     );
                 }
 
-                let mut children = Vec::with_capacity(row_count.saturating_mul(col_count));
-                let mut out_values = Vec::with_capacity(row_count.saturating_mul(col_count));
+                let cell_count = row_count.saturating_mul(col_count);
+                let mut children: Vec<TraceNode> = Vec::new();
+                let mut out_values: Vec<Value> = Vec::new();
+                if children.try_reserve_exact(cell_count).is_err()
+                    || out_values.try_reserve_exact(cell_count).is_err()
+                {
+                    debug_assert!(
+                        false,
+                        "allocation failed (trace array literal buffers, len={cell_count})"
+                    );
+                    let value = Value::Error(ErrorKind::Num);
+                    return (
+                        EvalValue::Scalar(value.clone()),
+                        TraceNode {
+                            kind: TraceKind::ArrayLiteral {
+                                rows: row_count,
+                                cols: col_count,
+                            },
+                            span: expr.span,
+                            value,
+                            reference: None,
+                            children: Vec::new(),
+                        },
+                    );
+                }
 
                 for row in rows {
                     for el in row {
@@ -2474,7 +2551,25 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             },
                         );
                     };
-                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    let mut ranges: Vec<ResolvedRange> = Vec::new();
+                    if ranges.try_reserve_exact(sheet_ids.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace cell ref ranges, len={})",
+                            sheet_ids.len()
+                        );
+                        let value = Value::Error(ErrorKind::Num);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::CellRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    }
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         {
@@ -2579,7 +2674,25 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             },
                         );
                     };
-                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    let mut ranges: Vec<ResolvedRange> = Vec::new();
+                    if ranges.try_reserve_exact(sheet_ids.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace range ref ranges, len={})",
+                            sheet_ids.len()
+                        );
+                        let value = Value::Error(ErrorKind::Num);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::RangeRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    }
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         {
@@ -2779,14 +2892,32 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         }
                     };
 
-                    let resolved: Vec<ResolvedRange> = ranges
-                        .into_iter()
-                        .map(|(start, end)| ResolvedRange {
+                    let mut resolved: Vec<ResolvedRange> = Vec::new();
+                    if resolved.try_reserve_exact(ranges.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace structured ref ranges, len={})",
+                            ranges.len()
+                        );
+                        let value = Value::Error(ErrorKind::Num);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    }
+                    for (start, end) in ranges.into_iter() {
+                        resolved.push(ResolvedRange {
                             sheet_id: FnSheetId::External(sheet_key.clone()),
                             start,
                             end,
-                        })
-                        .collect();
+                        });
+                    }
 
                     let reference = match resolved.as_slice() {
                         [only] if only.is_single_cell() => Some(TraceRef::Cell {
@@ -2821,14 +2952,32 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 .iter()
                                 .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id)) =>
                     {
-                        let resolved: Vec<ResolvedRange> = ranges
-                            .into_iter()
-                            .map(|(sheet_id, start, end)| ResolvedRange {
+                        let mut resolved: Vec<ResolvedRange> = Vec::new();
+                        if resolved.try_reserve_exact(ranges.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (trace structured ref ranges, len={})",
+                                ranges.len()
+                            );
+                            let value = Value::Error(ErrorKind::Num);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::StructuredRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        }
+                        for (sheet_id, start, end) in ranges.into_iter() {
+                            resolved.push(ResolvedRange {
                                 sheet_id: FnSheetId::Local(sheet_id),
                                 start,
                                 end,
-                            })
-                            .collect();
+                            });
+                        }
 
                         let reference = match resolved.as_slice() {
                             [only] if only.is_single_cell() => Some(TraceRef::Cell {
@@ -3255,7 +3404,21 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             SheetReference::SheetRange(a, b) => self
                 .resolver
                 .expand_sheet_span(*a, *b)
-                .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
+                .map(|ids| {
+                    let mut out: Vec<FnSheetId> = Vec::new();
+                    if out.try_reserve_exact(ids.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (trace sheet span ids, len={})",
+                            ids.len()
+                        );
+                        return None;
+                    }
+                    for id in ids.into_iter() {
+                        out.push(FnSheetId::Local(id));
+                    }
+                    Some(out)
+                })?,
             SheetReference::External(key) => {
                 if crate::eval::is_valid_external_single_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);
@@ -3266,7 +3429,19 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let keys = crate::external_refs::expand_external_sheet_span_from_order(
                     workbook, start, end, &order,
                 )?;
-                Some(keys.into_iter().map(FnSheetId::External).collect())
+                let mut out: Vec<FnSheetId> = Vec::new();
+                if out.try_reserve_exact(keys.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (trace external sheet keys, len={})",
+                        keys.len()
+                    );
+                    return None;
+                }
+                for key in keys.into_iter() {
+                    out.push(FnSheetId::External(key));
+                }
+                Some(out)
             }
         }
     }
@@ -3375,7 +3550,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(false, "allocation failed (trace rtd traces, len={})", args.len());
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         let (prog_id, trace) = self.eval_scalar(&args[0]);
         traces.push(trace);
@@ -3397,7 +3576,12 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             Err(e) => return (Value::Error(e), traces),
         };
 
-        let mut topics = Vec::with_capacity(args.len().saturating_sub(2));
+        let topic_len = args.len().saturating_sub(2);
+        let mut topics: Vec<String> = Vec::new();
+        if topics.try_reserve_exact(topic_len).is_err() {
+            debug_assert!(false, "allocation failed (trace rtd topics, len={topic_len})");
+            return (Value::Error(ErrorKind::Num), traces);
+        }
         for arg in &args[2..] {
             let (topic, trace) = self.eval_scalar(arg);
             traces.push(trace);
@@ -3423,7 +3607,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(false, "allocation failed (trace cubevalue traces, len={})", args.len());
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         let (connection, trace) = self.eval_scalar(&args[0]);
         traces.push(trace);
@@ -3435,7 +3623,12 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             Err(e) => return (Value::Error(e), traces),
         };
 
-        let mut tuples = Vec::with_capacity(args.len().saturating_sub(1));
+        let tuple_len = args.len().saturating_sub(1);
+        let mut tuples: Vec<String> = Vec::new();
+        if tuples.try_reserve_exact(tuple_len).is_err() {
+            debug_assert!(false, "allocation failed (trace cubevalue tuples, len={tuple_len})");
+            return (Value::Error(ErrorKind::Num), traces);
+        }
         for arg in &args[1..] {
             let (tuple, trace) = self.eval_scalar(arg);
             traces.push(trace);
@@ -3461,7 +3654,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace cubemember traces, len={})",
+                args.len()
+            );
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         let (connection, trace) = self.eval_scalar(&args[0]);
         traces.push(trace);
@@ -3510,7 +3711,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace cubememberproperty traces, len={})",
+                args.len()
+            );
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         let (connection, trace) = self.eval_scalar(&args[0]);
         traces.push(trace);
@@ -3556,7 +3765,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace cuberankedmember traces, len={})",
+                args.len()
+            );
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         // connection
         let (conn, trace) = self.eval_scalar(&args[0]);
@@ -3620,7 +3837,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace cubeset traces, len={})",
+                args.len()
+            );
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         // connection
         let (conn, trace) = self.eval_scalar(&args[0]);
@@ -3734,7 +3959,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return (Value::Error(ErrorKind::NA), Vec::new());
         };
 
-        let mut traces = Vec::with_capacity(args.len());
+        let mut traces: Vec<TraceNode> = Vec::new();
+        if traces.try_reserve_exact(args.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (trace cube traces, len={})",
+                args.len()
+            );
+            return (Value::Error(ErrorKind::Num), Vec::new());
+        }
 
         let (connection, trace) = self.eval_scalar(&args[0]);
         traces.push(trace);
@@ -4192,7 +4425,19 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
         Value::Array(arr) => {
-            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+            let out_len = arr.values.len();
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(out_len).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (trace elementwise_unary out, len={out_len})"
+                );
+                return Value::Error(ErrorKind::Num);
+            }
+            for v in arr.iter() {
+                out.push(f(v));
+            }
+            Value::Array(Array::new(arr.rows, arr.cols, out))
         }
         other => f(other),
     }
@@ -4221,7 +4466,15 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
                 return Value::Error(ErrorKind::Value);
             };
 
-            let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+            let out_len = out_rows.saturating_mul(out_cols);
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(out_len).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (trace elementwise_binary out, len={out_len})"
+                );
+                return Value::Error(ErrorKind::Num);
+            }
             for row in 0..out_rows {
                 let l_row = if left_arr.rows == 1 { 0 } else { row };
                 let r_row = if right_arr.rows == 1 { 0 } else { row };
@@ -4235,16 +4488,36 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
             }
             Value::Array(Array::new(out_rows, out_cols, out))
         }
-        (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
-            left_arr.rows,
-            left_arr.cols,
-            left_arr.values.iter().map(|a| f(a, right_scalar)).collect(),
-        )),
-        (left_scalar, Value::Array(right_arr)) => Value::Array(Array::new(
-            right_arr.rows,
-            right_arr.cols,
-            right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
-        )),
+        (Value::Array(left_arr), right_scalar) => {
+            let out_len = left_arr.values.len();
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(out_len).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (trace elementwise_binary out, len={out_len})"
+                );
+                return Value::Error(ErrorKind::Num);
+            }
+            for a in left_arr.values.iter() {
+                out.push(f(a, right_scalar));
+            }
+            Value::Array(Array::new(left_arr.rows, left_arr.cols, out))
+        }
+        (left_scalar, Value::Array(right_arr)) => {
+            let out_len = right_arr.values.len();
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(out_len).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (trace elementwise_binary out, len={out_len})"
+                );
+                return Value::Error(ErrorKind::Num);
+            }
+            for b in right_arr.values.iter() {
+                out.push(f(left_scalar, b));
+            }
+            Value::Array(Array::new(right_arr.rows, right_arr.cols, out))
+        }
         (left_scalar, right_scalar) => f(left_scalar, right_scalar),
     }
 }

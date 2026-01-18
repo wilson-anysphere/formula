@@ -333,7 +333,16 @@ fn compact_for_grouping_validation(text: &str) -> Option<Cow<'_, str>> {
         return Some(Cow::Borrowed(s));
     }
 
-    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut compact = String::new();
+    if compact.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(false, "allocation failed (compact_for_grouping_validation)");
+        return None;
+    }
+    for c in s.chars() {
+        if !c.is_whitespace() {
+            compact.push(c);
+        }
+    }
     (!compact.is_empty()).then(|| Cow::Owned(compact))
 }
 

@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::array_lift;
 use crate::functions::{
     eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType,
@@ -36,7 +37,15 @@ fn fieldaccess_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match base {
         Value::Error(e) => Value::Error(e),
         Value::Array(arr) => {
-            let mut out = Vec::with_capacity(arr.values.len());
+            let total = arr.values.len();
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "_FIELDACCESS array allocation failed (cells={total})");
+                return Value::Error(ErrorKind::Num);
+            }
             for elem in &arr.values {
                 out.push(fieldaccess_scalar(elem, &field));
             }

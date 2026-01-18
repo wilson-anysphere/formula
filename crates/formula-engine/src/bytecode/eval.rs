@@ -24,6 +24,9 @@ pub struct Vm {
 // accidental infinite recursion (matching the AST evaluator).
 const LAMBDA_RECURSION_LIMIT: u32 = 64;
 
+// Small stack reservation used by the engine's bytecode execution loop.
+pub(crate) const DEFAULT_VM_STACK_RESERVE: usize = 32;
+
 impl Vm {
     pub fn new() -> Self {
         Self {
@@ -34,9 +37,35 @@ impl Vm {
         }
     }
 
+    pub(crate) fn new_with_default_stack() -> Self {
+        Self::with_capacity(DEFAULT_VM_STACK_RESERVE)
+    }
+
+    #[inline]
+    fn push_stack(&mut self, v: Value) -> bool {
+        if self.stack.len() == self.stack.capacity() {
+            // Grow exponentially (bounded) to amortize capacity checks.
+            let additional = self.stack.len().max(1).min(1024);
+            if self.stack.try_reserve(additional).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (Vm stack grow, len={})",
+                    self.stack.len()
+                );
+                return false;
+            }
+        }
+        self.stack.push(v);
+        true
+    }
+
     pub fn with_capacity(stack: usize) -> Self {
+        let mut stack_vec: Vec<Value> = Vec::new();
+        if stack_vec.try_reserve_exact(stack).is_err() {
+            debug_assert!(false, "allocation failed (Vm stack, len={stack})");
+        }
         Self {
-            stack: Vec::with_capacity(stack),
+            stack: stack_vec,
             locals: Vec::new(),
             lambda_depth: 0,
             sheet_id: 0,
@@ -56,7 +85,12 @@ impl Vm {
         self.sheet_id = sheet_id;
         self.stack.clear();
         self.locals.clear();
-        self.locals.resize(program.locals.len(), Value::Empty);
+        let locals_len = program.locals.len();
+        if self.locals.try_reserve_exact(locals_len).is_err() {
+            debug_assert!(false, "allocation failed (Vm locals, len={locals_len})");
+            return Value::Error(ErrorKind::Num);
+        }
+        self.locals.resize(locals_len, Value::Empty);
         self.eval_program(program, grid, base, locale)
     }
 
@@ -89,32 +123,48 @@ impl Vm {
                 OpCode::Invalid => return Value::Error(ErrorKind::Value),
                 OpCode::PushConst => {
                     let v = program.consts[inst.a() as usize].to_value();
-                    self.stack.push(v);
+                    if !self.push_stack(v) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::LoadCell => {
                     let r = program.cell_refs[inst.a() as usize];
-                    self.stack.push(grid.get_value(r.resolve(base)));
+                    if !self.push_stack(grid.get_value(r.resolve(base))) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::LoadRange => {
                     let r = program.range_refs[inst.a() as usize];
-                    self.stack.push(Value::Range(r));
+                    if !self.push_stack(Value::Range(r)) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::LoadMultiRange => {
                     let r = program.multi_range_refs[inst.a() as usize].clone();
-                    self.stack.push(Value::MultiRange(r));
+                    if !self.push_stack(Value::MultiRange(r)) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::StoreLocal => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     let idx = inst.a() as usize;
                     if idx >= self.locals.len() {
-                        self.locals.resize(idx + 1, Value::Empty);
+                        let new_len = idx + 1;
+                        let additional = new_len.saturating_sub(self.locals.len());
+                        if self.locals.try_reserve_exact(additional).is_err() {
+                            debug_assert!(false, "allocation failed (Vm locals grow, len={new_len})");
+                            return Value::Error(ErrorKind::Num);
+                        }
+                        self.locals.resize(new_len, Value::Empty);
                     }
                     self.locals[idx] = v;
                 }
                 OpCode::LoadLocal => {
                     let idx = inst.a() as usize;
                     let v = self.locals.get(idx).cloned().unwrap_or(Value::Empty);
-                    self.stack.push(v);
+                    if !self.push_stack(v) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::Jump => {
                     pc = inst.a() as usize;
@@ -122,15 +172,21 @@ impl Vm {
                 }
                 OpCode::UnaryPlus => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(apply_unary(UnaryOp::Plus, v, grid, base));
+                    if !self.push_stack(apply_unary(UnaryOp::Plus, v, grid, base)) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::UnaryNeg => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(apply_unary(UnaryOp::Neg, v, grid, base));
+                    if !self.push_stack(apply_unary(UnaryOp::Neg, v, grid, base)) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::ImplicitIntersection => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(apply_implicit_intersection(v, grid, base));
+                    if !self.push_stack(apply_implicit_intersection(v, grid, base)) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::Add
                 | OpCode::Sub
@@ -166,8 +222,10 @@ impl Vm {
                             return Value::Error(ErrorKind::Value);
                         }
                     };
-                    self.stack
-                        .push(apply_binary(op, left, right, grid, self.sheet_id, base));
+                    let v = apply_binary(op, left, right, grid, self.sheet_id, base);
+                    if !self.push_stack(v) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::CallFunc => {
                     let func = &program.funcs[inst.a() as usize];
@@ -183,40 +241,70 @@ impl Vm {
                         result
                     };
                     self.stack.truncate(start);
-                    self.stack.push(result);
+                    if !self.push_stack(result) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::SpillRange => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(super::runtime::apply_spill_range(
+                    let spilled = super::runtime::apply_spill_range(
                         v,
                         grid,
                         self.sheet_id,
                         base,
-                    ));
+                    );
+                    if !self.push_stack(spilled) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::MakeLambda => {
                     let template = program.lambdas[inst.a() as usize].clone();
-                    let mut captures: Vec<Value> = Vec::with_capacity(template.captures.len());
+                    let mut captures: Vec<Value> = Vec::new();
+                    if captures.try_reserve_exact(template.captures.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (lambda captures, len={})",
+                            template.captures.len()
+                        );
+                        if !self.push_stack(Value::Error(ErrorKind::Num)) {
+                            return Value::Error(ErrorKind::Num);
+                        }
+                        pc += 1;
+                        continue;
+                    }
                     for cap in template.captures.iter() {
                         let outer_idx = cap.outer_local as usize;
                         captures.push(self.locals.get(outer_idx).cloned().unwrap_or(Value::Empty));
                     }
-                    self.stack.push(Value::Lambda(Lambda {
+                    if !self.push_stack(Value::Lambda(Lambda {
                         template,
                         captures: Arc::from(captures.into_boxed_slice()),
-                    }));
+                    })) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::CallValue => {
                     let argc = inst.b() as usize;
                     if argc > crate::EXCEL_MAX_ARGS {
                         // Should be prevented by parsing/lowering.
                         self.stack.truncate(self.stack.len().saturating_sub(argc));
-                        self.stack.push(Value::Error(ErrorKind::Value));
+                        if !self.push_stack(Value::Error(ErrorKind::Value)) {
+                            return Value::Error(ErrorKind::Num);
+                        }
                         pc += 1;
                         continue;
                     }
 
-                    let mut args: Vec<Value> = Vec::with_capacity(argc);
+                    let mut args: Vec<Value> = Vec::new();
+                    if args.try_reserve_exact(argc).is_err() {
+                        debug_assert!(false, "allocation failed (call args, len={argc})");
+                        self.stack.truncate(self.stack.len().saturating_sub(argc + 1));
+                        if !self.push_stack(Value::Error(ErrorKind::Num)) {
+                            return Value::Error(ErrorKind::Num);
+                        }
+                        pc += 1;
+                        continue;
+                    }
                     for _ in 0..argc {
                         args.push(self.stack.pop().unwrap_or(Value::Empty));
                     }
@@ -228,7 +316,9 @@ impl Vm {
                         Value::Error(e) => Value::Error(e),
                         _ => Value::Error(ErrorKind::Value),
                     };
-                    self.stack.push(result);
+                    if !self.push_stack(result) {
+                        return Value::Error(ErrorKind::Num);
+                    }
                 }
                 OpCode::JumpIfFalseOrError => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
@@ -243,7 +333,9 @@ impl Vm {
                             continue;
                         }
                         Err(e) => {
-                            self.stack.push(Value::Error(e));
+                            if !self.push_stack(Value::Error(e)) {
+                                return Value::Error(ErrorKind::Num);
+                            }
                             pc = inst.b() as usize;
                             continue;
                         }
@@ -297,7 +389,17 @@ impl Vm {
         self.lambda_depth += 1;
 
         let body_program = lambda.template.body.clone();
-        let mut locals: Vec<Value> = vec![Value::Empty; body_program.locals.len()];
+        let locals_len = body_program.locals.len();
+        let mut locals: Vec<Value> = Vec::new();
+        if locals.try_reserve_exact(locals_len).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (lambda locals, len={locals_len})"
+            );
+            self.lambda_depth = self.lambda_depth.saturating_sub(1);
+            return Value::Error(ErrorKind::Num);
+        }
+        locals.resize(locals_len, Value::Empty);
 
         // Populate captured values.
         debug_assert_eq!(lambda.template.captures.len(), lambda.captures.len());

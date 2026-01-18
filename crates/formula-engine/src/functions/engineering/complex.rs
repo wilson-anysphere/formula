@@ -30,23 +30,31 @@ fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
     }
 }
 
-fn strip_whitespace_if_needed(s: &str) -> Cow<'_, str> {
+fn strip_whitespace_if_needed(s: &str) -> Result<Cow<'_, str>, ErrorKind> {
     let mut it = s.char_indices();
     while let Some((idx, ch)) = it.next() {
         if !ch.is_whitespace() {
             continue;
         }
 
-        let mut out = String::with_capacity(s.len());
+        let mut out = String::new();
+        if out.try_reserve_exact(s.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (strip_whitespace_if_needed, len={})",
+                s.len()
+            );
+            return Err(ErrorKind::Num);
+        }
         out.push_str(&s[..idx]);
         for (_, ch) in it {
             if !ch.is_whitespace() {
                 out.push(ch);
             }
         }
-        return Cow::Owned(out);
+        return Ok(Cow::Owned(out));
     }
-    Cow::Borrowed(s)
+    Ok(Cow::Borrowed(s))
 }
 
 /// Parse an Excel-style complex number string (engineering functions).
@@ -59,7 +67,7 @@ fn strip_whitespace_if_needed(s: &str) -> Cow<'_, str> {
 ///
 /// Whitespace is ignored.
 pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedComplex, ErrorKind> {
-    let normalized = strip_whitespace_if_needed(text);
+    let normalized = strip_whitespace_if_needed(text)?;
     let normalized = normalized.as_ref();
     if normalized.is_empty() {
         return Ok(ParsedComplex {
@@ -68,20 +76,17 @@ pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedCo
         });
     }
 
-    let (suffix, core) = match normalized.chars().last() {
-        Some('i') | Some('I') => Some('i'),
-        Some('j') | Some('J') => Some('j'),
-        _ => None,
-    }
-    .map(|suffix| {
-        let last = normalized
-            .chars()
-            .last()
-            .expect("non-empty normalized has a last char");
-        let core_end = normalized.len().saturating_sub(last.len_utf8());
-        (suffix, &normalized[..core_end])
-    })
-    .unwrap_or(('i', normalized));
+    let (suffix, core) = match normalized.char_indices().next_back() {
+        Some((idx, last)) => match last {
+            'i' | 'I' => ('i', &normalized[..idx]),
+            'j' | 'J' => ('j', &normalized[..idx]),
+            _ => ('i', normalized),
+        },
+        None => {
+            debug_assert!(false, "normalized.is_empty() should have been handled above");
+            ('i', normalized)
+        }
+    };
 
     if normalized.len() != core.len() {
         // Excel only allows the imaginary unit suffix in the final position.

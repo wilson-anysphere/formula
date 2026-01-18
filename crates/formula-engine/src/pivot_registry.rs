@@ -15,6 +15,8 @@ use thiserror::Error;
 pub enum PivotRegistryError {
     #[error("pivot field {0:?} is missing from the pivot cache")]
     MissingField(String),
+    #[error("allocation failed ({0})")]
+    AllocationFailure(&'static str),
 }
 
 pub(crate) fn normalize_pivot_cache_field_name(name: &str) -> Cow<'_, str> {
@@ -80,33 +82,19 @@ fn pivot_field_ref_needs_display_key_alias(field: &PivotFieldRef) -> bool {
     }
 }
 
-fn pivot_field_ref_keys(field: &PivotFieldRef) -> (String, String, Option<String>) {
+fn pivot_field_ref_keys(
+    field: &PivotFieldRef,
+) -> Result<(String, String, Option<String>), PivotRegistryError> {
     let canonical = field.canonical_name();
-    let (canonical_key, normalized_key) = match canonical {
-        Cow::Borrowed(canon) => {
-            let canonical_key = crate::value::casefold(canon);
-            let normalized = normalize_pivot_cache_field_name(canon);
-            let normalized_key = if normalized.as_ref() == canon {
-                canonical_key.clone()
-            } else {
-                match normalized {
-                    Cow::Borrowed(s) => crate::value::casefold(s),
-                    Cow::Owned(s) => crate::value::casefold_owned(s),
-                }
-            };
-            (canonical_key, normalized_key)
-        }
-        Cow::Owned(canon) => {
-            let normalized = normalize_pivot_cache_field_name(&canon);
-            let normalized_same = normalized.as_ref() == canon.as_str();
-            let normalized_owned = (!normalized_same).then(|| normalized.into_owned());
-            let canonical_key = crate::value::casefold_owned(canon);
-            let normalized_key = match normalized_owned {
-                None => canonical_key.clone(),
-                Some(s) => crate::value::casefold_owned(s),
-            };
-            (canonical_key, normalized_key)
-        }
+    let canonical_key = crate::value::try_casefold(canonical.as_ref())
+        .map_err(|_| PivotRegistryError::AllocationFailure("pivot registry canonical field key"))?;
+    let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
+    let normalized_key = if normalized.as_ref() == canonical.as_ref() {
+        canonical_key.clone()
+    } else {
+        crate::value::try_casefold(normalized.as_ref()).map_err(|_| {
+            PivotRegistryError::AllocationFailure("pivot registry normalized field key")
+        })?
     };
 
     // Cache-backed fields already have a stable raw caption (`canonical_name` borrows the header
@@ -118,12 +106,15 @@ fn pivot_field_ref_keys(field: &PivotFieldRef) -> (String, String, Option<String
     let display_key = match field {
         PivotFieldRef::CacheFieldName(_) => None,
         field if pivot_field_ref_needs_display_key_alias(field) => {
-            Some(crate::value::casefold_owned(field.to_string()))
+            let display = field.to_string();
+            Some(crate::value::try_casefold(&display).map_err(|_| {
+                PivotRegistryError::AllocationFailure("pivot registry display field key")
+            })?)
         }
         _ => None,
     };
 
-    (canonical_key, normalized_key, display_key)
+    Ok((canonical_key, normalized_key, display_key))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +177,26 @@ impl PivotRegistryEntry {
 
         let mut cache_field_indices: HashMap<String, usize> = HashMap::new();
         let mut cache_field_names: HashMap<String, String> = HashMap::new();
+        let cache_field_count = pivot.cache.fields.len();
+        let cache_field_capacity = cache_field_count.saturating_mul(2);
+        if cache_field_indices.try_reserve(cache_field_capacity).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot registry cache field indices, len={cache_field_count})"
+            );
+            return Err(PivotRegistryError::AllocationFailure(
+                "pivot registry cache field indices",
+            ));
+        }
+        if cache_field_names.try_reserve(cache_field_capacity).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot registry cache field names, len={cache_field_count})"
+            );
+            return Err(PivotRegistryError::AllocationFailure(
+                "pivot registry cache field names",
+            ));
+        }
         for f in &pivot.cache.fields {
             // Store lookups for both the raw cache header and a normalized "Data Model" label.
             //
@@ -196,7 +207,9 @@ impl PivotRegistryEntry {
             // Note: `normalize_pivot_cache_field_name` is best-effort and may cause collisions if a
             // cache contains multiple headers that normalize to the same string. In that case we
             // preserve the first inserted mapping; callers can still match by exact raw header.
-            let raw_key = crate::value::casefold(&f.name);
+            let raw_key = crate::value::try_casefold(&f.name).map_err(|_| {
+                PivotRegistryError::AllocationFailure("pivot registry cache raw field key")
+            })?;
             cache_field_indices
                 .entry(raw_key.clone())
                 .or_insert(f.index);
@@ -205,10 +218,9 @@ impl PivotRegistryEntry {
                 .or_insert_with(|| f.name.clone());
 
             let normalized = normalize_pivot_cache_field_name(&f.name);
-            let normalized_key = match normalized {
-                Cow::Borrowed(s) => crate::value::casefold(s),
-                Cow::Owned(s) => crate::value::casefold_owned(s),
-            };
+            let normalized_key = crate::value::try_casefold(normalized.as_ref()).map_err(|_| {
+                PivotRegistryError::AllocationFailure("pivot registry cache normalized field key")
+            })?;
             cache_field_indices
                 .entry(normalized_key.clone())
                 .or_insert(f.index);
@@ -250,7 +262,7 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
             let (canonical_key, normalized_key, display_key) =
-                pivot_field_ref_keys(&f.source_field);
+                pivot_field_ref_keys(&f.source_field)?;
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -278,7 +290,7 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
             let (canonical_key, normalized_key, display_key) =
-                pivot_field_ref_keys(&f.source_field);
+                pivot_field_ref_keys(&f.source_field)?;
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -306,7 +318,7 @@ impl PivotRegistryEntry {
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
             let (canonical_key, normalized_key, display_key) =
-                pivot_field_ref_keys(&f.source_field);
+                pivot_field_ref_keys(&f.source_field)?;
 
             let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
             let pos = PivotFieldPosition {
@@ -333,10 +345,25 @@ impl PivotRegistryEntry {
         }
 
         let mut value_field_indices: HashMap<String, usize> = HashMap::new();
-        let mut value_field_source_indices: Vec<usize> =
-            Vec::with_capacity(pivot.config.value_fields.len());
+        let value_field_count = pivot.config.value_fields.len();
+        let mut value_field_source_indices: Vec<usize> = Vec::new();
+        if value_field_source_indices
+            .try_reserve_exact(value_field_count)
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (pivot registry value fields, count={value_field_count})"
+            );
+            return Err(PivotRegistryError::AllocationFailure(
+                "pivot registry value fields",
+            ));
+        }
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
-            value_field_indices.insert(crate::value::casefold(vf.name.as_str()), idx);
+            let folded = crate::value::try_casefold(vf.name.as_str()).map_err(|_| {
+                PivotRegistryError::AllocationFailure("pivot registry value field key")
+            })?;
+            value_field_indices.insert(folded, idx);
             let field_name = vf.source_field.canonical_name();
             let field_name = normalize_pivot_cache_field_name(field_name.as_ref());
             let (cache_idx, _cache_name) = crate::value::with_casefolded_key(field_name.as_ref(), |key| {

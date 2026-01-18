@@ -6,7 +6,7 @@ use formula_engine::locale::get_locale;
 use pretty_assertions::assert_eq;
 
 fn casefold(s: &str) -> String {
-    // Mirror `formula_engine::value::casefold` / `locale::registry::casefold_ident`.
+    // Mirror `formula_engine::value::try_casefold` / `locale::registry::casefold_ident`.
     // Excel-style identifier matching is case-insensitive across Unicode (`ä` -> `Ä`, `ß` -> `SS`).
     if s.is_ascii() {
         s.to_ascii_uppercase()

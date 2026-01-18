@@ -88,19 +88,19 @@ pub(crate) fn fixed_decimal_to_fixed_base(
         // Excel ignores the requested `places` and always returns a full-width (10 digit) two's
         // complement representation for negative values.
         let unsigned = i64_to_twos_complement(value, base.bits());
-        let raw = to_radix_upper(unsigned, radix);
-        return Ok(pad_left(&raw, base.max_digits(), '0'));
+        let raw = to_radix_upper(unsigned, radix)?;
+        return pad_left(&raw, base.max_digits(), '0');
     }
 
     let unsigned = value as u64;
-    let raw = to_radix_upper(unsigned, radix);
+    let raw = to_radix_upper(unsigned, radix)?;
     match places {
         None => Ok(raw),
         Some(p) => {
             if raw.len() > p {
                 return Err(ErrorKind::Num);
             }
-            Ok(pad_left(&raw, p, '0'))
+            pad_left(&raw, p, '0')
         }
     }
 }
@@ -176,13 +176,13 @@ pub(crate) fn base_from_decimal(
     min_length: Option<usize>,
 ) -> Result<String, ErrorKind> {
     let radix = validate_radix(radix)?;
-    let mut out = to_radix_upper(number, radix);
+    let mut out = to_radix_upper(number, radix)?;
 
     if let Some(min_len) = min_length {
         if min_len > 255 {
             return Err(ErrorKind::Num);
         }
-        out = pad_left(&out, min_len, '0');
+        out = pad_left(&out, min_len, '0')?;
     }
 
     Ok(out)
@@ -218,16 +218,26 @@ fn parse_unsigned_fixed(text: &str, radix: u32) -> Result<u64, ErrorKind> {
     u64::from_str_radix(text, radix).map_err(|_| ErrorKind::Num)
 }
 
-fn pad_left(text: &str, width: usize, pad: char) -> String {
+fn pad_left(text: &str, width: usize, pad: char) -> Result<String, ErrorKind> {
     if text.len() >= width {
-        return text.to_string();
+        let mut out = String::new();
+        if out.try_reserve_exact(text.len()).is_err() {
+            debug_assert!(false, "allocation failed (pad_left copy, len={})", text.len());
+            return Err(ErrorKind::Num);
+        }
+        out.push_str(text);
+        return Ok(out);
     }
-    let mut out = String::with_capacity(width);
+    let mut out = String::new();
+    if out.try_reserve_exact(width).is_err() {
+        debug_assert!(false, "allocation failed (pad_left, width={width})");
+        return Err(ErrorKind::Num);
+    }
     for _ in 0..(width - text.len()) {
         out.push(pad);
     }
     out.push_str(text);
-    out
+    Ok(out)
 }
 
 fn digit_value(ch: char) -> Option<u32> {
@@ -239,30 +249,47 @@ fn digit_value(ch: char) -> Option<u32> {
     }
 }
 
-fn digit_char(value: u32) -> char {
-    debug_assert!(value < 36);
-    match value {
-        0..=9 => (b'0' + (value as u8)) as char,
-        10..=35 => (b'A' + ((value - 10) as u8)) as char,
-        _ => {
-            debug_assert!(false, "digit value out of range: {value}");
-            '?'
-        }
-    }
-}
-
-fn to_radix_upper(mut value: u64, radix: u32) -> String {
+fn to_radix_upper(mut value: u64, radix: u32) -> Result<String, ErrorKind> {
     debug_assert!((2..=36).contains(&radix));
 
     if value == 0 {
-        return "0".to_string();
+        let mut out = String::new();
+        if out.try_reserve_exact(1).is_err() {
+            debug_assert!(false, "allocation failed (to_radix_upper zero)");
+            return Err(ErrorKind::Num);
+        }
+        out.push('0');
+        return Ok(out);
     }
 
-    let mut buf = Vec::<char>::new();
+    let mut scratch = [0u8; 64];
+    let mut idx = scratch.len();
     while value > 0 {
         let digit = (value % (radix as u64)) as u32;
-        buf.push(digit_char(digit));
+        let byte = match digit {
+            0..=9 => b'0' + (digit as u8),
+            10..=35 => b'A' + ((digit - 10) as u8),
+            _ => {
+                debug_assert!(false, "digit value out of range: {digit}");
+                b'?'
+            }
+        };
+        idx = idx.saturating_sub(1);
+        scratch[idx] = byte;
         value /= radix as u64;
     }
-    buf.iter().rev().collect()
+    let digits = &scratch[idx..];
+    let mut out = String::new();
+    if out.try_reserve_exact(digits.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (to_radix_upper, len={})",
+            digits.len()
+        );
+        return Err(ErrorKind::Num);
+    }
+    for &b in digits {
+        out.push(b as char);
+    }
+    Ok(out)
 }

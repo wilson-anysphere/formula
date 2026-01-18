@@ -6,22 +6,32 @@ pub fn exact(text1: &str, text2: &str) -> bool {
 /// CLEAN(text)
 ///
 /// Removes non-printable characters (ASCII control codes 0-31 and DEL).
-pub fn clean(text: &str) -> String {
-    text.chars()
-        .filter(|c| {
-            let code = *c as u32;
-            !(code <= 31 || code == 127)
-        })
-        .collect()
+pub fn clean(text: &str) -> Result<String, crate::value::ErrorKind> {
+    let mut out = String::new();
+    if out.try_reserve_exact(text.len()).is_err() {
+        debug_assert!(false, "allocation failed (clean, len={})", text.len());
+        return Err(crate::value::ErrorKind::Num);
+    }
+    for c in text.chars() {
+        let code = c as u32;
+        if !(code <= 31 || code == 127) {
+            out.push(c);
+        }
+    }
+    Ok(out)
 }
 
 /// PROPER(text)
-pub fn proper(text: &str) -> String {
+pub fn proper(text: &str) -> Result<String, crate::value::ErrorKind> {
     if text.is_ascii() {
         return proper_ascii(text);
     }
 
-    let mut out = String::with_capacity(text.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(text.len()).is_err() {
+        debug_assert!(false, "allocation failed (proper, len={})", text.len());
+        return Err(crate::value::ErrorKind::Num);
+    }
     let mut new_word = true;
     for c in text.chars() {
         if c.is_alphabetic() {
@@ -44,11 +54,15 @@ pub fn proper(text: &str) -> String {
             new_word = true;
         }
     }
-    out
+    Ok(out)
 }
 
-fn proper_ascii(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+fn proper_ascii(text: &str) -> Result<String, crate::value::ErrorKind> {
+    let mut out = String::new();
+    if out.try_reserve_exact(text.len()).is_err() {
+        debug_assert!(false, "allocation failed (proper_ascii, len={})", text.len());
+        return Err(crate::value::ErrorKind::Num);
+    }
     let mut new_word = true;
     for &b in text.as_bytes() {
         if b.is_ascii_alphabetic() {
@@ -64,5 +78,5 @@ fn proper_ascii(text: &str) -> String {
             new_word = true;
         }
     }
-    out
+    Ok(out)
 }

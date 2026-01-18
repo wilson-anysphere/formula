@@ -94,25 +94,29 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
         }
     }
 
+    if let (Some(a), Some(b)) = (text_like_str(ctx, lookup_value), text_like_str(ctx, candidate)) {
+        return crate::value::eq_case_insensitive(a.as_ref(), b.as_ref());
+    }
+
+    // Excel parses numeric text for comparisons, but does not treat empty strings as zero.
     match (lookup_value, candidate) {
-        (Value::Number(a), Value::Number(b)) => a == b,
-        (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
-            let a = text_like_str(ctx, a).unwrap();
-            let b = text_like_str(ctx, b).unwrap();
-            crate::value::eq_case_insensitive(a.as_ref(), b.as_ref())
-        }
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Error(a), Value::Error(b)) => a == b,
-        (Value::Number(a), b) | (b, Value::Number(a)) if text_like_str(ctx, b).is_some() => {
-            let b = text_like_str(ctx, b).unwrap();
-            let trimmed = b.trim();
-            if trimmed.is_empty() {
-                false
-            } else {
-                parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
-                    .is_ok_and(|parsed| parsed == *a)
+        (Value::Number(num), other) | (other, Value::Number(num)) => {
+            if let Some(other) = text_like_str(ctx, other) {
+                let trimmed = other.trim();
+                if trimmed.is_empty() {
+                    return false;
+                }
+                return parse_value_text(trimmed, ctx.value_locale, ctx.now_utc, ctx.date_system)
+                    .is_ok_and(|parsed| parsed == *num);
             }
         }
+        _ => {}
+    }
+
+    match (lookup_value, candidate) {
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Error(a), Value::Error(b)) => a == b,
         (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
             (*b == 0.0 && !a) || (*b == 1.0 && *a)
         }
@@ -247,13 +251,12 @@ fn lookup_cmp(ctx: &LookupContext, a: &Value, b: &Value) -> Ordering {
         return ra.cmp(&rb);
     }
 
+    if let (Some(a), Some(b)) = (text_like_str(ctx, a), text_like_str(ctx, b)) {
+        return crate::value::cmp_case_insensitive(a.as_ref(), b.as_ref());
+    }
+
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(ctx, a).is_some() && text_like_str(ctx, b).is_some() => {
-            let a = text_like_str(ctx, a).unwrap();
-            let b = text_like_str(ctx, b).unwrap();
-            crate::value::cmp_case_insensitive(a.as_ref(), b.as_ref())
-        }
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Error(x), Value::Error(y)) => x.code().cmp(&y.code()),

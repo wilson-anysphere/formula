@@ -18,6 +18,12 @@ pub(crate) use formatting::format_number_general_with_options;
 pub(crate) use number_parse::parse_number;
 pub use number_parse::NumberLocale;
 
+pub(crate) fn try_vec_with_capacity<T>(len: usize) -> Result<Vec<T>, ErrorKind> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(len).map_err(|_| ErrorKind::Num)?;
+    Ok(out)
+}
+
 pub(crate) fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
     let mut a_iter = a.as_bytes().iter();
     let mut b_iter = b.as_bytes().iter();
@@ -110,20 +116,34 @@ pub(crate) fn eq_case_insensitive(a: &str, b: &str) -> bool {
     }
 }
 
-pub(crate) fn casefold(s: &str) -> String {
-    fold_to_uppercase_string(s)
-}
-
-fn fold_to_uppercase_string(s: &str) -> String {
+fn try_fold_to_uppercase_string(s: &str) -> Option<String> {
+    if s.is_empty() {
+        return Some(String::new());
+    }
     if s.is_ascii() {
         let bytes = s.as_bytes();
         if !bytes.iter().any(|b| b.is_ascii_lowercase()) {
-            return s.to_string();
+            let mut out = String::new();
+            if out.try_reserve_exact(s.len()).is_err() {
+                return None;
+            }
+            out.push_str(s);
+            return Some(out);
         }
-        return s.to_ascii_uppercase();
+        let mut out = String::new();
+        if out.try_reserve_exact(s.len()).is_err() {
+            return None;
+        }
+        for &b in bytes {
+            out.push((b as char).to_ascii_uppercase());
+        }
+        return Some(out);
     }
 
-    let mut out = String::with_capacity(s.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(s.len()).is_err() {
+        return None;
+    }
     for ch in s.chars() {
         if ch.is_ascii() {
             out.push(ch.to_ascii_uppercase());
@@ -131,19 +151,38 @@ fn fold_to_uppercase_string(s: &str) -> String {
             out.extend(ch.to_uppercase());
         }
     }
-    out
+    Some(out)
 }
+
 
 fn fold_to_lowercase_string(s: &str) -> String {
     if s.is_ascii() {
         let bytes = s.as_bytes();
         if !bytes.iter().any(|b| b.is_ascii_uppercase()) {
-            return s.to_string();
+            let mut out = String::new();
+            if out.try_reserve_exact(s.len()).is_err() {
+                debug_assert!(false, "allocation failed (ascii lowercase copy)");
+                return String::new();
+            }
+            out.push_str(s);
+            return out;
         }
-        return s.to_ascii_lowercase();
+        let mut out = String::new();
+        if out.try_reserve_exact(s.len()).is_err() {
+            debug_assert!(false, "allocation failed (ascii lowercase)");
+            return String::new();
+        }
+        for &b in bytes {
+            out.push((b as char).to_ascii_lowercase());
+        }
+        return out;
     }
 
-    let mut out = String::with_capacity(s.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(false, "allocation failed (unicode lowercase)");
+        return String::new();
+    }
     for ch in s.chars() {
         if ch.is_ascii() {
             out.push(ch.to_ascii_lowercase());
@@ -162,7 +201,11 @@ fn fold_to_lowercase_string(s: &str) -> String {
 pub(crate) fn fold_to_uppercase_chars(s: &str) -> Vec<char> {
     if s.is_ascii() {
         let needs_uppercasing = s.as_bytes().iter().any(|b| b.is_ascii_lowercase());
-        let mut out: Vec<char> = Vec::with_capacity(s.len());
+        let mut out: Vec<char> = Vec::new();
+        if out.try_reserve_exact(s.len()).is_err() {
+            debug_assert!(false, "allocation failed (fold_to_uppercase_chars ascii)");
+            return Vec::new();
+        }
         if needs_uppercasing {
             out.extend(s.as_bytes().iter().map(|&b| (b as char).to_ascii_uppercase()));
         } else {
@@ -171,7 +214,11 @@ pub(crate) fn fold_to_uppercase_chars(s: &str) -> Vec<char> {
         return out;
     }
 
-    let mut out: Vec<char> = Vec::with_capacity(s.len());
+    let mut out: Vec<char> = Vec::new();
+    if out.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(false, "allocation failed (fold_to_uppercase_chars unicode)");
+        return Vec::new();
+    }
     for ch in s.chars() {
         if ch.is_ascii() {
             out.push(ch.to_ascii_uppercase());
@@ -186,8 +233,22 @@ pub(crate) fn fold_str_to_uppercase_with_starts(
     s: &str,
     ascii_needs_uppercasing: bool,
 ) -> (Vec<char>, Vec<usize>) {
-    let mut folded: Vec<char> = Vec::with_capacity(s.len());
-    let mut starts: Vec<usize> = Vec::with_capacity(s.len());
+    let mut folded: Vec<char> = Vec::new();
+    if folded.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (fold_str_to_uppercase_with_starts folded)"
+        );
+        return (Vec::new(), Vec::new());
+    }
+    let mut starts: Vec<usize> = Vec::new();
+    if starts.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (fold_str_to_uppercase_with_starts starts)"
+        );
+        return (Vec::new(), Vec::new());
+    }
     for ch in s.chars() {
         starts.push(folded.len());
         if ch.is_ascii() {
@@ -207,7 +268,17 @@ pub(crate) fn casefold_owned(mut s: String) -> String {
     let mut ascii_needs_uppercasing = false;
     for &b in s.as_bytes() {
         if b >= 0x80 {
-            return fold_to_uppercase_string(&s);
+            return match try_fold_to_uppercase_string(&s) {
+                Some(v) => v,
+                None => {
+                    debug_assert!(
+                        false,
+                        "allocation failed (casefold_owned unicode, len={})",
+                        s.len()
+                    );
+                    s
+                }
+            };
         }
         ascii_needs_uppercasing |= b.is_ascii_lowercase();
     }
@@ -221,7 +292,16 @@ pub(crate) fn lowercase_owned(mut s: String) -> String {
     let mut ascii_needs_lowercasing = false;
     for &b in s.as_bytes() {
         if b >= 0x80 {
-            return fold_to_lowercase_string(&s);
+            let folded = fold_to_lowercase_string(&s);
+            if folded.is_empty() && !s.is_empty() {
+                debug_assert!(
+                    false,
+                    "allocation failed (lowercase_owned unicode, len={})",
+                    s.len()
+                );
+                return s;
+            }
+            return folded;
         }
         ascii_needs_lowercasing |= b.is_ascii_uppercase();
     }
@@ -248,12 +328,24 @@ pub(crate) fn with_ascii_uppercased_key<R>(s: &str, f: impl FnOnce(&str) -> R) -
         for (dst, src) in buf[..bytes.len()].iter_mut().zip(bytes) {
             *dst = src.to_ascii_uppercase();
         }
-        let upper =
-            std::str::from_utf8(&buf[..bytes.len()]).expect("ASCII uppercasing preserves UTF-8");
+        let upper = match std::str::from_utf8(&buf[..bytes.len()]) {
+            Ok(s) => s,
+            Err(_) => {
+                debug_assert!(false, "ASCII uppercasing should preserve UTF-8");
+                return f(s);
+            }
+        };
         return f(upper);
     }
 
-    let upper = s.to_ascii_uppercase();
+    let mut upper = String::new();
+    if upper.try_reserve_exact(bytes.len()).is_err() {
+        debug_assert!(false, "allocation failed (ascii uppercase key)");
+        return f(s);
+    }
+    for &b in bytes {
+        upper.push((b as char).to_ascii_uppercase());
+    }
     f(&upper)
 }
 
@@ -262,8 +354,24 @@ pub(crate) fn with_casefolded_key<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
         return with_ascii_uppercased_key(s, f);
     }
 
-    let folded: String = fold_to_uppercase_string(s);
-    f(&folded)
+    match try_fold_to_uppercase_string(s) {
+        Some(folded) => f(&folded),
+        None => {
+            debug_assert!(
+                false,
+                "allocation failed (with_casefolded_key, len={})",
+                s.len()
+            );
+            f(s)
+        }
+    }
+}
+
+pub(crate) fn try_casefold(s: &str) -> Result<String, ErrorKind> {
+    if s.is_empty() {
+        return Ok(String::new());
+    }
+    try_fold_to_uppercase_string(s).ok_or(ErrorKind::Num)
 }
 
 #[inline]
@@ -616,7 +724,18 @@ impl fmt::Debug for Lambda {
 
         impl fmt::Debug for SortedEnv<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut entries: Vec<_> = self.0.iter().collect();
+                let mut entries: Vec<(&String, &Value)> = Vec::new();
+                if entries.try_reserve_exact(self.0.len()).is_err() {
+                    debug_assert!(false, "allocation failed (Lambda debug env)");
+                    let mut map = f.debug_map();
+                    for (k, v) in self.0 {
+                        map.entry(&k, v);
+                    }
+                    return map.finish();
+                }
+                for (k, v) in self.0.iter() {
+                    entries.push((k, v));
+                }
                 entries.sort_by(|(a, _), (b, _)| a.cmp(b));
                 let mut map = f.debug_map();
                 for (k, v) in entries {
@@ -1008,7 +1127,8 @@ mod tests {
             with_casefolded_key(s, |key| {
                 out = Some(key.to_string());
             });
-            assert_eq!(out.as_deref(), Some(casefold(s).as_str()), "input={s:?}");
+            let expected = try_casefold(s).unwrap();
+            assert_eq!(out.as_deref(), Some(expected.as_str()), "input={s:?}");
         }
     }
 
@@ -1022,7 +1142,8 @@ mod tests {
     fn casefolded_key_arc_if_matches_casefold_when_predicate_passes() {
         for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
             let key = casefolded_key_arc_if(s, |_| true).unwrap();
-            assert_eq!(key.as_ref(), casefold(s).as_str(), "input={s:?}");
+            let expected = try_casefold(s).unwrap();
+            assert_eq!(key.as_ref(), expected.as_str(), "input={s:?}");
         }
     }
 
@@ -1036,7 +1157,8 @@ mod tests {
     #[test]
     fn casefold_owned_matches_casefold() {
         for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
-            assert_eq!(casefold_owned(s.to_string()), casefold(s), "input={s:?}");
+            let expected = try_casefold(s).unwrap();
+            assert_eq!(casefold_owned(s.to_string()), expected, "input={s:?}");
         }
     }
 
@@ -1055,7 +1177,13 @@ mod tests {
     fn fold_to_uppercase_chars_matches_unicode_to_uppercase_expansion() {
         for s in ["foo", "FOO", "Straße", "ß", "_xlfn.xlookup"] {
             let folded: Vec<char> = fold_to_uppercase_chars(s);
-            let expected: Vec<char> = s.chars().flat_map(|c| c.to_uppercase()).collect();
+            let mut expected: Vec<char> = Vec::new();
+            if expected.try_reserve_exact(s.len()).is_err() {
+                panic!("allocation failed (upper casefold expected, input={s:?})");
+            }
+            for c in s.chars().flat_map(|c| c.to_uppercase()) {
+                expected.push(c);
+            }
             assert_eq!(folded, expected, "input={s:?}");
         }
     }

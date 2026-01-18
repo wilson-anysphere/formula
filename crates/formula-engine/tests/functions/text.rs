@@ -16,15 +16,15 @@ fn exact_is_case_sensitive() {
 #[test]
 fn clean_strips_control_codes() {
     let input = "a\u{0000}\u{0009}b\u{001F}c\u{007F}d";
-    assert_eq!(text::clean(input), "abcd");
+    assert_eq!(text::clean(input).unwrap(), "abcd");
 }
 
 #[test]
 fn proper_capitalizes_words() {
-    assert_eq!(text::proper("hello world"), "Hello World");
-    assert_eq!(text::proper("hELLO wORLD"), "Hello World");
-    assert_eq!(text::proper("123abc"), "123Abc");
-    assert_eq!(text::proper("O'CONNOR"), "O'Connor");
+    assert_eq!(text::proper("hello world").unwrap(), "Hello World");
+    assert_eq!(text::proper("hELLO wORLD").unwrap(), "Hello World");
+    assert_eq!(text::proper("123abc").unwrap(), "123Abc");
+    assert_eq!(text::proper("O'CONNOR").unwrap(), "O'Connor");
 }
 
 #[test]

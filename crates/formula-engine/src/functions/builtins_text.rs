@@ -749,7 +749,10 @@ fn clean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        Value::Text(crate::functions::text::clean(&text))
+        match crate::functions::text::clean(&text) {
+            Ok(s) => Value::Text(s),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -815,7 +818,10 @@ fn proper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        Value::Text(crate::functions::text::proper(&text))
+        match crate::functions::text::proper(&text) {
+            Ok(s) => Value::Text(s),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -976,8 +982,24 @@ fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -
             return Value::Error(ErrorKind::Value);
         }
 
-        let stride = hay_folded.len() + 1;
-        let mut memo: Vec<Option<bool>> = vec![None; (needle_tokens.len() + 1) * stride];
+        let stride = match hay_folded.len().checked_add(1) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let token_count = match needle_tokens.len().checked_add(1) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let memo_len = match token_count.checked_mul(stride) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let mut memo: Vec<Option<bool>> = Vec::new();
+        if memo.try_reserve_exact(memo_len).is_err() {
+            debug_assert!(false, "allocation failed (search memo, len={memo_len})");
+            return Value::Error(ErrorKind::Num);
+        }
+        memo.resize(memo_len, None);
         for orig_idx in start_idx..hay_len_chars {
             let folded_idx = folded_starts[orig_idx];
             if hay_folded.len().saturating_sub(folded_idx) < min_required {
@@ -1026,7 +1048,10 @@ fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -
             return Value::Error(ErrorKind::Value);
         }
 
-        let start_byte = start_byte.expect("start_idx < hay_len_chars implies a start byte");
+        let Some(start_byte) = start_byte else {
+            debug_assert!(false, "start_idx < hay_len_chars implies a start byte");
+            return Value::Error(ErrorKind::Value);
+        };
         let hay = &haystack[start_byte..];
         let Some(rel) = hay.find(needle) else {
             return Value::Error(ErrorKind::Value);
@@ -1053,14 +1078,27 @@ impl MatrixArg {
     }
 
     fn get(&self, row: usize, col: usize) -> &Value {
+        static FALLBACK_ERROR: Value = Value::Error(ErrorKind::Value);
+
         match self {
             MatrixArg::Scalar(v) => v,
             MatrixArg::Array(arr) => {
                 if arr.rows == 1 && arr.cols == 1 {
-                    arr.get(0, 0).expect("1x1 arrays have top-left")
+                    match arr.get(0, 0) {
+                        Some(v) => v,
+                        None => {
+                            debug_assert!(false, "1x1 arrays should have top-left");
+                            &FALLBACK_ERROR
+                        }
+                    }
                 } else {
-                    arr.get(row, col)
-                        .expect("broadcast shape ensures in-bounds")
+                    match arr.get(row, col) {
+                        Some(v) => v,
+                        None => {
+                            debug_assert!(false, "broadcast shape should ensure in-bounds");
+                            &FALLBACK_ERROR
+                        }
+                    }
                 }
             }
         }

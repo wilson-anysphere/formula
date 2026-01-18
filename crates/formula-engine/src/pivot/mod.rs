@@ -16,6 +16,7 @@ use formula_columnar::{ColumnarTable, Value as ColumnarValue};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::{
@@ -67,7 +68,8 @@ fn push_dax_quoted_table_identifier(raw: &str, out: &mut String) {
 }
 
 fn dax_quoted_column_ref(table: &str, column: &str) -> String {
-    let mut out = String::with_capacity(table.len() + column.len() + 6);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(6));
     push_dax_quoted_table_identifier(table, &mut out);
     out.push('[');
     push_escaped_bracketed_identifier_content(column, &mut out);
@@ -76,7 +78,8 @@ fn dax_quoted_column_ref(table: &str, column: &str) -> String {
 }
 
 fn dax_quoted_unescaped_column_ref(table: &str, column: &str) -> String {
-    let mut out = String::with_capacity(table.len() + column.len() + 6);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(6));
     push_dax_quoted_table_identifier(table, &mut out);
     out.push('[');
     out.push_str(column);
@@ -85,7 +88,8 @@ fn dax_quoted_unescaped_column_ref(table: &str, column: &str) -> String {
 }
 
 fn dax_unquoted_column_ref(table: &str, column: &str) -> String {
-    let mut out = String::with_capacity(table.len() + column.len() + 4);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(4));
     out.push_str(table);
     out.push('[');
     push_escaped_bracketed_identifier_content(column, &mut out);
@@ -94,7 +98,8 @@ fn dax_unquoted_column_ref(table: &str, column: &str) -> String {
 }
 
 fn dax_unquoted_unescaped_column_ref(table: &str, column: &str) -> String {
-    let mut out = String::with_capacity(table.len() + column.len() + 4);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(4));
     out.push_str(table);
     out.push('[');
     out.push_str(column);
@@ -144,6 +149,8 @@ pub enum PivotError {
         item: String,
         message: String,
     },
+    #[error("allocation failed: {0}")]
+    AllocationFailure(&'static str),
 }
 
 fn pivot_key_part_to_pivot_value(part: &PivotKeyPart) -> PivotValue {
@@ -222,9 +229,18 @@ impl PivotCache {
     ///   ordinal of the blank column in the header row.
     /// - If a caption collides with a previous caption (case-insensitive), append `" (2)"`,
     ///   `" (3)"`, ... until the name is unique.
-    fn normalize_field_names(headers: &[PivotValue]) -> Vec<String> {
-        let mut out = Vec::with_capacity(headers.len());
-        let mut used_folded: HashSet<String> = HashSet::with_capacity(headers.len());
+    fn normalize_field_names(headers: &[PivotValue]) -> Result<Vec<String>, PivotError> {
+        let mut out: Vec<String> = Vec::new();
+        if out.try_reserve_exact(headers.len()).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (field names)");
+            return Err(PivotError::AllocationFailure("pivot cache field names"));
+        }
+
+        let mut used_folded: HashSet<String> = HashSet::new();
+        if used_folded.try_reserve(headers.len()).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (field name set)");
+            return Err(PivotError::AllocationFailure("pivot cache field-name set"));
+        }
         let mut blank_counter = 0usize;
 
         for header in headers {
@@ -261,11 +277,19 @@ impl PivotCache {
                 }
             }
 
-            used_folded.insert(crate::value::casefold(&name));
+            let folded = crate::value::try_casefold(&name).map_err(|_| {
+                debug_assert!(
+                    false,
+                    "pivot cache allocation failed (field name fold, len={}, name={name:?})",
+                    name.len()
+                );
+                PivotError::AllocationFailure("pivot cache field name fold")
+            })?;
+            used_folded.insert(folded);
             out.push(name);
         }
 
-        out
+        Ok(out)
     }
 
     pub fn from_range(range: &[Vec<PivotValue>]) -> Result<Self, PivotError> {
@@ -278,15 +302,36 @@ impl PivotCache {
         }
 
         let headers = &range[0];
-        let normalized_names = Self::normalize_field_names(headers);
-        let mut fields = Vec::with_capacity(headers.len());
+        let normalized_names = Self::normalize_field_names(headers)?;
+        let mut fields: Vec<CacheField> = Vec::new();
+        if fields.try_reserve_exact(headers.len()).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (fields)");
+            return Err(PivotError::AllocationFailure("pivot cache fields"));
+        }
         for (idx, name) in normalized_names.into_iter().enumerate() {
             fields.push(CacheField { name, index: idx });
         }
 
-        let records = range[1..].to_vec();
+        let mut records: Vec<Vec<PivotValue>> = Vec::new();
+        if records.try_reserve_exact(range.len().saturating_sub(1)).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (records)");
+            return Err(PivotError::AllocationFailure("pivot cache records"));
+        }
+        for row in &range[1..] {
+            let mut out_row: Vec<PivotValue> = Vec::new();
+            if out_row.try_reserve_exact(row.len()).is_err() {
+                debug_assert!(false, "pivot cache allocation failed (record row)");
+                return Err(PivotError::AllocationFailure("pivot cache record row"));
+            }
+            out_row.extend(row.iter().cloned());
+            records.push(out_row);
+        }
 
         let mut unique_values: HashMap<String, BTreeMap<PivotKeyPart, PivotValue>> = HashMap::new();
+        if unique_values.try_reserve(fields.len()).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (unique_values)");
+            return Err(PivotError::AllocationFailure("pivot cache unique_values"));
+        }
 
         for row in &records {
             for field in &fields {
@@ -300,11 +345,22 @@ impl PivotCache {
         }
 
         let mut unique_values_final = HashMap::new();
+        if unique_values_final.try_reserve(fields.len()).is_err() {
+            debug_assert!(false, "pivot cache allocation failed (unique_values_final)");
+            return Err(PivotError::AllocationFailure("pivot cache unique_values_final"));
+        }
         for field in &fields {
-            let values = unique_values
-                .get(&field.name)
-                .map(|map| map.values().cloned().collect())
-                .unwrap_or_default();
+            let values = if let Some(map) = unique_values.get(&field.name) {
+                let mut values: Vec<PivotValue> = Vec::new();
+                if values.try_reserve_exact(map.len()).is_err() {
+                    debug_assert!(false, "pivot cache allocation failed (unique value list)");
+                    return Err(PivotError::AllocationFailure("pivot cache unique value list"));
+                }
+                values.extend(map.values().cloned());
+                values
+            } else {
+                Vec::new()
+            };
             unique_values_final.insert(field.name.clone(), values);
         }
 
@@ -405,7 +461,14 @@ impl PivotCache {
 
     /// Returns a lightweight schema suitable for AI tool prompting.
     pub fn schema(&self, sample_size: usize) -> PivotSchema {
-        let mut fields = Vec::with_capacity(self.fields.len());
+        let mut fields: Vec<PivotSchemaField> = Vec::new();
+        if fields.try_reserve_exact(self.fields.len()).is_err() {
+            debug_assert!(false, "pivot schema allocation failed (fields={})", self.fields.len());
+            return PivotSchema {
+                fields: Vec::new(),
+                record_count: self.records.len(),
+            };
+        }
         for field in &self.fields {
             let mut samples = Vec::new();
             let mut saw_number = false;
@@ -638,54 +701,70 @@ pub struct CreatePivotTableRequest {
 
 impl CreatePivotTableRequest {
     pub fn into_config(self) -> PivotConfig {
+        let row_fields_in = self.row_fields;
+        let column_fields_in = self.column_fields;
+        let value_fields_in = self.value_fields;
+        let filter_fields_in = self.filter_fields;
+
+        let mut row_fields: Vec<PivotField> = Vec::new();
+        let _ = row_fields.try_reserve_exact(row_fields_in.len());
+        for field in row_fields_in {
+            row_fields.push(PivotField::new(pivot_field_ref_from_legacy_string(field)));
+        }
+
+        let mut column_fields: Vec<PivotField> = Vec::new();
+        let _ = column_fields.try_reserve_exact(column_fields_in.len());
+        for field in column_fields_in {
+            column_fields.push(PivotField::new(pivot_field_ref_from_legacy_string(field)));
+        }
+
+        let mut value_fields: Vec<ValueField> = Vec::new();
+        let _ = value_fields.try_reserve_exact(value_fields_in.len());
+        for vf in value_fields_in {
+            let field = vf.field;
+            let source_field = pivot_field_ref_from_legacy_string(field);
+            let aggregation = vf.aggregation;
+            let name = vf.name.unwrap_or_else(|| {
+                // For Data Model measures, prefer a human-friendly name without the
+                // DAX bracket syntax (Excel displays the measure as `Total Sales`, not
+                // `[Total Sales]`, in the default "Sum of ..." label).
+                let label = pivot_field_ref_caption(&source_field);
+                format!("{:?} of {}", aggregation, label)
+            });
+            value_fields.push(ValueField {
+                source_field,
+                name,
+                aggregation,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            });
+        }
+
+        let mut filter_fields: Vec<FilterField> = Vec::new();
+        let _ = filter_fields.try_reserve_exact(filter_fields_in.len());
+        for f in filter_fields_in {
+            let CreatePivotFilterSpec { field, allowed } = f;
+            let allowed = allowed.map(|vals| {
+                let mut out: HashSet<PivotKeyPart> = HashSet::new();
+                let _ = out.try_reserve(vals.len());
+                for v in vals {
+                    out.insert(v.to_key_part());
+                }
+                out
+            });
+            filter_fields.push(FilterField {
+                source_field: pivot_field_ref_from_legacy_string(field),
+                allowed,
+            });
+        }
+
         PivotConfig {
-            row_fields: self
-                .row_fields
-                .into_iter()
-                .map(|field| PivotField::new(pivot_field_ref_from_legacy_string(field)))
-                .collect(),
-            column_fields: self
-                .column_fields
-                .into_iter()
-                .map(|field| PivotField::new(pivot_field_ref_from_legacy_string(field)))
-                .collect(),
-            value_fields: self
-                .value_fields
-                .into_iter()
-                .map(|vf| {
-                    let field = vf.field;
-                    let source_field = pivot_field_ref_from_legacy_string(field);
-                    let aggregation = vf.aggregation;
-                    let name = vf.name.unwrap_or_else(|| {
-                        // For Data Model measures, prefer a human-friendly name without the
-                        // DAX bracket syntax (Excel displays the measure as `Total Sales`, not
-                        // `[Total Sales]`, in the default "Sum of ..." label).
-                        let label = pivot_field_ref_caption(&source_field);
-                        format!("{:?} of {}", aggregation, label)
-                    });
-                    ValueField {
-                        source_field,
-                        name,
-                        aggregation,
-                        number_format: None,
-                        show_as: None,
-                        base_field: None,
-                        base_item: None,
-                    }
-                })
-                .collect(),
-            filter_fields: self
-                .filter_fields
-                .into_iter()
-                .map(|f| {
-                    let CreatePivotFilterSpec { field, allowed } = f;
-                    FilterField {
-                        source_field: pivot_field_ref_from_legacy_string(field),
-                        allowed: allowed
-                            .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
-                    }
-                })
-                .collect(),
+            row_fields,
+            column_fields,
+            value_fields,
+            filter_fields,
             calculated_fields: self.calculated_fields.unwrap_or_default(),
             calculated_items: self.calculated_items.unwrap_or_default(),
             layout: self.layout.unwrap_or(Layout::Tabular),
@@ -876,12 +955,16 @@ impl Accumulator {
     }
 }
 
-fn accumulator_vec(count: usize) -> Vec<Accumulator> {
-    let mut out = Vec::with_capacity(count);
+fn accumulator_vec(count: usize) -> Result<Vec<Accumulator>, PivotError> {
+    let mut out: Vec<Accumulator> = Vec::new();
+    if out.try_reserve_exact(count).is_err() {
+        debug_assert!(false, "pivot accumulator allocation failed (count={count})");
+        return Err(PivotError::AllocationFailure("pivot accumulator vec"));
+    }
     for _ in 0..count {
         out.push(Accumulator::new());
     }
-    out
+    Ok(out)
 }
 
 fn normalize_pivot_item_name_owned(name: String) -> String {
@@ -938,10 +1021,28 @@ impl FieldItemResolver {
         })
     }
 
-    fn insert_calculated_item(&mut self, name: &str) {
-        let normalized = crate::value::casefold(name);
+    fn insert_calculated_item(&mut self, name: &str) -> Result<(), PivotError> {
+        if self.by_name.try_reserve(1).is_err() {
+            debug_assert!(
+                false,
+                "pivot cache allocation failed (calculated item resolver, len={}, name={name:?})",
+                name.len()
+            );
+            return Err(PivotError::AllocationFailure(
+                "pivot calculated item resolver",
+            ));
+        }
+        let normalized = crate::value::try_casefold(name).map_err(|_| {
+            debug_assert!(
+                false,
+                "pivot cache allocation failed (calculated item fold, len={}, name={name:?})",
+                name.len()
+            );
+            PivotError::AllocationFailure("pivot calculated item fold")
+        })?;
         self.by_name
             .insert(normalized, PivotKeyPart::Text(name.to_string()));
+        Ok(())
     }
 
     fn resolve(&self, name: &str) -> Result<PivotKeyPart, String> {
@@ -1380,9 +1481,10 @@ impl PivotEngine {
             col_keys.insert(col_key.clone());
 
             let row_entry = cube.entry(row_key).or_default();
-            let cell = row_entry
-                .entry(col_key)
-                .or_insert_with(|| accumulator_vec(value_field_count));
+            let cell = match row_entry.entry(col_key) {
+                Entry::Occupied(o) => o.into_mut(),
+                Entry::Vacant(v) => v.insert(accumulator_vec(value_field_count)?),
+            };
 
             for (vf_idx, _vf) in cfg.value_fields.iter().enumerate() {
                 let val = source.value(row, indices.value_indices[vf_idx]);
@@ -1397,14 +1499,30 @@ impl PivotEngine {
             Self::apply_calculated_items(cache, cfg, &mut cube, &mut row_keys, &mut col_keys)?;
         }
 
-        let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
-        let row_sort_specs: SmallVec<[KeySortSpec; 4]> =
-            cfg.row_fields.iter().map(KeySortSpec::for_field).collect();
+        let row_key_set = row_keys;
+        let mut row_keys: Vec<PivotKey> = Vec::new();
+        if row_keys.try_reserve_exact(row_key_set.len()).is_err() {
+            return Err(PivotError::AllocationFailure("pivot row keys"));
+        }
+        row_keys.extend(row_key_set.into_iter());
+        let mut row_sort_specs: SmallVec<[KeySortSpec; 4]> = SmallVec::new();
+        let _ = row_sort_specs.try_reserve(cfg.row_fields.len());
+        for field in cfg.row_fields.iter() {
+            row_sort_specs.push(KeySortSpec::for_field(field));
+        }
         row_keys.sort_by(|a, b| compare_pivot_keys(a, b, &row_sort_specs));
 
-        let mut col_keys: Vec<PivotKey> = col_keys.into_iter().collect();
-        let col_sort_specs: SmallVec<[KeySortSpec; 4]> =
-            cfg.column_fields.iter().map(KeySortSpec::for_field).collect();
+        let col_key_set = col_keys;
+        let mut col_keys: Vec<PivotKey> = Vec::new();
+        if col_keys.try_reserve_exact(col_key_set.len()).is_err() {
+            return Err(PivotError::AllocationFailure("pivot column keys"));
+        }
+        col_keys.extend(col_key_set.into_iter());
+        let mut col_sort_specs: SmallVec<[KeySortSpec; 4]> = SmallVec::new();
+        let _ = col_sort_specs.try_reserve(cfg.column_fields.len());
+        for field in cfg.column_fields.iter() {
+            col_sort_specs.push(KeySortSpec::for_field(field));
+        }
         col_keys.sort_by(|a, b| compare_pivot_keys(a, b, &col_sort_specs));
 
         // Ensure at least one column key exists to simplify output logic.
@@ -1432,7 +1550,7 @@ impl PivotEngine {
                     &row_keys,
                     cfg,
                     subtotal_levels,
-                );
+                )?;
 
                 let mut prev_row_key: Option<PivotKey> = None;
                 for (row_key_idx, row_key) in row_keys.iter().enumerate() {
@@ -1447,7 +1565,7 @@ impl PivotEngine {
                         if let Some(totals) = group_totals[level].get(&prefix_key) {
                             data.push(Self::render_subtotal_row(
                                 level, &row_key.0, totals, &col_keys, cfg,
-                            ));
+                            )?);
                             row_kinds.push(PivotRowKind::Subtotal { level, prefix_key });
                         }
                     }
@@ -1455,18 +1573,22 @@ impl PivotEngine {
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
-                    ));
+                    )?);
                     row_kinds.push(PivotRowKind::Leaf { row_key_idx });
 
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len())?;
                     }
 
                     prev_row_key = Some(row_key.clone());
                 }
             }
             SubtotalPosition::Bottom if subtotal_levels > 0 => {
-                let mut group_accs: Vec<Option<GroupAccumulator>> = vec![None; subtotal_levels];
+                let mut group_accs: Vec<Option<GroupAccumulator>> = Vec::new();
+                if group_accs.try_reserve_exact(subtotal_levels).is_err() {
+                    return Err(PivotError::AllocationFailure("pivot group accumulators"));
+                }
+                group_accs.resize_with(subtotal_levels, || None);
 
                 let mut prev_row_key: Option<PivotKey> = None;
                 for (row_key_idx, row_key) in row_keys.iter().enumerate() {
@@ -1485,7 +1607,7 @@ impl PivotEngine {
                             prev,
                             &mut data,
                             &mut row_kinds,
-                        );
+                        )?;
                     }
 
                     // Open new groups for changed prefixes.
@@ -1496,17 +1618,17 @@ impl PivotEngine {
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
-                    ));
+                    )?);
                     row_kinds.push(PivotRowKind::Leaf { row_key_idx });
 
                     // Update subtotal accumulators & grand accumulator.
                     for level in 0..subtotal_levels {
                         if let Some(acc) = group_accs[level].as_mut() {
-                            acc.merge_row(row_map, cfg.value_fields.len());
+                            acc.merge_row(row_map, cfg.value_fields.len())?;
                         }
                     }
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len())?;
                     }
 
                     prev_row_key = Some(row_key.clone());
@@ -1522,7 +1644,7 @@ impl PivotEngine {
                         prev,
                         &mut data,
                         &mut row_kinds,
-                    );
+                    )?;
                 }
             }
             _ => {
@@ -1531,10 +1653,10 @@ impl PivotEngine {
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
                         row_key, row_map, &col_keys, cfg, /*label*/ None,
-                    ));
+                    )?);
                     row_kinds.push(PivotRowKind::Leaf { row_key_idx });
                     if let Some(acc) = grand_acc.as_mut() {
-                        acc.merge_row(row_map, cfg.value_fields.len());
+                        acc.merge_row(row_map, cfg.value_fields.len())?;
                     }
                 }
             }
@@ -1549,7 +1671,7 @@ impl PivotEngine {
                 &grand,
                 &col_keys,
                 cfg,
-            ));
+            )?);
             row_kinds.push(PivotRowKind::GrandTotal);
         }
 
@@ -1558,7 +1680,7 @@ impl PivotEngine {
             .iter()
             .any(|vf| vf.show_as.unwrap_or(ShowAsType::Normal) != ShowAsType::Normal)
         {
-            Self::apply_show_as(&mut data, &row_kinds, &cube, &row_keys, &col_keys, cfg);
+            Self::apply_show_as(&mut data, &row_kinds, &cube, &row_keys, &col_keys, cfg)?;
         }
 
         Ok(PivotResult { data })
@@ -1652,7 +1774,7 @@ impl PivotEngine {
                 )?,
             }
 
-            resolver.insert_calculated_item(&item.name);
+            resolver.insert_calculated_item(&item.name)?;
         }
 
         Ok(())
@@ -1710,7 +1832,17 @@ impl PivotEngine {
             let mut new_row_map: HashMap<PivotKey, Vec<Accumulator>> = HashMap::new();
 
             for col_key in col_keys.iter() {
-                let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
+                let mut cell_accs: Vec<Accumulator> = Vec::new();
+                if cell_accs.try_reserve_exact(cfg.value_fields.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "pivot calculated item allocation failed (value_fields={})",
+                        cfg.value_fields.len()
+                    );
+                    return Err(PivotError::AllocationFailure(
+                        "pivot calculated item cell accumulators",
+                    ));
+                }
                 for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
                     let agg = vf.aggregation;
                     let lookup = |part: &PivotKeyPart| -> f64 {
@@ -1811,7 +1943,17 @@ impl PivotEngine {
 
             for row_key in row_keys.iter() {
                 let row_map = cube.entry(row_key.clone()).or_default();
-                let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
+                let mut cell_accs: Vec<Accumulator> = Vec::new();
+                if cell_accs.try_reserve_exact(cfg.value_fields.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "pivot calculated item allocation failed (value_fields={})",
+                        cfg.value_fields.len()
+                    );
+                    return Err(PivotError::AllocationFailure(
+                        "pivot calculated item cell accumulators",
+                    ));
+                }
                 for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
                     let agg = vf.aggregation;
                     let value = expr
@@ -1935,7 +2077,7 @@ impl PivotEngine {
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
         label: Option<PivotValue>,
-    ) -> Vec<PivotValue> {
+    ) -> Result<Vec<PivotValue>, PivotError> {
         let mut row = Vec::new();
 
         match cfg.layout {
@@ -1973,7 +2115,7 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs = accumulator_vec(cfg.value_fields.len());
+        let mut row_total_accs = accumulator_vec(cfg.value_fields.len())?;
 
         for col_key in col_keys {
             let maybe_cell = row_map.and_then(|m| m.get(col_key));
@@ -1993,7 +2135,7 @@ impl PivotEngine {
             }
         }
 
-        row
+        Ok(row)
     }
 
     fn render_totals_row(
@@ -2003,7 +2145,7 @@ impl PivotEngine {
         totals: &GroupAccumulator,
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
-    ) -> Vec<PivotValue> {
+    ) -> Result<Vec<PivotValue>, PivotError> {
         let mut row = Vec::new();
 
         match cfg.layout {
@@ -2032,7 +2174,7 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs = accumulator_vec(cfg.value_fields.len());
+        let mut row_total_accs = accumulator_vec(cfg.value_fields.len())?;
         let empty = Accumulator::new();
 
         for col_key in col_keys {
@@ -2054,7 +2196,7 @@ impl PivotEngine {
             }
         }
 
-        row
+        Ok(row)
     }
 
     fn render_subtotal_row(
@@ -2063,7 +2205,7 @@ impl PivotEngine {
         totals: &GroupAccumulator,
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
-    ) -> Vec<PivotValue> {
+    ) -> Result<Vec<PivotValue>, PivotError> {
         let base = row_key_parts
             .get(level)
             .map(|p| p.display_string())
@@ -2082,8 +2224,12 @@ impl PivotEngine {
         row_keys: &[PivotKey],
         cfg: &PivotConfig,
         subtotal_levels: usize,
-    ) -> Vec<HashMap<PivotKey, GroupAccumulator>> {
-        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> = Vec::with_capacity(subtotal_levels);
+    ) -> Result<Vec<HashMap<PivotKey, GroupAccumulator>>, PivotError> {
+        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> = Vec::new();
+        if out.try_reserve_exact(subtotal_levels).is_err() {
+            debug_assert!(false, "pivot allocation failed (subtotal_levels={subtotal_levels})");
+            return Err(PivotError::AllocationFailure("pivot subtotal totals"));
+        }
         for _ in 0..subtotal_levels {
             out.push(HashMap::new());
         }
@@ -2095,11 +2241,11 @@ impl PivotEngine {
                 let entry = out[level]
                     .entry(prefix_key)
                     .or_insert_with(GroupAccumulator::new);
-                entry.merge_row(row_map, cfg.value_fields.len());
+                entry.merge_row(row_map, cfg.value_fields.len())?;
             }
         }
 
-        out
+        Ok(out)
     }
 
     fn close_groups_bottom(
@@ -2110,7 +2256,7 @@ impl PivotEngine {
         prev_row_key: &PivotKey,
         out: &mut Vec<Vec<PivotValue>>,
         row_kinds: &mut Vec<PivotRowKind>,
-    ) {
+    ) -> Result<(), PivotError> {
         // Close from deepest to keep_prefix_len.
         for level in (keep_prefix_len..group_accs.len()).rev() {
             if let Some(acc) = group_accs[level].take() {
@@ -2120,11 +2266,12 @@ impl PivotEngine {
                     &acc,
                     col_keys,
                     cfg,
-                ));
+                )?);
                 let prefix_key = PivotKey(prev_row_key.0[..=level].to_vec());
                 row_kinds.push(PivotRowKind::Subtotal { level, prefix_key });
             }
         }
+        Ok(())
     }
 
     fn apply_show_as(
@@ -2134,14 +2281,14 @@ impl PivotEngine {
         row_keys: &[PivotKey],
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
-    ) {
+    ) -> Result<(), PivotError> {
         if data.len() <= 1 {
-            return;
+            return Ok(());
         }
 
         let value_field_count = cfg.value_fields.len();
         if value_field_count == 0 {
-            return;
+            return Ok(());
         }
 
         let row_label_width = match cfg.layout {
@@ -2155,6 +2302,17 @@ impl PivotEngine {
         let mut leaf_rows: Vec<(usize, usize)> = Vec::new();
         let mut leaf_row_indices: Vec<usize> = Vec::new();
         let mut subtotal_rows: Vec<(usize, &PivotKey)> = Vec::new();
+        if leaf_rows.try_reserve(row_kinds.len()).is_err()
+            || leaf_row_indices.try_reserve(row_kinds.len()).is_err()
+            || subtotal_rows.try_reserve(row_kinds.len()).is_err()
+        {
+            debug_assert!(
+                false,
+                "pivot show_as allocation failed (row_kinds={})",
+                row_kinds.len()
+            );
+            return Err(PivotError::AllocationFailure("pivot show_as row buffers"));
+        }
         let mut grand_total_row: Option<usize> = None;
         for (idx, kind) in row_kinds.iter().enumerate() {
             match kind {
@@ -2168,7 +2326,18 @@ impl PivotEngine {
             }
         }
 
-        let mut cols = Vec::with_capacity(col_keys.len() + usize::from(cfg.grand_totals.columns));
+        let mut cols: Vec<usize> = Vec::new();
+        if cols
+            .try_reserve_exact(col_keys.len() + usize::from(cfg.grand_totals.columns))
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "pivot show_as allocation failed (cols={})",
+                col_keys.len() + usize::from(cfg.grand_totals.columns)
+            );
+            return Err(PivotError::AllocationFailure("pivot show_as cols"));
+        }
         for vf_idx in 0..value_field_count {
             let show_as = cfg.value_fields[vf_idx]
                 .show_as
@@ -2202,12 +2371,12 @@ impl PivotEngine {
                         value_field_count,
                         vf_idx,
                         cfg.grand_totals.columns,
-                    );
+                    )?;
                     Self::apply_percent_of_row_total(data, &cols, &row_denoms);
                 }
                 ShowAsType::PercentOfColumnTotal => {
                     let col_denoms =
-                        Self::compute_column_totals(cube, row_keys, col_keys, vf_idx, agg);
+                        Self::compute_column_totals(cube, row_keys, col_keys, vf_idx, agg)?;
                     let grand_denom =
                         Self::compute_grand_total(cube, row_keys, col_keys, vf_idx, agg);
                     Self::apply_percent_of_column_total(
@@ -2229,28 +2398,28 @@ impl PivotEngine {
                             .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
-                                Self::group_ids_excluding_pos(row_keys, base_row_pos);
+                                Self::group_ids_excluding_pos(row_keys, base_row_pos)?;
                             Self::apply_running_total_grouped_by_row(
                                 data,
                                 &leaf_rows,
                                 &cols,
                                 &group_ids,
                                 group_count,
-                            );
+                            )?;
                         } else if let Some(base_col_pos) = cfg
                             .column_fields
                             .iter()
                             .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
-                                Self::group_ids_excluding_pos(col_keys, base_col_pos);
+                                Self::group_ids_excluding_pos(col_keys, base_col_pos)?;
                             Self::apply_running_total_grouped_by_column(
                                 data,
                                 &leaf_row_indices,
                                 &cols[..col_keys.len()],
                                 &group_ids,
                                 group_count,
-                            );
+                            )?;
                         } else {
                             Self::apply_running_total(data, &leaf_row_indices, &cols);
                         }
@@ -2267,7 +2436,7 @@ impl PivotEngine {
                             .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
-                                Self::group_ids_excluding_pos(row_keys, base_row_pos);
+                                Self::group_ids_excluding_pos(row_keys, base_row_pos)?;
                             Self::apply_rank_grouped_by_row(
                                 data,
                                 &leaf_rows,
@@ -2275,14 +2444,14 @@ impl PivotEngine {
                                 &group_ids,
                                 group_count,
                                 descending,
-                            );
+                            )?;
                         } else if let Some(base_col_pos) = cfg
                             .column_fields
                             .iter()
                             .position(|f| &f.source_field == base_field)
                         {
                             let (group_ids, group_count) =
-                                Self::group_ids_excluding_pos(col_keys, base_col_pos);
+                                Self::group_ids_excluding_pos(col_keys, base_col_pos)?;
                             Self::apply_rank_grouped_by_column(
                                 data,
                                 &leaf_row_indices,
@@ -2290,12 +2459,12 @@ impl PivotEngine {
                                 &group_ids,
                                 group_count,
                                 descending,
-                            );
+                            )?;
                         } else {
-                            Self::apply_rank(data, &leaf_row_indices, &cols, descending);
+                            Self::apply_rank(data, &leaf_row_indices, &cols, descending)?;
                         }
                     } else {
-                        Self::apply_rank(data, &leaf_row_indices, &cols, descending);
+                        Self::apply_rank(data, &leaf_row_indices, &cols, descending)?;
                     }
                 }
                 ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
@@ -2378,7 +2547,7 @@ impl PivotEngine {
                             base_col_pos,
                             &base_part,
                             difference,
-                        );
+                        )?;
                     } else {
                         Self::blank_numeric_cells(data, &cols);
                     }
@@ -2386,6 +2555,8 @@ impl PivotEngine {
                 ShowAsType::Normal => {}
             }
         }
+
+        Ok(())
     }
 
     fn blank_numeric_cells(data: &mut [Vec<PivotValue>], cols: &[usize]) {
@@ -2427,8 +2598,12 @@ impl PivotEngine {
         col_keys: &[PivotKey],
         value_field_idx: usize,
         agg: AggregationType,
-    ) -> Vec<Option<f64>> {
-        let mut out = Vec::with_capacity(col_keys.len());
+    ) -> Result<Vec<Option<f64>>, PivotError> {
+        let mut out: Vec<Option<f64>> = Vec::new();
+        if out.try_reserve_exact(col_keys.len()).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (col_denoms={})", col_keys.len());
+            return Err(PivotError::AllocationFailure("pivot show_as column totals"));
+        }
         for col_key in col_keys {
             let mut acc = Accumulator::new();
             for row_key in row_keys {
@@ -2441,7 +2616,7 @@ impl PivotEngine {
             }
             out.push(acc.finalize(agg).as_number());
         }
-        out
+        Ok(out)
     }
 
     fn apply_percent_of_total(data: &mut [Vec<PivotValue>], cols: &[usize], denom: Option<f64>) {
@@ -2472,8 +2647,13 @@ impl PivotEngine {
         value_field_count: usize,
         value_field_idx: usize,
         has_row_grand_totals: bool,
-    ) -> Vec<Option<f64>> {
-        let mut out = vec![None; data.len()];
+    ) -> Result<Vec<Option<f64>>, PivotError> {
+        let mut out: Vec<Option<f64>> = Vec::new();
+        if out.try_reserve_exact(data.len()).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (row_denoms={})", data.len());
+            return Err(PivotError::AllocationFailure("pivot show_as row totals"));
+        }
+        out.resize(data.len(), None);
         let row_grand_total_start = row_label_width + col_key_count * value_field_count;
 
         for r in 1..data.len() {
@@ -2494,7 +2674,7 @@ impl PivotEngine {
             out[r] = saw_number.then_some(sum);
         }
 
-        out
+        Ok(out)
     }
 
     fn apply_percent_of_row_total(
@@ -2939,8 +3119,16 @@ impl PivotEngine {
         base_col_pos: usize,
         base_part: &PivotKeyPart,
         difference: bool,
-    ) {
-        let mut base_col_keys: Vec<PivotKey> = Vec::with_capacity(col_keys.len());
+    ) -> Result<(), PivotError> {
+        let mut base_col_keys: Vec<PivotKey> = Vec::new();
+        if base_col_keys.try_reserve_exact(col_keys.len()).is_err() {
+            debug_assert!(
+                false,
+                "pivot show_as allocation failed (base_col_keys={})",
+                col_keys.len()
+            );
+            return Err(PivotError::AllocationFailure("pivot show_as base column keys"));
+        }
         for col_key in col_keys {
             let mut parts = col_key.0.clone();
             if base_col_pos < parts.len() && parts[base_col_pos] != *base_part {
@@ -3067,14 +3255,34 @@ impl PivotEngine {
                 Self::apply_percent_of_base_item_cell(data, grand_r, total_col, denom, difference);
             }
         }
+        Ok(())
     }
 
-    fn group_ids_excluding_pos(keys: &[PivotKey], exclude_pos: usize) -> (Vec<usize>, usize) {
+    fn group_ids_excluding_pos(
+        keys: &[PivotKey],
+        exclude_pos: usize,
+    ) -> Result<(Vec<usize>, usize), PivotError> {
         let mut id_by_key: HashMap<PivotKey, usize> = HashMap::new();
-        let mut out = Vec::with_capacity(keys.len());
+        if id_by_key.try_reserve(keys.len()).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (group id map)");
+            return Err(PivotError::AllocationFailure("pivot show_as group id map"));
+        }
+
+        let mut out: Vec<usize> = Vec::new();
+        if out.try_reserve_exact(keys.len()).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (group ids)");
+            return Err(PivotError::AllocationFailure("pivot show_as group ids"));
+        }
 
         for key in keys {
-            let mut group_parts: Vec<PivotKeyPart> = Vec::with_capacity(key.0.len().saturating_sub(1));
+            let mut group_parts: Vec<PivotKeyPart> = Vec::new();
+            if group_parts
+                .try_reserve_exact(key.0.len().saturating_sub(1))
+                .is_err()
+            {
+                debug_assert!(false, "pivot show_as allocation failed (group parts)");
+                return Err(PivotError::AllocationFailure("pivot show_as group key"));
+            }
             for (idx, part) in key.0.iter().enumerate() {
                 if idx == exclude_pos {
                     continue;
@@ -3088,7 +3296,7 @@ impl PivotEngine {
             out.push(id);
         }
 
-        (out, id_by_key.len())
+        Ok((out, id_by_key.len()))
     }
 
     fn apply_running_total_grouped_by_row(
@@ -3097,12 +3305,20 @@ impl PivotEngine {
         cols: &[usize],
         row_group_ids: &[usize],
         group_count: usize,
-    ) {
+    ) -> Result<(), PivotError> {
         if group_count == 0 || leaf_rows.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let mut running_by_group = vec![0.0; group_count];
+        let mut running_by_group: Vec<f64> = Vec::new();
+        if running_by_group.try_reserve_exact(group_count).is_err() {
+            debug_assert!(
+                false,
+                "pivot show_as allocation failed (running_by_group={group_count})"
+            );
+            return Err(PivotError::AllocationFailure("pivot show_as running totals"));
+        }
+        running_by_group.resize(group_count, 0.0);
         for &c in cols {
             running_by_group.fill(0.0);
             for &(r, row_key_idx) in leaf_rows {
@@ -3122,6 +3338,7 @@ impl PivotEngine {
                 }
             }
         }
+        Ok(())
     }
 
     fn apply_running_total_grouped_by_column(
@@ -3130,12 +3347,20 @@ impl PivotEngine {
         cols: &[usize],
         col_group_ids: &[usize],
         group_count: usize,
-    ) {
+    ) -> Result<(), PivotError> {
         if group_count == 0 || leaf_rows.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let mut running_by_group = vec![0.0; group_count];
+        let mut running_by_group: Vec<f64> = Vec::new();
+        if running_by_group.try_reserve_exact(group_count).is_err() {
+            debug_assert!(
+                false,
+                "pivot show_as allocation failed (running_by_group={group_count})"
+            );
+            return Err(PivotError::AllocationFailure("pivot show_as running totals"));
+        }
+        running_by_group.resize(group_count, 0.0);
         for &r in leaf_rows {
             running_by_group.fill(0.0);
             for (col_idx, &c) in cols.iter().enumerate() {
@@ -3155,6 +3380,7 @@ impl PivotEngine {
                 }
             }
         }
+        Ok(())
     }
 
     fn apply_running_total(data: &mut [Vec<PivotValue>], leaf_rows: &[usize], cols: &[usize]) {
@@ -3176,16 +3402,61 @@ impl PivotEngine {
         row_group_ids: &[usize],
         group_count: usize,
         descending: bool,
-    ) {
+    ) -> Result<(), PivotError> {
         if group_count == 0 || leaf_rows.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let mut values_by_group: Vec<Vec<(usize, f64)>> = (0..group_count).map(|_| Vec::new()).collect();
+        let mut values_by_group: Vec<Vec<(usize, f64)>> = Vec::new();
+        if values_by_group.try_reserve_exact(group_count).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (rank groups)");
+            return Err(PivotError::AllocationFailure("pivot show_as rank groups"));
+        }
+        for _ in 0..group_count {
+            values_by_group.push(Vec::new());
+        }
+
+        let mut counts: Vec<usize> = Vec::new();
+        if counts.try_reserve_exact(group_count).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (rank counts)");
+            return Err(PivotError::AllocationFailure("pivot show_as rank counts"));
+        }
+        counts.resize(group_count, 0);
+
         for &c in cols {
             for values in values_by_group.iter_mut() {
                 values.clear();
             }
+            counts.fill(0);
+            for &(r, row_key_idx) in leaf_rows {
+                let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
+                    continue;
+                };
+                if data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
+                    .is_none()
+                {
+                    continue;
+                }
+                if let Some(slot) = counts.get_mut(group_id) {
+                    *slot = slot.saturating_add(1);
+                }
+            }
+
+            for (idx, needed) in counts.iter().copied().enumerate() {
+                if needed == 0 {
+                    continue;
+                }
+                if let Some(group) = values_by_group.get_mut(idx) {
+                    if group.try_reserve_exact(needed).is_err() {
+                        debug_assert!(false, "pivot show_as allocation failed (rank group={idx})");
+                        return Err(PivotError::AllocationFailure("pivot show_as rank values"));
+                    }
+                }
+            }
+
             for &(r, row_key_idx) in leaf_rows {
                 let Some(group_id) = row_group_ids.get(row_key_idx).copied() else {
                     continue;
@@ -3231,6 +3502,7 @@ impl PivotEngine {
                 }
             }
         }
+        Ok(())
     }
 
     fn apply_rank_grouped_by_column(
@@ -3240,16 +3512,61 @@ impl PivotEngine {
         col_group_ids: &[usize],
         group_count: usize,
         descending: bool,
-    ) {
+    ) -> Result<(), PivotError> {
         if group_count == 0 || leaf_rows.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let mut values_by_group: Vec<Vec<(usize, f64)>> = (0..group_count).map(|_| Vec::new()).collect();
+        let mut values_by_group: Vec<Vec<(usize, f64)>> = Vec::new();
+        if values_by_group.try_reserve_exact(group_count).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (rank groups)");
+            return Err(PivotError::AllocationFailure("pivot show_as rank groups"));
+        }
+        for _ in 0..group_count {
+            values_by_group.push(Vec::new());
+        }
+
+        let mut counts: Vec<usize> = Vec::new();
+        if counts.try_reserve_exact(group_count).is_err() {
+            debug_assert!(false, "pivot show_as allocation failed (rank counts)");
+            return Err(PivotError::AllocationFailure("pivot show_as rank counts"));
+        }
+        counts.resize(group_count, 0);
+
         for &r in leaf_rows {
             for values in values_by_group.iter_mut() {
                 values.clear();
             }
+            counts.fill(0);
+            for (col_idx, &c) in cols.iter().enumerate() {
+                let Some(group_id) = col_group_ids.get(col_idx).copied() else {
+                    continue;
+                };
+                if data
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .and_then(|v| v.as_number())
+                    .is_none()
+                {
+                    continue;
+                }
+                if let Some(slot) = counts.get_mut(group_id) {
+                    *slot = slot.saturating_add(1);
+                }
+            }
+
+            for (idx, needed) in counts.iter().copied().enumerate() {
+                if needed == 0 {
+                    continue;
+                }
+                if let Some(group) = values_by_group.get_mut(idx) {
+                    if group.try_reserve_exact(needed).is_err() {
+                        debug_assert!(false, "pivot show_as allocation failed (rank group={idx})");
+                        return Err(PivotError::AllocationFailure("pivot show_as rank values"));
+                    }
+                }
+            }
+
             for (col_idx, &c) in cols.iter().enumerate() {
                 let Some(group_id) = col_group_ids.get(col_idx).copied() else {
                     continue;
@@ -3298,6 +3615,7 @@ impl PivotEngine {
                 }
             }
         }
+        Ok(())
     }
 
     fn apply_rank(
@@ -3305,9 +3623,17 @@ impl PivotEngine {
         leaf_rows: &[usize],
         cols: &[usize],
         descending: bool,
-    ) {
+    ) -> Result<(), PivotError> {
         for &c in cols {
-            let mut values: Vec<(usize, f64)> = Vec::with_capacity(leaf_rows.len());
+            let mut values: Vec<(usize, f64)> = Vec::new();
+            if values.try_reserve_exact(leaf_rows.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "pivot show_as allocation failed (rank values={})",
+                    leaf_rows.len()
+                );
+                return Err(PivotError::AllocationFailure("pivot show_as rank"));
+            }
             for &r in leaf_rows {
                 if let Some(n) = data[r][c].as_number() {
                     values.push((r, n));
@@ -3340,6 +3666,7 @@ impl PivotEngine {
                 i = j;
             }
         }
+        Ok(())
     }
 }
 
@@ -3359,24 +3686,25 @@ impl GroupAccumulator {
         &mut self,
         row_map: Option<&HashMap<PivotKey, Vec<Accumulator>>>,
         value_field_count: usize,
-    ) {
+    ) -> Result<(), PivotError> {
         let Some(row_map) = row_map else {
-            return;
+            return Ok(());
         };
 
         for (col_key, src_accs) in row_map {
             debug_assert_eq!(src_accs.len(), value_field_count);
 
-            let dst = self
-                .cells
-                .entry(col_key.clone())
-                .or_insert_with(|| accumulator_vec(value_field_count));
+            let dst = match self.cells.entry(col_key.clone()) {
+                Entry::Occupied(o) => o.into_mut(),
+                Entry::Vacant(v) => v.insert(accumulator_vec(value_field_count)?),
+            };
             debug_assert_eq!(dst.len(), value_field_count);
 
             for (dst_acc, src_acc) in dst.iter_mut().zip(src_accs.iter()) {
                 dst_acc.merge(src_acc);
             }
         }
+        Ok(())
     }
 }
 
@@ -3499,12 +3827,12 @@ impl FieldIndices {
         row: usize,
         indices: &[usize],
     ) -> PivotKey {
-        PivotKey(
-            indices
-                .iter()
-                .map(|idx| source.value(row, *idx).to_key_part())
-                .collect(),
-        )
+        let mut parts: Vec<PivotKeyPart> = Vec::new();
+        let _ = parts.try_reserve_exact(indices.len());
+        for idx in indices.iter().copied() {
+            parts.push(source.value(row, idx).to_key_part());
+        }
+        PivotKey(parts)
     }
 
     fn passes_filters<S: PivotRecordSource + ?Sized>(&self, source: &S, row: usize) -> bool {
@@ -3529,12 +3857,20 @@ struct KeySortSpec {
 impl KeySortSpec {
     fn for_field(field: &PivotField) -> Self {
         let manual_index = if field.sort_order == SortOrder::Manual {
-            field.manual_sort.as_ref().map(|items| {
-                let mut index = HashMap::with_capacity(items.len());
+            field.manual_sort.as_ref().and_then(|items| {
+                let mut index: HashMap<PivotKeyPart, usize> = HashMap::new();
+                if index.try_reserve(items.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "pivot manual sort index allocation failed (items={})",
+                        items.len()
+                    );
+                    return None;
+                }
                 for (pos, part) in items.iter().enumerate() {
                     index.entry(part.clone()).or_insert(pos);
                 }
-                index
+                Some(index)
             })
         } else {
             None
@@ -5938,7 +6274,11 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
 
-        let field_names: Vec<String> = cache.fields.iter().map(|f| f.name.clone()).collect();
+        let mut field_names: Vec<String> = Vec::new();
+        assert!(field_names.try_reserve_exact(cache.fields.len()).is_ok());
+        for f in cache.fields.iter() {
+            field_names.push(f.name.clone());
+        }
         assert_eq!(
             field_names,
             vec![
@@ -5951,10 +6291,11 @@ mod tests {
             ]
         );
 
-        let folded: HashSet<String> = field_names
-            .iter()
-            .map(|s| crate::value::casefold(s))
-            .collect();
+        let mut folded: HashSet<String> = HashSet::new();
+        assert!(folded.try_reserve(field_names.len()).is_ok());
+        for name in field_names.iter() {
+            folded.insert(crate::value::try_casefold(name).unwrap());
+        }
         assert_eq!(folded.len(), field_names.len());
 
         assert_eq!(cache.unique_values.len(), field_names.len());
@@ -5973,16 +6314,21 @@ mod tests {
         ];
 
         let cache = PivotCache::from_range(&data).unwrap();
-        let field_names: Vec<String> = cache.fields.iter().map(|f| f.name.clone()).collect();
+        let mut field_names: Vec<String> = Vec::new();
+        assert!(field_names.try_reserve_exact(cache.fields.len()).is_ok());
+        for f in cache.fields.iter() {
+            field_names.push(f.name.clone());
+        }
         assert_eq!(
             field_names,
             vec!["Straße".to_string(), "STRASSE (2)".to_string()]
         );
 
-        let folded: HashSet<String> = field_names
-            .iter()
-            .map(|s| crate::value::casefold(s))
-            .collect();
+        let mut folded: HashSet<String> = HashSet::new();
+        assert!(folded.try_reserve(field_names.len()).is_ok());
+        for name in field_names.iter() {
+            folded.insert(crate::value::try_casefold(name).unwrap());
+        }
         assert_eq!(folded.len(), field_names.len());
     }
 
@@ -5997,7 +6343,8 @@ mod tests {
         let cache = PivotCache::from_range(&data).unwrap();
 
         // The cache should expose non-empty, unique names.
-        let mut field_names: Vec<&str> = Vec::with_capacity(cache.fields.len());
+        let mut field_names: Vec<&str> = Vec::new();
+        assert!(field_names.try_reserve_exact(cache.fields.len()).is_ok());
         for f in &cache.fields {
             field_names.push(f.name.as_str());
         }
@@ -6227,7 +6574,8 @@ mod tests {
         }
 
         let start = Instant::now();
-        let mut range: Vec<Vec<PivotValue>> = Vec::with_capacity(rows + 1);
+        let mut range: Vec<Vec<PivotValue>> = Vec::new();
+        assert!(range.try_reserve_exact(rows + 1).is_ok());
         range.push(vec!["Cat".into(), "Amount".into()]);
         for i in 0..rows {
             range.push(vec![((i % 1000) as i64).into(), ((i % 100) as i64).into()]);

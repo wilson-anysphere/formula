@@ -203,6 +203,19 @@ mod tests {
         matches_pattern_with_memo, min_required_hay_len, parse_search_pattern_folded, PatternToken,
     };
 
+    fn alloc_memo(tokens_len: usize, stride: usize) -> Vec<Option<bool>> {
+        let len = tokens_len
+            .checked_add(1)
+            .and_then(|n| n.checked_mul(stride))
+            .unwrap_or_else(|| panic!("memo len overflow (tokens_len={tokens_len}, stride={stride})"));
+        let mut memo: Vec<Option<bool>> = Vec::new();
+        if memo.try_reserve_exact(len).is_err() {
+            panic!("allocation failed (search_pattern memo, len={len})");
+        }
+        memo.resize(len, None);
+        memo
+    }
+
     fn fold_to_upper_chars(s: &str) -> Vec<char> {
         let mut out = Vec::new();
         for ch in s.chars() {
@@ -219,7 +232,7 @@ mod tests {
         let tokens = parse_search_pattern_folded(pattern);
         let hay = fold_to_upper_chars(hay);
         let stride = hay.len() + 1;
-        let mut memo: Vec<Option<bool>> = vec![None; (tokens.len() + 1) * stride];
+        let mut memo = alloc_memo(tokens.len(), stride);
         matches_pattern_with_memo(&tokens, &hay, 0, stride, &mut memo)
     }
 
@@ -264,9 +277,13 @@ mod tests {
     #[test]
     fn matcher_is_stack_safe_for_long_inputs() {
         let tokens = parse_search_pattern_folded("*");
-        let hay: Vec<char> = std::iter::repeat('A').take(100_000).collect();
+        let mut hay: Vec<char> = Vec::new();
+        if hay.try_reserve_exact(100_000).is_err() {
+            panic!("allocation failed (search_pattern long hay)");
+        }
+        hay.resize(100_000, 'A');
         let stride = hay.len() + 1;
-        let mut memo: Vec<Option<bool>> = vec![None; (tokens.len() + 1) * stride];
+        let mut memo = alloc_memo(tokens.len(), stride);
         assert!(matches_pattern_with_memo(&tokens, &hay, 0, stride, &mut memo));
     }
 }

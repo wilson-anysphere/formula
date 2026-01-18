@@ -45,13 +45,34 @@ pub(crate) fn solve_evolutionary<M: SolverModel>(
 
     let mut rng = XorShift64::new(options.evolutionary.seed);
 
-    let mut current = vec![0.0; n];
+    let mut current: Vec<f64> = Vec::new();
+    if current.try_reserve_exact(n).is_err() {
+        debug_assert!(false, "solver allocation failed (vars={n})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    current.resize(n, 0.0);
     model.get_vars(&mut current);
     clamp_vars(&mut current, &problem.variables);
 
-    let mut constraint_values = vec![0.0; m];
+    let mut constraint_values: Vec<f64> = Vec::new();
+    if constraint_values.try_reserve_exact(m).is_err() {
+        debug_assert!(false, "solver allocation failed (constraints={m})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    constraint_values.resize(m, 0.0);
 
-    let mut population = Vec::with_capacity(options.evolutionary.population_size);
+    let mut population: Vec<Individual> = Vec::new();
+    if population
+        .try_reserve_exact(options.evolutionary.population_size)
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "solver allocation failed (population_size={})",
+            options.evolutionary.population_size
+        );
+        return Err(SolverError::new("allocation failed"));
+    }
     population.push(evaluate_individual(
         model,
         problem,
@@ -62,7 +83,7 @@ pub(crate) fn solve_evolutionary<M: SolverModel>(
     )?);
 
     while population.len() < options.evolutionary.population_size {
-        let vars = random_vars(&mut rng, &current, problem);
+        let vars = random_vars(&mut rng, &current, problem)?;
         population.push(evaluate_individual(
             model,
             problem,
@@ -92,7 +113,19 @@ pub(crate) fn solve_evolutionary<M: SolverModel>(
     for gen in 0..options.max_iterations {
         generations = gen;
 
-        population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+        population.sort_by(|a, b| {
+            let a_fit = if a.fitness.is_nan() {
+                f64::NEG_INFINITY
+            } else {
+                a.fitness
+            };
+            let b_fit = if b.fitness.is_nan() {
+                f64::NEG_INFINITY
+            } else {
+                b.fitness
+            };
+            b_fit.total_cmp(&a_fit)
+        });
 
         if let Some(progress) = options.progress.as_deref_mut() {
             let best_fit = &population[0];
@@ -134,7 +167,11 @@ pub(crate) fn solve_evolutionary<M: SolverModel>(
 
         // Next generation.
         let elite = options.evolutionary.elite_count.min(population.len());
-        let mut next = Vec::with_capacity(population.len());
+        let mut next: Vec<Individual> = Vec::new();
+        if next.try_reserve_exact(population.len()).is_err() {
+            debug_assert!(false, "solver allocation failed (population={})", population.len());
+            return Err(SolverError::new("allocation failed"));
+        }
         next.extend_from_slice(&population[..elite]);
 
         while next.len() < options.evolutionary.population_size {
@@ -142,9 +179,9 @@ pub(crate) fn solve_evolutionary<M: SolverModel>(
             let parent_b = tournament(&mut rng, &population);
 
             let mut child_vars = if rng.next_f64() < options.evolutionary.crossover_rate {
-                crossover(&mut rng, &parent_a.vars, &parent_b.vars)
+                crossover(&mut rng, &parent_a.vars, &parent_b.vars)?
             } else {
-                parent_a.vars.clone()
+                try_clone_f64_slice(&parent_a.vars)?
             };
 
             mutate(
@@ -214,8 +251,15 @@ fn evaluate_individual<M: SolverModel>(
 
     let fitness = -merit;
 
+    let mut vars_vec: Vec<f64> = Vec::new();
+    if vars_vec.try_reserve_exact(vars.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (vars={})", vars.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    vars_vec.extend_from_slice(vars);
+
     Ok(Individual {
-        vars: vars.to_vec(),
+        vars: vars_vec,
         fitness,
         objective: obj,
         violation,
@@ -233,8 +277,20 @@ fn better_objective(problem: &SolverProblem, a: f64, b: f64) -> bool {
     }
 }
 
-fn random_vars(rng: &mut XorShift64, base: &[f64], problem: &SolverProblem) -> Vec<f64> {
-    let mut vars = Vec::with_capacity(problem.variables.len());
+fn random_vars(
+    rng: &mut XorShift64,
+    base: &[f64],
+    problem: &SolverProblem,
+) -> Result<Vec<f64>, SolverError> {
+    let mut vars: Vec<f64> = Vec::new();
+    if vars.try_reserve_exact(problem.variables.len()).is_err() {
+        debug_assert!(
+            false,
+            "solver allocation failed (vars={})",
+            problem.variables.len()
+        );
+        return Err(SolverError::new("allocation failed"));
+    }
     for (j, spec) in problem.variables.iter().enumerate() {
         let (lo, hi) = finite_range(spec.lower, spec.upper, base[j]);
         let v = match spec.var_type {
@@ -260,7 +316,7 @@ fn random_vars(rng: &mut XorShift64, base: &[f64], problem: &SolverProblem) -> V
         vars.push(v);
     }
     clamp_vars(&mut vars, &problem.variables);
-    vars
+    Ok(vars)
 }
 
 fn finite_range(lower: f64, upper: f64, center: f64) -> (f64, f64) {
@@ -295,11 +351,27 @@ fn tournament<'a>(rng: &mut XorShift64, population: &'a [Individual]) -> &'a Ind
     best
 }
 
-fn crossover(rng: &mut XorShift64, a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| if rng.next_f64() < 0.5 { *x } else { *y })
-        .collect()
+fn try_clone_f64_slice(src: &[f64]) -> Result<Vec<f64>, SolverError> {
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(src.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (vars={})", src.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    out.extend_from_slice(src);
+    Ok(out)
+}
+
+fn crossover(rng: &mut XorShift64, a: &[f64], b: &[f64]) -> Result<Vec<f64>, SolverError> {
+    debug_assert_eq!(a.len(), b.len());
+    let mut child: Vec<f64> = Vec::new();
+    if child.try_reserve_exact(a.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (vars={})", a.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    for (x, y) in a.iter().zip(b.iter()) {
+        child.push(if rng.next_f64() < 0.5 { *x } else { *y });
+    }
+    Ok(child)
 }
 
 fn mutate(

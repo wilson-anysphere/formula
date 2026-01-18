@@ -124,7 +124,15 @@ fn compact_for_grouping_validation(text: &str) -> Option<Cow<'_, str>> {
         return Some(Cow::Borrowed(s));
     }
 
-    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut compact = String::new();
+    if compact.try_reserve_exact(s.len()).is_err() {
+        return None;
+    }
+    for ch in s.chars() {
+        if !ch.is_whitespace() {
+            compact.push(ch);
+        }
+    }
     if compact.is_empty() {
         return None;
     }
@@ -584,7 +592,15 @@ fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
             if let Some(&next) = tokens.peek() {
                 let suffix = next.trim_matches(',');
                 if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
-                    let mut combined = String::with_capacity(token.len() + 1 + suffix.len());
+                    let combined_len = token.len() + 1 + suffix.len();
+                    let mut combined = String::new();
+                    if combined.try_reserve_exact(combined_len).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (try_parse_time combined, len={combined_len})"
+                        );
+                        return Some(Err(ExcelError::Num));
+                    }
                     combined.push_str(token);
                     combined.push(' ');
                     combined.push_str(suffix);
@@ -602,7 +618,15 @@ fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
             if let Some(&next) = tokens.peek() {
                 let suffix = next.trim_matches(',');
                 if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
-                    let mut combined = String::with_capacity(token.len() + 1 + suffix.len());
+                    let combined_len = token.len() + 1 + suffix.len();
+                    let mut combined = String::new();
+                    if combined.try_reserve_exact(combined_len).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (try_parse_time combined, len={combined_len})"
+                        );
+                        return Some(Err(ExcelError::Num));
+                    }
                     combined.push_str(token);
                     combined.push(' ');
                     combined.push_str(suffix);

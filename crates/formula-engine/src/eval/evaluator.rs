@@ -10,11 +10,12 @@ use crate::functions::{
 };
 use crate::locale::ValueLocaleConfig;
 use crate::value::{
-    casefold, casefold_owned, casefolded_key_arc_if, cmp_case_insensitive, with_casefolded_key,
+    casefold_owned, casefolded_key_arc_if, cmp_case_insensitive, try_casefold, with_casefolded_key,
     Array, ErrorKind, Lambda, NumberLocale, Value,
 };
 use crate::LocaleConfig;
 use formula_model::HorizontalAlignment;
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -111,7 +112,16 @@ impl DependencyTrace {
 
     #[must_use]
     pub fn precedents(&self, sheet_tab_index: impl Fn(usize) -> usize) -> Vec<FnReference> {
-        let mut out: Vec<FnReference> = self.precedents.iter().cloned().collect();
+        let mut out: Vec<FnReference> = Vec::new();
+        if out.try_reserve_exact(self.precedents.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (DependencyTrace precedents, len={})",
+                self.precedents.len()
+            );
+            return Vec::new();
+        }
+        out.extend(self.precedents.iter().cloned());
         out.sort_by(|a, b| {
             match (&a.sheet_id, &b.sheet_id) {
                 (FnSheetId::Local(a_sheet), FnSheetId::Local(b_sheet)) => sheet_tab_index(*a_sheet)
@@ -180,7 +190,18 @@ pub trait ValueResolver {
         };
         // Historical behavior expands to the numeric id range. Filter out missing sheets so deleted
         // ids (which are never reused) do not introduce spurious `#REF!` results.
-        Some((start..=end).filter(|id| self.sheet_exists(*id)).collect())
+        let len = end.checked_sub(start)?.checked_add(1)?;
+        let mut out: Vec<usize> = Vec::new();
+        if out.try_reserve_exact(len).is_err() {
+            debug_assert!(false, "allocation failed (expand_sheet_span, len={len})");
+            return None;
+        }
+        for id in start..=end {
+            if self.sheet_exists(id) {
+                out.push(id);
+            }
+        }
+        Some(out)
     }
 
     /// Host-provided system metadata used by the Excel `INFO()` worksheet function.
@@ -510,6 +531,7 @@ pub struct Evaluator<'a, R: ValueResolver> {
     tracer: Option<&'a RefCell<DependencyTrace>>,
     name_stack: Rc<RefCell<Vec<(usize, Arc<str>)>>>,
     lexical_scopes: Rc<RefCell<Vec<LexicalScope>>>,
+    external_workbook_sheet_index: Rc<RefCell<HashMap<String, HashMap<String, usize>>>>,
     lambda_depth: Rc<Cell<u32>>,
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
@@ -546,6 +568,46 @@ impl Drop for LexicalScopeGuard {
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
+    fn sheet_name_casefold_cow(name: &str) -> Cow<'_, str> {
+        if name.is_ascii() {
+            if name.as_bytes().iter().any(|b| b.is_ascii_lowercase()) {
+                Cow::Owned(name.to_ascii_uppercase())
+            } else {
+                Cow::Borrowed(name)
+            }
+        } else {
+            Cow::Owned(formula_model::sheet_name_casefold(name))
+        }
+    }
+
+    fn external_sheet_tab_index(&self, workbook: &str, sheet: &str) -> Option<usize> {
+        if !self.external_workbook_sheet_index.borrow().contains_key(workbook) {
+            let order = self.resolver.workbook_sheet_names(workbook)?;
+            let mut indices: HashMap<String, usize> = HashMap::new();
+            if indices.try_reserve(order.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "external-sheet tab-order cache allocation failed (sheets={})",
+                    order.len()
+                );
+                return None;
+            }
+            for (idx, name) in order.iter().enumerate() {
+                indices.insert(formula_model::sheet_name_casefold(name), idx);
+            }
+            let mut cache = self.external_workbook_sheet_index.borrow_mut();
+            if cache.try_reserve(1).is_err() {
+                debug_assert!(false, "external workbook cache insert allocation failed");
+                return None;
+            }
+            cache.insert(workbook.to_string(), indices);
+        }
+        let cache = self.external_workbook_sheet_index.borrow();
+        let indices = cache.get(workbook)?;
+        let key = Self::sheet_name_casefold_cow(sheet);
+        indices.get(key.as_ref()).copied()
+    }
+
     fn cmp_sheet_ids_in_tab_order(&self, a: &FnSheetId, b: &FnSheetId) -> Ordering {
         match (a, b) {
             (FnSheetId::Local(a_id), FnSheetId::Local(b_id)) => {
@@ -568,37 +630,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     split_external_sheet_key_parts(b_key),
                 ) {
                     (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
-                        match self.resolver.workbook_sheet_names(a_wb) {
-                            Some(order) => {
-                                let mut a_idx: Option<usize> = None;
-                                let mut b_idx: Option<usize> = None;
-                                for (idx, name) in order.iter().enumerate() {
-                                    if a_idx.is_none()
-                                        && formula_model::sheet_name_eq_case_insensitive(
-                                            name, a_sheet,
-                                        )
-                                    {
-                                        a_idx = Some(idx);
-                                    }
-                                    if b_idx.is_none()
-                                        && formula_model::sheet_name_eq_case_insensitive(
-                                            name, b_sheet,
-                                        )
-                                    {
-                                        b_idx = Some(idx);
-                                    }
-                                    if a_idx.is_some() && b_idx.is_some() {
-                                        break;
-                                    }
-                                }
-                                match (a_idx, b_idx) {
-                                    (Some(a_idx), Some(b_idx)) => {
-                                        a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))
-                                    }
-                                    _ => a_key.cmp(b_key),
-                                }
+                        match (
+                            self.external_sheet_tab_index(a_wb, a_sheet),
+                            self.external_sheet_tab_index(b_wb, b_sheet),
+                        ) {
+                            (Some(a_idx), Some(b_idx)) => {
+                                a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))
                             }
-                            None => a_key.cmp(b_key),
+                            _ => a_key.cmp(b_key),
                         }
                     }
                     _ => a_key.cmp(b_key),
@@ -615,6 +654,92 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 .then_with(|| a.end.row.cmp(&b.end.row))
                 .then_with(|| a.end.col.cmp(&b.end.col))
         });
+    }
+
+    fn resolved_ranges_to_fn_arg_value(&self, mut ranges: Vec<ResolvedRange>) -> FnArgValue {
+        // Ensure a stable order for deterministic function behavior (e.g. COUNT over a multi-area union).
+        self.sort_resolved_ranges(&mut ranges);
+        if ranges.len() == 1 {
+            let Some(only) = ranges.pop() else {
+                debug_assert!(false, "ranges.len() == 1 implies ranges is non-empty");
+                return FnArgValue::Scalar(Value::Error(ErrorKind::Value));
+            };
+            return FnArgValue::Reference(FnReference {
+                sheet_id: only.sheet_id,
+                start: only.start,
+                end: only.end,
+            });
+        }
+        FnArgValue::ReferenceUnion(
+            {
+                let mut out: Vec<FnReference> = Vec::new();
+                if out.try_reserve_exact(ranges.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (reference union, len={})",
+                        ranges.len()
+                    );
+                    return FnArgValue::Scalar(Value::Error(ErrorKind::Num));
+                }
+                for r in ranges {
+                    out.push(FnReference {
+                        sheet_id: r.sheet_id,
+                        start: r.start,
+                        end: r.end,
+                    });
+                }
+                out
+            },
+        )
+    }
+
+    fn resolved_ranges_to_value_reference(&self, mut ranges: Vec<ResolvedRange>) -> Value {
+        // Ensure a stable order for deterministic function behavior (e.g. COUNT over a multi-area union).
+        self.sort_resolved_ranges(&mut ranges);
+        if ranges.len() == 1 {
+            let Some(only) = ranges.pop() else {
+                debug_assert!(false, "ranges.len() == 1 implies ranges is non-empty");
+                return Value::Error(ErrorKind::Value);
+            };
+            return Value::Reference(FnReference {
+                sheet_id: only.sheet_id,
+                start: only.start,
+                end: only.end,
+            });
+        }
+        Value::ReferenceUnion(
+            {
+                let mut out: Vec<FnReference> = Vec::new();
+                if out.try_reserve_exact(ranges.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (value reference union, len={})",
+                        ranges.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
+                for r in ranges {
+                    out.push(FnReference {
+                        sheet_id: r.sheet_id,
+                        start: r.start,
+                        end: r.end,
+                    });
+                }
+                out
+            },
+        )
+    }
+
+    fn eval_lambda_body_with_scopes(
+        &self,
+        lambda: &crate::value::Lambda,
+        scopes: Vec<LexicalScope>,
+    ) -> Value {
+        let evaluator = self.with_lexical_scopes(scopes);
+        match evaluator.eval_value(lambda.body.as_ref()) {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(ranges) => evaluator.resolved_ranges_to_value_reference(ranges),
+        }
     }
 
     pub fn new(resolver: &'a R, ctx: EvalContext, recalc_ctx: &'a RecalcContext) -> Self {
@@ -677,6 +802,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             tracer: None,
             name_stack: Rc::new(RefCell::new(Vec::new())),
             lexical_scopes: Rc::new(RefCell::new(Vec::new())),
+            external_workbook_sheet_index: Rc::new(RefCell::new(HashMap::new())),
             lambda_depth: Rc::new(Cell::new(0)),
             date_system,
             value_locale,
@@ -704,6 +830,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             tracer: self.tracer,
             name_stack: Rc::clone(&self.name_stack),
             lexical_scopes: Rc::clone(&self.lexical_scopes),
+            external_workbook_sheet_index: Rc::clone(&self.external_workbook_sheet_index),
             lambda_depth: Rc::clone(&self.lambda_depth),
             date_system: self.date_system,
             value_locale: self.value_locale,
@@ -721,6 +848,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             tracer: self.tracer,
             name_stack: Rc::clone(&self.name_stack),
             lexical_scopes: Rc::new(RefCell::new(scopes)),
+            external_workbook_sheet_index: Rc::clone(&self.external_workbook_sheet_index),
             lambda_depth: Rc::clone(&self.lambda_depth),
             date_system: self.date_system,
             value_locale: self.value_locale,
@@ -787,7 +915,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 LexicalScope::Shared(scope) => scope.len(),
             })
             .sum();
-        let mut out = HashMap::with_capacity(cap);
+        let mut out: HashMap<String, Value> = HashMap::new();
+        if out.try_reserve(cap).is_err() {
+            debug_assert!(false, "lexical env capture allocation failed (cap={cap})");
+            return HashMap::new();
+        }
         for scope in scopes.iter() {
             match scope {
                 LexicalScope::Mutable(scope) => {
@@ -895,7 +1027,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }])
             }
             Value::ReferenceUnion(ranges) => {
-                let mut out = Vec::with_capacity(ranges.len());
+                let mut out: Vec<ResolvedRange> = Vec::new();
+                if !try_reserve_exact(&mut out, ranges.len(), "reference-union areas") {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                }
                 for r in ranges {
                     let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end)
                     else {
@@ -929,7 +1064,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Expr::Blank => EvalValue::Scalar(Value::Blank),
             Expr::Error(e) => EvalValue::Scalar(Value::Error(*e)),
             Expr::ArrayLiteral { rows, cols, values } => {
-                let mut out = Vec::with_capacity(rows.saturating_mul(*cols));
+                let total = rows.saturating_mul(*cols);
+                let mut out: Vec<Value> = Vec::new();
+                if !try_reserve_exact(&mut out, total, "array literal cells") {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                }
                 for el in values.iter() {
                     let v = match self.eval_value(el) {
                         EvalValue::Scalar(v) => v,
@@ -949,7 +1088,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     let Some(addr) = r.addr.resolve(self.ctx.current_cell) else {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     };
-                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    let mut ranges: Vec<ResolvedRange> = Vec::new();
+                    if !try_reserve_exact(&mut ranges, sheet_ids.len(), "cell-ref areas") {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                    }
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         {
@@ -977,7 +1119,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     let Some(end_addr) = r.end.resolve(self.ctx.current_cell) else {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     };
-                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    let mut ranges: Vec<ResolvedRange> = Vec::new();
+                    if !try_reserve_exact(&mut ranges, sheet_ids.len(), "range-ref areas") {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                    }
                     for sheet_id in sheet_ids {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         {
@@ -1062,16 +1207,23 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     }
 
-                    return EvalValue::Reference(
-                        ranges
-                            .into_iter()
-                            .map(|(start, end)| ResolvedRange {
-                                sheet_id: FnSheetId::External(sheet_key.clone()),
-                                start,
-                                end,
-                            })
-                            .collect(),
-                    );
+                    let mut out: Vec<ResolvedRange> = Vec::new();
+                    if out.try_reserve_exact(ranges.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (external structured ref ranges, len={})",
+                            ranges.len()
+                        );
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                    }
+                    for (start, end) in ranges {
+                        out.push(ResolvedRange {
+                            sheet_id: FnSheetId::External(sheet_key.clone()),
+                            start,
+                            end,
+                        });
+                    }
+                    return EvalValue::Reference(out);
                 }
 
                 // Local structured references resolve via workbook table metadata.
@@ -1097,16 +1249,23 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
 
-                        EvalValue::Reference(
-                            ranges
-                                .into_iter()
-                                .map(|(sheet_id, start, end)| ResolvedRange {
-                                    sheet_id: FnSheetId::Local(sheet_id),
-                                    start,
-                                    end,
-                                })
-                                .collect(),
-                        )
+                        let mut out: Vec<ResolvedRange> = Vec::new();
+                        if out.try_reserve_exact(ranges.len()).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (structured ref ranges, len={})",
+                                ranges.len()
+                            );
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Num));
+                        }
+                        for (sheet_id, start, end) in ranges {
+                            out.push(ResolvedRange {
+                                sheet_id: FnSheetId::Local(sheet_id),
+                                start,
+                                end,
+                            });
+                        }
+                        EvalValue::Reference(out)
                     }
                     Ok(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
                     Err(e) => EvalValue::Scalar(Value::Error(e)),
@@ -1329,7 +1488,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         lambda: crate::value::Lambda,
         args: &[CompiledExpr],
     ) -> Value {
-        let call_key = casefold(call_name.trim());
+        let call_key = match crate::value::try_casefold(call_name.trim()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         self.call_lambda_with_key(call_key, lambda, args)
     }
 
@@ -1368,8 +1530,18 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return Value::Error(ErrorKind::Value);
         }
 
-        let mut call_scope =
-            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
+        let mut call_scope: HashMap<String, Value> = HashMap::new();
+        if call_scope
+            .try_reserve(lambda.params.len().saturating_mul(2).saturating_add(1))
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "lambda call scope allocation failed (params={})",
+                lambda.params.len()
+            );
+            return Value::Error(ErrorKind::Num);
+        }
         call_scope.insert(call_key, Value::Lambda(lambda.clone()));
         for (idx, param) in lambda.params.iter().enumerate() {
             let value = if idx >= args.len() {
@@ -1377,34 +1549,27 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             } else {
                 match self.eval_value(&args[idx]) {
                     EvalValue::Scalar(v) => v,
-                    EvalValue::Reference(mut ranges) => {
-                        self.sort_resolved_ranges(&mut ranges);
-                        match ranges.as_slice() {
-                            [only] => Value::Reference(FnReference {
-                                sheet_id: only.sheet_id.clone(),
-                                start: only.start,
-                                end: only.end,
-                            }),
-                            _ => Value::ReferenceUnion(
-                                ranges
-                                    .into_iter()
-                                    .map(|r| FnReference {
-                                        sheet_id: r.sheet_id,
-                                        start: r.start,
-                                        end: r.end,
-                                    })
-                                    .collect(),
-                            ),
-                        }
-                    }
+                    EvalValue::Reference(ranges) => self.resolved_ranges_to_value_reference(ranges),
                 }
             };
             // `make_lambda` and `LAMBDA()` store params in canonical (casefolded) form.
             // Avoid re-folding during invocation.
             let param_key = param.clone();
             if idx >= args.len() {
-                let mut omitted_key =
-                    String::with_capacity(crate::eval::LAMBDA_OMITTED_PREFIX.len() + param_key.len());
+                let mut omitted_key = String::new();
+                if omitted_key
+                    .try_reserve_exact(
+                        crate::eval::LAMBDA_OMITTED_PREFIX.len().saturating_add(param_key.len()),
+                    )
+                    .is_err()
+                {
+                    debug_assert!(
+                        false,
+                        "lambda omitted-key allocation failed (param_len={})",
+                        param_key.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
                 omitted_key.push_str(crate::eval::LAMBDA_OMITTED_PREFIX);
                 omitted_key.push_str(&param_key);
                 call_scope.insert(param_key, value);
@@ -1419,34 +1584,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             scopes.push(LexicalScope::Shared(Arc::clone(&lambda.env)));
         }
         scopes.push(LexicalScope::Mutable(call_scope));
-
-        let evaluator = self.with_lexical_scopes(scopes);
-        match evaluator.eval_value(lambda.body.as_ref()) {
-            EvalValue::Scalar(v) => v,
-            EvalValue::Reference(mut ranges) => {
-                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
-                // multi-area union).
-                evaluator.sort_resolved_ranges(&mut ranges);
-
-                match ranges.as_slice() {
-                    [only] => Value::Reference(FnReference {
-                        sheet_id: only.sheet_id.clone(),
-                        start: only.start,
-                        end: only.end,
-                    }),
-                    _ => Value::ReferenceUnion(
-                        ranges
-                            .into_iter()
-                            .map(|r| FnReference {
-                                sheet_id: r.sheet_id,
-                                start: r.start,
-                                end: r.end,
-                            })
-                            .collect(),
-                    ),
-                }
-            }
-        }
+        self.eval_lambda_body_with_scopes(&lambda, scopes)
     }
 
     fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
@@ -1484,17 +1622,26 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         );
                     }
                     Value::ReferenceUnion(ranges) => {
+                        let len = ranges.len();
+                        let mut out: Vec<ResolvedRange> = Vec::new();
+                        if out.try_reserve_exact(len).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (lexical reference union, len={len})"
+                            );
+                            return (EvalValue::Scalar(Value::Error(ErrorKind::Num)), None);
+                        }
                         return (
-                            EvalValue::Reference(
-                                ranges
-                                    .into_iter()
-                                    .map(|r| ResolvedRange {
+                            EvalValue::Reference({
+                                for r in ranges {
+                                    out.push(ResolvedRange {
                                         sheet_id: r.sheet_id,
                                         start: r.start,
                                         end: r.end,
-                                    })
-                                    .collect(),
-                            ),
+                                    });
+                                }
+                                out
+                            }),
                             None,
                         );
                     }
@@ -1588,17 +1735,26 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         );
                     }
                     Value::ReferenceUnion(ranges) => {
+                        let len = ranges.len();
+                        let mut out: Vec<ResolvedRange> = Vec::new();
+                        if out.try_reserve_exact(len).is_err() {
+                            debug_assert!(
+                                false,
+                                "allocation failed (lexical reference union, len={len})"
+                            );
+                            return (EvalValue::Scalar(Value::Error(ErrorKind::Num)), None);
+                        }
                         return (
-                            EvalValue::Reference(
-                                ranges
-                                    .into_iter()
-                                    .map(|r| ResolvedRange {
+                            EvalValue::Reference({
+                                for r in ranges {
+                                    out.push(ResolvedRange {
                                         sheet_id: r.sheet_id,
                                         start: r.start,
                                         end: r.end,
-                                    })
-                                    .collect(),
-                            ),
+                                    });
+                                }
+                                out
+                            }),
                             None,
                         );
                     }
@@ -1645,7 +1801,21 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             SheetReference::SheetRange(a, b) => self
                 .resolver
                 .expand_sheet_span(*a, *b)
-                .map(|ids| ids.into_iter().map(FnSheetId::Local).collect()),
+                .and_then(|ids| {
+                    let mut out: Vec<FnSheetId> = Vec::new();
+                    if out.try_reserve_exact(ids.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (sheet span ids, len={})",
+                            ids.len()
+                        );
+                        return None;
+                    }
+                    for id in ids {
+                        out.push(FnSheetId::Local(id));
+                    }
+                    Some(out)
+                }),
             SheetReference::External(key) => {
                 if is_valid_external_single_sheet_key(key) {
                     return Some(vec![FnSheetId::External(key.clone())]);
@@ -1659,7 +1829,19 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let keys = crate::external_refs::expand_external_sheet_span_from_order(
                     workbook, start, end, &order,
                 )?;
-                Some(keys.into_iter().map(FnSheetId::External).collect())
+                let mut out: Vec<FnSheetId> = Vec::new();
+                if out.try_reserve_exact(keys.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (external sheet span ids, len={})",
+                        keys.len()
+                    );
+                    return None;
+                }
+                for key in keys {
+                    out.push(FnSheetId::External(key));
+                }
+                Some(out)
             }
         }
     }
@@ -1752,7 +1934,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
 
         let mut values: Vec<Value> = Vec::new();
-        if values.try_reserve_exact(total_cells).is_err() {
+        if !try_reserve_exact(&mut values, total_cells, "dynamic reference cells") {
             return Value::Error(ErrorKind::Num);
         }
         for row in range.start.row..=range.end.row {
@@ -1973,6 +2155,31 @@ pub(crate) fn split_external_sheet_span_key(key: &str) -> Option<(&str, &str, &s
 mod tests {
     use super::*;
 
+    #[derive(Debug, Clone, Copy)]
+    struct PanicCellValueResolver;
+
+    impl ValueResolver for PanicCellValueResolver {
+        fn sheet_exists(&self, sheet_id: usize) -> bool {
+            sheet_id == 0
+        }
+
+        fn get_cell_value(&self, _sheet_id: usize, _addr: CellAddr) -> Value {
+            panic!("unexpected get_cell_value call (materialization should have been guarded)")
+        }
+
+        fn resolve_structured_ref(
+            &self,
+            _ctx: EvalContext,
+            _sref: &crate::structured_refs::StructuredRef,
+        ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
+            Err(ErrorKind::Name)
+        }
+
+        fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<ResolvedName> {
+            None
+        }
+    }
+
     #[test]
     fn split_external_sheet_key_parts_parses_workbook_and_sheet() {
         let key = "[Book.xlsx]Sheet1";
@@ -2045,34 +2252,94 @@ mod tests {
             "[Book.xlsx]Sheet1:Sheet3"
         ));
     }
+
+    #[test]
+    fn deref_reference_dynamic_bails_out_before_materializing_huge_ranges() {
+        let parsed = crate::eval::Parser::parse("=A1:XFD400").expect("parse");
+        let mut map = |sref: &SheetReference<String>| match sref {
+            SheetReference::Current => SheetReference::Current,
+            SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+            SheetReference::SheetRange(_a, _b) => SheetReference::SheetRange(0, 0),
+            SheetReference::External(key) => SheetReference::External(key.clone()),
+        };
+        let expr = parsed.map_sheets(&mut map);
+
+        let resolver = PanicCellValueResolver;
+        let ctx = EvalContext {
+            current_sheet: 0,
+            current_cell: CellAddr { row: 0, col: 0 },
+        };
+        let recalc_ctx = RecalcContext::new(1);
+        let evaluator = Evaluator::new(&resolver, ctx, &recalc_ctx);
+        assert_eq!(evaluator.eval_formula(&expr), Value::Error(ErrorKind::Spill));
+    }
+
+    #[test]
+    fn elementwise_binary_broadcast_over_materialization_limit_returns_spill() {
+        // Construct two arrays that are individually small, but whose broadcasted shape would
+        // exceed the engine's materialization limit.
+        //
+        // left:  1 x 2500
+        // right: 2500 x 1
+        // out:   2500 x 2500 = 6,250,000 > MAX_MATERIALIZED_ARRAY_CELLS (5,000,000)
+        let mut left_values = Vec::new();
+        if left_values.try_reserve_exact(2500).is_err() {
+            panic!("allocation failed (broadcast test left values)");
+        }
+        left_values.resize(2500, Value::Number(1.0));
+        let left = Value::Array(Array::new(1, 2500, left_values));
+
+        let mut right_values = Vec::new();
+        if right_values.try_reserve_exact(2500).is_err() {
+            panic!("allocation failed (broadcast test right values)");
+        }
+        right_values.resize(2500, Value::Number(2.0));
+        let right = Value::Array(Array::new(2500, 1, right_values));
+
+        let out = elementwise_binary(&left, &right, |a, b| match (a, b) {
+            (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+            _ => Value::Error(ErrorKind::Value),
+        });
+        assert_eq!(out, Value::Error(ErrorKind::Spill));
+    }
+
+    #[test]
+    fn elementwise_unary_maps_array_values() {
+        let input = Value::Array(Array::new(
+            2,
+            2,
+            vec![
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0),
+                Value::Number(4.0),
+            ],
+        ));
+        let out = elementwise_unary(&input, |v| match v {
+            Value::Number(n) => Value::Number(n + 1.0),
+            _ => Value::Error(ErrorKind::Value),
+        });
+        assert_eq!(
+            out,
+            Value::Array(Array::new(
+                2,
+                2,
+                vec![
+                    Value::Number(2.0),
+                    Value::Number(3.0),
+                    Value::Number(4.0),
+                    Value::Number(5.0),
+                ]
+            ))
+        );
+    }
 }
 
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn eval_arg(&self, expr: &CompiledExpr) -> FnArgValue {
         match self.eval_value(expr) {
             EvalValue::Scalar(v) => FnArgValue::Scalar(v),
-            EvalValue::Reference(mut ranges) => {
-                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
-                // multi-area union).
-                self.sort_resolved_ranges(&mut ranges);
-                match ranges.as_slice() {
-                    [only] => FnArgValue::Reference(FnReference {
-                        sheet_id: only.sheet_id.clone(),
-                        start: only.start,
-                        end: only.end,
-                    }),
-                    _ => FnArgValue::ReferenceUnion(
-                        ranges
-                            .into_iter()
-                            .map(|r| FnReference {
-                                sheet_id: r.sheet_id,
-                                start: r.start,
-                                end: r.end,
-                            })
-                            .collect(),
-                    ),
-                }
-            }
+            EvalValue::Reference(ranges) => self.resolved_ranges_to_fn_arg_value(ranges),
         }
     }
 
@@ -2093,7 +2360,11 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             return self.eval_formula(expr);
         }
 
-        let mut scope = HashMap::with_capacity(bindings.len());
+        let mut scope: HashMap<String, Value> = HashMap::new();
+        if scope.try_reserve(bindings.len()).is_err() {
+            debug_assert!(false, "binding scope allocation failed (len={})", bindings.len());
+            return Value::Error(ErrorKind::Num);
+        }
         for (k, v) in bindings {
             let trimmed = k.trim();
             let key = if trimmed.len() == k.len()
@@ -2103,7 +2374,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
                 // Most callers already pass canonical (casefolded) ASCII keys; avoid re-folding.
                 k.clone()
             } else {
-                casefold(trimmed)
+                match try_casefold(trimmed) {
+                    Ok(folded) => folded,
+                    Err(e) => {
+                        debug_assert!(
+                            false,
+                            "binding key allocation failed (len={}, key={trimmed:?})",
+                            trimmed.len()
+                        );
+                        return Value::Error(e);
+                    }
+                }
             };
             scope.insert(key, v.clone());
         }
@@ -2229,7 +2510,18 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn set_local(&self, name: &str, value: FnArgValue) {
-        let key = casefold(name.trim());
+        let trimmed = name.trim();
+        let key = match try_casefold(trimmed) {
+            Ok(key) => key,
+            Err(_e) => {
+                debug_assert!(
+                    false,
+                    "allocation failed (set_local, len={}, key={trimmed:?})",
+                    trimmed.len()
+                );
+                return;
+            }
+        };
         self.set_local_key(key, value);
     }
 
@@ -2240,7 +2532,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             if trimmed.len() == p.len() {
                 *p = casefold_owned(std::mem::take(p));
             } else {
-                *p = casefold(trimmed);
+                *p = match try_casefold(trimmed) {
+                    Ok(folded) => folded,
+                    Err(e) => {
+                        debug_assert!(
+                            false,
+                            "allocation failed (make_lambda param fold, len={}, key={trimmed:?})",
+                            trimmed.len()
+                        );
+                        return Value::Error(e);
+                    }
+                };
             }
         }
 
@@ -2284,8 +2586,18 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             counter: Rc::clone(&self.lambda_depth),
         };
 
-        let mut call_scope =
-            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
+        let mut call_scope: HashMap<String, Value> = HashMap::new();
+        if call_scope
+            .try_reserve(lambda.params.len().saturating_mul(2).saturating_add(1))
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "anon lambda call scope allocation failed (params={})",
+                lambda.params.len()
+            );
+            return Value::Error(ErrorKind::Num);
+        }
         call_scope.insert(
             ANON_LAMBDA_CALL_NAME.to_string(),
             Value::Lambda(lambda.clone()),
@@ -2303,8 +2615,20 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             };
             let param_key = param.clone();
             if idx >= args.len() {
-                let mut omitted_key =
-                    String::with_capacity(crate::eval::LAMBDA_OMITTED_PREFIX.len() + param_key.len());
+                let mut omitted_key = String::new();
+                if omitted_key
+                    .try_reserve_exact(
+                        crate::eval::LAMBDA_OMITTED_PREFIX.len().saturating_add(param_key.len()),
+                    )
+                    .is_err()
+                {
+                    debug_assert!(
+                        false,
+                        "lambda omitted-key allocation failed (param_len={})",
+                        param_key.len()
+                    );
+                    return Value::Error(ErrorKind::Num);
+                }
                 omitted_key.push_str(crate::eval::LAMBDA_OMITTED_PREFIX);
                 omitted_key.push_str(&param_key);
                 call_scope.insert(param_key, value);
@@ -2319,34 +2643,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             scopes.push(LexicalScope::Shared(Arc::clone(&lambda.env)));
         }
         scopes.push(LexicalScope::Mutable(call_scope));
-
-        let evaluator = self.with_lexical_scopes(scopes);
-        match evaluator.eval_value(lambda.body.as_ref()) {
-            EvalValue::Scalar(v) => v,
-            EvalValue::Reference(mut ranges) => {
-                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
-                // multi-area union).
-                evaluator.sort_resolved_ranges(&mut ranges);
-
-                match ranges.as_slice() {
-                    [only] => Value::Reference(FnReference {
-                        sheet_id: only.sheet_id.clone(),
-                        start: only.start,
-                        end: only.end,
-                    }),
-                    _ => Value::ReferenceUnion(
-                        ranges
-                            .into_iter()
-                            .map(|r| FnReference {
-                                sheet_id: r.sheet_id,
-                                start: r.start,
-                                end: r.end,
-                            })
-                            .collect(),
-                    ),
-                }
-            }
-        }
+        self.eval_lambda_body_with_scopes(lambda, scopes)
     }
 
     fn volatile_rand_u64(&self) -> u64 {
@@ -2735,7 +3032,21 @@ fn numeric_binary(ctx: &dyn FunctionContext, op: BinaryOp, left: &Value, right: 
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
         Value::Array(arr) => {
-            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+            let total = arr.values.len();
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                debug_assert!(false, "elementwise unary exceeds materialization limit (cells={total})");
+                return Value::Error(ErrorKind::Spill);
+            }
+
+            let mut out: Vec<Value> = Vec::new();
+            if !try_reserve_exact(&mut out, total, "elementwise unary cells") {
+                return Value::Error(ErrorKind::Num);
+            }
+            for el in arr.values.iter() {
+                out.push(f(el));
+            }
+
+            Value::Array(Array::new(arr.rows, arr.cols, out))
         }
         other => f(other),
     }
@@ -2779,7 +3090,18 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
                 return Value::Error(ErrorKind::Value);
             };
 
-            let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+            let total_cells = match out_rows.checked_mul(out_cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total_cells > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+
+            let mut out: Vec<Value> = Vec::new();
+            if !try_reserve_exact(&mut out, total_cells, "elementwise binary cells") {
+                return Value::Error(ErrorKind::Num);
+            }
             for row in 0..out_rows {
                 let l_row = if left_arr.rows == 1 { 0 } else { row };
                 let r_row = if right_arr.rows == 1 { 0 } else { row };
@@ -2797,12 +3119,46 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
         (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
             left_arr.rows,
             left_arr.cols,
-            left_arr.values.iter().map(|a| f(a, right_scalar)).collect(),
+            {
+                let total = left_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if !try_reserve_exact(&mut out, total, "elementwise binary cells") {
+                    return Value::Error(ErrorKind::Num);
+                }
+                for a in left_arr.values.iter() {
+                    out.push(f(a, right_scalar));
+                }
+                out
+            },
         )),
         (left_scalar, Value::Array(right_arr)) => Value::Array(Array::new(
             right_arr.rows,
             right_arr.cols,
-            right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
+            {
+                let total = right_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if !try_reserve_exact(&mut out, total, "elementwise binary cells") {
+                    return Value::Error(ErrorKind::Num);
+                }
+                for b in right_arr.values.iter() {
+                    out.push(f(left_scalar, b));
+                }
+                out
+            },
         )),
         (left_scalar, right_scalar) => f(left_scalar, right_scalar),
     }
@@ -2816,4 +3172,15 @@ fn splitmix64(mut state: u64) -> u64 {
     state = (state ^ (state >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     state = (state ^ (state >> 27)).wrapping_mul(0x94d049bb133111eb);
     state ^ (state >> 31)
+}
+
+fn try_reserve_exact<T>(vec: &mut Vec<T>, additional: usize, context: &'static str) -> bool {
+    if vec.try_reserve_exact(additional).is_ok() {
+        return true;
+    }
+    debug_assert!(
+        false,
+        "{context} allocation failed (count={additional})"
+    );
+    false
 }

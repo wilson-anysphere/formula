@@ -58,18 +58,24 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
 
     for spec in inventory::iter::<FunctionSpec> {
         let name = spec.name.to_ascii_uppercase();
+        let mut arg_types: Vec<String> = Vec::new();
+        if arg_types.try_reserve_exact(spec.arg_types.len()).is_err() {
+            return Err(format!(
+                "allocation failed (function catalog arg_types, len={})",
+                spec.arg_types.len()
+            )
+            .into());
+        }
+        for &arg_type in spec.arg_types {
+            arg_types.push(value_type_to_string(arg_type));
+        }
         let entry = FunctionCatalogEntry {
             name: name.clone(),
             min_args: spec.min_args,
             max_args: spec.max_args,
             volatility: volatility_to_string(spec.volatility),
             return_type: value_type_to_string(spec.return_type),
-            arg_types: spec
-                .arg_types
-                .iter()
-                .copied()
-                .map(value_type_to_string)
-                .collect(),
+            arg_types,
         };
 
         if functions.insert(name.clone(), entry).is_some() {
@@ -80,8 +86,19 @@ fn main_inner() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let mut entries: Vec<FunctionCatalogEntry> = Vec::new();
+    if entries.try_reserve_exact(functions.len()).is_err() {
+        return Err(format!(
+            "allocation failed (function catalog entries, len={})",
+            functions.len()
+        )
+        .into());
+    }
+    for entry in functions.into_values() {
+        entries.push(entry);
+    }
     let catalog = FunctionCatalog {
-        functions: functions.into_values().collect(),
+        functions: entries,
     };
 
     let stdout = io::stdout();

@@ -24,7 +24,7 @@ impl Engine {
             .sheet_id(sheet)
             .ok_or_else(|| PivotError::SheetNotFound(sheet.to_string()))?;
 
-        let source = materialize_range_as_pivot_values(self, sheet_id, range);
+        let source = materialize_range_as_pivot_values(self, sheet_id, range)?;
         PivotCache::from_range(&source)
     }
 
@@ -52,7 +52,7 @@ impl Engine {
             .sheet_id(sheet)
             .ok_or_else(|| PivotError::SheetNotFound(sheet.to_string()))?;
 
-        let source = materialize_range_as_pivot_values(self, sheet_id, range);
+        let source = materialize_range_as_pivot_values(self, sheet_id, range)?;
         let cache = PivotCache::from_range(&source)?;
         PivotEngine::calculate(&cache, cfg)
     }
@@ -62,13 +62,19 @@ fn materialize_range_as_pivot_values(
     engine: &Engine,
     sheet_id: SheetId,
     range: Range,
-) -> Vec<Vec<PivotValue>> {
+) -> Result<Vec<Vec<PivotValue>>, PivotError> {
     let width = range.width() as usize;
     let height = range.height() as usize;
 
-    let mut out = Vec::with_capacity(height);
+    let mut out: Vec<Vec<PivotValue>> = Vec::new();
+    if out.try_reserve_exact(height).is_err() {
+        return Err(PivotError::AllocationFailure("pivot source rows"));
+    }
     for row in range.start.row..=range.end.row {
-        let mut row_out = Vec::with_capacity(width);
+        let mut row_out: Vec<PivotValue> = Vec::new();
+        if row_out.try_reserve_exact(width).is_err() {
+            return Err(PivotError::AllocationFailure("pivot source row values"));
+        }
         for col in range.start.col..=range.end.col {
             let addr = CellAddr { row, col };
             let value = get_cell_value_at(engine, sheet_id, addr);
@@ -82,7 +88,7 @@ fn materialize_range_as_pivot_values(
         }
         out.push(row_out);
     }
-    out
+    Ok(out)
 }
 
 fn number_format_at<'a>(engine: &'a Engine, sheet_id: SheetId, addr: CellAddr) -> Option<&'a str> {

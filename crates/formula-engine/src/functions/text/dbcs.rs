@@ -117,9 +117,7 @@ pub(crate) fn replaceb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> V
             }
             let start0 = (start - 1) as usize;
             let num = usize::try_from(num).unwrap_or(usize::MAX);
-            Ok(Value::Text(replaceb_bytes(
-                codepage, &old, start0, num, &new,
-            )))
+            Ok(Value::Text(replaceb_bytes(codepage, &old, start0, num, &new)?))
         },
     )
 }
@@ -214,7 +212,8 @@ pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
-        Ok(Value::Number(encode_bytes_len(codepage, &s) as f64))
+        let len = encode_bytes_len(codepage, &s)?;
+        Ok(Value::Number(len as f64))
     })
 }
 
@@ -233,9 +232,9 @@ pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value 
             return Ok(Value::Text(s));
         }
         if cp932 {
-            Ok(Value::Text(asc_cp932(&s)))
+            Ok(Value::Text(asc_cp932(&s)?))
         } else {
-            Ok(Value::Text(asc_dbcs_basic(&s)))
+            Ok(Value::Text(asc_dbcs_basic(&s)?))
         }
     })
 }
@@ -251,9 +250,9 @@ pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
             return Ok(Value::Text(s));
         }
         if cp932 {
-            Ok(Value::Text(dbcs_cp932(&s)))
+            Ok(Value::Text(dbcs_cp932(&s)?))
         } else {
-            Ok(Value::Text(dbcs_dbcs_basic(&s)))
+            Ok(Value::Text(dbcs_dbcs_basic(&s)?))
         }
     })
 }
@@ -344,8 +343,20 @@ const FULLWIDTH_WON: char = '\u{FFE6}';
 const COMBINING_DAKUTEN: char = '\u{3099}';
 const COMBINING_HANDAKUTEN: char = '\u{309A}';
 
-fn asc_cp932(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
+fn ensure_string_capacity(out: &mut String, additional: usize) -> Result<(), ErrorKind> {
+    if out.capacity().saturating_sub(out.len()) < additional {
+        if out.try_reserve(additional).is_err() {
+            return Err(ErrorKind::Num);
+        }
+    }
+    Ok(())
+}
+
+fn asc_cp932(input: &str) -> Result<String, ErrorKind> {
+    let mut out = String::new();
+    if out.try_reserve_exact(input.len()).is_err() {
+        return Err(ErrorKind::Num);
+    }
     let mut iter = input.chars().peekable();
 
     while let Some(ch) = iter.next() {
@@ -356,9 +367,13 @@ fn asc_cp932(input: &str) -> String {
 
         // Fullwidth ASCII variants: U+FF01..U+FF5E -> U+0021..U+007E.
         if ('\u{FF01}'..='\u{FF5E}').contains(&ch) {
-            let ascii = char::from_u32((ch as u32).saturating_sub(0xFEE0))
-                .expect("FF01..FF5E - 0xFEE0 must remain in Unicode scalar range");
-            out.push(ascii);
+            let code = (ch as u32).saturating_sub(0xFEE0);
+            if let Some(ascii) = char::from_u32(code) {
+                out.push(ascii);
+            } else {
+                debug_assert!(false, "FF01..FF5E - 0xFEE0 should remain a Unicode scalar");
+                out.push(ch);
+            }
             continue;
         }
 
@@ -423,11 +438,14 @@ fn asc_cp932(input: &str) -> String {
         out.push(ch);
     }
 
-    out
+    Ok(out)
 }
 
-fn asc_dbcs_basic(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
+fn asc_dbcs_basic(input: &str) -> Result<String, ErrorKind> {
+    let mut out = String::new();
+    if out.try_reserve_exact(input.len()).is_err() {
+        return Err(ErrorKind::Num);
+    }
 
     for ch in input.chars() {
         if ch == FULLWIDTH_SPACE {
@@ -437,9 +455,13 @@ fn asc_dbcs_basic(input: &str) -> String {
 
         // Fullwidth ASCII variants: U+FF01..U+FF5E -> U+0021..U+007E.
         if ('\u{FF01}'..='\u{FF5E}').contains(&ch) {
-            let ascii = char::from_u32((ch as u32).saturating_sub(0xFEE0))
-                .expect("FF01..FF5E - 0xFEE0 must remain in Unicode scalar range");
-            out.push(ascii);
+            let code = (ch as u32).saturating_sub(0xFEE0);
+            if let Some(ascii) = char::from_u32(code) {
+                out.push(ascii);
+            } else {
+                debug_assert!(false, "FF01..FF5E - 0xFEE0 should remain a Unicode scalar");
+                out.push(ch);
+            }
             continue;
         }
 
@@ -451,29 +473,40 @@ fn asc_dbcs_basic(input: &str) -> String {
         out.push(ch);
     }
 
-    out
+    Ok(out)
 }
 
-fn dbcs_cp932(input: &str) -> String {
+fn dbcs_cp932(input: &str) -> Result<String, ErrorKind> {
     // Output can grow (e.g. ASCII -> fullwidth), but input length is a reasonable lower bound.
-    let mut out = String::with_capacity(input.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(input.len()).is_err() {
+        return Err(ErrorKind::Num);
+    }
     let mut iter = input.chars().peekable();
 
     while let Some(ch) = iter.next() {
         if ch == ' ' {
+            ensure_string_capacity(&mut out, FULLWIDTH_SPACE.len_utf8())?;
             out.push(FULLWIDTH_SPACE);
             continue;
         }
 
         // ASCII (printable): U+0021..U+007E -> U+FF01..U+FF5E.
         if ('!'..='~').contains(&ch) {
-            let fw = char::from_u32(ch as u32 + 0xFEE0)
-                .expect("ASCII 0x21..0x7E + 0xFEE0 must be valid Unicode scalar");
-            out.push(fw);
+            let code = ch as u32 + 0xFEE0;
+            if let Some(fw) = char::from_u32(code) {
+                ensure_string_capacity(&mut out, fw.len_utf8())?;
+                out.push(fw);
+            } else {
+                debug_assert!(false, "ASCII + 0xFEE0 should remain a Unicode scalar");
+                ensure_string_capacity(&mut out, ch.len_utf8())?;
+                out.push(ch);
+            }
             continue;
         }
 
         if let Some(mapped) = halfwidth_symbol_to_fullwidth(ch) {
+            ensure_string_capacity(&mut out, mapped.len_utf8())?;
             out.push(mapped);
             continue;
         }
@@ -483,6 +516,7 @@ fn dbcs_cp932(input: &str) -> String {
             if let Some(&next) = iter.peek() {
                 if next == HALFWIDTH_DAKUTEN || next == HALFWIDTH_HANDAKUTEN {
                     if let Some(composed) = compose_halfwidth_katakana(ch, next) {
+                        ensure_string_capacity(&mut out, composed.len_utf8())?;
                         out.push(composed);
                         iter.next(); // consume mark
                         continue;
@@ -491,47 +525,62 @@ fn dbcs_cp932(input: &str) -> String {
             }
 
             if let Some(mapped) = halfwidth_katakana_to_fullwidth(ch) {
+                ensure_string_capacity(&mut out, mapped.len_utf8())?;
                 out.push(mapped);
             } else {
                 // Should not happen, but keep behavior deterministic.
+                ensure_string_capacity(&mut out, ch.len_utf8())?;
                 out.push(ch);
             }
             continue;
         }
 
+        ensure_string_capacity(&mut out, ch.len_utf8())?;
         out.push(ch);
     }
 
-    out
+    Ok(out)
 }
 
-fn dbcs_dbcs_basic(input: &str) -> String {
+fn dbcs_dbcs_basic(input: &str) -> Result<String, ErrorKind> {
     // Output can grow (e.g. ASCII -> fullwidth), but input length is a reasonable lower bound.
-    let mut out = String::with_capacity(input.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(input.len()).is_err() {
+        return Err(ErrorKind::Num);
+    }
 
     for ch in input.chars() {
         if ch == ' ' {
+            ensure_string_capacity(&mut out, FULLWIDTH_SPACE.len_utf8())?;
             out.push(FULLWIDTH_SPACE);
             continue;
         }
 
         // ASCII -> fullwidth ASCII.
         if ('!'..='~').contains(&ch) {
-            let full = char::from_u32((ch as u32).saturating_add(0xFEE0))
-                .expect("ASCII + 0xFEE0 must remain in Unicode scalar range");
-            out.push(full);
+            let code = (ch as u32).saturating_add(0xFEE0);
+            if let Some(full) = char::from_u32(code) {
+                ensure_string_capacity(&mut out, full.len_utf8())?;
+                out.push(full);
+            } else {
+                debug_assert!(false, "ASCII + 0xFEE0 should remain a Unicode scalar");
+                ensure_string_capacity(&mut out, ch.len_utf8())?;
+                out.push(ch);
+            }
             continue;
         }
 
         if let Some(mapped) = halfwidth_symbol_to_fullwidth(ch) {
+            ensure_string_capacity(&mut out, mapped.len_utf8())?;
             out.push(mapped);
             continue;
         }
 
+        ensure_string_capacity(&mut out, ch.len_utf8())?;
         out.push(ch);
     }
 
-    out
+    Ok(out)
 }
 
 fn fullwidth_symbol_to_halfwidth(ch: char) -> Option<char> {
@@ -802,7 +851,7 @@ fn compose_halfwidth_katakana(base: char, mark: char) -> Option<char> {
     })
 }
 
-fn encode_bytes_len(codepage: u16, text: &str) -> usize {
+fn encode_bytes_len(codepage: u16, text: &str) -> Result<usize, ErrorKind> {
     // Excel semantics: `*B` byte-count functions only differ from their non-`B` equivalents in
     // DBCS locales. For single-byte codepages, byte count matches character count.
     //
@@ -811,12 +860,12 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
     // environments, so we use `chars().count()` rather than attempting to encode.
     match codepage as u32 {
         932 | 936 | 949 | 950 => {}
-        _ => return text.chars().count(),
+        _ => return Ok(text.chars().count()),
     }
 
     let Some(encoding) = encoding_for_codepage(codepage) else {
         // Best-effort fallback: treat byte count as character count.
-        return text.chars().count();
+        return Ok(text.chars().count());
     };
     // `encoding_rs::Encoding::encode` emits HTML numeric character references for unmappable
     // characters, which is Web-correct but not what we want for Excel byte-count semantics. We
@@ -826,7 +875,11 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
     let mut encoder = encoding.new_encoder();
     let mut remaining = text;
     let mut total = 0usize;
-    let mut scratch: Vec<u8> = vec![0u8; 64];
+    let mut scratch: Vec<u8> = Vec::new();
+    if scratch.try_reserve_exact(64).is_err() {
+        return Err(ErrorKind::Num);
+    }
+    scratch.resize(64, 0);
 
     while !remaining.is_empty() {
         let (result, read, written) =
@@ -841,6 +894,10 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
                 // to encode a single code point.
                 if read == 0 && written == 0 {
                     let new_len = scratch.len().saturating_mul(2).max(1);
+                    let additional = new_len.saturating_sub(scratch.len());
+                    if scratch.try_reserve_exact(additional).is_err() {
+                        return Err(ErrorKind::Num);
+                    }
                     scratch.resize(new_len, 0);
                 }
             }
@@ -870,6 +927,10 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
             encoding_rs::EncoderResult::InputEmpty => break,
             encoding_rs::EncoderResult::OutputFull => {
                 let new_len = scratch.len().saturating_mul(2).max(1);
+                let additional = new_len.saturating_sub(scratch.len());
+                if scratch.try_reserve_exact(additional).is_err() {
+                    return Err(ErrorKind::Num);
+                }
                 scratch.resize(new_len, 0);
             }
             encoding_rs::EncoderResult::Unmappable(_) => {
@@ -878,7 +939,7 @@ fn encode_bytes_len(codepage: u16, text: &str) -> usize {
         }
     }
 
-    total
+    Ok(total)
 }
 
 fn encoded_byte_len_for_char(encoding: &'static Encoding, ch: char) -> usize {
@@ -993,17 +1054,19 @@ fn replaceb_bytes(
     start0: usize,
     len: usize,
     new_text: &str,
-) -> String {
+) -> Result<String, ErrorKind> {
     let (start_byte, end_byte) = aligned_utf8_range_for_dbcs_byte_range(codepage, old_text, start0, len);
     let end_byte = end_byte.max(start_byte);
 
-    let mut out = String::with_capacity(
-        old_text.len() - end_byte.saturating_sub(start_byte) + new_text.len(),
-    );
+    let out_len = old_text.len() - end_byte.saturating_sub(start_byte) + new_text.len();
+    let mut out = String::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        return Err(ErrorKind::Num);
+    }
     out.push_str(&old_text[..start_byte]);
     out.push_str(new_text);
     out.push_str(&old_text[end_byte..]);
-    out
+    Ok(out)
 }
 
 fn findb_impl(
@@ -1085,8 +1148,24 @@ fn findb_impl(
             return Value::Error(ErrorKind::Value);
         }
 
-        let stride = hay_folded.len() + 1;
-        let mut memo: Vec<Option<bool>> = vec![None; (needle_tokens.len() + 1) * stride];
+        let stride = match hay_folded.len().checked_add(1) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let token_count = match needle_tokens.len().checked_add(1) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let memo_len = match token_count.checked_mul(stride) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Num),
+        };
+        let mut memo: Vec<Option<bool>> = Vec::new();
+        if memo.try_reserve_exact(memo_len).is_err() {
+            debug_assert!(false, "allocation failed (findb memo, len={memo_len})");
+            return Value::Error(ErrorKind::Num);
+        }
+        memo.resize(memo_len, None);
         for orig_idx in start_idx..orig_len {
             let folded_idx = folded_starts[orig_idx];
             if hay_folded.len().saturating_sub(folded_idx) < min_required {

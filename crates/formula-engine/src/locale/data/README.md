@@ -280,8 +280,9 @@ Excel-compatible alias spellings. In those cases:
 Excel treats function identifiers case-insensitively. Our locale translation layer matches that by
 normalizing identifiers before lookup and when loading TSVs:
 
-- The engine uses `crate::value::casefold` (Unicode-aware uppercasing via `char::to_uppercase`) so
-  case-insensitive matching behaves like Excel (e.g. `ß` → `SS`).
+- The engine uses Unicode-aware case-folding (via `crate::value::with_casefolded_key` /
+  `crate::value::try_casefold`, backed by `char::to_uppercase`) so case-insensitive matching behaves
+  like Excel (e.g. `ß` → `SS`).
 - When building the locale translation maps, both the canonical and localized columns are
   case-folded into hash keys so lookups are case-insensitive and duplicates are detected reliably.
 

@@ -83,11 +83,39 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
         crate::Expr::FunctionCall(call) => Expr::FunctionCall {
             name: call.name.name_upper.clone(),
             original_name: call.name.original.clone(),
-            args: call.args.iter().map(lower_expr).collect(),
+            args: {
+                let mut args: Vec<ParsedExpr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (lower_expr function args, len={})",
+                        call.args.len()
+                    );
+                    return Expr::Error(ErrorKind::Num);
+                }
+                for arg in call.args.iter() {
+                    args.push(lower_expr(arg));
+                }
+                args
+            },
         },
         crate::Expr::Call(call) => Expr::Call {
             callee: Box::new(lower_expr(call.callee.as_ref())),
-            args: call.args.iter().map(lower_expr).collect(),
+            args: {
+                let mut args: Vec<ParsedExpr> = Vec::new();
+                if args.try_reserve_exact(call.args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (lower_expr call args, len={})",
+                        call.args.len()
+                    );
+                    return Expr::Error(ErrorKind::Num);
+                }
+                for arg in call.args.iter() {
+                    args.push(lower_expr(arg));
+                }
+                args
+            },
         },
 
         crate::Expr::Unary(u) => match u.op {
@@ -127,7 +155,15 @@ fn lower_array_literal(arr: &crate::ArrayLiteral) -> ParsedExpr {
         return Expr::Error(ErrorKind::Value);
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let len = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Expr::Error(ErrorKind::Num),
+    };
+    let mut values: Vec<ParsedExpr> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "allocation failed (lower_array_literal, len={len})");
+        return Expr::Error(ErrorKind::Num);
+    }
     for row in &arr.rows {
         for el in row {
             values.push(lower_expr(el));

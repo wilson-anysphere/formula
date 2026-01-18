@@ -47,7 +47,20 @@ pub fn text_codepage_for_locale_id(locale_id: &str) -> u16 {
 pub fn supported_locale_ids() -> &'static [&'static str] {
     static IDS: OnceLock<Box<[&'static str]>> = OnceLock::new();
     IDS.get_or_init(|| {
-        let mut ids: Vec<&'static str> = iter_locales().map(|locale| locale.id).collect();
+        let mut ids: Vec<&'static str> = Vec::new();
+        let (_, upper) = iter_locales().size_hint();
+        if let Some(capacity) = upper {
+            if ids.try_reserve_exact(capacity).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (supported_locale_ids, capacity={capacity})"
+                );
+                return Vec::new().into_boxed_slice();
+            }
+        }
+        for locale in iter_locales() {
+            ids.push(locale.id);
+        }
         ids.sort_unstable();
         ids.into_boxed_slice()
     })
@@ -88,7 +101,15 @@ fn normalize_locale_key(id: &str) -> Option<Cow<'_, str>> {
     //
     // Note: this intentionally supports a small set of locales the engine ships with, plus
     // best-effort normalization for common OS / browser locale tags.
-    let mut key = String::with_capacity(trimmed.len());
+    let mut key = String::new();
+    if key.try_reserve_exact(trimmed.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (normalize_locale_key, len={})",
+            trimmed.len()
+        );
+        return None;
+    }
     for ch in trimmed.chars() {
         let ch = match ch {
             '_' => '-',

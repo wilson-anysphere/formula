@@ -91,12 +91,18 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let row_segments = if row_delimiters.is_empty() {
         vec![text.clone()]
     } else {
-        split_on_any(&text, &row_delimiters, ignore_empty, match_mode)
+        match split_on_any(&text, &row_delimiters, ignore_empty, match_mode) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        }
     };
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     for row in row_segments {
-        let cols = split_on_any(&row, &col_delimiters, ignore_empty, match_mode);
+        let cols = match split_on_any(&row, &col_delimiters, ignore_empty, match_mode) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         rows.push(cols);
     }
 
@@ -178,15 +184,13 @@ fn split_on_any(
     delimiters: &[String],
     ignore_empty: bool,
     match_mode: MatchMode,
-) -> Vec<String> {
+) -> Result<Vec<String>, ErrorKind> {
     match match_mode {
-        MatchMode::CaseSensitive => {
-            split_on_any_case_sensitive(text, text, delimiters, ignore_empty)
-        }
+        MatchMode::CaseSensitive => Ok(split_on_any_case_sensitive(text, text, delimiters, ignore_empty)),
         MatchMode::CaseInsensitive => {
             // ASCII fast path: preserve existing TEXTSPLIT behavior and avoid Unicode case-fold allocations.
             if text.is_ascii() && delimiters.iter().all(|d| d.is_ascii()) {
-                return split_on_any_ascii_case_insensitive(text, delimiters, ignore_empty);
+                return Ok(split_on_any_ascii_case_insensitive(text, delimiters, ignore_empty));
             }
 
             split_on_any_unicode_case_insensitive(text, delimiters, ignore_empty)
@@ -340,7 +344,7 @@ fn split_on_any_unicode_case_insensitive(
     text: &str,
     delimiters: &[String],
     ignore_empty: bool,
-) -> Vec<String> {
+) -> Result<Vec<String>, ErrorKind> {
     let mut char_starts: Vec<usize> = Vec::new();
     let mut hay_folded: Vec<char> = Vec::new();
     let mut folded_starts: Vec<usize> = Vec::new();
@@ -356,10 +360,23 @@ fn split_on_any_unicode_case_insensitive(
     char_starts.push(text.len());
     let hay_len = folded_starts.len();
 
-    let folded_delimiters: Vec<Vec<char>> = delimiters
-        .iter()
-        .map(|d| crate::value::fold_to_uppercase_chars(d))
-        .collect();
+    let mut folded_delimiters: Vec<Vec<char>> = Vec::new();
+    if folded_delimiters.try_reserve_exact(delimiters.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (TEXTSPLIT folded delimiters, len={})",
+            delimiters.len()
+        );
+        return Err(ErrorKind::Num);
+    }
+    for d in delimiters {
+        let folded = crate::value::fold_to_uppercase_chars(d);
+        if folded.is_empty() && !d.is_empty() {
+            debug_assert!(false, "allocation failed (TEXTSPLIT fold delimiter)");
+            return Err(ErrorKind::Num);
+        }
+        folded_delimiters.push(folded);
+    }
 
     let mut segments = Vec::new();
     let mut cursor = 0usize;
@@ -407,7 +424,7 @@ fn split_on_any_unicode_case_insensitive(
         segments.push(text[tail_start..].to_string());
     }
 
-    segments
+    Ok(segments)
 }
 
 // On wasm targets, `inventory` registrations can be dropped by the linker if the object file

@@ -278,7 +278,15 @@ impl<S: Clone> Expr<S> {
                 rows: *rows,
                 cols: *cols,
                 values: {
-                    let mut out: Vec<Expr<T>> = Vec::with_capacity(values.len());
+                    let mut out: Vec<Expr<T>> = Vec::new();
+                    if out.try_reserve_exact(values.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (map_sheets array literal, len={})",
+                            values.len()
+                        );
+                        return Expr::Error(ErrorKind::Num);
+                    }
                     for v in values.iter() {
                         out.push(v.map_sheets(f));
                     }
@@ -331,11 +339,39 @@ impl<S: Clone> Expr<S> {
             } => Expr::FunctionCall {
                 name: name.clone(),
                 original_name: original_name.clone(),
-                args: args.iter().map(|a| a.map_sheets(f)).collect(),
+                args: {
+                    let mut out: Vec<Expr<T>> = Vec::new();
+                    if out.try_reserve_exact(args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (map_sheets function call args, len={})",
+                            args.len()
+                        );
+                        return Expr::Error(ErrorKind::Num);
+                    }
+                    for a in args.iter() {
+                        out.push(a.map_sheets(f));
+                    }
+                    out
+                },
             },
             Expr::Call { callee, args } => Expr::Call {
                 callee: Box::new(callee.map_sheets(f)),
-                args: args.iter().map(|a| a.map_sheets(f)).collect(),
+                args: {
+                    let mut out: Vec<Expr<T>> = Vec::new();
+                    if out.try_reserve_exact(args.len()).is_err() {
+                        debug_assert!(
+                            false,
+                            "allocation failed (map_sheets call args, len={})",
+                            args.len()
+                        );
+                        return Expr::Error(ErrorKind::Num);
+                    }
+                    for a in args.iter() {
+                        out.push(a.map_sheets(f));
+                    }
+                    out
+                },
             },
             Expr::ImplicitIntersection(inner) => {
                 Expr::ImplicitIntersection(Box::new(inner.map_sheets(f)))

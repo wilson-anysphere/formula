@@ -41,7 +41,7 @@ fn filter_hides_rows_from_render_and_can_be_cleared() {
         )]),
     };
 
-    let result = apply_autofilter(&data, &filter);
+    let result = apply_autofilter(&data, &filter).expect("filter should succeed");
     let rendered = render_visible_rows(&data, &result.visible_rows);
     assert_eq!(rendered.len(), 2);
     assert_eq!(rendered[1][0], CellValue::Text("Alice".into()));
@@ -51,7 +51,7 @@ fn filter_hides_rows_from_render_and_can_be_cleared() {
         range: data.range,
         columns: BTreeMap::new(),
     };
-    let cleared = apply_autofilter(&data, &empty_filter);
+    let cleared = apply_autofilter(&data, &empty_filter).expect("filter should succeed");
     let rendered = render_visible_rows(&data, &cleared.visible_rows);
     assert_eq!(rendered.len(), 3);
 }

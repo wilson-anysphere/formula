@@ -5,16 +5,39 @@ use crate::value::{Array, ErrorKind, Value};
 
 use crate::functions::information;
 
+fn map_array<F>(arr: &Array, f: F) -> Value
+where
+    F: Fn(&Value) -> Value + Copy,
+{
+    let total = arr.values.len();
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        debug_assert!(
+            false,
+            "information builtin exceeds materialization limit (cells={total})"
+        );
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let mut out: Vec<Value> = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        debug_assert!(
+            false,
+            "information builtin allocation failed (cells={total})"
+        );
+        return Value::Error(ErrorKind::Num);
+    }
+    for v in arr.iter() {
+        out.push(f(v));
+    }
+    Value::Array(Array::new(arr.rows, arr.cols, out))
+}
+
 fn map_value<F>(value: &Value, f: F) -> Value
 where
     F: Fn(&Value) -> Value + Copy,
 {
     match value {
-        Value::Array(arr) => Value::Array(Array::new(
-            arr.rows,
-            arr.cols,
-            arr.iter().map(|v| f(v)).collect(),
-        )),
+        Value::Array(arr) => map_array(arr, f),
         other => f(other),
     }
 }
@@ -135,11 +158,7 @@ fn isref_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(_) | ArgValue::ReferenceUnion(_) => Value::Bool(true),
         ArgValue::Scalar(v) => match v {
-            Value::Array(arr) => Value::Array(Array::new(
-                arr.rows,
-                arr.cols,
-                arr.iter().map(|v| Value::Bool(is_ref_value(v))).collect(),
-            )),
+            Value::Array(arr) => map_array(&arr, |v| Value::Bool(is_ref_value(v))),
             other => Value::Bool(is_ref_value(&other)),
         },
     }
@@ -361,3 +380,37 @@ fn t_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 // `functions/mod.rs` ensures the module (and its `inventory::submit!` entries) are retained.
 #[cfg(target_arch = "wasm32")]
 pub(super) fn __force_link() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_value_maps_arrays_without_changing_shape() {
+        let value = Value::Array(Array::new(
+            2,
+            2,
+            vec![
+                Value::Number(1.0),
+                Value::Blank,
+                Value::Number(3.0),
+                Value::Number(4.0),
+            ],
+        ));
+
+        let out = map_value(&value, |v| Value::Bool(matches!(v, Value::Number(_))));
+        assert_eq!(
+            out,
+            Value::Array(Array::new(
+                2,
+                2,
+                vec![
+                    Value::Bool(true),
+                    Value::Bool(false),
+                    Value::Bool(true),
+                    Value::Bool(true),
+                ]
+            ))
+        );
+    }
+}

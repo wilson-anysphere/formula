@@ -3,6 +3,26 @@ use super::{
     SolveOptions, SolveOutcome, SolveStatus, SolverError, SolverModel, SolverProblem, VarType,
 };
 
+fn try_clone_f64_slice(src: &[f64]) -> Result<Vec<f64>, SolverError> {
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(src.len()).is_err() {
+        debug_assert!(false, "solver allocation failed (len={})", src.len());
+        return Err(SolverError::new("allocation failed"));
+    }
+    out.extend_from_slice(src);
+    Ok(out)
+}
+
+fn try_zeros_f64(len: usize) -> Result<Vec<f64>, SolverError> {
+    let mut out: Vec<f64> = Vec::new();
+    if out.try_reserve_exact(len).is_err() {
+        debug_assert!(false, "solver allocation failed (len={len})");
+        return Err(SolverError::new("allocation failed"));
+    }
+    out.resize(len, 0.0);
+    Ok(out)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GrgOptions {
     /// Initial step size for the line search.
@@ -40,12 +60,12 @@ pub(crate) fn solve_grg<M: SolverModel>(
     let n = model.num_vars();
     let m = model.num_constraints();
 
-    let mut x = vec![0.0; n];
+    let mut x = try_zeros_f64(n)?;
     model.get_vars(&mut x);
     clamp_vars(&mut x, &problem.variables);
 
-    let mut constraint_values = vec![0.0; m];
-    let mut best_vars = x.clone();
+    let mut constraint_values = try_zeros_f64(m)?;
+    let mut best_vars = try_clone_f64_slice(&x)?;
     let mut best_obj = f64::NAN;
     let mut best_violation = f64::INFINITY;
 
@@ -54,7 +74,7 @@ pub(crate) fn solve_grg<M: SolverModel>(
     let mut current_violation = max_constraint_violation(&constraint_values, &problem.constraints);
     let mut penalty_weight = options.grg.penalty_weight;
 
-    let mut best_overall_vars = x.clone();
+    let mut best_overall_vars = try_clone_f64_slice(&x)?;
     let mut best_overall_obj = current_obj;
     let mut best_overall_violation = current_violation;
     let mut best_overall_merit =
@@ -66,6 +86,10 @@ pub(crate) fn solve_grg<M: SolverModel>(
         best_obj = current_obj;
         best_violation = current_violation;
     }
+
+    let mut direction = try_zeros_f64(n)?;
+    let mut candidate = try_zeros_f64(n)?;
+    let mut candidate_constraints = try_zeros_f64(m)?;
 
     let mut iterations = 0usize;
     for iter in 0..options.max_iterations {
@@ -108,7 +132,7 @@ pub(crate) fn solve_grg<M: SolverModel>(
 
         // Normalized steepest descent direction; normalization avoids line search
         // degenerate behavior when the penalty weight becomes large.
-        let mut direction = vec![0.0; n];
+        direction.fill(0.0);
         if grad_norm > 0.0 {
             for j in 0..n {
                 direction[j] = -grad[j] / grad_norm;
@@ -119,8 +143,7 @@ pub(crate) fn solve_grg<M: SolverModel>(
         // Line search.
         let mut step = options.grg.initial_step;
         let mut accepted = false;
-        let mut candidate = x.clone();
-        let mut candidate_constraints = constraint_values.clone();
+        candidate.clone_from(&x);
         let mut candidate_obj = current_obj;
 
         for _ in 0..options.grg.line_search_max_steps {
@@ -295,13 +318,13 @@ fn finite_difference_gradient<M: SolverModel>(
     diff_step: f64,
 ) -> Result<(Vec<f64>, f64), SolverError> {
     let n = x.len();
-    let mut grad = vec![0.0; n];
-
-    let base_constraints = current_constraints.to_vec();
+    let mut grad = try_zeros_f64(n)?;
     let base_obj = model.objective();
-    let base_merit = merit_function(problem, base_obj, &base_constraints, penalty_weight);
+    let base_merit = merit_function(problem, base_obj, current_constraints, penalty_weight);
 
-    let mut tmp_constraints = vec![0.0; base_constraints.len()];
+    let mut tmp_constraints = try_zeros_f64(current_constraints.len())?;
+    let mut x_fwd = try_clone_f64_slice(x)?;
+    let mut x_bwd = try_clone_f64_slice(x)?;
 
     for j in 0..n {
         if problem.variables[j].var_type != VarType::Continuous {
@@ -311,7 +334,7 @@ fn finite_difference_gradient<M: SolverModel>(
 
         let scale = 1.0_f64.max(x[j].abs());
         let h = diff_step * scale;
-        let mut x_fwd = x.to_vec();
+        x_fwd.as_mut_slice().copy_from_slice(x);
         x_fwd[j] += h;
         clamp_vars(&mut x_fwd, &problem.variables);
 
@@ -320,7 +343,7 @@ fn finite_difference_gradient<M: SolverModel>(
         let merit_fwd = merit_function(problem, obj_fwd, &tmp_constraints, penalty_weight);
 
         // Try central difference if we can move backwards.
-        let mut x_bwd = x.to_vec();
+        x_bwd.as_mut_slice().copy_from_slice(x);
         x_bwd[j] -= h;
         clamp_vars(&mut x_bwd, &problem.variables);
 
@@ -352,7 +375,9 @@ fn repair_equalities<M: SolverModel>(
     let n = x.len();
     let m = constraint_values.len();
     let max_iters = 10;
-    let mut tmp_constraints = vec![0.0; m];
+    let mut tmp_constraints = try_zeros_f64(m)?;
+    let mut grad = try_zeros_f64(n)?;
+    let mut x_fwd = try_zeros_f64(n)?;
 
     for _ in 0..max_iters {
         evaluate(model, x, constraint_values)?;
@@ -373,14 +398,14 @@ fn repair_equalities<M: SolverModel>(
             }
 
             // Estimate gradient of the equality constraint.
-            let mut grad = vec![0.0; n];
+            grad.fill(0.0);
             for j in 0..n {
                 if problem.variables[j].var_type != VarType::Continuous {
                     continue;
                 }
                 let scale = 1.0_f64.max(x[j].abs());
                 let h = diff_step * scale;
-                let mut x_fwd = x.to_vec();
+                x_fwd.as_mut_slice().copy_from_slice(x);
                 x_fwd[j] += h;
                 clamp_vars(&mut x_fwd, &problem.variables);
 

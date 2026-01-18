@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{cmp_case_insensitive, Array, ErrorKind, Value};
+use crate::value::{cmp_case_insensitive, try_vec_with_capacity, Array, ErrorKind, Value};
 use std::cmp::Ordering;
 
 const VAR_ARGS: usize = 255;
@@ -70,8 +70,18 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
     }
 
     let max_index = i64::try_from(choices.len()).unwrap_or(i64::MAX);
-    let mut normalized = Vec::with_capacity(indices.values.len());
-    let mut used_indices: HashSet<usize> = HashSet::new();
+    let mut normalized: Vec<Result<usize, ErrorKind>> = match try_vec_with_capacity(indices.values.len())
+    {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut used: Vec<bool> = match try_vec_with_capacity(choices.len()) {
+        Ok(mut v) => {
+            v.resize(choices.len(), false);
+            v
+        }
+        Err(e) => return Value::Error(e),
+    };
 
     for v in &indices.values {
         let res = match v {
@@ -79,7 +89,9 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
             other => match other.coerce_to_i64_with_ctx(ctx) {
                 Ok(idx) if idx >= 1 && idx <= max_index => {
                     let zero_based = (idx - 1) as usize;
-                    used_indices.insert(zero_based);
+                    if let Some(slot) = used.get_mut(zero_based) {
+                        *slot = true;
+                    }
                     Ok(zero_based)
                 }
                 Ok(_) => Err(ErrorKind::Value),
@@ -89,10 +101,18 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
         normalized.push(res);
     }
 
-    let mut evaluated: HashMap<usize, ArgValue> = HashMap::with_capacity(used_indices.len());
-    for idx in &used_indices {
-        if let Some(expr) = choices.get(*idx) {
-            evaluated.insert(*idx, ctx.eval_arg(expr));
+    let used_len = used.iter().filter(|&&b| b).count();
+    let mut evaluated: HashMap<usize, ArgValue> = HashMap::new();
+    if evaluated.try_reserve(used_len).is_err() {
+        debug_assert!(false, "CHOOSE allocation failed (evaluated args)");
+        return Value::Error(ErrorKind::Num);
+    }
+    for (idx, is_used) in used.iter().copied().enumerate() {
+        if !is_used {
+            continue;
+        }
+        if let Some(expr) = choices.get(idx) {
+            evaluated.insert(idx, ctx.eval_arg(expr));
         }
     }
 
@@ -118,7 +138,18 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
     union_candidate &= all_refs;
 
     if union_candidate {
-        let mut ranges: Vec<Reference> = Vec::new();
+        let mut cap = 0usize;
+        for arg in evaluated.values() {
+            cap = cap.saturating_add(match arg {
+                ArgValue::Reference(_) => 1,
+                ArgValue::ReferenceUnion(rs) => rs.len(),
+                _ => 0,
+            });
+        }
+        let mut ranges: Vec<Reference> = match try_vec_with_capacity(cap) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for idx in normalized {
             let idx = match idx {
                 Ok(v) => v,
@@ -143,13 +174,20 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
         cols: indices.cols,
     };
 
-    let mut evaluated_values: HashMap<usize, Value> = HashMap::with_capacity(evaluated.len());
+    let mut evaluated_values: HashMap<usize, Value> = HashMap::new();
+    if evaluated_values.try_reserve(evaluated.len()).is_err() {
+        debug_assert!(false, "CHOOSE allocation failed (evaluated values)");
+        return Value::Error(ErrorKind::Num);
+    }
     for (idx, arg) in evaluated {
         let value = choose_value_from_arg(ctx, arg);
         evaluated_values.insert(idx, value);
     }
 
-    let mut out_values: Vec<Value> = Vec::with_capacity(indices.values.len());
+    let mut out_values: Vec<Value> = match try_vec_with_capacity(indices.values.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for (pos, idx) in normalized.into_iter().enumerate() {
         match idx {
             Err(e) => out_values.push(Value::Error(e)),
@@ -508,18 +546,9 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         (l, r) => (l, r),
     };
 
-    fn text_like_str(v: &Value) -> Option<&str> {
-        match v {
-            Value::Text(s) => Some(s),
-            _ => None,
-        }
-    }
-
     let ord = match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
-        }
+        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a, b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         (Value::Entity(a), Value::Entity(b)) => cmp_case_insensitive(&a.display, &b.display),
         (Value::Record(a), Value::Record(b)) => cmp_case_insensitive(&a.display, &b.display),
@@ -563,7 +592,6 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
-        _ => Ordering::Equal,
     };
 
     Ok(ord == Ordering::Equal)

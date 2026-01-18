@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::statistical::ets::{self, AggregationMethod};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
@@ -30,7 +30,15 @@ fn collect_optional_numbers_from_arg(
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => match &v {
             Value::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
+                let total = arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut out: Vec<Option<f64>> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "ETS allocation failed (cells={total})");
+                    return Err(ErrorKind::Num);
+                }
                 for cell in arr.iter() {
                     out.push(coerce_cell(ctx, cell)?);
                 }
@@ -41,7 +49,15 @@ fn collect_optional_numbers_from_arg(
         ArgValue::Reference(r) => {
             let r = r.normalized();
             ctx.record_reference(&r);
-            let mut out = Vec::new();
+            let total = r.size() as usize;
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut out: Vec<Option<f64>> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "ETS allocation failed (cells={total})");
+                return Err(ErrorKind::Num);
+            }
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 out.push(coerce_cell(ctx, &v)?);
@@ -54,6 +70,14 @@ fn collect_optional_numbers_from_arg(
             for r in ranges {
                 let r = r.normalized();
                 ctx.record_reference(&r);
+                let reserve = r.size() as usize;
+                if out.len().saturating_add(reserve) > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                if out.try_reserve(reserve).is_err() {
+                    debug_assert!(false, "ETS allocation failed (reserve={reserve})");
+                    return Err(ErrorKind::Num);
+                }
                 for addr in r.iter_cells() {
                     if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;

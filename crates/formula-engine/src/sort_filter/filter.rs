@@ -101,6 +101,8 @@ pub enum ModelAutoFilterError {
     RangeOverflow,
     #[error("autofilter column id exceeds engine bounds")]
     ColumnOverflow,
+    #[error("allocation failed ({0})")]
+    AllocationFailure(&'static str),
 }
 
 impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
@@ -139,28 +141,35 @@ impl AutoFilter {
             let col_id =
                 usize::try_from(col.col_id).map_err(|_| ModelAutoFilterError::ColumnOverflow)?;
 
-            let criteria: Vec<FilterCriterion> = if !col.criteria.is_empty() {
-                col.criteria
-                    .iter()
-                    .filter_map(model_criterion_to_engine)
-                    .collect()
+            let mut criteria: Vec<FilterCriterion> = Vec::new();
+            if !col.criteria.is_empty() {
+                if criteria.try_reserve_exact(col.criteria.len()).is_err() {
+                    debug_assert!(false, "allocation failed (autofilter criteria)");
+                    return Err(ModelAutoFilterError::AllocationFailure("autofilter criteria"));
+                }
+                for c in &col.criteria {
+                    if let Some(c) = model_criterion_to_engine(c) {
+                        criteria.push(c);
+                    }
+                }
             } else {
                 // Backwards compatibility: older schema used the `values` list only.
                 //
                 // These are stored as strings, and Excel interprets them using the workbook locale.
-                col.values
-                    .iter()
-                    .map(|raw| {
-                        if let Some(n) = parse_text_number(raw, value_locale) {
-                            FilterCriterion::Equals(FilterValue::Number(n))
-                        } else if let Some(dt) = parse_text_datetime(raw, value_locale) {
-                            FilterCriterion::Equals(FilterValue::DateTime(dt))
-                        } else {
-                            FilterCriterion::Equals(FilterValue::Text(raw.clone()))
-                        }
-                    })
-                    .collect()
-            };
+                if criteria.try_reserve_exact(col.values.len()).is_err() {
+                    debug_assert!(false, "allocation failed (autofilter values)");
+                    return Err(ModelAutoFilterError::AllocationFailure("autofilter values"));
+                }
+                for raw in &col.values {
+                    if let Some(n) = parse_text_number(raw, value_locale) {
+                        criteria.push(FilterCriterion::Equals(FilterValue::Number(n)));
+                    } else if let Some(dt) = parse_text_datetime(raw, value_locale) {
+                        criteria.push(FilterCriterion::Equals(FilterValue::DateTime(dt)));
+                    } else {
+                        criteria.push(FilterCriterion::Equals(FilterValue::Text(raw.clone())));
+                    }
+                }
+            }
 
             columns.insert(
                 col_id,
@@ -284,6 +293,12 @@ pub struct FilterResult {
     pub hidden_sheet_rows: Vec<usize>,
 }
 
+#[derive(Debug, Error)]
+pub enum FilterError {
+    #[error("allocation failed ({0})")]
+    AllocationFailure(&'static str),
+}
+
 /// A simple filter-view manager for collaboration.
 ///
 /// Each view (collaborator) can have independent filters on the same sheet.
@@ -314,7 +329,7 @@ impl FilterViews {
     }
 }
 
-pub fn apply_autofilter(range: &RangeData, filter: &AutoFilter) -> FilterResult {
+pub fn apply_autofilter(range: &RangeData, filter: &AutoFilter) -> Result<FilterResult, FilterError> {
     apply_autofilter_with_value_locale(range, filter, ValueLocaleConfig::en_us())
 }
 
@@ -322,16 +337,21 @@ pub fn apply_autofilter_with_value_locale(
     range: &RangeData,
     filter: &AutoFilter,
     value_locale: ValueLocaleConfig,
-) -> FilterResult {
+) -> Result<FilterResult, FilterError> {
     let row_count = range.rows.len();
-    let mut visible_rows = vec![true; row_count];
+    let mut visible_rows: Vec<bool> = Vec::new();
+    if visible_rows.try_reserve_exact(row_count).is_err() {
+        debug_assert!(false, "allocation failed (autofilter visible rows={row_count})");
+        return Err(FilterError::AllocationFailure("autofilter visible rows"));
+    }
+    visible_rows.resize(row_count, true);
 
     // Excel AutoFilter always treats the first row in the ref as the header row.
     if row_count == 0 {
-        return FilterResult {
+        return Ok(FilterResult {
             visible_rows,
             hidden_sheet_rows: Vec::new(),
-        };
+        });
     }
 
     for local_row in 1..row_count {
@@ -351,17 +371,20 @@ pub fn apply_autofilter_with_value_locale(
     }
 
     let mut hidden_sheet_rows: Vec<usize> = Vec::new();
-    hidden_sheet_rows.reserve(row_count.saturating_sub(1));
+    if hidden_sheet_rows.try_reserve(row_count.saturating_sub(1)).is_err() {
+        debug_assert!(false, "allocation failed (autofilter hidden rows)");
+        return Err(FilterError::AllocationFailure("autofilter hidden rows"));
+    }
     for (local_row, visible) in visible_rows.iter().enumerate().skip(1) {
         if !*visible {
             hidden_sheet_rows.push(range.range.start_row + local_row);
         }
     }
 
-    FilterResult {
+    Ok(FilterResult {
         visible_rows,
         hidden_sheet_rows,
-    }
+    })
 }
 
 fn evaluate_column_filter(
@@ -497,11 +520,13 @@ fn date_cmp(cell: &CellValue, cmp: &DateComparison, value_locale: ValueLocaleCon
             date_cmp(cell, &DateComparison::OnDate(today), value_locale)
         }
         DateComparison::Yesterday => {
-            let yesterday = Local::now().date_naive().pred_opt().unwrap();
+            let today = Local::now().date_naive();
+            let yesterday = today.pred_opt().unwrap_or(today);
             date_cmp(cell, &DateComparison::OnDate(yesterday), value_locale)
         }
         DateComparison::Tomorrow => {
-            let tomorrow = Local::now().date_naive().succ_opt().unwrap();
+            let today = Local::now().date_naive();
+            let tomorrow = today.succ_opt().unwrap_or(today);
             date_cmp(cell, &DateComparison::OnDate(tomorrow), value_locale)
         }
         DateComparison::OnDate(d) => coerce_datetime(cell, value_locale)
@@ -642,7 +667,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -670,7 +695,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![3]);
     }
@@ -694,7 +719,8 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de())
+            .expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -720,7 +746,8 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de())
+            .expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -746,7 +773,8 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de())
+            .expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -773,7 +801,8 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us())
+            .expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![3]);
     }
@@ -797,7 +826,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -821,7 +850,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -845,7 +874,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, false, true]);
         assert_eq!(result.hidden_sheet_rows, vec![1]);
     }
@@ -873,7 +902,7 @@ mod tests {
             )]),
         };
 
-        let result = apply_autofilter(&data, &filter);
+        let result = apply_autofilter(&data, &filter).expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, false, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![1, 3]);
     }
@@ -917,13 +946,15 @@ mod tests {
             views
                 .get_filter(&FilterViewId("u1".into()), data.range)
                 .unwrap(),
-        );
+        )
+        .expect("filter should succeed");
         let result2 = apply_autofilter(
             &data,
             views
                 .get_filter(&FilterViewId("u2".into()), data.range)
                 .unwrap(),
-        );
+        )
+        .expect("filter should succeed");
 
         assert_eq!(result1.visible_rows, vec![true, true, false]);
         assert_eq!(result2.visible_rows, vec![true, false, true]);
@@ -966,7 +997,8 @@ mod tests {
             ]),
         };
 
-        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de())
+            .expect("filter should succeed");
         assert_eq!(result.visible_rows, vec![true, true]);
         assert_eq!(result.hidden_sheet_rows, Vec::<usize>::new());
 

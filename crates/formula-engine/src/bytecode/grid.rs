@@ -305,10 +305,47 @@ pub struct ColumnarGrid {
 
 impl ColumnarGrid {
     pub fn new(rows: i32, cols: i32) -> Self {
-        let mut cols_data = Vec::with_capacity(cols as usize);
-        for _ in 0..cols {
-            cols_data.push(vec![f64::NAN; rows as usize]);
+        if rows <= 0 || cols <= 0 {
+            return Self {
+                rows: 0,
+                cols: 0,
+                cols_data: Vec::new(),
+            };
         }
+
+        let rows_usize = rows as usize;
+        let cols_usize = cols as usize;
+
+        let mut cols_data: Vec<Vec<f64>> = Vec::new();
+        if cols_data.try_reserve_exact(cols_usize).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (ColumnarGrid cols_data, cols={cols_usize})"
+            );
+            return Self {
+                rows: 0,
+                cols: 0,
+                cols_data: Vec::new(),
+            };
+        }
+
+        for _ in 0..cols_usize {
+            let mut col: Vec<f64> = Vec::new();
+            if col.try_reserve_exact(rows_usize).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (ColumnarGrid column, rows={rows_usize})"
+                );
+                return Self {
+                    rows: 0,
+                    cols: 0,
+                    cols_data: Vec::new(),
+                };
+            }
+            col.resize(rows_usize, f64::NAN);
+            cols_data.push(col);
+        }
+
         Self {
             rows,
             cols,

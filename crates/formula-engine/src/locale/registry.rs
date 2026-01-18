@@ -1,4 +1,4 @@
-use crate::value::{casefold, with_casefolded_key};
+use crate::value::{try_casefold, with_casefolded_key};
 use crate::value::ErrorKind;
 use crate::LocaleConfig;
 
@@ -52,47 +52,56 @@ impl FunctionTranslations {
                 let mut parts = raw_line.split('\t');
                 let canon = parts.next().unwrap_or("");
                 let Some(loc) = parts.next() else {
-                    if cfg!(debug_assertions) {
-                        panic!("invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}");
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 };
                 if parts.next().is_some() {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid function translation line (empty entry) at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid function translation line (empty entry) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
 
-                let canon_key = casefold(canon);
-                let loc_key = casefold(loc);
+                let canon_key = match try_casefold(canon) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        debug_assert!(false, "allocation failed (canonical function key)");
+                        continue;
+                    }
+                };
+                let loc_key = match try_casefold(loc) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        debug_assert!(false, "allocation failed (localized function key)");
+                        continue;
+                    }
+                };
 
                 if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "duplicate canonical function translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "duplicate canonical function translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
                     continue;
                 }
                 if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "duplicate localized function translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "duplicate localized function translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                    );
                     continue;
                 }
 
@@ -188,50 +197,57 @@ impl ErrorTranslations {
                 let mut parts = raw_line.split('\t');
                 let canon = parts.next().unwrap_or("");
                 let Some(loc) = parts.next() else {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 };
                 if parts.next().is_some() {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
 
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
                 if !canon.starts_with('#') || !loc.starts_with('#') {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "invalid error translation line (expected error literals to start with '#') at line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "invalid error translation line (expected error literals to start with '#') at line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
 
-                let canon_key = casefold(canon);
-                let loc_key = casefold(loc);
+                let canon_key = match try_casefold(canon) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        debug_assert!(false, "allocation failed (canonical function key)");
+                        continue;
+                    }
+                };
+                let loc_key = match try_casefold(loc) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        debug_assert!(false, "allocation failed (localized function key)");
+                        continue;
+                    }
+                };
 
                 if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {raw_line:?}"
-                        );
-                    }
+                    debug_assert!(
+                        false,
+                        "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {raw_line:?}"
+                    );
                     continue;
                 }
                 loc_line.insert(loc_key.clone(), (line_no, raw_line));

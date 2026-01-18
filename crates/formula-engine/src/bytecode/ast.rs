@@ -697,8 +697,16 @@ impl<'a> Parser<'a> {
                         self.pos += 1;
                         out.push(b'"');
                     } else {
-                        let text = String::from_utf8(out)
-                            .expect("string literal bytes come from valid UTF-8 input");
+                        let text = match String::from_utf8(out) {
+                            Ok(text) => text,
+                            Err(_) => {
+                                debug_assert!(
+                                    false,
+                                    "string literal bytes should be valid UTF-8 (input is &str)"
+                                );
+                                return Err(ParseError::UnexpectedToken(self.pos.saturating_sub(1)));
+                            }
+                        };
                         return Ok(Expr::Literal(Value::Text(Arc::from(text))));
                     }
                 }
@@ -786,8 +794,20 @@ impl<'a> Parser<'a> {
                 if args.is_empty() {
                     return Err(ParseError::UnexpectedToken(start));
                 }
-                let body = Box::new(args.pop().expect("checked len"));
-                let mut params = Vec::with_capacity(args.len());
+                let Some(body) = args.pop() else {
+                    debug_assert!(false, "args was checked non-empty but pop returned None");
+                    return Err(ParseError::UnexpectedToken(start));
+                };
+                let body = Box::new(body);
+                let mut params: Vec<Arc<str>> = Vec::new();
+                if params.try_reserve_exact(args.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (bytecode ast parse LAMBDA params, params={})",
+                        args.len()
+                    );
+                    return Err(ParseError::UnexpectedToken(start));
+                }
                 for arg in args {
                     match arg {
                         Expr::NameRef(name) => params.push(name),

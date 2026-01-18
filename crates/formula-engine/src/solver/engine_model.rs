@@ -68,23 +68,61 @@ impl<'a> EngineSolverModel<'a> {
     ) -> Result<Self, SolverError> {
         let default_sheet = default_sheet.into();
         let objective_cell = CellAddress::parse(objective_cell, &default_sheet)?;
-        let vars = vars
-            .into_iter()
-            .map(|s| CellAddress::parse(s, &default_sheet))
-            .collect::<Result<Vec<_>, _>>()?;
-        let constraint_cells = constraint_cells
-            .into_iter()
-            .map(|s| CellAddress::parse(s, &default_sheet))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut parsed_vars: Vec<CellAddress> = Vec::new();
+        if parsed_vars.try_reserve_exact(vars.len()).is_err() {
+            debug_assert!(false, "solver allocation failed (vars={})", vars.len());
+            return Err(SolverError::new("allocation failed"));
+        }
+        for s in vars {
+            parsed_vars.push(CellAddress::parse(s, &default_sheet)?);
+        }
 
-        let cached_vars = vec![0.0; vars.len()];
-        let cached_constraints = vec![0.0; constraint_cells.len()];
+        let mut parsed_constraint_cells: Vec<CellAddress> = Vec::new();
+        if parsed_constraint_cells
+            .try_reserve_exact(constraint_cells.len())
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "solver allocation failed (constraints={})",
+                constraint_cells.len()
+            );
+            return Err(SolverError::new("allocation failed"));
+        }
+        for s in constraint_cells {
+            parsed_constraint_cells.push(CellAddress::parse(s, &default_sheet)?);
+        }
+
+        let mut cached_vars: Vec<f64> = Vec::new();
+        if cached_vars.try_reserve_exact(parsed_vars.len()).is_err() {
+            debug_assert!(
+                false,
+                "solver allocation failed (cached_vars={})",
+                parsed_vars.len()
+            );
+            return Err(SolverError::new("allocation failed"));
+        }
+        cached_vars.resize(parsed_vars.len(), 0.0);
+
+        let mut cached_constraints: Vec<f64> = Vec::new();
+        if cached_constraints
+            .try_reserve_exact(parsed_constraint_cells.len())
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "solver allocation failed (cached_constraints={})",
+                parsed_constraint_cells.len()
+            );
+            return Err(SolverError::new("allocation failed"));
+        }
+        cached_constraints.resize(parsed_constraint_cells.len(), 0.0);
 
         let mut model = Self {
             engine,
-            vars,
+            vars: parsed_vars,
             objective_cell,
-            constraint_cells,
+            constraint_cells: parsed_constraint_cells,
             cached_vars,
             cached_objective: f64::NAN,
             cached_constraints,

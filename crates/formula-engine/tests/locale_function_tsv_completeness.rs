@@ -6,7 +6,7 @@ use formula_engine::locale::get_locale;
 use formula_engine::ErrorKind;
 
 fn casefold_key(s: &str) -> String {
-    // Match the runtime case-folding used by the locale registry (`value::casefold`):
+    // Match the runtime case-folding used by the locale registry (`value::try_casefold`):
     // ASCII fast path + Unicode-aware uppercasing fallback.
     if s.is_ascii() {
         return s.to_ascii_uppercase();

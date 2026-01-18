@@ -34,7 +34,8 @@ fn autofilter_updates_outline_filter_hidden_flags_and_can_be_cleared() {
     };
 
     let mut outline = Outline::default();
-    let result = apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+    let result =
+        apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter)).expect("filter");
 
     // Row 1 is header (A1) and is never hidden by AutoFilter.
     assert!(!outline.rows.entry(1).hidden.filter);
@@ -46,7 +47,7 @@ fn autofilter_updates_outline_filter_hidden_flags_and_can_be_cleared() {
 
     // Clearing the filter removes filter hidden flags but preserves the outline map
     // shape (entries should drop back to defaults).
-    let cleared = apply_autofilter_to_outline(&sheet, &mut outline, range, None);
+    let cleared = apply_autofilter_to_outline(&sheet, &mut outline, range, None).expect("filter");
     assert_eq!(cleared.hidden_sheet_rows, Vec::<usize>::new());
     assert!(!outline.rows.entry(3).hidden.filter);
 }
@@ -79,7 +80,8 @@ fn autofilter_evaluates_negative_text_ops_from_opaque_custom() {
     };
 
     let mut outline = Outline::default();
-    let result = apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+    let result =
+        apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter)).expect("filter");
 
     // Header row is never hidden.
     assert_eq!(result.visible_rows[0], true);
@@ -116,14 +118,14 @@ fn autofilter_preserves_user_hidden_rows() {
     let mut outline = Outline::default();
     outline.rows.entry_mut(3).hidden.user = true;
 
-    apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+    apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter)).expect("filter");
 
     // Row 3 is hidden both by user and by filter.
     assert!(outline.rows.entry(3).hidden.user);
     assert!(outline.rows.entry(3).hidden.filter);
 
     // Clearing the filter keeps user hidden.
-    apply_autofilter_to_outline(&sheet, &mut outline, range, None);
+    apply_autofilter_to_outline(&sheet, &mut outline, range, None).expect("filter");
     assert!(outline.rows.entry(3).hidden.user);
     assert!(!outline.rows.entry(3).hidden.filter);
 }
@@ -153,7 +155,8 @@ fn autofilter_blanks_does_not_treat_errors_as_blank() {
     };
 
     let mut outline = Outline::default();
-    let result = apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+    let result =
+        apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter)).expect("filter");
 
     // Row 2 is an error and should not match the Blanks criterion; row 3 is blank and should
     // remain visible.
@@ -192,7 +195,8 @@ fn autofilter_with_value_locale_parses_text_numbers() {
         range,
         Some(&filter),
         ValueLocaleConfig::de_de(),
-    );
+    )
+    .expect("filter");
 
     // Row 1 is header and should always be visible.
     assert_eq!(result.visible_rows, vec![true, true, false]);
@@ -232,7 +236,8 @@ fn autofilter_with_value_locale_parses_legacy_value_list_numbers() {
         range,
         Some(&filter),
         ValueLocaleConfig::de_de(),
-    );
+    )
+    .expect("filter");
 
     // Header visible, 1.1 row visible, 1.2 row hidden.
     assert_eq!(result.visible_rows, vec![true, true, false]);

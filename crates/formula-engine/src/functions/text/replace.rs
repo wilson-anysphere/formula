@@ -23,8 +23,12 @@ pub fn substitute(
             for (idx, _) in text.match_indices(old_text) {
                 count += 1;
                 if count == n {
-                    let mut out =
-                        String::with_capacity(text.len() - old_text.len() + new_text.len());
+                    let out_len = text.len().saturating_sub(old_text.len()).saturating_add(new_text.len());
+                    let mut out = String::new();
+                    if out.try_reserve_exact(out_len).is_err() {
+                        debug_assert!(false, "allocation failed (substitute nth match, len={out_len})");
+                        return Err(ExcelError::Num);
+                    }
                     out.push_str(&text[..idx]);
                     out.push_str(new_text);
                     out.push_str(&text[idx + old_text.len()..]);
@@ -59,7 +63,15 @@ pub fn replace(
     let start_byte = char_pos_to_byte(old_text, start);
     let end_byte = char_pos_to_byte(old_text, end);
 
-    let mut out = String::with_capacity(old_text.len() - (end_byte - start_byte) + new_text.len());
+    let out_len = old_text
+        .len()
+        .saturating_sub(end_byte.saturating_sub(start_byte))
+        .saturating_add(new_text.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        debug_assert!(false, "allocation failed (replace, len={out_len})");
+        return Err(ExcelError::Num);
+    }
     out.push_str(&old_text[..start_byte]);
     out.push_str(new_text);
     out.push_str(&old_text[end_byte..]);

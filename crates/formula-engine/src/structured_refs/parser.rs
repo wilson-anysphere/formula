@@ -329,32 +329,42 @@ enum StructuredColumnsRaw<'a> {
     Multi(Vec<StructuredColumnRaw<'a>>),
 }
 
-fn columns_raw_into_owned(columns: StructuredColumnsRaw<'_>) -> StructuredColumns {
+fn columns_raw_into_owned(columns: StructuredColumnsRaw<'_>) -> Option<StructuredColumns> {
     match columns {
-        StructuredColumnsRaw::All => StructuredColumns::All,
-        StructuredColumnsRaw::Single(name) => StructuredColumns::Single(name.into_owned()),
-        StructuredColumnsRaw::Range { start, end } => StructuredColumns::Range {
+        StructuredColumnsRaw::All => Some(StructuredColumns::All),
+        StructuredColumnsRaw::Single(name) => Some(StructuredColumns::Single(name.into_owned())),
+        StructuredColumnsRaw::Range { start, end } => Some(StructuredColumns::Range {
             start: start.into_owned(),
             end: end.into_owned(),
-        },
-        StructuredColumnsRaw::Multi(parts) => StructuredColumns::Multi(
-            parts
-                .into_iter()
-                .map(|part| match part {
+        }),
+        StructuredColumnsRaw::Multi(parts) => {
+            let mut out: Vec<StructuredColumn> = Vec::new();
+            if out.try_reserve_exact(parts.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (structured columns, len={})",
+                    parts.len()
+                );
+                return None;
+            }
+            for part in parts {
+                out.push(match part {
                     StructuredColumnRaw::Single(name) => StructuredColumn::Single(name.into_owned()),
                     StructuredColumnRaw::Range { start, end } => StructuredColumn::Range {
                         start: start.into_owned(),
                         end: end.into_owned(),
                     },
-                })
-                .collect(),
-        ),
+                });
+            }
+            Some(StructuredColumns::Multi(out))
+        }
     }
 }
 
 fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredColumns)> {
     let (items, columns) = parse_inner_spec_raw(inner)?;
-    Some((items, columns_raw_into_owned(columns)))
+    let columns = columns_raw_into_owned(columns)?;
+    Some((items, columns))
 }
 
 fn validate_inner_spec_raw(inner: &str) -> Option<()> {

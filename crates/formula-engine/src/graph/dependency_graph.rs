@@ -272,21 +272,26 @@ impl DependencyGraph {
         }
 
         // Remove existing precedent relationships for this cell.
-        if let Some(node) = self.cells.get_mut(&cell) {
-            let old_cells: Vec<CellId> = node.precedent_cells.drain().collect();
-            for precedent in old_cells {
-                if let Some(set) = self.cell_dependents.get_mut(&precedent) {
-                    set.remove(&cell);
-                    if set.is_empty() {
-                        self.cell_dependents.remove(&precedent);
-                    }
+        let (old_cells, old_ranges) = if let Some(node) = self.cells.get_mut(&cell) {
+            (
+                std::mem::take(&mut node.precedent_cells),
+                std::mem::take(&mut node.precedent_ranges),
+            )
+        } else {
+            (HashSet::new(), HashSet::new())
+        };
+
+        for precedent in old_cells {
+            if let Some(set) = self.cell_dependents.get_mut(&precedent) {
+                set.remove(&cell);
+                if set.is_empty() {
+                    self.cell_dependents.remove(&precedent);
                 }
             }
+        }
 
-            let old_ranges: Vec<RangeId> = node.precedent_ranges.drain().collect();
-            for range_id in old_ranges {
-                self.detach_cell_from_range_node(range_id, cell);
-            }
+        for range_id in old_ranges {
+            self.detach_cell_from_range_node(range_id, cell);
         }
 
         // Add new precedents.
@@ -300,12 +305,15 @@ impl DependencyGraph {
                 }
                 Precedent::Range(range) => {
                     let range_id = self.intern_range_node(range);
-                    new_precedent_ranges.insert(range_id);
-                    self.range_nodes
-                        .get_mut(&range_id)
-                        .expect("range node must exist")
-                        .dependents
-                        .insert(cell);
+                    if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
+                        range_node.dependents.insert(cell);
+                        new_precedent_ranges.insert(range_id);
+                    } else {
+                        debug_assert!(
+                            false,
+                            "interned range id missing from range_nodes: range_id={range_id}"
+                        );
+                    }
                 }
             }
         }
@@ -352,11 +360,15 @@ impl DependencyGraph {
             return Vec::new();
         };
 
-        let mut out: Vec<Precedent> = Vec::with_capacity(
-            node.precedent_cells
-                .len()
-                .saturating_add(node.precedent_ranges.len()),
-        );
+        let total = node
+            .precedent_cells
+            .len()
+            .saturating_add(node.precedent_ranges.len());
+        let mut out: Vec<Precedent> = Vec::new();
+        if out.try_reserve_exact(total).is_err() {
+            debug_assert!(false, "precedents_of allocation failed (total={total})");
+            return Vec::new();
+        }
         out.extend(node.precedent_cells.iter().copied().map(Precedent::Cell));
         out.extend(
             node.precedent_ranges
@@ -392,27 +404,37 @@ impl DependencyGraph {
             }
         }
 
-        for range_id in self.range_nodes_containing_cell(cell) {
-            let Some(range_node) = self.range_nodes.get(&range_id) else {
-                continue;
-            };
-            let range_kind = DependentEdgeKind::Range(range_node.range);
-            for &dep in &range_node.dependents {
-                best.entry(dep)
-                    .and_modify(|existing| {
-                        if dependent_kind_sort_key(*existing) > dependent_kind_sort_key(range_kind)
-                        {
-                            *existing = range_kind;
-                        }
-                    })
-                    .or_insert(range_kind);
+        if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+            let point = cell_to_point(cell);
+            let env = AABB::from_point(point);
+            for entry in tree.locate_in_envelope_intersecting(&env) {
+                let range_id = entry.id;
+                let Some(range_node) = self.range_nodes.get(&range_id) else {
+                    continue;
+                };
+                let range_kind = DependentEdgeKind::Range(range_node.range);
+                for &dep in &range_node.dependents {
+                    best.entry(dep)
+                        .and_modify(|existing| {
+                            if dependent_kind_sort_key(*existing)
+                                > dependent_kind_sort_key(range_kind)
+                            {
+                                *existing = range_kind;
+                            }
+                        })
+                        .or_insert(range_kind);
+                }
             }
         }
 
-        let mut out: Vec<DependentEdge> = best
-            .into_iter()
-            .map(|(dependent, kind)| DependentEdge { dependent, kind })
-            .collect();
+        let mut out: Vec<DependentEdge> = Vec::new();
+        if out.try_reserve_exact(best.len()).is_err() {
+            debug_assert!(false, "dependents_of allocation failed (len={})", best.len());
+            return Vec::new();
+        }
+        for (dependent, kind) in best {
+            out.push(DependentEdge { dependent, kind });
+        }
         out.sort_by_key(|edge| {
             (
                 edge.dependent.sheet_id,
@@ -433,10 +455,16 @@ impl DependencyGraph {
 
         let (min, max) = range.envelope_i64();
         let env = AABB::from_corners(min, max);
-        let mut out: Vec<CellId> = tree
-            .locate_in_envelope_intersecting(&env)
-            .map(|entry| entry.cell)
-            .collect();
+        let mut out: Vec<CellId> = Vec::new();
+        for entry in tree.locate_in_envelope_intersecting(&env) {
+            if out.len() == out.capacity() {
+                if out.try_reserve(64).is_err() {
+                    debug_assert!(false, "formula_cells_in_range allocation failed");
+                    return Vec::new();
+                }
+            }
+            out.push(entry.cell);
+        }
         out.sort_by_key(|cell| (cell.sheet_id, cell.cell.row, cell.cell.col));
         out
     }
@@ -525,20 +553,25 @@ impl DependencyGraph {
                 return;
             }
 
-            for range_id in self.range_nodes_containing_cell(cur) {
-                if let Some(range_node) = self.range_nodes.get(&range_id) {
-                    for &dep in &range_node.dependents {
-                        if seen.insert(dep) {
-                            if seen.len() > self.dirty_mark_limit {
-                                exceeded_limit = true;
-                                break;
+            if let Some(tree) = self.range_index.get(&cur.sheet_id) {
+                let point = cell_to_point(cur);
+                let env = AABB::from_point(point);
+                for entry in tree.locate_in_envelope_intersecting(&env) {
+                    let range_id = entry.id;
+                    if let Some(range_node) = self.range_nodes.get(&range_id) {
+                        for &dep in &range_node.dependents {
+                            if seen.insert(dep) {
+                                if seen.len() > self.dirty_mark_limit {
+                                    exceeded_limit = true;
+                                    break;
+                                }
+                                queue.push_back(dep);
                             }
-                            queue.push_back(dep);
                         }
                     }
-                }
-                if exceeded_limit {
-                    break;
+                    if exceeded_limit {
+                        break;
+                    }
                 }
             }
 
@@ -564,9 +597,14 @@ impl DependencyGraph {
             vec.extend(dependents.iter().copied());
         }
 
-        for range_id in self.range_nodes_containing_cell(cell) {
-            if let Some(range_node) = self.range_nodes.get(&range_id) {
-                vec.extend(range_node.dependents.iter().copied());
+        if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+            let point = cell_to_point(cell);
+            let env = AABB::from_point(point);
+            for entry in tree.locate_in_envelope_intersecting(&env) {
+                let range_id = entry.id;
+                if let Some(range_node) = self.range_nodes.get(&range_id) {
+                    vec.extend(range_node.dependents.iter().copied());
+                }
             }
         }
 
@@ -576,8 +614,23 @@ impl DependencyGraph {
     }
 
     #[must_use]
+    pub fn dirty_cell_count(&self) -> usize {
+        self.dirty.len()
+    }
+
+    #[must_use]
     pub fn dirty_cells(&self) -> Vec<CellId> {
-        self.dirty.iter().copied().collect()
+        let mut out: Vec<CellId> = Vec::new();
+        if out.try_reserve_exact(self.dirty.len()).is_err() {
+            debug_assert!(false, "dirty_cells allocation failed (len={})", self.dirty.len());
+            return Vec::new();
+        }
+        out.extend(self.dirty.iter().copied());
+        out
+    }
+
+    pub fn dirty_cells_iter(&self) -> impl Iterator<Item = CellId> + '_ {
+        self.dirty.iter().copied()
     }
 
     /// Returns the calculation order for the current dirty set (plus any volatile closure), in a
@@ -631,7 +684,11 @@ impl DependencyGraph {
         }
 
         // In-degree for formula cells restricted to the evaluated subset.
-        let mut cell_in: HashMap<CellId, usize> = HashMap::with_capacity(eval_cells.len());
+        let mut cell_in: HashMap<CellId, usize> = HashMap::new();
+        if cell_in.try_reserve(eval_cells.len()).is_err() {
+            debug_assert!(false, "calc_levels_for_dirty allocation failed (cell_in)");
+            return Err(CycleError { path: Vec::new() });
+        }
         let mut ready_cells: BTreeSet<ReadyNode> = BTreeSet::new();
         for cell in eval_cells.iter().copied() {
             let Some(node) = self.cells.get(&cell) else {
@@ -650,15 +707,23 @@ impl DependencyGraph {
         }
 
         // In-degree for range nodes = number of evaluated formula cells inside the range.
-        let mut range_in: HashMap<RangeId, usize> = relevant_ranges
-            .iter()
-            .copied()
-            .map(|id| (id, 0usize))
-            .collect();
+        let mut range_in: HashMap<RangeId, usize> = HashMap::new();
+        if range_in.try_reserve(relevant_ranges.len()).is_err() {
+            debug_assert!(false, "calc_levels_for_dirty allocation failed (range_in)");
+            return Err(CycleError { path: Vec::new() });
+        }
+        for id in relevant_ranges.iter().copied() {
+            range_in.insert(id, 0);
+        }
         for cell in eval_cells.iter().copied() {
-            for range_id in self.range_nodes_containing_cell(cell) {
-                if let Some(deg) = range_in.get_mut(&range_id) {
-                    *deg = deg.saturating_add(1);
+            if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+                let point = cell_to_point(cell);
+                let env = AABB::from_point(point);
+                for entry in tree.locate_in_envelope_intersecting(&env) {
+                    let range_id = entry.id;
+                    if let Some(deg) = range_in.get_mut(&range_id) {
+                        *deg = deg.saturating_add(1);
+                    }
                 }
             }
         }
@@ -708,7 +773,15 @@ impl DependencyGraph {
                 break;
             }
 
-            let mut level: Vec<CellId> = Vec::with_capacity(ready_cells.len());
+            let mut level: Vec<CellId> = Vec::new();
+            if level.try_reserve_exact(ready_cells.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "calc_order_for_dirty allocation failed (ready_cells={})",
+                    ready_cells.len()
+                );
+                return Err(CycleError { path: Vec::new() });
+            }
             while let Some(node) = ready_cells.pop_first() {
                 let cell = match node.kind {
                     ReadyNodeKind::Cell(cell) => cell,
@@ -747,11 +820,16 @@ impl DependencyGraph {
                 }
 
                 // Range membership edges.
-                for range_id in self.range_nodes_containing_cell(cell) {
-                    if let Some(deg) = range_in.get_mut(&range_id) {
-                        *deg = deg.saturating_sub(1);
-                        if *deg == 0 {
-                            next_ready_ranges.insert(self.ready_range_node(range_id));
+                if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+                    let point = cell_to_point(cell);
+                    let env = AABB::from_point(point);
+                    for entry in tree.locate_in_envelope_intersecting(&env) {
+                        let range_id = entry.id;
+                        if let Some(deg) = range_in.get_mut(&range_id) {
+                            *deg = deg.saturating_sub(1);
+                            if *deg == 0 {
+                                next_ready_ranges.insert(self.ready_range_node(range_id));
+                            }
                         }
                     }
                 }
@@ -803,11 +881,16 @@ impl DependencyGraph {
                 }
             }
 
-            for range_id in self.range_nodes_containing_cell(cur) {
-                if let Some(range_node) = self.range_nodes.get(&range_id) {
-                    for &dep in &range_node.dependents {
-                        if visited.insert(dep) {
-                            queue.push_back(dep);
+            if let Some(tree) = self.range_index.get(&cur.sheet_id) {
+                let point = cell_to_point(cur);
+                let env = AABB::from_point(point);
+                for entry in tree.locate_in_envelope_intersecting(&env) {
+                    let range_id = entry.id;
+                    if let Some(range_node) = self.range_nodes.get(&range_id) {
+                        for &dep in &range_node.dependents {
+                            if visited.insert(dep) {
+                                queue.push_back(dep);
+                            }
                         }
                     }
                 }
@@ -824,7 +907,11 @@ impl DependencyGraph {
         }
 
         // In-degree for formula cell nodes.
-        let mut cell_in: HashMap<CellId, usize> = HashMap::with_capacity(self.cells.len());
+        let mut cell_in: HashMap<CellId, usize> = HashMap::new();
+        if cell_in.try_reserve(self.cells.len()).is_err() {
+            debug_assert!(false, "calc chain allocation failed (cell_in)");
+            return Err(CycleError { path: Vec::new() });
+        }
         for (&cell, node) in &self.cells {
             let direct_formula_precedents = node
                 .precedent_cells
@@ -836,7 +923,11 @@ impl DependencyGraph {
         }
 
         // In-degree for range nodes = number of formula cells currently in the range.
-        let mut range_in: HashMap<RangeId, usize> = HashMap::with_capacity(self.range_nodes.len());
+        let mut range_in: HashMap<RangeId, usize> = HashMap::new();
+        if range_in.try_reserve(self.range_nodes.len()).is_err() {
+            debug_assert!(false, "calc chain allocation failed (range_in)");
+            return Err(CycleError { path: Vec::new() });
+        }
         for (&id, node) in &self.range_nodes {
             range_in.insert(id, node.member_formula_cells);
         }
@@ -855,7 +946,15 @@ impl DependencyGraph {
             }
         }
 
-        let mut chain = Vec::with_capacity(self.cells.len());
+        let mut chain: Vec<CellId> = Vec::new();
+        if chain.try_reserve_exact(self.cells.len()).is_err() {
+            debug_assert!(
+                false,
+                "calc chain allocation failed (cells={})",
+                self.cells.len()
+            );
+            return Err(CycleError { path: Vec::new() });
+        }
         let mut processed_nodes = 0usize;
 
         while let Some(node) = ready.pop_first() {
@@ -877,11 +976,16 @@ impl DependencyGraph {
                     }
 
                     // Range membership edges: this cell contributes to any containing range node's in-degree.
-                    for range_id in self.range_nodes_containing_cell(cell) {
-                        if let Some(deg) = range_in.get_mut(&range_id) {
-                            *deg = deg.saturating_sub(1);
-                            if *deg == 0 {
-                                ready.insert(self.ready_range_node(range_id));
+                    if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+                        let point = cell_to_point(cell);
+                        let env = AABB::from_point(point);
+                        for entry in tree.locate_in_envelope_intersecting(&env) {
+                            let range_id = entry.id;
+                            if let Some(deg) = range_in.get_mut(&range_id) {
+                                *deg = deg.saturating_sub(1);
+                                if *deg == 0 {
+                                    ready.insert(self.ready_range_node(range_id));
+                                }
                             }
                         }
                     }
@@ -902,14 +1006,26 @@ impl DependencyGraph {
         }
 
         if processed_nodes != total_nodes {
-            let remaining_cells: HashSet<CellId> = cell_in
-                .into_iter()
-                .filter_map(|(c, d)| (d > 0).then_some(c))
-                .collect();
-            let remaining_ranges: HashSet<RangeId> = range_in
-                .into_iter()
-                .filter_map(|(r, d)| (d > 0).then_some(r))
-                .collect();
+            let mut remaining_cells: HashSet<CellId> = HashSet::new();
+            if remaining_cells.try_reserve(cell_in.len()).is_err() {
+                debug_assert!(false, "cycle analysis allocation failed (remaining_cells)");
+                return Err(CycleError { path: Vec::new() });
+            }
+            for (c, d) in cell_in.into_iter() {
+                if d > 0 {
+                    remaining_cells.insert(c);
+                }
+            }
+            let mut remaining_ranges: HashSet<RangeId> = HashSet::new();
+            if remaining_ranges.try_reserve(range_in.len()).is_err() {
+                debug_assert!(false, "cycle analysis allocation failed (remaining_ranges)");
+                return Err(CycleError { path: Vec::new() });
+            }
+            for (r, d) in range_in.into_iter() {
+                if d > 0 {
+                    remaining_ranges.insert(r);
+                }
+            }
             let cycle_path = self
                 .find_cycle(&remaining_cells, &remaining_ranges)
                 .unwrap_or_else(|| vec![]);
@@ -922,11 +1038,14 @@ impl DependencyGraph {
     }
 
     fn ready_range_node(&self, range_id: RangeId) -> ReadyNode {
-        let range = &self
-            .range_nodes
-            .get(&range_id)
-            .expect("range must exist")
-            .range;
+        let Some(range_node) = self.range_nodes.get(&range_id) else {
+            debug_assert!(
+                false,
+                "ready_range_node called with missing range id: range_id={range_id}"
+            );
+            return ReadyNode::range(range_id, u32::MAX, u32::MAX, u32::MAX);
+        };
+        let range = &range_node.range;
         let start = range.start();
         ReadyNode::range(range_id, range.sheet_id, start.row, start.col)
     }
@@ -954,7 +1073,12 @@ impl DependencyGraph {
         let mut stack: Vec<GraphNode> = Vec::new();
         let mut pos_in_stack: HashMap<GraphNode, usize> = HashMap::new();
 
-        let mut nodes: Vec<GraphNode> = color.keys().copied().collect();
+        let mut nodes: Vec<GraphNode> = Vec::new();
+        if nodes.try_reserve_exact(color.len()).is_err() {
+            debug_assert!(false, "cycle analysis allocation failed (nodes)");
+            return None;
+        }
+        nodes.extend(color.keys().copied());
         nodes.sort_by(|a, b| {
             self.graph_node_sort_key(*a)
                 .cmp(&self.graph_node_sort_key(*b))
@@ -1035,9 +1159,14 @@ impl DependencyGraph {
                 }
 
                 // Membership edges.
-                for range_id in self.range_nodes_containing_cell(cell) {
-                    if remaining_ranges.contains(&range_id) {
-                        out.push(GraphNode::Range(range_id));
+                if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+                    let point = cell_to_point(cell);
+                    let env = AABB::from_point(point);
+                    for entry in tree.locate_in_envelope_intersecting(&env) {
+                        let range_id = entry.id;
+                        if remaining_ranges.contains(&range_id) {
+                            out.push(GraphNode::Range(range_id));
+                        }
                     }
                 }
             }
@@ -1063,7 +1192,14 @@ impl DependencyGraph {
         match node {
             GraphNode::Cell(cell) => (0, cell.sheet_id, cell.cell.row, cell.cell.col, 0),
             GraphNode::Range(range_id) => {
-                let range = &self.range_nodes.get(&range_id).expect("range exists").range;
+                let Some(range_node) = self.range_nodes.get(&range_id) else {
+                    debug_assert!(
+                        false,
+                        "graph_node_sort_key called with missing range id: range_id={range_id}"
+                    );
+                    return (1, u32::MAX, u32::MAX, u32::MAX, range_id);
+                };
+                let range = &range_node.range;
                 let start = range.start();
                 (1, range.sheet_id, start.row, start.col, range_id)
             }
@@ -1159,17 +1295,6 @@ impl DependencyGraph {
         }
     }
 
-    fn range_nodes_containing_cell(&self, cell: CellId) -> Vec<RangeId> {
-        let Some(tree) = self.range_index.get(&cell.sheet_id) else {
-            return Vec::new();
-        };
-        let point = cell_to_point(cell);
-        let env = AABB::from_point(point);
-        tree.locate_in_envelope_intersecting(&env)
-            .map(|entry| entry.id)
-            .collect()
-    }
-
     fn count_formula_cells_in_range(&self, range: SheetRange) -> usize {
         let Some(tree) = self.cell_index.get(&range.sheet_id) else {
             return 0;
@@ -1180,17 +1305,29 @@ impl DependencyGraph {
     }
 
     fn bump_range_member_counts_for_new_formula_cell(&mut self, cell: CellId) {
-        for range_id in self.range_nodes_containing_cell(cell) {
-            if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
-                range_node.member_formula_cells = range_node.member_formula_cells.saturating_add(1);
+        if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+            let point = cell_to_point(cell);
+            let env = AABB::from_point(point);
+            for entry in tree.locate_in_envelope_intersecting(&env) {
+                let range_id = entry.id;
+                if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
+                    range_node.member_formula_cells =
+                        range_node.member_formula_cells.saturating_add(1);
+                }
             }
         }
     }
 
     fn decrement_range_member_counts_for_removed_formula_cell(&mut self, cell: CellId) {
-        for range_id in self.range_nodes_containing_cell(cell) {
-            if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
-                range_node.member_formula_cells = range_node.member_formula_cells.saturating_sub(1);
+        if let Some(tree) = self.range_index.get(&cell.sheet_id) {
+            let point = cell_to_point(cell);
+            let env = AABB::from_point(point);
+            for entry in tree.locate_in_envelope_intersecting(&env) {
+                let range_id = entry.id;
+                if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
+                    range_node.member_formula_cells =
+                        range_node.member_formula_cells.saturating_sub(1);
+                }
             }
         }
     }

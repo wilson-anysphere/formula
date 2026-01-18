@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::error::ExcelError;
-use crate::eval::{CellAddr, CompiledExpr};
+use crate::eval::{CellAddr, CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::{
     array_lift, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference,
 };
@@ -18,17 +18,29 @@ fn excel_error_kind(err: ExcelError) -> ErrorKind {
     }
 }
 
-fn reference_to_array(ctx: &dyn FunctionContext, reference: Reference) -> Array {
+fn reference_to_array(ctx: &dyn FunctionContext, reference: Reference) -> Result<Array, ErrorKind> {
     let reference = reference.normalized();
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Err(ErrorKind::Spill),
+    };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Spill);
+    }
+
+    let mut values: Vec<Value> = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        debug_assert!(false, "reference materialization allocation failed (cells={total})");
+        return Err(ErrorKind::Num);
+    }
     for row in reference.start.row..=reference.end.row {
         for col in reference.start.col..=reference.end.col {
             values.push(ctx.get_cell_value(&reference.sheet_id, CellAddr { row, col }));
         }
     }
-    Array::new(rows, cols, values)
+    Ok(Array::new(rows, cols, values))
 }
 
 fn implicit_intersection_union(ctx: &dyn FunctionContext, ranges: &[Reference]) -> Value {
@@ -64,7 +76,10 @@ fn dynamic_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
             if r.is_single_cell() {
                 ctx.get_cell_value(&r.sheet_id, r.start)
             } else {
-                Value::Array(reference_to_array(ctx, r))
+                match reference_to_array(ctx, r) {
+                    Ok(arr) => Value::Array(arr),
+                    Err(e) => Value::Error(e),
+                }
             }
         }
         ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
@@ -74,7 +89,25 @@ fn dynamic_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
         Value::Array(arr) => {
-            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+            let total = arr.values.len();
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                debug_assert!(
+                    false,
+                    "elementwise unary exceeds materialization limit (cells={total})"
+                );
+                return Value::Error(ErrorKind::Spill);
+            }
+
+            let mut out: Vec<Value> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "elementwise unary allocation failed (cells={total})");
+                return Value::Error(ErrorKind::Num);
+            }
+            for el in arr.values.iter() {
+                out.push(f(el));
+            }
+
+            Value::Array(Array::new(arr.rows, arr.cols, out))
         }
         other => f(other),
     }
@@ -84,33 +117,77 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
     match (left, right) {
         (Value::Array(left_arr), Value::Array(right_arr)) => {
             if left_arr.rows == right_arr.rows && left_arr.cols == right_arr.cols {
+                let total = left_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+
+                let mut out: Vec<Value> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "elementwise binary allocation failed (cells={total})");
+                    return Value::Error(ErrorKind::Num);
+                }
+                for (a, b) in left_arr.values.iter().zip(right_arr.values.iter()) {
+                    out.push(f(a, b));
+                }
                 return Value::Array(Array::new(
                     left_arr.rows,
                     left_arr.cols,
-                    left_arr
-                        .values
-                        .iter()
-                        .zip(right_arr.values.iter())
-                        .map(|(a, b)| f(a, b))
-                        .collect(),
+                    out,
                 ));
             }
 
             if left_arr.rows == 1 && left_arr.cols == 1 {
                 let scalar = left_arr.values.get(0).unwrap_or(&Value::Blank);
+                let total = right_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "elementwise binary allocation failed (cells={total})");
+                    return Value::Error(ErrorKind::Num);
+                }
+                for b in right_arr.values.iter() {
+                    out.push(f(scalar, b));
+                }
                 return Value::Array(Array::new(
                     right_arr.rows,
                     right_arr.cols,
-                    right_arr.values.iter().map(|b| f(scalar, b)).collect(),
+                    out,
                 ));
             }
 
             if right_arr.rows == 1 && right_arr.cols == 1 {
                 let scalar = right_arr.values.get(0).unwrap_or(&Value::Blank);
+                let total = left_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "elementwise binary allocation failed (cells={total})");
+                    return Value::Error(ErrorKind::Num);
+                }
+                for a in left_arr.values.iter() {
+                    out.push(f(a, scalar));
+                }
                 return Value::Array(Array::new(
                     left_arr.rows,
                     left_arr.cols,
-                    left_arr.values.iter().map(|a| f(a, scalar)).collect(),
+                    out,
                 ));
             }
 
@@ -119,14 +196,192 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
         (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
             left_arr.rows,
             left_arr.cols,
-            left_arr.values.iter().map(|a| f(a, right_scalar)).collect(),
+            {
+                let total = left_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "elementwise binary allocation failed (cells={total})");
+                    return Value::Error(ErrorKind::Num);
+                }
+                for a in left_arr.values.iter() {
+                    out.push(f(a, right_scalar));
+                }
+                out
+            },
         )),
         (left_scalar, Value::Array(right_arr)) => Value::Array(Array::new(
             right_arr.rows,
             right_arr.cols,
-            right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
+            {
+                let total = right_arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    debug_assert!(
+                        false,
+                        "elementwise binary exceeds materialization limit (cells={total})"
+                    );
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut out: Vec<Value> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "elementwise binary allocation failed (cells={total})");
+                    return Value::Error(ErrorKind::Num);
+                }
+                for b in right_arr.values.iter() {
+                    out.push(f(left_scalar, b));
+                }
+                out
+            },
         )),
         (left_scalar, right_scalar) => f(left_scalar, right_scalar),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::date::ExcelDateSystem;
+    use crate::functions::SheetId;
+    use crate::value::Lambda;
+    use chrono::{LocalResult, TimeZone};
+    use std::collections::HashMap;
+
+    struct PanicGetCellCtx {
+        reference: Reference,
+    }
+
+    impl FunctionContext for PanicGetCellCtx {
+        fn eval_arg(&self, _expr: &CompiledExpr) -> ArgValue {
+            ArgValue::Reference(self.reference.clone())
+        }
+
+        fn eval_scalar(&self, _expr: &CompiledExpr) -> Value {
+            Value::Blank
+        }
+
+        fn eval_formula(&self, _expr: &CompiledExpr) -> Value {
+            Value::Blank
+        }
+
+        fn eval_formula_with_bindings(
+            &self,
+            _expr: &CompiledExpr,
+            _bindings: &HashMap<String, Value>,
+        ) -> Value {
+            Value::Blank
+        }
+
+        fn capture_lexical_env(&self) -> HashMap<String, Value> {
+            HashMap::new()
+        }
+
+        fn apply_implicit_intersection(&self, _reference: &Reference) -> Value {
+            Value::Blank
+        }
+
+        fn get_cell_value(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Value {
+            panic!("unexpected get_cell_value call (materialization should have been guarded)");
+        }
+
+        fn iter_reference_cells<'a>(
+            &'a self,
+            _reference: &'a Reference,
+        ) -> Box<dyn Iterator<Item = CellAddr> + 'a> {
+            Box::new(std::iter::empty())
+        }
+
+        fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
+            match chrono::Utc.timestamp_opt(0, 0) {
+                LocalResult::Single(dt) => dt,
+                other => {
+                    debug_assert!(false, "expected epoch timestamp to be valid, got {other:?}");
+                    chrono::DateTime::<chrono::Utc>::MIN_UTC
+                }
+            }
+        }
+
+        fn date_system(&self) -> ExcelDateSystem {
+            ExcelDateSystem::EXCEL_1900
+        }
+
+        fn current_sheet_id(&self) -> usize {
+            0
+        }
+
+        fn current_cell_addr(&self) -> CellAddr {
+            CellAddr { row: 0, col: 0 }
+        }
+
+        fn push_local_scope(&self) {}
+
+        fn pop_local_scope(&self) {}
+
+        fn set_local(&self, _name: &str, _value: ArgValue) {}
+
+        fn make_lambda(&self, _params: Vec<String>, _body: CompiledExpr) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn eval_lambda(&self, _lambda: &Lambda, _args: Vec<ArgValue>) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn volatile_rand_u64(&self) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn sin_bails_out_before_materializing_oversize_references() {
+        let reference = Reference {
+            sheet_id: SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr {
+                row: MAX_MATERIALIZED_ARRAY_CELLS as u32,
+                col: 0,
+            },
+        };
+        let ctx = PanicGetCellCtx { reference };
+        let expr = crate::eval::Expr::Blank;
+        let out = sin_fn(&ctx, &[expr]);
+        assert_eq!(out, Value::Error(ErrorKind::Spill));
+    }
+
+    #[test]
+    fn elementwise_unary_maps_values_in_order() {
+        let input = Value::Array(Array::new(
+            2,
+            2,
+            vec![
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0),
+                Value::Number(4.0),
+            ],
+        ));
+        let out = elementwise_unary(&input, |v| match v {
+            Value::Number(n) => Value::Number(n + 1.0),
+            _ => Value::Error(ErrorKind::Value),
+        });
+        assert_eq!(
+            out,
+            Value::Array(Array::new(
+                2,
+                2,
+                vec![
+                    Value::Number(2.0),
+                    Value::Number(3.0),
+                    Value::Number(4.0),
+                    Value::Number(5.0),
+                ]
+            ))
+        );
     }
 }
 

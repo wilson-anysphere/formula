@@ -36,18 +36,18 @@ struct TextCriteria {
 }
 
 impl TextCriteria {
-    fn new(raw: &str) -> Self {
+    fn new(raw: &str) -> Result<Self, ErrorKind> {
         // `WildcardPattern` tokenizes the pattern in a case-insensitive manner (Unicode-aware),
         // so we don't need to pre-fold the raw string.
         let wildcard = WildcardPattern::new(raw);
         // For `>`/`<` comparisons, treat wildcard operators as literal characters while still
         // applying escape handling and case folding.
-        let literal_folded = wildcard.literal_pattern();
+        let literal_folded = wildcard.literal_pattern()?;
 
-        Self {
+        Ok(Self {
             literal_folded,
             wildcard,
-        }
+        })
     }
 }
 
@@ -351,7 +351,7 @@ fn parse_criteria_string(
 
         return Ok(Criteria {
             op,
-            rhs: CriteriaRhs::Text(TextCriteria::new(&text_literal)),
+            rhs: CriteriaRhs::Text(TextCriteria::new(&text_literal)?),
             value_locale,
             number_locale,
         });
@@ -406,7 +406,7 @@ fn parse_criteria_string(
 
     Ok(Criteria {
         op,
-        rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)),
+        rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)?),
         value_locale,
         number_locale,
     })

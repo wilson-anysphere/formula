@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::error::ExcelError;
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, MAX_MATERIALIZED_ARRAY_CELLS};
 use crate::functions::array_lift;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
@@ -893,7 +893,15 @@ fn collect_coefficients(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<
     match arg {
         ArgValue::Scalar(v) => match v {
             Value::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.values.len());
+                let total = arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut out: Vec<f64> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "SERIESSUM coefficient allocation failed (cells={total})");
+                    return Err(ErrorKind::Num);
+                }
                 for v in arr.values {
                     out.push(coerce_coeff(ctx, v)?);
                 }
@@ -904,7 +912,15 @@ fn collect_coefficients(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<
         ArgValue::Reference(r) => {
             let r = r.normalized();
             ctx.record_reference(&r);
-            let mut out = Vec::with_capacity(r.size() as usize);
+            let total = r.size() as usize;
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut out: Vec<f64> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "SERIESSUM coefficient allocation failed (cells={total})");
+                return Err(ErrorKind::Num);
+            }
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 out.push(coerce_coeff(ctx, v)?);
@@ -947,7 +963,15 @@ fn arg_to_numeric_sequence(
             Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)]),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.values.len());
+                let total = arr.values.len();
+                if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut out: Vec<Option<f64>> = Vec::new();
+                if out.try_reserve_exact(total).is_err() {
+                    debug_assert!(false, "numeric sequence allocation failed (cells={total})");
+                    return Err(ErrorKind::Num);
+                }
                 for v in arr.iter() {
                     match v {
                         Value::Error(e) => return Err(*e),
@@ -974,9 +998,15 @@ fn arg_to_numeric_sequence(
         ArgValue::Reference(r) => {
             let r = r.normalized();
             ctx.record_reference(&r);
-            let rows = (r.end.row - r.start.row + 1) as usize;
-            let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut out = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = r.size() as usize;
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut out: Vec<Option<f64>> = Vec::new();
+            if out.try_reserve_exact(total).is_err() {
+                debug_assert!(false, "numeric sequence allocation failed (cells={total})");
+                return Err(ErrorKind::Num);
+            }
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 match v {
@@ -1002,9 +1032,14 @@ fn arg_to_numeric_sequence(
             for r in ranges {
                 let r = r.normalized();
                 ctx.record_reference(&r);
-                let rows = (r.end.row - r.start.row + 1) as usize;
-                let cols = (r.end.col - r.start.col + 1) as usize;
-                out.reserve(rows.saturating_mul(cols));
+                let reserve = r.size() as usize;
+                if out.len().saturating_add(reserve) > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                if out.try_reserve(reserve).is_err() {
+                    debug_assert!(false, "numeric sequence allocation failed (reserve={reserve})");
+                    return Err(ErrorKind::Num);
+                }
                 for addr in r.iter_cells() {
                     if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;

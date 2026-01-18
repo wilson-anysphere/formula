@@ -34,7 +34,7 @@ fn worksheet_sort_moves_cells_and_rewrites_relative_formulas() {
         }],
     };
 
-    sort_worksheet_range(&mut sheet, range, &spec);
+    sort_worksheet_range(&mut sheet, range, &spec).expect("sort should succeed");
 
     // Values swapped.
     assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(1.0));
@@ -79,7 +79,7 @@ fn worksheet_sort_places_errors_after_booleans_and_orders_by_error_code() {
         }],
     };
 
-    sort_worksheet_range(&mut sheet, range, &spec);
+    sort_worksheet_range(&mut sheet, range, &spec).expect("sort should succeed");
 
     // Excel ordering: numbers < text < booleans < errors < blanks.
     // Errors ordered by `ErrorValue::code()` (Div0=2, GettingData=8, Field=11).
@@ -127,7 +127,8 @@ fn worksheet_sort_with_value_locale_parses_text_numbers() {
         }],
     };
 
-    sort_worksheet_range_with_value_locale(&mut sheet, range, &spec, ValueLocaleConfig::de_de());
+    sort_worksheet_range_with_value_locale(&mut sheet, range, &spec, ValueLocaleConfig::de_de())
+        .expect("sort should succeed");
 
     assert_eq!(
         sheet.value(CellRef::new(1, 0)),

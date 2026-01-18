@@ -80,7 +80,11 @@ impl ScenarioManager {
             ));
         }
 
-        let mut value_map = HashMap::with_capacity(changing_cells.len());
+        let mut value_map: HashMap<CellRef, CellValue> = HashMap::new();
+        if value_map.try_reserve(changing_cells.len()).is_err() {
+            debug_assert!(false, "allocation failed (scenario values)");
+            return Err(WhatIfError::NumericalFailure("allocation failed"));
+        }
         for (cell, value) in changing_cells.iter().cloned().zip(values.into_iter()) {
             value_map.insert(cell, value);
         }
@@ -88,6 +92,10 @@ impl ScenarioManager {
         let id = ScenarioId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
 
+        if self.scenarios.try_reserve(1).is_err() {
+            debug_assert!(false, "allocation failed (scenarios)");
+            return Err(WhatIfError::NumericalFailure("allocation failed"));
+        }
         self.scenarios.insert(
             id,
             Scenario {
@@ -131,8 +139,8 @@ impl ScenarioManager {
             return Ok(());
         }
 
-        for (cell, value) in self.base_values.clone() {
-            model.set_cell_value(&cell, value)?;
+        for (cell, value) in &self.base_values {
+            model.set_cell_value(cell, value.clone())?;
         }
         model.recalculate()?;
 
@@ -148,13 +156,20 @@ impl ScenarioManager {
         let scenario = self
             .scenarios
             .get(&id)
-            .cloned()
             .ok_or_else(|| WhatIfError::InvalidParams("scenario not found"))?;
 
         // Capture base values for any changing cells we haven't seen yet.
         //
         // Scenarios may have different changing cell sets, so the base snapshot
         // needs to be the union of inputs across all applied scenarios.
+        if self
+            .base_values
+            .try_reserve(scenario.changing_cells.len())
+            .is_err()
+        {
+            debug_assert!(false, "allocation failed (base scenario values)");
+            return Err(WhatIfError::NumericalFailure("allocation failed"));
+        }
         for cell in &scenario.changing_cells {
             if !self.base_values.contains_key(cell) {
                 let base = model.get_cell_value(cell)?;
@@ -162,8 +177,8 @@ impl ScenarioManager {
             }
         }
 
-        for (cell, value) in scenario.values {
-            model.set_cell_value(&cell, value)?;
+        for (cell, value) in &scenario.values {
+            model.set_cell_value(cell, value.clone())?;
         }
         model.recalculate()?;
 
@@ -180,9 +195,20 @@ impl ScenarioManager {
         self.restore_base(model)?;
 
         let mut results: HashMap<String, HashMap<CellRef, CellValue>> = HashMap::new();
+        if results
+            .try_reserve(scenario_ids.len().saturating_add(1))
+            .is_err()
+        {
+            debug_assert!(false, "allocation failed (scenario summary results)");
+            return Err(WhatIfError::NumericalFailure("allocation failed"));
+        }
 
         // Base case.
-        let mut base_row = HashMap::new();
+        let mut base_row: HashMap<CellRef, CellValue> = HashMap::new();
+        if base_row.try_reserve(result_cells.len()).is_err() {
+            debug_assert!(false, "allocation failed (scenario summary base row)");
+            return Err(WhatIfError::NumericalFailure("allocation failed"));
+        }
         for cell in &result_cells {
             base_row.insert(cell.clone(), model.get_cell_value(cell)?);
         }
@@ -196,7 +222,11 @@ impl ScenarioManager {
                 .get(id)
                 .ok_or_else(|| WhatIfError::InvalidParams("scenario not found"))?;
 
-            let mut row = HashMap::new();
+            let mut row: HashMap<CellRef, CellValue> = HashMap::new();
+            if row.try_reserve(result_cells.len()).is_err() {
+                debug_assert!(false, "allocation failed (scenario summary row)");
+                return Err(WhatIfError::NumericalFailure("allocation failed"));
+            }
             for cell in &result_cells {
                 row.insert(cell.clone(), model.get_cell_value(cell)?);
             }

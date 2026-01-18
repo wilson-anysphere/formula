@@ -2,7 +2,8 @@ use formula_engine::run_benchmarks;
 use std::io::{self, Write};
 
 fn escape_json_string(input: &str) -> String {
-    let mut out = String::with_capacity(input.len() + 8);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(input.len().saturating_add(8));
     for ch in input.chars() {
         match ch {
             '"' => out.push_str("\\\""),
