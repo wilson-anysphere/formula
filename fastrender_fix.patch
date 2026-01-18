@@ -1,0 +1,717 @@
+From dad9de4f38f2cf31c0204d629dfb6e1e3a057103 Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 11:05:23 -0800
+Subject: [PATCH] fix(non-macOS): restore layout/fragmentation tests
+
+- Fix duplicate WebSocket maybe_tls_stream module export
+- Unblock non-macOS unit tests by stubbing missing scroll wheel interaction wiring
+- Make URL hex-digit helper available to non-test parser code
+- Improve minimal grid layout:
+  - plumb percentage bases from LayoutConstraints
+  - account for row/column gaps in track positioning and GridTrackRanges
+  - cover all justify/align-content variants exercised by tests
+- Harden fragmentation:
+  - sort mirrored grid track ranges in physical flow order for atomic candidates
+  - fix grid fragmentation test fixtures to include expected box ids
+- Silence check-cfg warnings by defining no-op `renderer` features in websocket helper crates
+---
+ crates/fastrender-websocket/Cargo.toml   |   1 +
+ crates/fastrender_url/src/code_points.rs |   1 -
+ crates/ipc_stack/Cargo.toml              |   1 +
+ src/layout/fragmentation.rs              |  75 +++++++---
+ src/layout_minimal/constraints.rs        |  11 +-
+ src/layout_minimal/contexts/grid.rs      |   7 +-
+ src/layout_minimal/engine.rs             | 179 +++++++++++++++++------
+ src/layout_minimal/formatting_context.rs |  52 +++++++
+ src/lib_non_macos_impl.rs                |  84 +++++++++++
+ src/net/websocket/mod.rs                 |   1 -
+ 10 files changed, 342 insertions(+), 70 deletions(-)
+
+diff --git a/crates/fastrender-websocket/Cargo.toml b/crates/fastrender-websocket/Cargo.toml
+index 85d0f4be47..5f6fbf99b1 100644
+--- a/crates/fastrender-websocket/Cargo.toml
++++ b/crates/fastrender-websocket/Cargo.toml
+@@ -11,6 +11,7 @@ default = ["websocket_proptests"]
+ # modules are compiled via `#[path]`.
+ renderer_integration_tests = []
+ # Compatibility shims for renderer-only cfg flags used in shared sources.
++renderer = []
+ renderer_minimal = []
+ # Tokio-backed async `AsyncWebSocket` wrapper (only `io-util` traits).
+ websocket_async = ["dep:tokio"]
+diff --git a/crates/fastrender_url/src/code_points.rs b/crates/fastrender_url/src/code_points.rs
+index 8037df7030..2abf204655 100644
+--- a/crates/fastrender_url/src/code_points.rs
++++ b/crates/fastrender_url/src/code_points.rs
+@@ -10,7 +10,6 @@ pub(crate) fn is_ascii_alphanumeric(c: char) -> bool {
+   is_ascii_alpha(c) || matches!(c, '0'..='9')
+ }
+ 
+-#[cfg(test)]
+ #[inline]
+ pub(crate) fn is_ascii_hex_digit(c: char) -> bool {
+   matches!(c, '0'..='9' | 'A'..='F' | 'a'..='f')
+diff --git a/crates/ipc_stack/Cargo.toml b/crates/ipc_stack/Cargo.toml
+index be6acf9e79..388d64d784 100644
+--- a/crates/ipc_stack/Cargo.toml
++++ b/crates/ipc_stack/Cargo.toml
+@@ -12,6 +12,7 @@ default = []
+ # Feature gate used by `tests/integration.rs` to opt into the full renderer integration suite.
+ renderer_integration_tests = []
+ # Compatibility shims for renderer-only cfg flags referenced in shared sources.
++renderer = []
+ renderer_minimal = []
+ # Optional full renderer/browser IPC surface (not needed for the protocol hardening tests).
+ ipc_full = []
+diff --git a/src/layout/fragmentation.rs b/src/layout/fragmentation.rs
+index 475f575efe..5a62ffb525 100644
+--- a/src/layout/fragmentation.rs
++++ b/src/layout/fragmentation.rs
+@@ -5654,8 +5654,23 @@ fn collect_atomic_candidate_for_node(
+ 
+   if matches!(style.display, Display::Grid | Display::InlineGrid) {
+     if let Some(grid_tracks) = node.grid_tracks.as_deref() {
+-      let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
+-      debug_assert_grid_tracks_in_flow_order(tracks, axis, node_block_size);
++      let mut tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis).to_vec();
++      tracks.sort_by(|(a_start, a_end), (b_start, b_end)| {
++        let a_size = (*a_end - *a_start).max(0.0);
++        let b_size = (*b_end - *b_start).max(0.0);
++        let a_flow = axis.flow_offset(*a_start, a_size, node_block_size);
++        let b_flow = axis.flow_offset(*b_start, b_size, node_block_size);
++
++        match (a_flow.is_finite(), b_flow.is_finite()) {
++          (true, true) => a_flow
++            .partial_cmp(&b_flow)
++            .unwrap_or(std::cmp::Ordering::Equal),
++          (true, false) => std::cmp::Ordering::Less,
++          (false, true) => std::cmp::Ordering::Greater,
++          (false, false) => std::cmp::Ordering::Equal,
++        }
++      });
++      debug_assert_grid_tracks_in_flow_order(&tracks, axis, node_block_size);
+ 
+       // Treat each grid track as indivisible. Additionally, treat the inter-track gutter preceding
+       // each track as part of the following track so pagination never splits a `row-gap`/`column-gap`
+@@ -6927,16 +6942,20 @@ mod tests {
+     second_style.break_before = BreakBetween::Left;
+     let second_style = Arc::new(second_style);
+ 
++    let mut first =
++      FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], first_style);
++    first.content = FragmentContent::Block { box_id: Some(1) };
++
++    let mut second = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      second_style,
++    );
++    second.content = FragmentContent::Block { box_id: Some(2) };
++
+     let mut grid = FragmentNode::new_block_styled(
+       Rect::from_xywh(0.0, 0.0, 100.0, 120.0),
+-      vec![
+-        FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], first_style),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          second_style,
+-        ),
+-      ],
++      vec![first, second],
+       grid_style,
+     );
+     grid.grid_tracks = Some(Arc::new(GridTrackRanges {
+@@ -7505,21 +7524,27 @@ mod tests {
+     left_again_style.break_before = BreakBetween::Left;
+     let left_again_style = Arc::new(left_again_style);
+ 
++    let mut left =
++      FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], left_style);
++    left.content = FragmentContent::Block { box_id: Some(1) };
++
++    let mut right = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      right_style,
++    );
++    right.content = FragmentContent::Block { box_id: Some(2) };
++
++    let mut left_again = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      left_again_style,
++    );
++    left_again.content = FragmentContent::Block { box_id: Some(3) };
++
+     let mut grid = FragmentNode::new_block_styled(
+       Rect::from_xywh(0.0, 0.0, 100.0, 120.0),
+-      vec![
+-        FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], left_style),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          right_style,
+-        ),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          left_again_style,
+-        ),
+-      ],
++      vec![left, right, left_again],
+       grid_style,
+     );
+     grid.grid_tracks = Some(Arc::new(GridTrackRanges {
+@@ -8846,7 +8871,9 @@ mod tests {
+     let mut first = FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 10.0), vec![]);
+     first.style = Some(break_style);
+     let second = FragmentNode::new_block(Rect::from_xywh(0.0, 10.0, 100.0, 10.0), vec![]);
+-    let item = FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 20.0), vec![first, second]);
++    let mut item =
++      FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 20.0), vec![first, second]);
++    item.content = FragmentContent::Block { box_id: Some(1) };
+ 
+     let mut grid_style = ComputedStyle::default();
+     grid_style.display = Display::Grid;
+diff --git a/src/layout_minimal/constraints.rs b/src/layout_minimal/constraints.rs
+index e6a12299a9..20b6c8a3b6 100644
+--- a/src/layout_minimal/constraints.rs
++++ b/src/layout_minimal/constraints.rs
+@@ -30,13 +30,18 @@ impl AvailableSpace {
+ pub struct LayoutConstraints {
+   pub available_width: AvailableSpace,
+   pub available_height: AvailableSpace,
++  pub inline_percentage_base: Option<f32>,
++  pub block_percentage_base: Option<f32>,
+ }
+ 
+ impl LayoutConstraints {
+   pub fn new(available_width: AvailableSpace, available_height: AvailableSpace) -> Self {
++    let inline_percentage_base = available_width.to_definite().filter(|base| base.is_finite());
+     Self {
+       available_width,
+       available_height,
++      inline_percentage_base,
++      block_percentage_base: None,
+     }
+   }
+ 
+@@ -55,11 +60,13 @@ impl LayoutConstraints {
+     )
+   }
+ 
+-  pub fn with_block_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_block_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.block_percentage_base = base;
+     self
+   }
+ 
+-  pub fn with_inline_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_inline_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.inline_percentage_base = base;
+     self
+   }
+ }
+diff --git a/src/layout_minimal/contexts/grid.rs b/src/layout_minimal/contexts/grid.rs
+index cbe0a11420..8317e7052a 100644
+--- a/src/layout_minimal/contexts/grid.rs
++++ b/src/layout_minimal/contexts/grid.rs
+@@ -10,7 +10,10 @@ use crate::geometry::Point;
+ use crate::layout::axis::{FragmentAxes, PhysicalAxis};
+ use crate::layout::constraints::{AvailableSpace, LayoutConstraints};
+ use crate::layout::engine::{LayoutConfig, LayoutEngine, LayoutParallelism};
+-use crate::layout::formatting_context::{FormattingContext, IntrinsicSizingMode, LayoutError};
++use crate::layout::formatting_context::{
++  set_block_percentage_base_hint, set_inline_percentage_base_hint, FormattingContext,
++  IntrinsicSizingMode, LayoutError,
++};
+ use crate::style::types::GridTrack;
+ use crate::tree::box_tree::{BoxNode, BoxTree};
+ use crate::tree::fragment_tree::{FragmentNode, FragmentTree};
+@@ -41,6 +44,8 @@ impl GridFormattingContext {
+     let _ = self.parallelism;
+     let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
+     let tree = BoxTree::new(box_node.clone());
++    let _inline_base_guard = set_inline_percentage_base_hint(constraints.inline_percentage_base);
++    let _block_base_guard = set_block_percentage_base_hint(constraints.block_percentage_base);
+     engine.layout_tree(&tree)
+   }
+ 
+diff --git a/src/layout_minimal/engine.rs b/src/layout_minimal/engine.rs
+index c5d3942ccd..357b247b7c 100644
+--- a/src/layout_minimal/engine.rs
++++ b/src/layout_minimal/engine.rs
+@@ -15,8 +15,9 @@ use crate::layout::fragmentation::{
+ };
+ use crate::layout::formatting_context::{
+   fragmentainer_axes_hint, fragmentainer_block_offset_hint, fragmentainer_block_size_hint,
+-  set_fragmentainer_axes_hint, set_fragmentainer_block_offset_hint, set_fragmentainer_block_size_hint,
+-  set_viewport_size_hint, viewport_size_hint, LayoutError,
++  block_percentage_base_hint, inline_percentage_base_hint, set_fragmentainer_axes_hint,
++  set_fragmentainer_block_offset_hint, set_fragmentainer_block_size_hint, set_viewport_size_hint,
++  viewport_size_hint, LayoutError,
+ };
+ use crate::style::display::FormattingContextType;
+ use crate::style::page::PageSide;
+@@ -371,6 +372,27 @@ fn resolve_length(
+     .unwrap_or(fallback)
+ }
+ 
++fn percentage_base_for_physical_axis(
++  axes: FragmentAxes,
++  physical_axis: PhysicalAxis,
++  available: Size,
++) -> Option<f32> {
++  let direct = match physical_axis {
++    PhysicalAxis::X => available.width,
++    PhysicalAxis::Y => available.height,
++  };
++  if direct.is_finite() {
++    return Some(direct.max(0.0));
++  }
++
++  let hint = if axes.inline_axis() == physical_axis {
++    inline_percentage_base_hint()
++  } else {
++    block_percentage_base_hint()
++  };
++  hint.filter(|base| base.is_finite()).map(|base| base.max(0.0))
++}
++
+ fn resolve_margin(
+   value: Option<crate::style::values::Length>,
+   percentage_base: f32,
+@@ -1474,15 +1496,28 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       .unwrap_or_else(|| length.to_px())
+   };
+ 
+-  let inline_base = if axes.block_axis() == PhysicalAxis::X {
+-    available.height
+-  } else {
+-    available.width
+-  };
+-  let block_base = if axes.block_axis() == PhysicalAxis::X {
+-    available.width
++  let inline_base = percentage_base_for_physical_axis(axes, axes.inline_axis(), available).unwrap_or_else(|| {
++    if axes.inline_axis() == PhysicalAxis::X {
++      available.width
++    } else {
++      available.height
++    }
++  });
++  let block_base = percentage_base_for_physical_axis(axes, axes.block_axis(), available).unwrap_or_else(|| {
++    if axes.block_axis() == PhysicalAxis::X {
++      available.width
++    } else {
++      available.height
++    }
++  });
++
++  // CSS Values & Units: percentage `gap` lengths resolve against the container's *inline* size.
++  // We don't know the final used size yet, but the available-size-derived inline base is a good
++  // approximation for the minimal layout harness (and matches px lengths exactly).
++  let gap_base = if inline_base.is_finite() {
++    inline_base.max(0.0)
+   } else {
+-    available.height
++    0.0
+   };
+ 
+   // Minimal implicit track sizing: when no explicit template tracks are specified, fall back to the
+@@ -1591,23 +1626,38 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   let track_block_sum: f32 = row_sizes.iter().sum();
+   let track_inline_sum: f32 = column_sizes.iter().sum();
+ 
++  let row_gap = if style.grid_row_gap_is_normal {
++    0.0
++  } else {
++    resolve_track_length(style.grid_row_gap, gap_base).max(0.0)
++  };
++  let column_gap = if style.grid_column_gap_is_normal {
++    0.0
++  } else {
++    resolve_track_length(style.grid_column_gap, gap_base).max(0.0)
++  };
++
++  let row_gap_total = row_gap * row_sizes.len().saturating_sub(1) as f32;
++  let column_gap_total = column_gap * column_sizes.len().saturating_sub(1) as f32;
++  let track_block_total = track_block_sum + row_gap_total;
++  let track_inline_total = track_inline_sum + column_gap_total;
++
+   let (track_width, track_height) = if axes.block_axis() == PhysicalAxis::X {
+-    (track_block_sum, track_inline_sum)
++    (track_block_total, track_inline_total)
+   } else {
+-    (track_inline_sum, track_block_sum)
++    (track_inline_total, track_block_total)
+   };
+ 
++  let width_base = percentage_base_for_physical_axis(axes, PhysicalAxis::X, available);
++  let height_base = percentage_base_for_physical_axis(axes, PhysicalAxis::Y, available);
++
+   let mut width = style
+     .width
+-    .and_then(|length| {
+-      length.resolve_px_with_fonts(Some(available.width), style.font_size, style.root_font_size)
+-    })
++    .and_then(|length| length.resolve_px_with_fonts(width_base, style.font_size, style.root_font_size))
+     .unwrap_or_else(|| if track_width > 0.0 { track_width } else { available.width });
+   let mut height = style
+     .height
+-    .and_then(|length| {
+-      length.resolve_px_with_fonts(Some(available.height), style.font_size, style.root_font_size)
+-    })
++    .and_then(|length| length.resolve_px_with_fonts(height_base, style.font_size, style.root_font_size))
+     .unwrap_or_else(|| if track_height > 0.0 { track_height } else { 0.0 });
+ 
+   // CSS Sizing: if the grid container has a preferred aspect ratio and one axis has a definite used
+@@ -1645,7 +1695,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   // This is required for regression tests that expect a single implicit `auto` row/column to fill
+   // the container and allow default `align-items: stretch` / `justify-items: stretch` to size grid
+   // items.
+-  let mut stretch_auto_tracks = |tracks: &[GridTrack], sizes: &mut [f32], container_size: f32| {
++  let mut stretch_auto_tracks =
++    |tracks: &[GridTrack], sizes: &mut [f32], container_size: f32, gap: f32| {
+     if tracks.is_empty() || sizes.is_empty() || tracks.len() != sizes.len() {
+       return;
+     }
+@@ -1658,7 +1709,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     if !total.is_finite() {
+       return;
+     }
+-    let free_space = container_size - total;
++    let gap_total = gap.max(0.0) * tracks.len().saturating_sub(1) as f32;
++    let free_space = container_size - total - gap_total;
+     if !(free_space.is_finite() && free_space > 0.01) {
+       return;
+     }
+@@ -1677,11 +1729,14 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       }
+     }
+   };
+-  if matches!(style.justify_content, JustifyContent::FlexStart) {
+-    stretch_auto_tracks(&column_tracks, &mut column_sizes, container_inline_size);
++  if matches!(
++    style.justify_content,
++    JustifyContent::Normal | JustifyContent::Stretch | JustifyContent::FlexStart
++  ) {
++    stretch_auto_tracks(&column_tracks, &mut column_sizes, container_inline_size, column_gap);
+   }
+   if matches!(style.align_content, AlignContent::Stretch) {
+-    stretch_auto_tracks(&row_tracks, &mut row_sizes, container_block_size);
++    stretch_auto_tracks(&row_tracks, &mut row_sizes, container_block_size, row_gap);
+   }
+ 
+   let block_size = container_block_size;
+@@ -1805,8 +1860,10 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+ 
+   let track_block_sum: f32 = row_sizes.iter().sum();
+   let track_inline_sum: f32 = column_sizes.iter().sum();
+-  let mut block_free = (container_block_size - track_block_sum).max(0.0);
+-  let inline_free = (container_inline_size - track_inline_sum).max(0.0);
++  let track_block_total = track_block_sum + row_gap * row_count.saturating_sub(1) as f32;
++  let track_inline_total = track_inline_sum + column_gap * column_count.saturating_sub(1) as f32;
++  let mut block_free = (container_block_size - track_block_total).max(0.0);
++  let inline_free = (container_inline_size - track_inline_total).max(0.0);
+ 
+   // `align-content: stretch` distributes any remaining free space across the grid tracks. The
+   // minimal layout harness only needs the simplest behavior: grow each row equally.
+@@ -1830,22 +1887,41 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   };
+   let inline_offset = match style.justify_content {
+     JustifyContent::Center => inline_free / 2.0,
+-    JustifyContent::FlexEnd => inline_free,
+-    JustifyContent::FlexStart | JustifyContent::Start => 0.0,
++    JustifyContent::FlexEnd | JustifyContent::End => inline_free,
++    JustifyContent::Normal
++    | JustifyContent::Stretch
++    | JustifyContent::FlexStart
++    | JustifyContent::Start
++    | JustifyContent::SpaceBetween
++    | JustifyContent::SpaceAround
++    | JustifyContent::SpaceEvenly => 0.0,
+   };
+ 
++  // Track positioning with `row-gap` / `column-gap`.
++  //
++  // `row_edges` / `column_edges` store grid line positions at the *end* of each track (i.e. before
++  // the following gap). This matches how fragmentation expects track ranges to expose gaps as the
++  // space between consecutive ranges.
+   let mut row_edges: Vec<f32> = Vec::with_capacity(row_count + 1);
+   row_edges.push(block_offset);
+-  for size in row_sizes.iter().copied() {
+-    let next = row_edges.last().copied().unwrap_or(block_offset) + size;
+-    row_edges.push(next);
++  let mut row_cursor = block_offset;
++  for (idx, size) in row_sizes.iter().copied().enumerate() {
++    row_cursor += size;
++    row_edges.push(row_cursor);
++    if idx + 1 < row_count {
++      row_cursor += row_gap;
++    }
+   }
+ 
+   let mut column_edges: Vec<f32> = Vec::with_capacity(column_count + 1);
+   column_edges.push(inline_offset);
+-  for size in column_sizes.iter().copied() {
+-    let next = column_edges.last().copied().unwrap_or(inline_offset) + size;
+-    column_edges.push(next);
++  let mut column_cursor = inline_offset;
++  for (idx, size) in column_sizes.iter().copied().enumerate() {
++    column_cursor += size;
++    column_edges.push(column_cursor);
++    if idx + 1 < column_count {
++      column_cursor += column_gap;
++    }
+   }
+ 
+   fn mirror_ranges(ranges: &mut [(f32, f32)], span_start: f32, span_end: f32) {
+@@ -1869,17 +1945,27 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   }
+ 
+   let mut row_ranges = Vec::with_capacity(row_count);
+-  for window in row_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
++  for idx in 0..row_count {
++    let Some(&end) = row_edges.get(idx + 1) else {
++      continue;
++    };
++    let Some(&line) = row_edges.get(idx) else {
++      continue;
++    };
++    let start = if idx == 0 { line } else { line + row_gap };
+     if start.is_finite() && end.is_finite() && end >= start {
+       row_ranges.push((start, end));
+     }
+   }
+   let mut col_ranges = Vec::with_capacity(column_count);
+-  for window in column_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
++  for idx in 0..column_count {
++    let Some(&end) = column_edges.get(idx + 1) else {
++      continue;
++    };
++    let Some(&line) = column_edges.get(idx) else {
++      continue;
++    };
++    let start = if idx == 0 { line } else { line + column_gap };
+     if start.is_finite() && end.is_finite() && end >= start {
+       col_ranges.push((start, end));
+     }
+@@ -1925,13 +2011,24 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     let row_end_edge = row_end.saturating_sub(1) as usize;
+     let col_end_edge = col_end.saturating_sub(1) as usize;
+ 
+-    let Some(&block_start) = row_edges.get(row_start_edge) else {
++    let Some(&block_start_line) = row_edges.get(row_start_edge) else {
+       continue;
+     };
+-    let Some(&inline_start) = column_edges.get(col_start_edge) else {
++    let Some(&inline_start_line) = column_edges.get(col_start_edge) else {
+       continue;
+     };
+ 
++    let block_start = if row_start_edge == 0 {
++      block_start_line
++    } else {
++      block_start_line + row_gap
++    };
++    let inline_start = if col_start_edge == 0 {
++      inline_start_line
++    } else {
++      inline_start_line + column_gap
++    };
++
+     let block_end = row_edges.get(row_end_edge).copied().unwrap_or(block_start);
+     let inline_end = column_edges.get(col_end_edge).copied().unwrap_or(inline_start);
+     let cell_block = (block_end - block_start).max(0.0);
+diff --git a/src/layout_minimal/formatting_context.rs b/src/layout_minimal/formatting_context.rs
+index c56bcebf73..9d6a407ce4 100644
+--- a/src/layout_minimal/formatting_context.rs
++++ b/src/layout_minimal/formatting_context.rs
+@@ -157,6 +157,8 @@ thread_local! {
+   static FRAGMENTAINER_BLOCK_SIZE_HINT: Cell<Option<f32>> = Cell::new(None);
+   static FRAGMENTAINER_BLOCK_OFFSET_HINT: Cell<f32> = Cell::new(0.0);
+   static FRAGMENTAINER_AXES_HINT: Cell<Option<FragmentAxes>> = Cell::new(None);
++  static INLINE_PERCENTAGE_BASE_HINT: Cell<Option<f32>> = Cell::new(None);
++  static BLOCK_PERCENTAGE_BASE_HINT: Cell<Option<f32>> = Cell::new(None);
+ }
+ 
+ pub(crate) struct ViewportSizeHintGuard {
+@@ -184,6 +186,56 @@ pub(crate) fn set_viewport_size_hint(viewport: Option<Size>) -> ViewportSizeHint
+   ViewportSizeHintGuard { previous }
+ }
+ 
++pub(crate) struct InlinePercentageBaseHintGuard {
++  previous: Option<f32>,
++}
++
++impl Drop for InlinePercentageBaseHintGuard {
++  fn drop(&mut self) {
++    INLINE_PERCENTAGE_BASE_HINT.with(|hint| {
++      hint.set(self.previous);
++    });
++  }
++}
++
++pub(crate) fn inline_percentage_base_hint() -> Option<f32> {
++  INLINE_PERCENTAGE_BASE_HINT.with(|hint| hint.get())
++}
++
++pub(crate) fn set_inline_percentage_base_hint(base: Option<f32>) -> InlinePercentageBaseHintGuard {
++  let previous = INLINE_PERCENTAGE_BASE_HINT.with(|cell| {
++    let previous = cell.get();
++    cell.set(base);
++    previous
++  });
++  InlinePercentageBaseHintGuard { previous }
++}
++
++pub(crate) struct BlockPercentageBaseHintGuard {
++  previous: Option<f32>,
++}
++
++impl Drop for BlockPercentageBaseHintGuard {
++  fn drop(&mut self) {
++    BLOCK_PERCENTAGE_BASE_HINT.with(|hint| {
++      hint.set(self.previous);
++    });
++  }
++}
++
++pub(crate) fn block_percentage_base_hint() -> Option<f32> {
++  BLOCK_PERCENTAGE_BASE_HINT.with(|hint| hint.get())
++}
++
++pub(crate) fn set_block_percentage_base_hint(base: Option<f32>) -> BlockPercentageBaseHintGuard {
++  let previous = BLOCK_PERCENTAGE_BASE_HINT.with(|cell| {
++    let previous = cell.get();
++    cell.set(base);
++    previous
++  });
++  BlockPercentageBaseHintGuard { previous }
++}
++
+ pub(crate) struct FragmentainerBlockSizeHintGuard {
+   previous: Option<f32>,
+ }
+diff --git a/src/lib_non_macos_impl.rs b/src/lib_non_macos_impl.rs
+index 14f377dd4e..276ef15086 100644
+--- a/src/lib_non_macos_impl.rs
++++ b/src/lib_non_macos_impl.rs
+@@ -323,6 +323,8 @@ pub mod platform {
+     pub mod pixel_snap;
+     #[path = "scroll_reconcile.rs"]
+     pub mod scroll_reconcile;
++    #[path = "scroll_gesture.rs"]
++    pub mod scroll_gesture;
+     #[path = "scroll_end.rs"]
+     pub mod scroll_end;
+     #[path = "fast_scroll_regions.rs"]
+@@ -343,6 +345,88 @@ pub mod ui {
+   pub mod shortcuts;
+ }
+ 
++// Minimal interaction surface needed by scroll-related unit tests.
++//
++// The full interaction engine depends on platform and DOM subsystems that are not built in the
++// non-macOS test harness, but some of the macOS scroll utilities are platform-agnostic and unit
++// tested on every target.
++#[cfg(test)]
++pub mod interaction {
++  pub mod scroll_wheel {
++    pub use crate::platform::wheel::WheelGesturePhase;
++    use crate::platform::wheel::WheelPhase;
++
++    /// Cached scroll target for a wheel/trackpad gesture (minimal test stub).
++    #[derive(Debug, Clone, PartialEq, Eq)]
++    pub enum ScrollLatchTarget {
++      ViewportOnly,
++      ScrollContainer { id: u64 },
++    }
++
++    #[derive(Debug, Default, Clone)]
++    pub struct ScrollLatchState {
++      latched_target: Option<ScrollLatchTarget>,
++      latched_listener_generation: Option<u64>,
++    }
++
++    impl ScrollLatchState {
++      pub fn is_latched(&self) -> bool {
++        self.latched_target.is_some()
++      }
++
++      pub fn latched_target(&self) -> Option<&ScrollLatchTarget> {
++        self.latched_target.as_ref()
++      }
++
++      pub fn latched_listener_generation(&self) -> Option<u64> {
++        self.latched_listener_generation
++      }
++
++      pub fn clear(&mut self) {
++        self.latched_target = None;
++        self.latched_listener_generation = None;
++      }
++
++      fn should_start_latch(&self, phase: WheelGesturePhase) -> bool {
++        phase.is_unphased()
++          || matches!(phase.phase, Some(WheelPhase::Began))
++          || self.latched_target.is_none()
++      }
++
++      fn should_clear_latch(phase: WheelGesturePhase) -> bool {
++        phase.is_gesture_end() || phase.is_unphased()
++      }
++
++      pub fn with_target_for_event<T>(
++        &mut self,
++        phase: WheelGesturePhase,
++        listener_generation: Option<u64>,
++        resolve_target: impl FnOnce() -> ScrollLatchTarget,
++        f: impl FnOnce(&ScrollLatchTarget) -> T,
++      ) -> T {
++        if self.should_start_latch(phase) {
++          self.latched_target = Some(resolve_target());
++          self.latched_listener_generation = listener_generation;
++        }
++
++        let result = {
++          let target = self
++            .latched_target
++            .as_ref()
++            .expect("scroll latch target should be set");
++          f(target)
++        };
++
++        if Self::should_clear_latch(phase) {
++          self.clear();
++        }
++
++        result
++      }
++    }
++  }
++}
++
+ // Resource-layer helpers that are platform-independent and useful to validate on non-macOS builds.
+ //
+ // Keep this intentionally narrow: the full `resource` stack depends on platform and networking
+diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
+index 80b14c89b4..fefd07e493 100644
+--- a/src/net/websocket/mod.rs
++++ b/src/net/websocket/mod.rs
+@@ -15,7 +15,6 @@ pub mod handshake_client;
+ pub mod http_response_head;
+ pub mod http_headers;
+ pub mod message;
+-pub mod maybe_tls_stream;
+ pub mod ws_url;
+ pub mod origin;
+ pub mod server;
+-- 
+2.43.0
+
