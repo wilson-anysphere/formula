@@ -5,7 +5,7 @@ This directory exists to preserve a change for the (currently inaccessible) `wil
 ## What this is
 
 - `e048af7b46_restore_build_and_fragmentation_tests.patch`
-  - `git format-patch` output for commit `e048af7b46a8c77ac95c28c1db1e6d26f4a8d4e0`.
+  - `git format-patch` output for commit `e048af7b4688c5671f9d57dfe779171a1b71ed26`.
 
 - `e048af7b46_restore_build_and_fragmentation_tests.bundle`
   - A `git bundle` containing **only** that single commit.
@@ -35,4 +35,3 @@ git cherry-pick FETCH_HEAD
 ```bash
 git am < grind_patches/e048af7b46_restore_build_and_fragmentation_tests.patch
 ```
-
