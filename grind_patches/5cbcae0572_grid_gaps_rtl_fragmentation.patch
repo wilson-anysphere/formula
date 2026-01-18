@@ -1,0 +1,801 @@
+From 5cbcae05722e5ba917cbe6b4ae1705631ba12ff3 Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 11:08:33 -0800
+Subject: [PATCH] fix(layout_minimal): grid gaps + rtl fragmentation track
+ order
+
+- Apply numeric longhand overrides before normalizing grid placement conflicts (preserves spans)
+- Implement row/column gaps in minimal grid track sizing + item placement
+- Do not stretch fixed tracks for align-content/justify-content stretch (keeps 0px tracks)
+- Fragmentation: consume grid track ranges in global flow order when axes are mirrored
+- Snapshot harness: dedupe websocket exports + non-macOS stubs + URL imports
+---
+ src/layout/fragmentation.rs          | 157 +++++++++++++++++++++---
+ src/layout_minimal/constraints.rs    |  47 ++++++-
+ src/layout_minimal/contexts/block.rs |   4 +-
+ src/layout_minimal/contexts/flex.rs  |   4 +-
+ src/layout_minimal/contexts/grid.rs  |   4 +-
+ src/layout_minimal/engine.rs         | 176 +++++++++++++++------------
+ src/lib_non_macos_impl.rs            |  53 --------
+ src/style_minimal/computed.rs        |  13 ++
+ src/style_minimal/mod.rs             |   1 +
+ src/ui/url.rs                        |   1 -
+ 10 files changed, 302 insertions(+), 158 deletions(-)
+ create mode 100644 src/style_minimal/computed.rs
+
+diff --git a/src/layout/fragmentation.rs b/src/layout/fragmentation.rs
+index e2d815128f..9a7573732e 100644
+--- a/src/layout/fragmentation.rs
++++ b/src/layout/fragmentation.rs
+@@ -1351,20 +1351,142 @@ const SIBLING_LIMIT_FALLBACK_RATIO: f32 = 0.15;
+ // The vectors stay in logical track order; reversed writing-mode/direction is represented by
+ // mirrored coordinates (gutters live between ranges). Keep this in mind when mapping to the
+ // fragmentation axis (see fragment_tree.rs for the full conventions).
++#[derive(Clone, Copy)]
++struct GridTracksInFlowOrder<'a> {
++  tracks: &'a [(f32, f32)],
++  reversed: bool,
++}
++
++impl<'a> GridTracksInFlowOrder<'a> {
++  fn new(tracks: &'a [(f32, f32)], axis: &FragmentAxis, parent_block_size: f32) -> Self {
++    if tracks.len() < 2 || !parent_block_size.is_finite() {
++      return Self {
++        tracks,
++        reversed: false,
++      };
++    }
++
++    let mut prev_flow_start: Option<f32> = None;
++    for (track_start, track_end) in tracks.iter().copied() {
++      let track_size = (track_end - track_start).max(0.0);
++      let flow_start = axis.flow_offset(track_start, track_size, parent_block_size);
++      if !flow_start.is_finite() {
++        prev_flow_start = None;
++        continue;
++      }
++      if let Some(prev) = prev_flow_start {
++        if flow_start + BREAK_EPSILON < prev {
++          return Self {
++            tracks,
++            reversed: true,
++          };
++        }
++      }
++      prev_flow_start = Some(flow_start);
++    }
++
++    Self {
++      tracks,
++      reversed: false,
++    }
++  }
++
++  #[inline]
++  fn len(&self) -> usize {
++    self.tracks.len()
++  }
++
++  #[inline]
++  fn is_empty(&self) -> bool {
++    self.tracks.is_empty()
++  }
++
++  fn get(&self, idx: usize) -> Option<(f32, f32)> {
++    if !self.reversed {
++      return self.tracks.get(idx).copied();
++    }
++    let len = self.tracks.len();
++    let mapped = len.checked_sub(1)?.checked_sub(idx)?;
++    self.tracks.get(mapped).copied()
++  }
++
++  fn iter(&self) -> GridTracksInFlowOrderIter<'a> {
++    if self.reversed {
++      GridTracksInFlowOrderIter::Reverse(self.tracks.iter().rev())
++    } else {
++      GridTracksInFlowOrderIter::Forward(self.tracks.iter())
++    }
++  }
++
++  fn map_line_in_flow_order(&self, line: u16) -> u16 {
++    if !self.reversed {
++      return line;
++    }
++    // N tracks → N + 1 grid lines.
++    let line_count = (self.tracks.len() as u32).saturating_add(1).max(1);
++    let mapped = line_count
++      .saturating_add(1)
++      .saturating_sub(line as u32)
++      .clamp(1, line_count);
++    mapped as u16
++  }
++
++  fn map_line_range_in_flow_order(&self, start: u16, end: u16) -> (u16, u16) {
++    let mapped_start = self.map_line_in_flow_order(start);
++    let mapped_end = self.map_line_in_flow_order(end);
++    if mapped_start <= mapped_end {
++      (mapped_start, mapped_end)
++    } else {
++      (mapped_end, mapped_start)
++    }
++  }
++
++  fn item_lines_in_flow_order(
++    &self,
++    placement: &GridItemFragmentationData,
++    axis: &FragmentAxis,
++  ) -> (u16, u16) {
++    let (start, end) = if axis.block_is_horizontal {
++      (placement.column_start, placement.column_end)
++    } else {
++      (placement.row_start, placement.row_end)
++    };
++    self.map_line_range_in_flow_order(start, end)
++  }
++}
++
++enum GridTracksInFlowOrderIter<'a> {
++  Forward(std::slice::Iter<'a, (f32, f32)>),
++  Reverse(std::iter::Rev<std::slice::Iter<'a, (f32, f32)>>),
++}
++
++impl<'a> Iterator for GridTracksInFlowOrderIter<'a> {
++  type Item = (f32, f32);
++
++  fn next(&mut self) -> Option<Self::Item> {
++    match self {
++      GridTracksInFlowOrderIter::Forward(iter) => iter.next().copied(),
++      GridTracksInFlowOrderIter::Reverse(iter) => iter.next().copied(),
++    }
++  }
++}
++
+ fn grid_tracks_in_fragmentation_axis<'a>(
+   tracks: &'a GridTrackRanges,
+   axis: &FragmentAxis,
+-) -> &'a [(f32, f32)] {
+-  if axis.block_is_horizontal {
++  parent_block_size: f32,
++) -> GridTracksInFlowOrder<'a> {
++  let tracks = if axis.block_is_horizontal {
+     &tracks.columns
+   } else {
+     &tracks.rows
+-  }
++  };
++  GridTracksInFlowOrder::new(tracks, axis, parent_block_size)
+ }
+ 
+ #[cfg(debug_assertions)]
+ pub(crate) fn debug_assert_grid_tracks_in_flow_order(
+-  tracks: &[(f32, f32)],
++  tracks: GridTracksInFlowOrder<'_>,
+   axis: &FragmentAxis,
+   parent_block_size: f32,
+ ) {
+@@ -1373,7 +1495,7 @@ pub(crate) fn debug_assert_grid_tracks_in_flow_order(
+   }
+ 
+   let mut prev_flow_start: Option<(usize, f32)> = None;
+-  for (idx, (track_start, track_end)) in tracks.iter().copied().enumerate() {
++  for (idx, (track_start, track_end)) in tracks.iter().enumerate() {
+     let track_size = (track_end - track_start).max(0.0);
+     let flow_start = axis.flow_offset(track_start, track_size, parent_block_size);
+     if !flow_start.is_finite() {
+@@ -1396,7 +1518,7 @@ pub(crate) fn debug_assert_grid_tracks_in_flow_order(
+ 
+ #[cfg(not(debug_assertions))]
+ #[inline]
+-pub(crate) fn debug_assert_grid_tracks_in_flow_order(_: &[(f32, f32)], _: &FragmentAxis, _: f32) {}
++pub(crate) fn debug_assert_grid_tracks_in_flow_order(_: GridTracksInFlowOrder<'_>, _: &FragmentAxis, _: f32) {}
+ 
+ #[cfg(debug_assertions)]
+ fn debug_assert_grid_fragmentation_child_order(node: &FragmentNode) {
+@@ -4397,7 +4519,7 @@ fn collect_break_opportunities(
+   let grid_tracks = node
+     .grid_tracks
+     .as_deref()
+-    .map(|tracks| grid_tracks_in_fragmentation_axis(tracks, axis));
++    .map(|tracks| grid_tracks_in_fragmentation_axis(tracks, axis, node_block_size));
+   let grid_item_break_hints_use_tracks =
+     grid_item_count_parallel_flow > 0 && grid_tracks.is_some_and(|tracks| !tracks.is_empty());
+   let grid_item_break_hints_fallback_to_edges =
+@@ -4424,7 +4546,7 @@ fn collect_break_opportunities(
+           .map(|s| s.as_ref())
+           .unwrap_or(default_style);
+         let placement = &grid_items.items[idx];
+-        let (start_line, end_line) = grid_item_lines_in_fragmentation_axis(placement, axis);
++        let (start_line, end_line) = tracks.item_lines_in_flow_order(placement, axis);
+ 
+         let child_break_before = if child_style.position.is_absolutely_positioned() {
+           BreakBetween::Auto
+@@ -4475,8 +4597,7 @@ fn collect_break_opportunities(
+         } else if boundary_idx == tracks.len() {
+           abs_end
+         } else {
+-          let Some((track_start, track_end)) = tracks.get(boundary_idx.saturating_sub(1)).copied()
+-          else {
++          let Some((track_start, track_end)) = tracks.get(boundary_idx.saturating_sub(1)) else {
+             continue;
+           };
+           let track_size = (track_end - track_start).max(0.0);
+@@ -5109,7 +5230,7 @@ fn collect_forced_boundaries_with_axes_internal(
+         node
+           .grid_tracks
+           .as_deref()
+-          .map(|tracks| grid_tracks_in_fragmentation_axis(tracks, axis))
++          .map(|tracks| grid_tracks_in_fragmentation_axis(tracks, axis, parent_block_size))
+       } else {
+         None
+       };
+@@ -5119,7 +5240,7 @@ fn collect_forced_boundaries_with_axes_internal(
+     let mut grid_item_count = 0usize;
+     if matches!(node_style.display, Display::Grid | Display::InlineGrid) {
+       if let (Some(grid_tracks), Some(grid_items)) = (node.grid_tracks.as_deref(), grid_items) {
+-        let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
++        let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis, parent_block_size);
+         debug_assert_grid_tracks_in_flow_order(tracks, axis, parent_block_size);
+         if !tracks.is_empty() && !grid_items.items.is_empty() {
+           let in_flow_count = grid_items.items.len().min(node.children.len());
+@@ -5135,7 +5256,7 @@ fn collect_forced_boundaries_with_axes_internal(
+               .map(|s| s.as_ref())
+               .unwrap_or(default_style);
+             let placement = &grid_items.items[idx];
+-            let (start_line, end_line) = grid_item_lines_in_fragmentation_axis(placement, axis);
++            let (start_line, end_line) = tracks.item_lines_in_flow_order(placement, axis);
+ 
+             let child_break_before = if child_style.position.is_absolutely_positioned() {
+               BreakBetween::Auto
+@@ -5175,7 +5296,7 @@ fn collect_forced_boundaries_with_axes_internal(
+             // of track `i + 1`, which would land after the gutter and can create gap-only pages when
+             // page sizes line up exactly with track ends).
+             let mut track_flow_ends = Vec::with_capacity(tracks.len());
+-            for (track_start, track_end) in tracks.iter().copied() {
++            for (track_start, track_end) in tracks.iter() {
+               let track_size = (track_end - track_start).max(0.0);
+               if !track_start.is_finite() {
+                 track_flow_ends.push(abs_start);
+@@ -5660,7 +5781,7 @@ fn collect_atomic_candidate_for_node(
+ 
+   if matches!(style.display, Display::Grid | Display::InlineGrid) {
+     if let Some(grid_tracks) = node.grid_tracks.as_deref() {
+-      let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
++      let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis, node_block_size);
+       debug_assert_grid_tracks_in_flow_order(tracks, axis, node_block_size);
+ 
+       // Treat each grid track as indivisible. Additionally, treat the inter-track gutter preceding
+@@ -5671,7 +5792,7 @@ fn collect_atomic_candidate_for_node(
+       // gutter). The gutter is empty space; it may force a fragmentainer to under-fill, but should
+       // not cause a track band that otherwise fits to become breakable.
+       let mut prev_flow_end: Option<f32> = None;
+-      for (track_start, track_end) in tracks.iter().copied() {
++      for (track_start, track_end) in tracks.iter() {
+         let track_size = (track_end - track_start).max(0.0);
+         let flow_offset = axis.flow_offset(track_start, track_size, node_block_size);
+         let mut start = abs_start + flow_offset;
+@@ -5893,14 +6014,14 @@ fn collect_atomic_range_for_node(
+ 
+   if matches!(style.display, Display::Grid | Display::InlineGrid) {
+     if let Some(grid_tracks) = node.grid_tracks.as_deref() {
+-      let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
++      let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis, node_block_size);
+       debug_assert_grid_tracks_in_flow_order(tracks, axis, node_block_size);
+ 
+       // Treat each grid track as indivisible. Additionally, treat the inter-track gutter preceding
+       // each track as part of the following track so pagination never splits a `row-gap`/`column-gap`
+       // across fragmentainers (and avoids producing a fragmentainer that contains only the gap).
+       let mut prev_flow_end: Option<f32> = None;
+-      for (track_start, track_end) in tracks.iter().copied() {
++      for (track_start, track_end) in tracks.iter() {
+         let track_size = (track_end - track_start).max(0.0);
+         let flow_offset = axis.flow_offset(track_start, track_size, node_block_size);
+         let mut start = abs_start + flow_offset;
+diff --git a/src/layout_minimal/constraints.rs b/src/layout_minimal/constraints.rs
+index e6a12299a9..11a592509a 100644
+--- a/src/layout_minimal/constraints.rs
++++ b/src/layout_minimal/constraints.rs
+@@ -1,4 +1,6 @@
+ use crate::geometry::Size;
++use crate::layout::axis::{FragmentAxes, PhysicalAxis};
++use crate::style::types::{Direction, WritingMode};
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+ pub enum AvailableSpace {
+@@ -30,6 +32,8 @@ impl AvailableSpace {
+ pub struct LayoutConstraints {
+   pub available_width: AvailableSpace,
+   pub available_height: AvailableSpace,
++  pub inline_percentage_base: Option<f32>,
++  pub block_percentage_base: Option<f32>,
+ }
+ 
+ impl LayoutConstraints {
+@@ -37,6 +41,8 @@ impl LayoutConstraints {
+     Self {
+       available_width,
+       available_height,
++      inline_percentage_base: None,
++      block_percentage_base: None,
+     }
+   }
+ 
+@@ -55,11 +61,48 @@ impl LayoutConstraints {
+     )
+   }
+ 
+-  pub fn with_block_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_block_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.block_percentage_base = base;
+     self
+   }
+ 
+-  pub fn with_inline_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_inline_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.inline_percentage_base = base;
+     self
+   }
++
++  /// Computes the physical initial containing block size used by the minimal layout harness.
++  ///
++  /// The minimal harness represents indefinite available space as `f32::INFINITY` for layout
++  /// purposes. When callers provide explicit percentage bases, use them to seed the initial
++  /// containing block size so percentage-based lengths resolve against definite values instead of
++  /// infinity.
++  pub fn initial_containing_block_size(&self, writing_mode: WritingMode, direction: Direction) -> Size {
++    let axes = FragmentAxes::from_writing_mode_and_direction(writing_mode, direction);
++    self.initial_containing_block_size_for_axes(axes)
++  }
++
++  pub fn initial_containing_block_size_for_axes(&self, axes: FragmentAxes) -> Size {
++    let mut size = self.available_size();
++    if !size.width.is_finite() {
++      if let Some(base) = self.percentage_base_for_physical_axis(PhysicalAxis::X, axes) {
++        size.width = base;
++      }
++    }
++    if !size.height.is_finite() {
++      if let Some(base) = self.percentage_base_for_physical_axis(PhysicalAxis::Y, axes) {
++        size.height = base;
++      }
++    }
++    size
++  }
++
++  fn percentage_base_for_physical_axis(&self, axis: PhysicalAxis, axes: FragmentAxes) -> Option<f32> {
++    let base = if axes.block_axis() == axis {
++      self.block_percentage_base
++    } else {
++      self.inline_percentage_base
++    };
++    base.filter(|base| base.is_finite()).map(|base| base.max(0.0))
++  }
+ }
+diff --git a/src/layout_minimal/contexts/block.rs b/src/layout_minimal/contexts/block.rs
+index 89a75b40b1..1e5a57bfc2 100644
+--- a/src/layout_minimal/contexts/block.rs
++++ b/src/layout_minimal/contexts/block.rs
+@@ -23,7 +23,9 @@ impl BlockFormattingContext {
+ 
+   pub fn layout(&self, box_node: &BoxNode, constraints: &LayoutConstraints) -> Result<FragmentNode, LayoutError> {
+     let _ = self.parallelism;
+-    let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
++    let style = box_node.style.as_ref();
++    let icb = constraints.initial_containing_block_size(style.writing_mode, style.direction);
++    let engine = LayoutEngine::new(LayoutConfig::new(icb));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree).map(|tree| tree.root)
+   }
+diff --git a/src/layout_minimal/contexts/flex.rs b/src/layout_minimal/contexts/flex.rs
+index 49d88080c0..ec3006481d 100644
+--- a/src/layout_minimal/contexts/flex.rs
++++ b/src/layout_minimal/contexts/flex.rs
+@@ -44,7 +44,9 @@ impl FlexFormattingContext {
+ 
+   pub fn layout(&self, box_node: &BoxNode, constraints: &LayoutConstraints) -> Result<FragmentNode, LayoutError> {
+     let _ = self.parallelism;
+-    let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
++    let style = box_node.style.as_ref();
++    let icb = constraints.initial_containing_block_size(style.writing_mode, style.direction);
++    let engine = LayoutEngine::new(LayoutConfig::new(icb));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree).map(|tree| tree.root)
+   }
+diff --git a/src/layout_minimal/contexts/grid.rs b/src/layout_minimal/contexts/grid.rs
+index 4a431aca31..5ed0a9ec03 100644
+--- a/src/layout_minimal/contexts/grid.rs
++++ b/src/layout_minimal/contexts/grid.rs
+@@ -37,7 +37,9 @@ impl GridFormattingContext {
+     constraints: &LayoutConstraints,
+   ) -> Result<FragmentTree, LayoutError> {
+     let _ = self.parallelism;
+-    let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
++    let style = box_node.style.as_ref();
++    let icb = constraints.initial_containing_block_size(style.writing_mode, style.direction);
++    let engine = LayoutEngine::new(LayoutConfig::new(icb));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree)
+   }
+diff --git a/src/layout_minimal/engine.rs b/src/layout_minimal/engine.rs
+index 842409a052..70b78d01e3 100644
+--- a/src/layout_minimal/engine.rs
++++ b/src/layout_minimal/engine.rs
+@@ -1685,6 +1685,13 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     content_width
+   };
+ 
++  // Match flexbox: percentages in `row-gap`/`column-gap` resolve against the container's inline
++  // size. Keep a single resolved pair so the same gaps are applied to track positioning and to the
++  // grid track ranges recorded for fragmentation.
++  let (row_gap, column_gap) = flex_gap_px(style, container_inline_size);
++  let row_gap = if row_gap.is_finite() { row_gap.max(0.0) } else { 0.0 };
++  let column_gap = if column_gap.is_finite() { column_gap.max(0.0) } else { 0.0 };
++
+   // The minimal grid sizing logic initializes `auto` tracks at their intrinsic size. When the grid
+   // container has a definite size (explicit lengths, aspect-ratio, definite available size, etc.)
+   // CSS Grid stretches `auto` tracks to fill the remaining free space.
+@@ -1692,7 +1699,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   // This is required for regression tests that expect a single implicit `auto` row/column to fill
+   // the container and allow default `align-items: stretch` / `justify-items: stretch` to size grid
+   // items.
+-  let mut stretch_auto_tracks = |tracks: &[GridTrack], sizes: &mut [f32], container_size: f32| {
++  let mut stretch_auto_tracks =
++    |tracks: &[GridTrack], sizes: &mut [f32], container_size: f32, gap: f32| {
+     if tracks.is_empty() || sizes.is_empty() || tracks.len() != sizes.len() {
+       return;
+     }
+@@ -1700,6 +1708,12 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       return;
+     }
+     let container_size = container_size.max(0.0);
++    let gap_total = if gap.is_finite() && gap > 0.0 {
++      gap * sizes.len().saturating_sub(1) as f32
++    } else {
++      0.0
++    };
++    let container_size = (container_size - gap_total).max(0.0);
+ 
+     let total: f32 = sizes.iter().copied().sum();
+     if !total.is_finite() {
+@@ -1724,11 +1738,19 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       }
+     }
+   };
+-  if matches!(style.justify_content, JustifyContent::Stretch) {
+-    stretch_auto_tracks(&column_tracks, &mut column_sizes, container_inline_size);
++  if matches!(
++    style.justify_content,
++    JustifyContent::Stretch | JustifyContent::Normal
++  ) {
++    stretch_auto_tracks(
++      &column_tracks,
++      &mut column_sizes,
++      container_inline_size,
++      column_gap,
++    );
+   }
+   if matches!(style.align_content, AlignContent::Stretch) {
+-    stretch_auto_tracks(&row_tracks, &mut row_sizes, container_block_size);
++    stretch_auto_tracks(&row_tracks, &mut row_sizes, container_block_size, row_gap);
+   }
+ 
+   let block_size = container_block_size;
+@@ -1756,22 +1778,31 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+ 
+   fn axis_spec(start: i32, end: i32, raw: Option<&str>) -> (GridAxisPlacement, u16) {
+     let mut parsed = raw.map(|raw| placement::parse_grid_line_placement_raw(raw, None));
++
++    // Apply numeric longhand overrides to the shorthand first, then normalize conflicts. This
++    // preserves remaining spans in cases like `grid-column: span 2 / span 2; grid-column-start: 2`.
+     if let Some(line) = parsed.as_mut() {
++      if start != 0 {
++        line.start = placement::GridPlacementComponent::Line(start);
++      }
++      if end != 0 {
++        line.end = placement::GridPlacementComponent::Line(end);
++      }
+       placement::normalize_grid_placement_conflicts(line);
+     }
+ 
+-    let start_component = if start != 0 {
+-      placement::GridPlacementComponent::Line(start)
+-    } else if let Some(line) = parsed.as_ref() {
++    let start_component = if let Some(line) = parsed.as_ref() {
+       line.start.clone()
++    } else if start != 0 {
++      placement::GridPlacementComponent::Line(start)
+     } else {
+       placement::GridPlacementComponent::Auto
+     };
+ 
+-    let end_component = if end != 0 {
+-      placement::GridPlacementComponent::Line(end)
+-    } else if let Some(line) = parsed.as_ref() {
++    let end_component = if let Some(line) = parsed.as_ref() {
+       line.end.clone()
++    } else if end != 0 {
++      placement::GridPlacementComponent::Line(end)
+     } else {
+       placement::GridPlacementComponent::Auto
+     };
+@@ -1861,45 +1892,16 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+ 
+   let track_block_sum: f32 = row_sizes.iter().sum();
+   let track_inline_sum: f32 = column_sizes.iter().sum();
+-  let mut block_free = (container_block_size - track_block_sum).max(0.0);
+-  let mut inline_free = (container_inline_size - track_inline_sum).max(0.0);
+-
+-  // `align-content: stretch` distributes any remaining free space across the grid tracks. The
+-  // minimal layout harness only needs the simplest behavior: grow each row equally.
+-  if matches!(style.align_content, AlignContent::Stretch)
+-    && container_block_size.is_finite()
+-    && track_block_sum.is_finite()
+-    && block_free.is_finite()
+-    && row_count > 0
+-    && block_free > 0.0
+-  {
+-    let extra = block_free / row_count as f32;
+-    for size in row_sizes.iter_mut() {
+-      *size += extra;
+-    }
+-    block_free = 0.0;
+-  }
++  let row_gap_total = row_gap * row_count.saturating_sub(1) as f32;
++  let column_gap_total = column_gap * column_count.saturating_sub(1) as f32;
++  let mut block_free = (container_block_size - track_block_sum - row_gap_total).max(0.0);
++  let mut inline_free = (container_inline_size - track_inline_sum - column_gap_total).max(0.0);
++
+   let block_offset = match style.align_content {
+     AlignContent::Center => block_free / 2.0,
+     AlignContent::Stretch | AlignContent::Start | AlignContent::FlexStart => 0.0,
+     AlignContent::End | AlignContent::FlexEnd => block_free,
+   };
+-  // `justify-content: stretch` (and `normal`) distributes remaining inline space across columns.
+-  if matches!(
+-    style.justify_content,
+-    JustifyContent::Stretch | JustifyContent::Normal
+-  ) && container_inline_size.is_finite()
+-    && track_inline_sum.is_finite()
+-    && inline_free.is_finite()
+-    && column_count > 0
+-    && inline_free > 0.0
+-  {
+-    let extra = inline_free / column_count as f32;
+-    for size in column_sizes.iter_mut() {
+-      *size += extra;
+-    }
+-    inline_free = 0.0;
+-  }
+ 
+   // The minimal layout harness only supports start/center/end offsets; other distribution modes
+   // fall back to start-alignment for simplicity.
+@@ -1913,19 +1915,50 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     | JustifyContent::SpaceEvenly => 0.0,
+   };
+ 
+-  let mut row_edges: Vec<f32> = Vec::with_capacity(row_count + 1);
+-  row_edges.push(block_offset);
+-  for size in row_sizes.iter().copied() {
+-    let next = row_edges.last().copied().unwrap_or(block_offset) + size;
+-    row_edges.push(next);
+-  }
++  let build_track_ranges = |sizes: &[f32], gap: f32, offset: f32| {
++    let gap = if gap.is_finite() && gap > 0.0 { gap } else { 0.0 };
++    let mut pos = if offset.is_finite() { offset } else { 0.0 };
++    let mut ranges = Vec::with_capacity(sizes.len());
++    for (idx, size) in sizes.iter().copied().enumerate() {
++      let size = if size.is_finite() { size.max(0.0) } else { 0.0 };
++      let start = pos;
++      let end = start + size;
++      ranges.push((start, end));
++      pos = end;
++      if idx + 1 < sizes.len() {
++        pos += gap;
++      }
++    }
++    ranges
++  };
+ 
+-  let mut column_edges: Vec<f32> = Vec::with_capacity(column_count + 1);
+-  column_edges.push(inline_offset);
+-  for size in column_sizes.iter().copied() {
+-    let next = column_edges.last().copied().unwrap_or(inline_offset) + size;
+-    column_edges.push(next);
+-  }
++  let row_ranges_for_layout = build_track_ranges(&row_sizes, row_gap, block_offset);
++  let col_ranges_for_layout = build_track_ranges(&column_sizes, column_gap, inline_offset);
++
++  let grid_line_start = |ranges: &[(f32, f32)], line: u16| -> Option<f32> {
++    let Some(first) = ranges.first() else {
++      return Some(0.0);
++    };
++    let idx = line.saturating_sub(1) as usize;
++    if idx == ranges.len() {
++      return Some(ranges.last().copied().unwrap_or(*first).1);
++    }
++    ranges.get(idx).map(|(start, _)| *start)
++  };
++
++  let grid_line_end = |ranges: &[(f32, f32)], line: u16| -> Option<f32> {
++    let Some(first) = ranges.first() else {
++      return Some(0.0);
++    };
++    let idx = line.saturating_sub(1) as usize;
++    if idx == 0 {
++      return Some(first.0);
++    }
++    if idx == ranges.len() {
++      return Some(ranges.last().copied().unwrap_or(*first).1);
++    }
++    ranges.get(idx.saturating_sub(1)).map(|(_, end)| *end)
++  };
+ 
+   fn mirror_ranges(ranges: &mut [(f32, f32)], span_start: f32, span_end: f32) {
+     if ranges.is_empty() {
+@@ -1947,22 +1980,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     }
+   }
+ 
+-  let mut row_ranges = Vec::with_capacity(row_count);
+-  for window in row_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
+-    if start.is_finite() && end.is_finite() && end >= start {
+-      row_ranges.push((start, end));
+-    }
+-  }
+-  let mut col_ranges = Vec::with_capacity(column_count);
+-  for window in column_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
+-    if start.is_finite() && end.is_finite() && end >= start {
+-      col_ranges.push((start, end));
+-    }
+-  }
++  let mut row_ranges = row_ranges_for_layout.clone();
++  let mut col_ranges = col_ranges_for_layout.clone();
+   if !axes.block_positive() {
+     mirror_ranges(&mut row_ranges, 0.0, container_block_size.max(0.0));
+   }
+@@ -2009,20 +2028,15 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       )
+     };
+ 
+-    let row_start_edge = row_start.saturating_sub(1) as usize;
+-    let col_start_edge = col_start.saturating_sub(1) as usize;
+-    let row_end_edge = row_end.saturating_sub(1) as usize;
+-    let col_end_edge = col_end.saturating_sub(1) as usize;
+-
+-    let Some(&block_start) = row_edges.get(row_start_edge) else {
++    let Some(block_start) = grid_line_start(&row_ranges_for_layout, row_start) else {
+       continue;
+     };
+-    let Some(&inline_start) = column_edges.get(col_start_edge) else {
++    let Some(inline_start) = grid_line_start(&col_ranges_for_layout, col_start) else {
+       continue;
+     };
+ 
+-    let block_end = row_edges.get(row_end_edge).copied().unwrap_or(block_start);
+-    let inline_end = column_edges.get(col_end_edge).copied().unwrap_or(inline_start);
++    let block_end = grid_line_end(&row_ranges_for_layout, row_end).unwrap_or(block_start);
++    let inline_end = grid_line_end(&col_ranges_for_layout, col_end).unwrap_or(inline_start);
+     let cell_block = (block_end - block_start).max(0.0);
+     let cell_inline = (inline_end - inline_start).max(0.0);
+ 
+diff --git a/src/lib_non_macos_impl.rs b/src/lib_non_macos_impl.rs
+index 9e3a901cef..ca03f0967a 100644
+--- a/src/lib_non_macos_impl.rs
++++ b/src/lib_non_macos_impl.rs
+@@ -331,8 +331,6 @@ pub mod platform {
+     pub mod scroll_gesture;
+     #[path = "scroll_reconcile.rs"]
+     pub mod scroll_reconcile;
+-    #[path = "scroll_gesture.rs"]
+-    pub mod scroll_gesture;
+     #[path = "scroll_end.rs"]
+     pub mod scroll_end;
+     #[path = "fast_scroll_regions.rs"]
+@@ -353,57 +351,6 @@ pub mod ui {
+   pub mod shortcuts;
+ }
+ 
+-// Lightweight scroll-wheel latch helpers for non-macOS test builds.
+-#[cfg(test)]
+-pub mod interaction {
+-  pub mod scroll_wheel {
+-    pub use crate::platform::wheel::{WheelGesturePhase, WheelPhase};
+-
+-    #[derive(Debug, Clone, PartialEq, Eq)]
+-    pub enum ScrollLatchTarget {
+-      ViewportOnly,
+-      ScrollContainer { id: u64 },
+-    }
+-
+-    #[derive(Debug, Default, Clone)]
+-    pub struct ScrollLatchState {
+-      latched_target: Option<ScrollLatchTarget>,
+-    }
+-
+-    impl ScrollLatchState {
+-      pub fn is_latched(&self) -> bool {
+-        self.latched_target.is_some()
+-      }
+-
+-      pub fn with_target_for_event<T>(
+-        &mut self,
+-        phase: WheelGesturePhase,
+-        _listener_generation: Option<u64>,
+-        resolve_target: impl FnOnce() -> ScrollLatchTarget,
+-        f: impl FnOnce(&ScrollLatchTarget) -> T,
+-      ) -> T {
+-        if self.latched_target.is_none() || phase.is_unphased() || phase.is_gesture_start() {
+-          self.latched_target = Some(resolve_target());
+-        }
+-
+-        let result = {
+-          let target = self
+-            .latched_target
+-            .as_ref()
+-            .expect("scroll latch target should be set");
+-          f(target)
+-        };
+-
+-        if phase.is_gesture_end() || phase.is_unphased() {
+-          self.latched_target = None;
+-        }
+-
+-        result
+-      }
+-    }
+-  }
+-}
+-
+ // Resource-layer helpers that are platform-independent and useful to validate on non-macOS builds.
+ //
+ // Keep this intentionally narrow: the full `resource` stack depends on platform and networking
+diff --git a/src/style_minimal/computed.rs b/src/style_minimal/computed.rs
+new file mode 100644
+index 0000000000..175e1523f5
+--- /dev/null
++++ b/src/style_minimal/computed.rs
+@@ -0,0 +1,13 @@
++//! Minimal computed-style helpers for the non-macOS test harness.
++//!
++//! The production renderer exposes a rich `style::computed` module. The lightweight non-macOS build
++//! only needs a small placeholder type so layout helpers that reference
++//! `crate::style::computed::PositionedStyle` can compile.
++
++use crate::geometry::Rect;
++
++#[derive(Debug, Clone, Copy, Default, PartialEq)]
++pub struct PositionedStyle {
++  pub bounds: Rect,
++}
++
+diff --git a/src/style_minimal/mod.rs b/src/style_minimal/mod.rs
+index 26155e0f8e..c4ba020de8 100644
+--- a/src/style_minimal/mod.rs
++++ b/src/style_minimal/mod.rs
+@@ -1,6 +1,7 @@
+ //! Minimal style system for layout/fragmentation unit tests.
+ 
+ pub mod color;
++pub mod computed;
+ pub mod display;
+ pub mod float;
+ pub mod media;
+diff --git a/src/ui/url.rs b/src/ui/url.rs
+index 6580efb6f2..c9eea159ed 100644
+--- a/src/ui/url.rs
++++ b/src/ui/url.rs
+@@ -6,7 +6,6 @@ use std::sync::{Mutex, MutexGuard};
+ use fastrender_url::Url;
+ 
+ use super::protocol_limits::MAX_URL_BYTES;
+-use fastrender_url::Url;
+ 
+ static CRASH_URLS_ALLOWED: AtomicBool = AtomicBool::new(false);
+ 
+-- 
+2.43.0
+
