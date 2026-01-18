@@ -1,4 +1,4 @@
-From 9ed76bfbe6c07fdb158c7e73f1b1c7870f681fab Mon Sep 17 00:00:00 2001
+From 98628754a3132e82aead6c4e9d2f9078cad9c72b Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
 Date: Sun, 18 Jan 2026 01:22:14 -0800
 Subject: [PATCH] fix(snapshot): stabilize CI with grid gap + percent-base
@@ -9,8 +9,12 @@ Subject: [PATCH] fix(snapshot): stabilize CI with grid gap + percent-base
 - Minimal layout constraints: carry inline/block percentage bases through LayoutConfig and use
   thread-local physical bases when available sizes are indefinite, avoiding `inf` calc(% + px)
   widths in vertical writing modes.
+- Minimal grid alignment: `align/justify-content: stretch|normal` now stretch only `auto` tracks,
+  preserving explicit `0px` tracks in `GridTrackRanges`.
 - Fragmentation: normalize grid track ranges into fragmentation flow order and remap line indices
   when tracks are reversed.
+- Tests: fix brace nesting in `fragmentation_tracks_test` so `grid_tracks_preserve_zero_length_rows`
+  is a real unit test (no more `cannot test inner items` warning).
 - Workspace hygiene: keep in-tree `url` shims out of the snapshot workspace members (exclude them)
   so the root lockfile stays free of blocked `url` package entries.
 - Removed selector parity tests that depended on blocked Servo crates.
