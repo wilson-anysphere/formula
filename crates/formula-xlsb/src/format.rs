@@ -18,7 +18,8 @@ pub fn push_column_label(col: u32, out: &mut String) {
 
 /// Format bytes as an uppercase hex string, separated by spaces.
 pub fn format_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().saturating_mul(3));
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len().saturating_mul(3));
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for (i, b) in bytes.iter().enumerate() {
         if i > 0 {

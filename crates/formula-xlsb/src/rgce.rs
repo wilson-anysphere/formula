@@ -548,7 +548,12 @@ fn decode_rgce_impl(
                         ptg,
                     });
                 };
-                let prec = binary_precedence(ptg).expect("precedence for binary ops");
+                let Some(prec) = binary_precedence(ptg) else {
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
+                };
 
                 if stack.len() < 2 {
                     return Err(DecodeError::StackUnderflow {
@@ -556,14 +561,21 @@ fn decode_rgce_impl(
                         ptg,
                     });
                 }
-                let right = stack.pop().expect("len checked");
-                let left = stack.pop().expect("len checked");
+                let right = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
+                let left = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
 
                 let contains_union = left.contains_union || right.contains_union || ptg == 0x10;
                 let left_s = maybe_parenthesize(left, prec);
                 let right_s = maybe_parenthesize(right, prec);
 
-                let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
+                let mut text = String::new();
+                let _ = text.try_reserve(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
                 text.push_str(op);
                 text.push_str(&right_s);
@@ -585,7 +597,8 @@ fn decode_rgce_impl(
                 let prec = 70;
                 let contains_union = expr.contains_union;
                 let inner = maybe_parenthesize(expr, prec);
-                let mut text = String::with_capacity(op.len() + inner.len());
+                let mut text = String::new();
+                let _ = text.try_reserve(op.len() + inner.len());
                 text.push_str(op);
                 text.push_str(&inner);
                 stack.push(ExprFragment {
@@ -673,7 +686,8 @@ fn decode_rgce_impl(
                 let iter = raw
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
-                let mut lit = String::with_capacity(cch.saturating_add(2));
+                let mut lit = String::new();
+                let _ = lit.try_reserve(cch.saturating_add(2));
                 lit.push('"');
                 for decoded in std::char::decode_utf16(iter) {
                     match decoded {
@@ -808,7 +822,8 @@ fn decode_rgce_impl(
                         let mut prec = 100;
                         let is_value_class = ptg == 0x38;
                         let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
-                        let mut out = String::with_capacity(
+                        let mut out = String::new();
+                        let _ = out.try_reserve(
                             estimated_structured_ref_len(display_table_name, item, &columns)
                                 .saturating_add(needs_at as usize),
                         );
@@ -1558,9 +1573,13 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let mut args = Vec::with_capacity(argc);
+                let mut args = Vec::new();
+                let _ = args.try_reserve_exact(argc);
                 for _ in 0..argc {
-                    args.push(stack.pop().expect("len checked"));
+                    args.push(stack.pop().ok_or(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    })?);
                 }
                 args.reverse();
                 stack.push(format_function_call(name, args));
@@ -1597,10 +1616,17 @@ fn decode_rgce_impl(
                         });
                     }
 
-                    let func_name = stack.pop().expect("len checked").text;
-                    let mut args = Vec::with_capacity(argc - 1);
+                    let func_name = stack.pop().ok_or(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    })?.text;
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
-                        args.push(stack.pop().expect("len checked"));
+                        args.push(stack.pop().ok_or(DecodeError::StackUnderflow {
+                            offset: ptg_offset,
+                            ptg,
+                        })?);
                     }
                     args.reverse();
                     stack.push(format_function_call(&func_name, args));
@@ -1629,9 +1655,13 @@ fn decode_rgce_impl(
                         }
                     };
 
-                    let mut args = Vec::with_capacity(argc);
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc);
                     for _ in 0..argc {
-                        args.push(stack.pop().expect("len checked"));
+                        args.push(stack.pop().ok_or(DecodeError::StackUnderflow {
+                            offset: ptg_offset,
+                            ptg,
+                        })?);
                     }
                     args.reverse();
                     stack.push(format_function_call(name, args));
@@ -1655,7 +1685,13 @@ fn decode_rgce_impl(
     }
 
     if stack.len() == 1 {
-        Ok(stack.pop().expect("len checked").text)
+        Ok(stack
+            .pop()
+            .map(|v| v.text)
+            .unwrap_or_else(|| {
+                debug_assert!(false, "stack length checked");
+                String::new()
+            }))
     } else if warnings.is_some() {
         // Best-effort mode: keep the decode parseable for diagnostics by returning the
         // top-of-stack fragment, even if the token stream left extra items on the stack.
@@ -3618,9 +3654,11 @@ mod encode_ast {
             ));
         }
 
-        let mut rows = Vec::with_capacity(arr.rows.len());
+        let mut rows = Vec::new();
+        let _ = rows.try_reserve_exact(arr.rows.len());
         for row in &arr.rows {
-            let mut out_row = Vec::with_capacity(row.len());
+            let mut out_row = Vec::new();
+            let _ = out_row.try_reserve_exact(row.len());
             for el in row {
                 out_row.push(array_elem_from_expr(el)?);
             }
@@ -4048,8 +4086,13 @@ fn emit_func(
         for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
             *dst = src.to_ascii_uppercase();
         }
-        std::str::from_utf8(&buf[..name.len()])
-            .expect("ASCII uppercasing preserves UTF-8")
+        match std::str::from_utf8(&buf[..name.len()]) {
+            Ok(s) => s,
+            Err(_) => {
+                debug_assert!(false, "ASCII uppercasing preserves UTF-8");
+                name
+            }
+        }
     } else {
         upper_owned = name.to_ascii_uppercase();
         &upper_owned
@@ -5240,7 +5283,12 @@ impl<'a> FormulaParser<'a> {
     fn peek_non_ws_pos(&self) -> usize {
         let mut i = self.pos;
         while i < self.input.len() {
-            let ch = self.input[i..].chars().next().expect("i < len");
+            let Some(rest) = self.input.get(i..) else {
+                break;
+            };
+            let Some(ch) = rest.chars().next() else {
+                break;
+            };
             if ch.is_whitespace() {
                 i += ch.len_utf8();
             } else {
@@ -5253,7 +5301,12 @@ impl<'a> FormulaParser<'a> {
     fn looks_like_row_range_start(&self) -> bool {
         let mut i = self.pos;
         while i < self.input.len() {
-            let ch = self.input[i..].chars().next().expect("i < len");
+            let Some(rest) = self.input.get(i..) else {
+                break;
+            };
+            let Some(ch) = rest.chars().next() else {
+                break;
+            };
             if ch.is_ascii_digit() {
                 i += ch.len_utf8();
             } else {
@@ -5264,14 +5317,19 @@ impl<'a> FormulaParser<'a> {
             return false;
         }
         while i < self.input.len() {
-            let ch = self.input[i..].chars().next().expect("i < len");
+            let Some(rest) = self.input.get(i..) else {
+                break;
+            };
+            let Some(ch) = rest.chars().next() else {
+                break;
+            };
             if ch.is_whitespace() {
                 i += ch.len_utf8();
             } else {
                 break;
             }
         }
-        i < self.input.len() && self.input[i..].starts_with(':')
+        i < self.input.len() && self.input.get(i..).is_some_and(|rest| rest.starts_with(':'))
     }
 
     fn is_intersection_rhs_start(&self) -> bool {

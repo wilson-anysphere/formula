@@ -166,7 +166,8 @@ fn decode_utf16le_lossy(raw: &[u8]) -> Option<String> {
     }
     // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled inputs; decode
     // directly into a `String`.
-    let mut out = String::with_capacity(raw.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(raw.len());
     let iter = raw
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));

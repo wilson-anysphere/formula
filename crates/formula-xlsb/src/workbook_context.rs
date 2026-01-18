@@ -877,7 +877,8 @@ fn quote_excel_quoted_ident(raw: &str) -> String {
     }
 
     let quote_count = raw.chars().filter(|&ch| ch == '\'').count();
-    let mut out = String::with_capacity(raw.len() + quote_count + 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(raw.len() + quote_count + 2);
     out.push('\'');
     for ch in raw.chars() {
         if ch == '\'' {

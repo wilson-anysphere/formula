@@ -1027,7 +1027,10 @@ impl XlsbWorkbook {
         };
 
         // Encode the formula token streams with the updated context.
-        let mut binary_edits: Vec<CellEdit> = Vec::with_capacity(edits.len());
+        let mut binary_edits: Vec<CellEdit> = Vec::new();
+        binary_edits
+            .try_reserve_exact(edits.len())
+            .map_err(|_| ParseError::AllocationFailure("alloc binary edits"))?;
         for edit in edits {
             let base = CellCoord::new(edit.row, edit.col);
             let encoded =
@@ -1150,7 +1153,12 @@ impl XlsbWorkbook {
                     // edit is a no-op (text matches the existing shared string) keep the original
                     // `isst` so rich-text / phonetic shared strings stay byte-identical.
                     if record.payload.len() >= 12 {
-                        let isst = u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                        let isst = u32::from_le_bytes([
+                            record.payload[8],
+                            record.payload[9],
+                            record.payload[10],
+                            record.payload[11],
+                        ]);
                         if self
                             .shared_strings
                             .get(isst as usize)
@@ -1359,7 +1367,12 @@ impl XlsbWorkbook {
                     // No-op shared-string edit: keep the existing `isst` to avoid inserting a new
                     // (plain) `BrtSI` record when the original string has rich-text/phonetic data.
                     if record.payload.len() >= 12 {
-                        let isst = u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                        let isst = u32::from_le_bytes([
+                            record.payload[8],
+                            record.payload[9],
+                            record.payload[10],
+                            record.payload[11],
+                        ]);
                         if self
                             .shared_strings
                             .get(isst as usize)
@@ -1634,7 +1647,12 @@ impl XlsbWorkbook {
                         // new plain `BrtSI` when the original string has rich-text/phonetic data.
                         if record.payload.len() >= 12 {
                             let isst =
-                                u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                                u32::from_le_bytes([
+                                    record.payload[8],
+                                    record.payload[9],
+                                    record.payload[10],
+                                    record.payload[11],
+                                ]);
                             if self
                                 .shared_strings
                                 .get(isst as usize)
@@ -1778,12 +1796,15 @@ impl XlsbWorkbook {
             let patched = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
                 patch_sheet_bin(bytes, edits)?
             } else {
-                let zip = match zip.as_mut() {
-                    Some(zip) => zip,
-                    None => {
-                        zip = Some(self.open_zip()?);
-                        zip.as_mut().expect("zip just initialized")
-                    }
+                if zip.is_none() {
+                    zip = Some(self.open_zip()?);
+                }
+                let Some(zip) = zip.as_mut() else {
+                    debug_assert!(false, "zip just initialized");
+                    return Err(ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "failed to initialize XLSB zip reader",
+                    )));
                 };
                 let bytes = read_zip_entry_required(zip, &sheet_part)?;
                 patch_sheet_bin(&bytes, edits)?
@@ -2328,7 +2349,10 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
 
     // Read tail bytes into memory for signature search.
     reader.seek(SeekFrom::End(-(tail_len as i64)))?;
-    let mut tail = vec![0u8; tail_len];
+    let mut tail = Vec::new();
+    tail.try_reserve_exact(tail_len)
+        .map_err(|_| ParseError::AllocationFailure("alloc zip eocd tail"))?;
+    tail.resize(tail_len, 0);
     reader.read_exact(&mut tail)?;
 
     // Search backwards for the EOCD signature, validating the comment length so we don't match a
@@ -2340,7 +2364,11 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
         if tail.get(i..i + 4) != Some(&EOCD_SIG) {
             continue;
         }
-        let comment_len = u16::from_le_bytes(tail[i + 20..i + 22].try_into().unwrap()) as usize;
+        let comment_len_bytes = tail
+            .get(i + 20..i + 22)
+            .ok_or(ParseError::UnexpectedEof)?;
+        let comment_len =
+            u16::from_le_bytes([comment_len_bytes[0], comment_len_bytes[1]]) as usize;
         if i + 22 + comment_len == tail.len() {
             eocd_pos = Some(i);
             break;
@@ -2353,8 +2381,11 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
     };
 
     // EOCD total entry count is a u16 at offset 10.
+    let total_entries_bytes = tail
+        .get(eocd_pos + 10..eocd_pos + 12)
+        .ok_or(ParseError::UnexpectedEof)?;
     let total_entries_u16 =
-        u16::from_le_bytes(tail[eocd_pos + 10..eocd_pos + 12].try_into().unwrap());
+        u16::from_le_bytes([total_entries_bytes[0], total_entries_bytes[1]]);
 
     let total_entries_u64 = if total_entries_u16 != 0xFFFF {
         total_entries_u16 as u64
@@ -2375,8 +2406,19 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
             // treat 0xFFFF as the literal count.
             0xFFFFu64
         } else {
-            let zip64_eocd_offset =
-                u64::from_le_bytes(tail[locator_pos + 8..locator_pos + 16].try_into().unwrap());
+            let zip64_offset_bytes = tail
+                .get(locator_pos + 8..locator_pos + 16)
+                .ok_or(ParseError::UnexpectedEof)?;
+            let zip64_eocd_offset = u64::from_le_bytes([
+                zip64_offset_bytes[0],
+                zip64_offset_bytes[1],
+                zip64_offset_bytes[2],
+                zip64_offset_bytes[3],
+                zip64_offset_bytes[4],
+                zip64_offset_bytes[5],
+                zip64_offset_bytes[6],
+                zip64_offset_bytes[7],
+            ]);
 
             // Save current position so we can restore after reading the zip64 EOCD record.
             let cur = reader.seek(SeekFrom::Current(0))?;
@@ -2395,7 +2437,9 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
                 )));
             }
 
-            u64::from_le_bytes(hdr[32..40].try_into().unwrap())
+            u64::from_le_bytes([
+                hdr[32], hdr[33], hdr[34], hdr[35], hdr[36], hdr[37], hdr[38], hdr[39],
+            ])
         }
     };
 
@@ -2790,7 +2834,7 @@ mod zip_guardrail_tests {
             .flat_map(u16::to_le_bytes)
             .collect::<Vec<u8>>();
         let cch: u32 = (utf16le.len() / 2) as u32;
-        let mut out = Vec::with_capacity(4 + utf16le.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&cch.to_le_bytes());
         out.extend_from_slice(&utf16le);
         out
@@ -3746,16 +3790,31 @@ fn read_zip_entry<R: Read + Seek>(
 
         // Don't trust the ZIP metadata for preallocation; use a small fixed buffer to keep
         // allocations modest even if `ZipFile::size()` is forged.
-        let mut bytes = Vec::with_capacity(ZIP_ENTRY_READ_PREALLOC_BYTES);
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve(ZIP_ENTRY_READ_PREALLOC_BYTES)
+            .map_err(|_| ParseError::AllocationFailure("alloc zip entry prebuffer"))?;
 
-        // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read.
-        entry.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > max {
-            return Err(ParseError::PartTooLarge {
-                part: entry_name.to_string(),
-                size: bytes.len() as u64,
-                max,
-            });
+        // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read,
+        // and by making growth allocation-fallible (avoid abort-on-OOM).
+        let mut reader = entry.take(max.saturating_add(1));
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            bytes
+                .try_reserve(n)
+                .map_err(|_| ParseError::AllocationFailure("alloc zip entry bytes"))?;
+            bytes.extend_from_slice(&buf[..n]);
+            if bytes.len() as u64 > max {
+                return Err(ParseError::PartTooLarge {
+                    part: entry_name.to_string(),
+                    size: bytes.len() as u64,
+                    max,
+                });
+            }
         }
         Ok(bytes)
     };
@@ -4312,7 +4371,9 @@ fn patch_workbook_bin_full_calc_on_load(
     workbook_bin: &[u8],
 ) -> Result<Option<Vec<u8>>, ParseError> {
     let mut cursor = Cursor::new(workbook_bin);
-    let mut out = Vec::with_capacity(workbook_bin.len());
+    let mut out = Vec::new();
+    out.try_reserve_exact(workbook_bin.len())
+        .map_err(|_| ParseError::AllocationFailure("alloc workbook.bin patch output"))?;
     let mut changed = false;
 
     loop {

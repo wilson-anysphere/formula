@@ -360,7 +360,8 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         bounds_include(&mut requested_bounds, edit.row, edit.col);
     }
 
-    let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
+    let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::new();
+    let _ = edits_by_coord.try_reserve(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
         if edit.clear_formula
             && (edit.new_formula.is_some()
@@ -387,7 +388,8 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     let mut applied = vec![false; edits.len()];
     let mut insert_cursor = 0usize;
 
-    let mut out = Vec::with_capacity(sheet_bin.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(sheet_bin.len());
     let mut writer = Biff12Writer::new(&mut out);
 
     let mut offset = 0usize;
@@ -991,7 +993,8 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 return Err(Error::UnexpectedEof);
             }
 
-            let mut dim_bytes = Vec::with_capacity(24);
+            let mut dim_bytes = Vec::new();
+            let _ = dim_bytes.try_reserve_exact(24);
             {
                 let mut w = Biff12Writer::new(&mut dim_bytes);
                 w.write_record_header(biff12::DIMENSION, 16)?;
@@ -1927,7 +1930,8 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
     }
 
     let str_bytes_len = ws.cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let mut desired_bytes = Vec::with_capacity(str_bytes_len);
+    let mut desired_bytes = Vec::new();
+    let _ = desired_bytes.try_reserve_exact(str_bytes_len);
     for unit in desired_cached.encode_utf16() {
         desired_bytes.extend_from_slice(&unit.to_le_bytes());
     }
@@ -2109,7 +2113,8 @@ pub(crate) fn value_edit_is_noop_inline_string(
     };
 
     // Avoid parsing rich/phonetic blocks; just compare the UTF-16LE bytes directly.
-    let mut desired_bytes = Vec::with_capacity(byte_len);
+    let mut desired_bytes = Vec::new();
+    let _ = desired_bytes.try_reserve_exact(byte_len);
     for unit in desired.encode_utf16() {
         desired_bytes.extend_from_slice(&unit.to_le_bytes());
     }
@@ -2418,7 +2423,8 @@ fn patch_cell_st<W: io::Write>(
     let existing_utf16 = payload
         .get(ws.utf16_start..ws.utf16_end)
         .ok_or(Error::UnexpectedEof)?;
-    let mut desired_utf16 = Vec::with_capacity(desired_utf16_len as usize);
+    let mut desired_utf16 = Vec::new();
+    let _ = desired_utf16.try_reserve_exact(desired_utf16_len as usize);
     for unit in text.encode_utf16() {
         desired_utf16.extend_from_slice(&unit.to_le_bytes());
     }
@@ -2871,7 +2877,8 @@ fn patch_fmla_string<W: io::Write>(
     let existing_utf16 = payload
         .get(ws.utf16_start..ws.utf16_end)
         .ok_or(Error::UnexpectedEof)?;
-    let mut desired_utf16 = Vec::with_capacity(desired_str_len as usize);
+    let mut desired_utf16 = Vec::new();
+    let _ = desired_utf16.try_reserve_exact(desired_str_len as usize);
     for unit in cached.encode_utf16() {
         desired_utf16.extend_from_slice(&unit.to_le_bytes());
     }
@@ -2997,12 +3004,23 @@ fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOf
     let simple_valid = validate_following_formula_fields(simple.end);
 
     match (full_valid, simple_valid) {
-        (true, false) => Ok(full.expect("full offsets present")),
+        (true, false) => {
+            if let Some(full) = full {
+                Ok(full)
+            } else {
+                debug_assert!(false, "full_valid implies full offsets are present");
+                Ok(simple)
+            }
+        }
         (false, true) => Ok(simple),
         (true, true) => {
             // If the flags contain only the rich/phonetic indicators, trust the full parse.
             if flags & !(FLAG_RICH | FLAG_PHONETIC) == 0 {
-                return Ok(full.expect("full offsets present"));
+                if let Some(full) = full {
+                    return Ok(full);
+                }
+                debug_assert!(false, "full_valid implies full offsets are present");
+                return Ok(simple);
             }
 
             // When reserved bits are set, prefer the "simple" layout if the rich/phonetic bits
@@ -3316,12 +3334,8 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
-    let bytes: [u8; 2] = data
-        .get(offset..offset + 2)
-        .ok_or(Error::UnexpectedEof)?
-        .try_into()
-        .unwrap();
-    Ok(u16::from_le_bytes(bytes))
+    let raw = data.get(offset..offset + 2).ok_or(Error::UnexpectedEof)?;
+    Ok(u16::from_le_bytes([raw[0], raw[1]]))
 }
 
 fn read_u8(data: &[u8], offset: usize) -> Result<u8, Error> {
@@ -3329,21 +3343,15 @@ fn read_u8(data: &[u8], offset: usize) -> Result<u8, Error> {
 }
 
 fn read_u32(data: &[u8], offset: usize) -> Result<u32, Error> {
-    let bytes: [u8; 4] = data
-        .get(offset..offset + 4)
-        .ok_or(Error::UnexpectedEof)?
-        .try_into()
-        .unwrap();
-    Ok(u32::from_le_bytes(bytes))
+    let raw = data.get(offset..offset + 4).ok_or(Error::UnexpectedEof)?;
+    Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 
 fn read_f64(data: &[u8], offset: usize) -> Result<f64, Error> {
-    let bytes: [u8; 8] = data
-        .get(offset..offset + 8)
-        .ok_or(Error::UnexpectedEof)?
-        .try_into()
-        .unwrap();
-    Ok(f64::from_le_bytes(bytes))
+    let raw = data.get(offset..offset + 8).ok_or(Error::UnexpectedEof)?;
+    Ok(f64::from_le_bytes([
+        raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+    ]))
 }
 
 fn read_record_id(data: &[u8], offset: &mut usize) -> Result<u32, Error> {

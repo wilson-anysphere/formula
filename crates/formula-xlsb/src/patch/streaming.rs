@@ -43,7 +43,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
     super::validate_cell_edits(edits)?;
 
-    let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::with_capacity(edits.len());
+    let mut edits_by_coord: HashMap<(u32, u32), usize> = HashMap::new();
+    let _ = edits_by_coord.try_reserve(edits.len());
     for (idx, edit) in edits.iter().enumerate() {
         if edit.clear_formula
             && (edit.new_formula.is_some()
@@ -368,8 +369,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                 let mut prefix = [0u8; 8];
                 input.read_exact(&mut prefix).map_err(super::map_io_error)?;
                 let row = current_row.unwrap_or(0);
-                let col = u32::from_le_bytes(prefix[0..4].try_into().expect("col bytes"));
-                let style = u32::from_le_bytes(prefix[4..8].try_into().expect("style bytes"));
+                let col = u32::from_le_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]);
+                let style = u32::from_le_bytes([prefix[4], prefix[5], prefix[6], prefix[7]]);
 
                 if super::flush_missing_cells_before(
                     &mut writer,
@@ -391,7 +392,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     continue;
                 };
 
-                let mut payload = Vec::with_capacity(len.min(READ_PAYLOAD_CHUNK_BYTES));
+                let mut payload = Vec::new();
+                let _ = payload.try_reserve_exact(len.min(READ_PAYLOAD_CHUNK_BYTES));
                 payload.extend_from_slice(&prefix);
                 read_exact_into_vec(
                     &mut input,
@@ -792,7 +794,8 @@ fn read_record_header<R: Read>(r: &mut R) -> Result<Option<RawRecordHeader>, Err
 
 fn read_record_id_raw<R: Read>(r: &mut R) -> Result<Option<(u32, Vec<u8>)>, Error> {
     let mut v: u32 = 0;
-    let mut raw = Vec::with_capacity(4);
+    let mut raw = Vec::new();
+    let _ = raw.try_reserve_exact(4);
 
     for i in 0..4 {
         let mut buf = [0u8; 1];
@@ -820,7 +823,8 @@ fn read_record_id_raw<R: Read>(r: &mut R) -> Result<Option<(u32, Vec<u8>)>, Erro
 
 fn read_record_len_raw<R: Read>(r: &mut R) -> Result<(u32, Vec<u8>), Error> {
     let mut v: u32 = 0;
-    let mut raw = Vec::with_capacity(4);
+    let mut raw = Vec::new();
+    let _ = raw.try_reserve_exact(4);
 
     for i in 0..4 {
         let mut buf = [0u8; 1];
@@ -856,7 +860,8 @@ fn read_payload<R: Read>(r: &mut R, len: usize) -> Result<Vec<u8>, Error> {
     // Record lengths are attacker-controlled. Avoid allocating the full payload up-front; instead
     // grow the buffer as bytes are successfully read (important when the underlying stream is
     // truncated or size-limited).
-    let mut payload = Vec::with_capacity(len.min(READ_PAYLOAD_CHUNK_BYTES));
+    let mut payload = Vec::new();
+    let _ = payload.try_reserve_exact(len.min(READ_PAYLOAD_CHUNK_BYTES));
     read_exact_into_vec(r, &mut payload, len)?;
     Ok(payload)
 }

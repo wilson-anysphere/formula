@@ -93,6 +93,8 @@ pub enum Error {
     Zip(#[from] zip::result::ZipError),
     #[error("XML error: {0}")]
     Xml(#[from] quick_xml::Error),
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("invalid password")]
     InvalidPassword,
     #[error("invalid XLSB: unexpected end of record")]
@@ -334,36 +336,32 @@ impl<'a> RecordReader<'a> {
     }
 
     pub(crate) fn read_u16(&mut self) -> Result<u16, Error> {
-        let bytes: [u8; 2] = self
+        let raw = self
             .data
             .get(self.offset..self.offset + 2)
-            .ok_or(Error::UnexpectedEof)?
-            .try_into()
-            .unwrap();
+            .ok_or(Error::UnexpectedEof)?;
         self.offset += 2;
-        Ok(u16::from_le_bytes(bytes))
+        Ok(u16::from_le_bytes([raw[0], raw[1]]))
     }
 
     pub(crate) fn read_u32(&mut self) -> Result<u32, Error> {
-        let bytes: [u8; 4] = self
+        let raw = self
             .data
             .get(self.offset..self.offset + 4)
-            .ok_or(Error::UnexpectedEof)?
-            .try_into()
-            .unwrap();
+            .ok_or(Error::UnexpectedEof)?;
         self.offset += 4;
-        Ok(u32::from_le_bytes(bytes))
+        Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
     }
 
     fn read_f64(&mut self) -> Result<f64, Error> {
-        let bytes: [u8; 8] = self
+        let raw = self
             .data
             .get(self.offset..self.offset + 8)
-            .ok_or(Error::UnexpectedEof)?
-            .try_into()
-            .unwrap();
+            .ok_or(Error::UnexpectedEof)?;
         self.offset += 8;
-        Ok(f64::from_le_bytes(bytes))
+        Ok(f64::from_le_bytes([
+            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+        ]))
     }
 
     /// BIFF RK-encoded number used by `BrtCellRk` / `NUM` records.
@@ -400,7 +398,8 @@ impl<'a> RecordReader<'a> {
         // Avoid allocating a full `Vec<u16>` for attacker-controlled string lengths; decode
         // UTF-16LE directly into a `String`. This keeps peak memory closer to the final UTF-8
         // output size (the record payload bytes are already buffered elsewhere).
-        let mut out = String::with_capacity(raw.len());
+        let mut out = String::new();
+        let _ = out.try_reserve(raw.len());
         let iter = raw
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
@@ -1568,8 +1567,10 @@ fn parse_runs_8(run_bytes: &[u8], count: usize) -> Option<(Vec<usize>, Vec<Vec<u
     if run_bytes.len() != count.checked_mul(8)? {
         return None;
     }
-    let mut starts = Vec::with_capacity(count);
-    let mut formats = Vec::with_capacity(count);
+    let mut starts = Vec::new();
+    let _ = starts.try_reserve_exact(count);
+    let mut formats = Vec::new();
+    let _ = formats.try_reserve_exact(count);
     for chunk in run_bytes.chunks_exact(8) {
         let ich = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
         starts.push(ich);
@@ -1582,8 +1583,10 @@ fn parse_runs_4(run_bytes: &[u8], count: usize) -> Option<(Vec<usize>, Vec<Vec<u
     if run_bytes.len() != count.checked_mul(4)? {
         return None;
     }
-    let mut starts = Vec::with_capacity(count);
-    let mut formats = Vec::with_capacity(count);
+    let mut starts = Vec::new();
+    let _ = starts.try_reserve_exact(count);
+    let mut formats = Vec::new();
+    let _ = formats.try_reserve_exact(count);
     for chunk in run_bytes.chunks_exact(4) {
         let ich = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
         starts.push(ich);
@@ -1629,8 +1632,10 @@ fn build_rich_text_from_runs(
         paired.insert(0, (0, Vec::new()));
     }
 
-    let mut segments = Vec::with_capacity(paired.len());
-    let mut out_formats = Vec::with_capacity(paired.len());
+    let mut segments = Vec::new();
+    let _ = segments.try_reserve_exact(paired.len());
+    let mut out_formats = Vec::new();
+    let _ = out_formats.try_reserve_exact(paired.len());
 
     for i in 0..paired.len() {
         let start = paired[i].0;
@@ -1980,8 +1985,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                         // This is best-effort: we preserve the original `ifnt`
                                         // bytes (and any other run-format bytes) opaquely, and
                                         // recompute `ich` from the decoded string.
-                                        let mut utf16_offsets: Vec<u32> =
-                                            Vec::with_capacity(s.rich_text.char_len() + 1);
+                                        let mut utf16_offsets: Vec<u32> = Vec::new();
+                                        let _ = utf16_offsets
+                                            .try_reserve_exact(s.rich_text.char_len() + 1);
                                         let mut u16_cursor: u32 = 0;
                                         utf16_offsets.push(0);
                                         for ch in s.rich_text.text.chars() {
@@ -1990,8 +1996,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                             utf16_offsets.push(u16_cursor);
                                         }
 
-                                        let mut runs_bytes: Vec<u8> =
-                                            Vec::with_capacity(s.rich_text.runs.len() * 8);
+                                        let mut runs_bytes: Vec<u8> = Vec::new();
+                                        let _ = runs_bytes
+                                            .try_reserve_exact(s.rich_text.runs.len() * 8);
                                         for (i, run) in s.rich_text.runs.iter().enumerate() {
                                             let ich = utf16_offsets
                                                 .get(run.start)
@@ -2053,7 +2060,8 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                 let cce_offset = rr.offset;
                                 let mut accept = false;
                                 if let Some(raw) = rr.data.get(cce_offset..cce_offset + 4) {
-                                    let cce = u32::from_le_bytes(raw.try_into().unwrap()) as usize;
+                                    let cce = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
+                                        as usize;
                                     let rgce_offset = cce_offset + 4;
                                     if let Some(rgce_end) = rgce_offset.checked_add(cce) {
                                         if rgce_end <= rr.data.len() {
@@ -2417,7 +2425,8 @@ fn materialize_rgce(
     let delta_row = row as i64 - base_row as i64;
     let delta_col = col as i64 - base_col as i64;
 
-    let mut out = Vec::with_capacity(base.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(base.len());
     let mut i = 0usize;
     while i < base.len() {
         let ptg = *base.get(i)?;
@@ -2947,7 +2956,8 @@ fn read_supbook_sheet_names(rr: &mut RecordReader<'_>, ctab: usize) -> Vec<Strin
     }
 
     let start_offset = rr.offset;
-    let mut out = Vec::with_capacity(ctab);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(ctab);
     for _ in 0..ctab {
         match rr.read_utf16_string() {
             Ok(s) => out.push(s),
@@ -3024,7 +3034,8 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
     if data.len() >= 2 {
         let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
         if data.len() == 2 + cxti * 6 {
-            let mut out = Vec::with_capacity(cxti);
+            let mut out = Vec::new();
+            let _ = out.try_reserve_exact(cxti);
             let mut offset = 2;
             for _ in 0..cxti {
                 let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
@@ -3045,7 +3056,8 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
     if data.len() >= 4 {
         let cxti = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         if data.len() == 4 + cxti * 6 {
-            let mut out = Vec::with_capacity(cxti);
+            let mut out = Vec::new();
+            let _ = out.try_reserve_exact(cxti);
             let mut offset = 4;
             for _ in 0..cxti {
                 let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
@@ -3062,7 +3074,8 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
         }
 
         if data.len() == 4 + cxti * 12 {
-            let mut out = Vec::with_capacity(cxti);
+            let mut out = Vec::new();
+            let _ = out.try_reserve_exact(cxti);
             let mut offset = 4;
             for _ in 0..cxti {
                 let supbook = u32::from_le_bytes([

@@ -265,25 +265,21 @@ impl<'a> RecordReader<'a> {
     }
 
     fn read_u16(&mut self) -> Result<u16, Error> {
-        let bytes: [u8; 2] = self
+        let raw = self
             .data
             .get(self.offset..self.offset + 2)
-            .ok_or(Error::UnexpectedEof)?
-            .try_into()
-            .unwrap();
+            .ok_or(Error::UnexpectedEof)?;
         self.offset += 2;
-        Ok(u16::from_le_bytes(bytes))
+        Ok(u16::from_le_bytes([raw[0], raw[1]]))
     }
 
     fn read_u32(&mut self) -> Result<u32, Error> {
-        let bytes: [u8; 4] = self
+        let raw = self
             .data
             .get(self.offset..self.offset + 4)
-            .ok_or(Error::UnexpectedEof)?
-            .try_into()
-            .unwrap();
+            .ok_or(Error::UnexpectedEof)?;
         self.offset += 4;
-        Ok(u32::from_le_bytes(bytes))
+        Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
     }
 
     fn read_utf16_string(&mut self) -> Result<String, Error> {
@@ -297,7 +293,8 @@ impl<'a> RecordReader<'a> {
 
         // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled string lengths;
         // decode UTF-16LE directly into a `String`.
-        let mut out = String::with_capacity(raw.len());
+        let mut out = String::new();
+        let _ = out.try_reserve(raw.len());
         let iter = raw
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));

@@ -96,8 +96,10 @@ impl SharedStringsWriter {
                         return Err(Error::UnexpectedEof);
                     }
                     // BrtSST: [cstTotal: u32][cstUnique: u32] (matches BIFF8 + XLSX `sst` attrs).
-                    sst_total_count = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-                    sst_unique_count = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+                    sst_total_count =
+                        u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                    sst_unique_count =
+                        u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
                 }
                 biff12::SI if !seen_sst_end => {
                     if let Some(text) = parse_plain_si_text(&bytes[payload_start..payload_end]) {
@@ -207,7 +209,8 @@ impl SharedStringsWriter {
             return Ok(self.bytes);
         }
 
-        let mut out = Vec::with_capacity(
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(
             self.bytes
                 .len()
                 .saturating_add(self.appended_plain.len().saturating_mul(16)),
@@ -334,7 +337,7 @@ impl SharedStringsWriterStreaming {
                     input.read_exact(&mut prefix).map_err(map_io_error)?;
 
                     let original_total =
-                        u32::from_le_bytes(prefix[0..4].try_into().expect("u32 bytes"));
+                        u32::from_le_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]);
                     let updated_total = apply_total_ref_delta(original_total, total_ref_delta)?;
 
                     prefix[0..4].copy_from_slice(&updated_total.to_le_bytes());
@@ -406,7 +409,8 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
 
     // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled strings; decode
     // UTF-16LE directly into a `String`.
-    let mut out = String::with_capacity(raw.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(raw.len());
     let iter = raw
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));

@@ -66,7 +66,12 @@ pub(crate) fn patch_workbook_bin_intern_namex_functions(
         extern_name_count: u16,
     }
 
-    let mut out = Vec::with_capacity(workbook_bin.len() + function_names.len() * 64);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(
+        workbook_bin
+            .len()
+            .saturating_add(function_names.len().saturating_mul(64)),
+    );
     let mut inserted: Vec<InsertedNamexFunction> = Vec::new();
 
     let mut offset = 0usize;
@@ -84,7 +89,7 @@ pub(crate) fn patch_workbook_bin_intern_namex_functions(
             let name_index = start_index
                 .checked_add(delta as u16)
                 .ok_or(Error::UnexpectedEof)?;
-            let payload = build_extern_name_function_payload(name);
+            let payload = build_extern_name_function_payload(name)?;
             write_record(out, biff::EXTERN_NAME, &payload)?;
             inserted.push(InsertedNamexFunction {
                 name: name.clone(),
@@ -240,12 +245,12 @@ fn insert_addin_supbook_section(
     inserted: &mut Vec<InsertedNamexFunction>,
 ) -> Result<(), Error> {
     let _ = supbook_index;
-    let supbook_payload = build_addin_supbook_payload();
+    let supbook_payload = build_addin_supbook_payload()?;
     write_record(out, biff::SUPBOOK, &supbook_payload)?;
 
     for (idx, name) in function_names.iter().enumerate() {
         let name_index = u16::try_from(idx + 1).map_err(|_| Error::UnexpectedEof)?;
-        let payload = build_extern_name_function_payload(name);
+        let payload = build_extern_name_function_payload(name)?;
         write_record(out, biff::EXTERN_NAME, &payload)?;
         inserted.push(InsertedNamexFunction {
             name: name.clone(),
@@ -260,16 +265,16 @@ fn insert_addin_supbook_section(
     Ok(())
 }
 
-fn build_addin_supbook_payload() -> Vec<u8> {
+fn build_addin_supbook_payload() -> Result<Vec<u8>, Error> {
     // Minimal AddIn `SupBook` payload:
     //   [ctab:u16=0][raw_name: xlWideString("\u{0001}")]
     let mut out = Vec::new();
     out.extend_from_slice(&0u16.to_le_bytes());
-    write_xl_wide_string(&mut out, "\u{0001}");
-    out
+    write_xl_wide_string(&mut out, "\u{0001}")?;
+    Ok(out)
 }
 
-fn build_extern_name_function_payload(name: &str) -> Vec<u8> {
+fn build_extern_name_function_payload(name: &str) -> Result<Vec<u8>, Error> {
     // Minimal `ExternName` layout A:
     //   [flags:u16][scope:u16=0xFFFF][name: xlWideString]
     //
@@ -277,8 +282,8 @@ fn build_extern_name_function_payload(name: &str) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&0x0002u16.to_le_bytes());
     out.extend_from_slice(&0xFFFFu16.to_le_bytes());
-    write_xl_wide_string(&mut out, name);
-    out
+    write_xl_wide_string(&mut out, name)?;
+    Ok(out)
 }
 
 fn parse_supbook_raw_name(payload: &[u8]) -> Option<String> {
@@ -315,7 +320,8 @@ fn read_xl_wide_string(data: &[u8], offset: &mut usize) -> Option<String> {
     *offset += byte_len;
 
     // Strict decode: return `None` on invalid surrogate sequences.
-    let mut out = String::with_capacity(bytes.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len());
     let iter = bytes
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
@@ -325,15 +331,19 @@ fn read_xl_wide_string(data: &[u8], offset: &mut usize) -> Option<String> {
     Some(out)
 }
 
-fn write_xl_wide_string(out: &mut Vec<u8>, s: &str) {
-    let len_pos = out.len();
-    out.extend_from_slice(&0u32.to_le_bytes()); // backpatched
-    let mut cch: u32 = 0;
+fn write_xl_wide_string(out: &mut Vec<u8>, s: &str) -> Result<(), Error> {
+    let cch = s.encode_utf16().count();
+    let cch: u32 = u32::try_from(cch).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "string is too large",
+        ))
+    })?;
+    out.extend_from_slice(&cch.to_le_bytes());
     for u in s.encode_utf16() {
-        cch = cch.checked_add(1).expect("UTF-16 unit count fits in u32");
         out.extend_from_slice(&u.to_le_bytes());
     }
-    out[len_pos..len_pos + 4].copy_from_slice(&cch.to_le_bytes());
+    Ok(())
 }
 
 fn write_record(out: &mut Vec<u8>, id: u32, payload: &[u8]) -> Result<(), Error> {
