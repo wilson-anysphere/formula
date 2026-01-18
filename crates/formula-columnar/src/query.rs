@@ -2758,12 +2758,12 @@ impl GroupByEngine {
                         name,
                         column_type: ColumnType::Number,
                     });
+                    let mut seen: FastHashMap<DistinctGroupKey, ()> =
+                        HashMap::with_hasher(FastBuildHasher::default());
+                    let _ = seen.try_reserve(seen_capacity);
                     agg_states.push(AggState::DistinctCount {
                         counts: Vec::new(),
-                        seen: FastHashMap::with_capacity_and_hasher(
-                            seen_capacity,
-                            FastBuildHasher::default(),
-                        ),
+                        seen,
                         col,
                         kind,
                     });
@@ -2931,6 +2931,10 @@ impl GroupByEngine {
             .unwrap_or(0)
             .min(table.row_count());
 
+        let mut groups: FastHashMap<Box<[KeyValue]>, usize> =
+            HashMap::with_hasher(FastBuildHasher::default());
+        let _ = groups.try_reserve(capacity_hint);
+
         Ok(Self {
             schema,
             key_cols,
@@ -2939,7 +2943,7 @@ impl GroupByEngine {
             agg_states,
             count_row_aggs,
             agg_plans,
-            groups: FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default()),
+            groups,
             scratch_keys: vec![KeyValue::Null; keys.len()],
             scratch_key_scalars: vec![Scalar::Null; keys.len()],
             groups_len: 0,
@@ -3410,8 +3414,8 @@ fn build_dict_mapping(
         return (0..right_dict.len()).map(|i| Some(i as u32)).collect();
     }
 
-    let mut map: FastHashMap<&str, u32> =
-        FastHashMap::with_capacity_and_hasher(left_dict.len(), FastBuildHasher::default());
+    let mut map: FastHashMap<&str, u32> = HashMap::with_hasher(FastBuildHasher::default());
+    let _ = map.try_reserve(left_dict.len());
     for (idx, s) in left_dict.iter().enumerate() {
         map.insert(s.as_ref(), idx as u32);
     }
@@ -3487,8 +3491,8 @@ pub fn hash_join(
         .unwrap_or(0)
         .min(right_rows);
 
-    let mut map: FastHashMap<KeyValue, usize> =
-        FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default());
+    let mut map: FastHashMap<KeyValue, usize> = HashMap::with_hasher(FastBuildHasher::default());
+    let _ = map.try_reserve(capacity_hint);
 
     // Build phase (right).
     let right_chunks = right
@@ -3799,8 +3803,8 @@ where
         (est as usize).min(right_rows)
     };
 
-    let mut map: FastHashMap<Box<[KeyValue]>, usize> =
-        FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default());
+    let mut map: FastHashMap<Box<[KeyValue]>, usize> = HashMap::with_hasher(FastBuildHasher::default());
+    let _ = map.try_reserve(capacity_hint);
 
     // Build phase (right).
     let right_chunks_by_plan: Vec<&[EncodedChunk]> = plans
