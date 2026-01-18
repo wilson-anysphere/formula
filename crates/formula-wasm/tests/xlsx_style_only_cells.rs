@@ -42,7 +42,7 @@ fn from_xlsx_bytes_imports_style_only_cells_for_cell_metadata_functions() {
         .unwrap();
 
     let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
-    wb.debug_recalculate();
+    wb.debug_recalculate().unwrap();
 
     assert_eq!(
         wb.debug_get_engine_value(DEFAULT_SHEET, "B1"),

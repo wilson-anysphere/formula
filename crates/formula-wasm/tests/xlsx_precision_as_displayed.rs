@@ -40,7 +40,7 @@ fn from_xlsx_bytes_rounds_cached_numbers_when_precision_as_displayed_enabled() {
         EngineValue::Number(1.24)
     );
 
-    wb.debug_recalculate();
+    wb.debug_recalculate().unwrap();
     assert_eq!(
         wb.debug_get_engine_value(DEFAULT_SHEET, "B1"),
         EngineValue::Number(1.24)
@@ -57,7 +57,7 @@ fn from_xlsx_bytes_preserves_cached_numbers_when_full_precision_enabled() {
         EngineValue::Number(1.239)
     );
 
-    wb.debug_recalculate();
+    wb.debug_recalculate().unwrap();
     assert_eq!(
         wb.debug_get_engine_value(DEFAULT_SHEET, "B1"),
         EngineValue::Number(1.239)

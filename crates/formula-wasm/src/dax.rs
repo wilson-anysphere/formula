@@ -202,7 +202,10 @@ impl DaxModel {
                 .dyn_into::<Array>()
                 .map_err(|_| js_error("rows must be an array of arrays"))?;
 
-            let mut out = Vec::with_capacity(row.length() as usize);
+            let mut out = Vec::new();
+            if out.try_reserve_exact(row.length() as usize).is_err() {
+                return Err(js_error("allocation failure (addTable row)"));
+            }
             for cell in row.iter() {
                 out.push(js_value_to_dax_value(cell)?);
             }
@@ -514,7 +517,10 @@ impl DaxModel {
             .map(|c| GroupByColumn::new(c.table, c.column))
             .collect();
 
-        let mut pivot_measures = Vec::with_capacity(measures.len());
+        let mut pivot_measures = Vec::new();
+        if pivot_measures.try_reserve_exact(measures.len()).is_err() {
+            return Err(js_error("allocation failure (pivot measures)"));
+        }
         for m in measures {
             pivot_measures.push(PivotMeasure::new(m.name, m.expression).map_err(dax_error_to_js)?);
         }
@@ -574,7 +580,10 @@ impl DaxModel {
             .map(|c| GroupByColumn::new(c.table, c.column))
             .collect();
 
-        let mut pivot_measures = Vec::with_capacity(measures.len());
+        let mut pivot_measures = Vec::new();
+        if pivot_measures.try_reserve_exact(measures.len()).is_err() {
+            return Err(js_error("allocation failure (pivotCrosstab measures)"));
+        }
         for m in measures {
             pivot_measures.push(PivotMeasure::new(m.name, m.expression).map_err(dax_error_to_js)?);
         }
@@ -712,7 +721,10 @@ impl DaxFilterContext {
         column: &str,
         values: Vec<JsValue>,
     ) -> Result<(), JsValue> {
-        let mut out = Vec::with_capacity(values.len());
+        let mut out = Vec::new();
+        if out.try_reserve_exact(values.len()).is_err() {
+            return Err(js_error("allocation failure (setColumnIn values)"));
+        }
         for value in values {
             out.push(js_value_to_dax_value(value)?);
         }
@@ -842,7 +854,10 @@ impl WasmDaxDataModel {
 
         let mut table = Table::new(&schema.name, schema.columns);
         for row in rows {
-            let mut values = Vec::with_capacity(row.len());
+            let mut values = Vec::new();
+            if values.try_reserve_exact(row.len()).is_err() {
+                return Err(super::js_err("allocation failure (DaxDataModel.addTable row)"));
+            }
             for cell in row {
                 values.push(json_scalar_to_dax_value(&cell)?);
             }
@@ -870,7 +885,10 @@ impl WasmDaxDataModel {
         let row: Vec<JsonValue> =
             serde_wasm_bindgen::from_value(row).map_err(|err| super::js_err(err.to_string()))?;
 
-        let mut values = Vec::with_capacity(row.len());
+        let mut values = Vec::new();
+        if values.try_reserve_exact(row.len()).is_err() {
+            return Err(super::js_err("allocation failure (DaxDataModel.insertRow)"));
+        }
         for cell in row {
             values.push(json_scalar_to_dax_value(&cell)?);
         }

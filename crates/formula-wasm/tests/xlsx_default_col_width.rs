@@ -17,7 +17,7 @@ fn from_xlsx_bytes_imports_sheet_default_col_width_for_cell_width() {
         .save_to_vec()
         .unwrap();
     let mut wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
-    wb.debug_recalculate();
+    wb.debug_recalculate().unwrap();
 
     // Excel returns the floored width with a `0` flag (no +0.1) when the column uses the sheet
     // default width.

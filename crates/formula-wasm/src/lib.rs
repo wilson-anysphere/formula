@@ -1132,7 +1132,12 @@ pub struct Utf16Span {
 }
 
 #[derive(Clone, Debug)]
-struct Utf16IndexMap {
+struct Utf16IndexMap<'a> {
+    /// When present, compute UTF-16 offsets on-demand (no allocation).
+    ///
+    /// This mode is used when building the dense boundary table would require an allocation that
+    /// fails (e.g. extremely large formulas in constrained environments).
+    s: Option<&'a str>,
     /// Monotonic mapping from UTF-8 byte offsets (Rust) to UTF-16 code-unit offsets (JS).
     ///
     /// Contains `(0, 0)` and `(s.len(), s.encode_utf16().count())`, plus an entry at every UTF-8
@@ -1140,9 +1145,16 @@ struct Utf16IndexMap {
     byte_to_utf16: Vec<(usize, usize)>,
 }
 
-impl Utf16IndexMap {
-    fn new(s: &str) -> Self {
-        let mut byte_to_utf16 = Vec::with_capacity(s.chars().count() + 2);
+impl<'a> Utf16IndexMap<'a> {
+    fn new(s: &'a str) -> Self {
+        let mut byte_to_utf16 = Vec::new();
+        let capacity_hint = s.chars().count().saturating_add(2);
+        if byte_to_utf16.try_reserve_exact(capacity_hint).is_err() {
+            return Self {
+                s: Some(s),
+                byte_to_utf16: Vec::new(),
+            };
+        }
         byte_to_utf16.push((0, 0));
         let mut utf16: usize = 0;
         for (byte_idx, ch) in s.char_indices() {
@@ -1152,10 +1164,16 @@ impl Utf16IndexMap {
             utf16 = utf16.saturating_add(ch.len_utf16());
         }
         byte_to_utf16.push((s.len(), utf16));
-        Self { byte_to_utf16 }
+        Self {
+            s: None,
+            byte_to_utf16,
+        }
     }
 
     fn byte_to_utf16(&self, byte_offset: usize) -> usize {
+        if let Some(s) = self.s {
+            return byte_to_utf16_on_demand(s, byte_offset);
+        }
         match self
             .byte_to_utf16
             .binary_search_by_key(&byte_offset, |(byte, _)| *byte)
@@ -1174,7 +1192,17 @@ impl Utf16IndexMap {
     }
 }
 
-fn engine_span_to_utf16(span: EngineSpan, utf16_map: &Utf16IndexMap) -> Utf16Span {
+fn byte_to_utf16_on_demand(s: &str, byte_offset: usize) -> usize {
+    let mut byte_offset = byte_offset.min(s.len());
+    while byte_offset > 0 && s.get(..byte_offset).is_none() {
+        byte_offset = byte_offset.saturating_sub(1);
+    }
+    s.get(..byte_offset)
+        .map(|prefix| prefix.encode_utf16().count())
+        .unwrap_or(0)
+}
+
+fn engine_span_to_utf16(span: EngineSpan, utf16_map: &Utf16IndexMap<'_>) -> Utf16Span {
     Utf16Span {
         start: utf16_map.byte_to_utf16(span.start) as u32,
         end: utf16_map.byte_to_utf16(span.end) as u32,
@@ -1348,7 +1376,7 @@ impl From<Coord> for CoordDto {
     }
 }
 
-fn token_to_dto(token: Token, byte_offset: usize, utf16_map: &Utf16IndexMap) -> LexTokenDto {
+fn token_to_dto(token: Token, byte_offset: usize, utf16_map: &Utf16IndexMap<'_>) -> LexTokenDto {
     let span = engine_span_to_utf16(add_byte_offset(token.span, byte_offset), utf16_map);
     match token.kind {
         TokenKind::Number(raw) => LexTokenDto::Number { span, value: raw },
@@ -1542,7 +1570,12 @@ pub fn rewrite_formulas_for_copy_delta(requests: JsValue) -> Result<JsValue, JsV
         serde_wasm_bindgen::from_value(requests).map_err(|err| js_err(err.to_string()))?;
 
     let origin = CellAddr::new(0, 0);
-    let mut out: Vec<String> = Vec::with_capacity(requests.len());
+    let mut out: Vec<String> = Vec::new();
+    if out.try_reserve_exact(requests.len()).is_err() {
+        return Err(js_err(
+            "allocation failure (rewrite_formulas_for_copy_delta output)",
+        ));
+    }
     for req in requests {
         let (rewritten, _) = rewrite_formula_for_copy_delta(
             &req.formula,
@@ -1974,9 +2007,15 @@ fn engine_value_to_cell_value_rich(value: EngineValue) -> CellValue {
         }
         EngineValue::Array(arr) => {
             let mut iter = arr.values.into_iter();
-            let mut data = Vec::with_capacity(arr.rows);
+            let mut data = Vec::new();
+            if data.try_reserve_exact(arr.rows).is_err() {
+                return CellValue::Error(formula_model::ErrorValue::Num);
+            }
             for _ in 0..arr.rows {
-                let mut row = Vec::with_capacity(arr.cols);
+                let mut row = Vec::new();
+                if row.try_reserve_exact(arr.cols).is_err() {
+                    return CellValue::Error(formula_model::ErrorValue::Num);
+                }
                 for _ in 0..arr.cols {
                     let next = iter.next().unwrap_or(EngineValue::Blank);
                     row.push(engine_value_to_cell_value_rich(next));
@@ -2042,7 +2081,10 @@ fn cell_value_to_engine_rich(value: &CellValue) -> Result<EngineValue, JsValue> 
                 ));
             }
 
-            let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+            let mut values = Vec::new();
+            if values.try_reserve_exact(rows.saturating_mul(cols)).is_err() {
+                return Err(js_err("allocation failure (CellValue::Array values)"));
+            }
             for row in &arr.data {
                 for v in row {
                     values.push(cell_value_to_engine_rich(v)?);
@@ -2706,7 +2748,10 @@ impl WorkbookState {
         );
 
         let date_system = self.engine.date_system();
-        let mut out = Vec::with_capacity(writes.len());
+        let mut out = Vec::new();
+        if out.try_reserve_exact(writes.len()).is_err() {
+            return Err(js_err("allocation failure (calculate_pivot_writes output)"));
+        }
         for write in writes {
             out.push(PivotCellWrite {
                 sheet: sheet.clone(),
@@ -2784,10 +2829,7 @@ impl WorkbookState {
                 }
             }
 
-            let sheet_cells = this
-                .sheets
-                .get_mut(&sheet)
-                .expect("sheet just ensured must exist");
+            let sheet_cells = this.sheets.entry(sheet.clone()).or_default();
 
             // `null` represents an empty cell in the JS protocol. Preserve sparse semantics in the
             // JSON input map by removing the stored entry instead of storing an explicit blank.
@@ -2810,7 +2852,13 @@ impl WorkbookState {
             }
 
             if is_formula_input(&input) {
-                let raw = input.as_str().expect("formula input must be string");
+                let Some(raw) = input.as_str() else {
+                    debug_assert!(
+                        false,
+                        "is_formula_input returned true but input was not a string: {input:?}"
+                    );
+                    return Err(js_err("invalid formula input".to_string()));
+                };
                 // Match `formula-model`'s display semantics so the worker protocol doesn't
                 // drift from other layers (trim both ends, strip a single leading '=', and
                 // treat bare '=' as empty).
@@ -2943,14 +2991,8 @@ impl WorkbookState {
                 }
             }
 
-            let sheet_cells = this
-                .sheets
-                .get_mut(&sheet)
-                .expect("sheet just ensured must exist");
-            let sheet_cells_rich = this
-                .sheets_rich
-                .get_mut(&sheet)
-                .expect("sheet just ensured must exist");
+            let sheet_cells = this.sheets.entry(sheet.clone()).or_default();
+            let sheet_cells_rich = this.sheets_rich.entry(sheet.clone()).or_default();
 
             // Convert model cell value into the engine's runtime value.
             //
@@ -3624,10 +3666,7 @@ impl WorkbookState {
             for change in &result.changed_cells {
                 let sheet = self.ensure_sheet(&change.sheet);
                 let address = formula_model::cell_to_a1(change.cell.row, change.cell.col);
-                let sheet_cells = self
-                    .sheets
-                    .get_mut(&sheet)
-                    .expect("sheet just ensured must exist");
+                let sheet_cells = self.sheets.entry(sheet.clone()).or_default();
 
                 match &change.after {
                     None => {
@@ -3717,7 +3756,13 @@ impl WorkbookState {
             }
 
             // Convert to JS-friendly DTO.
-            let mut changed_cells = Vec::with_capacity(result.changed_cells.len());
+            let mut changed_cells = Vec::new();
+            if changed_cells
+                .try_reserve_exact(result.changed_cells.len())
+                .is_err()
+            {
+                return Err(js_err("allocation failure (edit changed_cells DTO)"));
+            }
             for change in &result.changed_cells {
                 let address = formula_model::cell_to_a1(change.cell.row, change.cell.col);
                 let before = change.before.as_ref().map(|snap| EditCellSnapshotDto {
@@ -3954,10 +3999,14 @@ fn scan_fallback_function_context(
 
     let mut i: usize = 0;
     while i < formula_prefix.len() {
-        let ch = formula_prefix[i..]
-            .chars()
-            .next()
-            .expect("char_indices iteration should always yield a char");
+        let Some(ch) = formula_prefix[i..].chars().next() else {
+            debug_assert!(
+                false,
+                "expected non-empty suffix at i={i} len={}",
+                formula_prefix.len()
+            );
+            break;
+        };
         let ch_len = ch.len_utf8();
 
         match mode {
@@ -4097,10 +4146,14 @@ fn scan_fallback_function_context(
                         let start = i;
                         let mut end = i + ch_len;
                         while end < formula_prefix.len() {
-                            let next = formula_prefix[end..]
-                                .chars()
-                                .next()
-                                .expect("slice must start at char boundary");
+                            let Some(next) = formula_prefix[end..].chars().next() else {
+                                debug_assert!(
+                                    false,
+                                    "expected char at end={end} len={}",
+                                    formula_prefix.len()
+                                );
+                                break;
+                            };
                             if is_ident_cont_char(next) {
                                 end += next.len_utf8();
                             } else {
@@ -4111,10 +4164,14 @@ fn scan_fallback_function_context(
                         // Look ahead for `(`, allowing whitespace between.
                         let mut j = end;
                         while j < formula_prefix.len() {
-                            let next = formula_prefix[j..]
-                                .chars()
-                                .next()
-                                .expect("slice must start at char boundary");
+                            let Some(next) = formula_prefix[j..].chars().next() else {
+                                debug_assert!(
+                                    false,
+                                    "expected char at j={j} len={}",
+                                    formula_prefix.len()
+                                );
+                                break;
+                            };
                             if next.is_whitespace() {
                                 j += next.len_utf8();
                             } else {
@@ -5119,7 +5176,13 @@ impl WasmWorkbook {
         // Map workbook model style ids through the engine's style interner so row/column/cell
         // formatting layers reference the engine's canonical style ids. This keeps style ids
         // consistent even when the incoming style table contains duplicate entries.
-        let mut style_id_map: Vec<u32> = Vec::with_capacity(model.styles.styles.len());
+        let mut style_id_map: Vec<u32> = Vec::new();
+        if style_id_map
+            .try_reserve_exact(model.styles.styles.len())
+            .is_err()
+        {
+            return Err(js_err("allocation failure (style_id_map)"));
+        }
         style_id_map.push(0);
         for style in model.styles.styles.iter().skip(1) {
             style_id_map.push(wb.engine.intern_style(style.clone()));
@@ -5133,10 +5196,7 @@ impl WasmWorkbook {
             let Some(origin) = sheet.view.pane.top_left_cell else {
                 continue;
             };
-            let sheet_name = wb
-                .resolve_sheet(&sheet.name)
-                .expect("sheet just ensured must resolve")
-                .to_string();
+            let sheet_name = wb.require_sheet(&sheet.name)?.to_string();
             let origin = formula_model::cell_to_a1(origin.row, origin.col);
             let _ = wb.engine.set_sheet_origin(&sheet_name, Some(&origin));
         }
@@ -5148,10 +5208,7 @@ impl WasmWorkbook {
         // `<sheetFormatPr defaultColWidth="...">`) and are needed for workbook info functions like
         // `CELL("format")` and `CELL("width")`.
         for sheet in &model.sheets {
-            let sheet_name = wb
-                .resolve_sheet(&sheet.name)
-                .expect("sheet just ensured must resolve")
-                .to_string();
+            let sheet_name = wb.require_sheet(&sheet.name)?.to_string();
 
             wb.engine
                 .set_sheet_default_col_width(&sheet_name, sheet.default_col_width);
@@ -5200,10 +5257,7 @@ impl WasmWorkbook {
         // Import Excel tables (structured reference metadata) before formulas are compiled so
         // expressions like `Table1[Col]` and `[@Col]` resolve correctly.
         for sheet in &model.sheets {
-            let sheet_name = wb
-                .resolve_sheet(&sheet.name)
-                .expect("sheet just ensured must resolve")
-                .to_string();
+            let sheet_name = wb.require_sheet(&sheet.name)?.to_string();
             wb.engine
                 .set_sheet_tables(&sheet_name, sheet.tables.clone());
         }
@@ -5249,10 +5303,7 @@ impl WasmWorkbook {
         }
 
         for sheet in &model.sheets {
-            let sheet_name = wb
-                .resolve_sheet(&sheet.name)
-                .expect("sheet just ensured must resolve")
-                .to_string();
+            let sheet_name = wb.require_sheet(&sheet.name)?.to_string();
 
             for (cell_ref, cell) in sheet.iter_cells() {
                 let address = formula_model::cell_to_a1(cell_ref.row, cell_ref.col);
@@ -5302,10 +5353,7 @@ impl WasmWorkbook {
                                 .map_err(|err| js_err(err.to_string()))?;
                         }
 
-                        let sheet_cells = wb
-                            .sheets
-                            .get_mut(&sheet_name)
-                            .expect("sheet just ensured must exist");
+                        let sheet_cells = wb.sheets.entry(sheet_name.clone()).or_default();
                         sheet_cells.insert(address.clone(), JsonValue::String(display));
                         continue;
                     }
@@ -5318,10 +5366,7 @@ impl WasmWorkbook {
                 }
 
                 // Non-formula cell; store scalar value as input.
-                let sheet_cells = wb
-                    .sheets
-                    .get_mut(&sheet_name)
-                    .expect("sheet just ensured must exist");
+                let sheet_cells = wb.sheets.entry(sheet_name.clone()).or_default();
                 sheet_cells.insert(address, cell_value_to_scalar_json_input(&cell.value));
             }
         }
@@ -6107,8 +6152,10 @@ impl WasmWorkbook {
         let outer = Array::new_with_length(values.len() as u32);
         // Reuse buffers to avoid per-cell string allocations (both for input lookup and
         // for emitting the `address` string field).
-        let mut addr_buf = String::with_capacity(16);
-        let mut row_buf = String::with_capacity(16);
+        let mut addr_buf = String::new();
+        let mut row_buf = String::new();
+        let _ = addr_buf.try_reserve(16);
+        let _ = row_buf.try_reserve(16);
         for (row_off, row_values) in values.into_iter().enumerate() {
             let row = start_row + row_off as u32;
             row_buf.clear();
@@ -6168,8 +6215,10 @@ impl WasmWorkbook {
 
         let outer = Array::new_with_length(values.len() as u32);
         // Reuse buffers to avoid per-cell string allocations while looking up sparse inputs.
-        let mut addr_buf = String::with_capacity(16);
-        let mut row_buf = String::with_capacity(16);
+        let mut addr_buf = String::new();
+        let mut row_buf = String::new();
+        let _ = addr_buf.try_reserve(16);
+        let _ = row_buf.try_reserve(16);
         for (row_off, row_values) in values.into_iter().enumerate() {
             let row = start_row + row_off as u32;
             row_buf.clear();
@@ -6483,12 +6532,23 @@ fn xlsb_to_model_workbook(
     //
     // `formula-xlsb` currently only exposes number formats (`numFmtId`/`ifmt`) via `Styles`.
     // Preserve those for downstream consumers like date inference in pivot tables.
-    let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
+    let mut xf_to_style_id: Vec<u32> = Vec::new();
+    if xf_to_style_id.try_reserve_exact(wb.styles().len()).is_err() {
+        return Err(formula_xlsb::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "allocation failure (xf_to_style_id)",
+        )));
+    }
     for xf_idx in 0..wb.styles().len() {
-        let info = wb
-            .styles()
-            .get(xf_idx as u32)
-            .expect("xf index within wb.styles().len()");
+        let Some(info) = wb.styles().get(xf_idx as u32) else {
+            debug_assert!(
+                false,
+                "missing style info for xf index {xf_idx} (len={})",
+                wb.styles().len()
+            );
+            xf_to_style_id.push(0);
+            continue;
+        };
         if info.num_fmt_id == 0 {
             xf_to_style_id.push(0);
             continue;
@@ -6507,8 +6567,16 @@ fn xlsb_to_model_workbook(
         xf_to_style_id.push(style_id);
     }
 
-    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
-        Vec::with_capacity(wb.sheet_metas().len());
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
+    if worksheet_ids_by_index
+        .try_reserve_exact(wb.sheet_metas().len())
+        .is_err()
+    {
+        return Err(formula_xlsb::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "allocation failure (worksheet_ids_by_index)",
+        )));
+    }
 
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
         let sheet_id = out.add_sheet(meta.name.clone()).map_err(|err| {
@@ -6516,9 +6584,17 @@ fn xlsb_to_model_workbook(
         })?;
         worksheet_ids_by_index.push(sheet_id);
 
-        let sheet = out
-            .sheet_mut(sheet_id)
-            .expect("sheet id should exist immediately after add");
+        let Some(sheet) = out.sheet_mut(sheet_id) else {
+            debug_assert!(
+                false,
+                "sheet id {sheet_id:?} missing immediately after add_sheet({:?})",
+                meta.name
+            );
+            return Err(formula_xlsb::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "internal error: sheet id missing immediately after add_sheet",
+            )));
+        };
         sheet.visibility = match meta.visibility {
             formula_xlsb::SheetVisibility::Visible => ModelSheetVisibility::Visible,
             formula_xlsb::SheetVisibility::Hidden => ModelSheetVisibility::Hidden,
@@ -6622,10 +6698,8 @@ impl WasmWorkbook {
     }
 
     #[doc(hidden)]
-    pub fn debug_recalculate(&mut self) -> Vec<CellChange> {
-        self.inner
-            .recalculate_internal(None)
-            .expect("recalculate should succeed")
+    pub fn debug_recalculate(&mut self) -> Result<Vec<CellChange>, JsValue> {
+        self.inner.recalculate_internal(None)
     }
 
     #[doc(hidden)]
@@ -6633,10 +6707,9 @@ impl WasmWorkbook {
         &mut self,
         directory: Option<&str>,
         filename: Option<&str>,
-    ) {
+    ) -> Result<(), JsValue> {
         self.inner
             .set_workbook_file_metadata_internal(directory, filename)
-            .expect("set_workbook_file_metadata should succeed");
     }
 }
 
@@ -7858,13 +7931,14 @@ mod tests {
         wb.inner
             .set_cell_internal(DEFAULT_SHEET, "A1", json!("=CELL(\"filename\")"))
             .unwrap();
-        wb.debug_recalculate();
+        wb.debug_recalculate().unwrap();
         assert_eq!(
             wb.debug_get_engine_value(DEFAULT_SHEET, "A1"),
             EngineValue::Text(String::new())
         );
 
-        wb.debug_set_workbook_file_metadata(Some("/tmp/"), Some("book.xlsx"));
+        wb.debug_set_workbook_file_metadata(Some("/tmp/"), Some("book.xlsx"))
+            .unwrap();
 
         // The setter should not have triggered an automatic recalc.
         assert_eq!(
@@ -7876,7 +7950,7 @@ mod tests {
             EngineValue::Text(String::new())
         );
 
-        let changes = wb.debug_recalculate();
+        let changes = wb.debug_recalculate().unwrap();
         assert!(
             changes.iter().any(|change| {
                 change.sheet == DEFAULT_SHEET
