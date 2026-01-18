@@ -2252,7 +2252,9 @@ fn parse_standard_encryption_info_lenient(
         pos: &mut usize,
         context: &'static str,
     ) -> Result<u16, formula_offcrypto::OffcryptoError> {
-        let end = pos.saturating_add(2);
+        let Some(end) = pos.checked_add(2) else {
+            return Err(formula_offcrypto::OffcryptoError::Truncated { context });
+        };
         let slice = bytes
             .get(*pos..end)
             .ok_or(formula_offcrypto::OffcryptoError::Truncated { context })?;
@@ -2265,7 +2267,9 @@ fn parse_standard_encryption_info_lenient(
         pos: &mut usize,
         context: &'static str,
     ) -> Result<u32, formula_offcrypto::OffcryptoError> {
-        let end = pos.saturating_add(4);
+        let Some(end) = pos.checked_add(4) else {
+            return Err(formula_offcrypto::OffcryptoError::Truncated { context });
+        };
         let slice = bytes
             .get(*pos..end)
             .ok_or(formula_offcrypto::OffcryptoError::Truncated { context })?;
@@ -2292,12 +2296,17 @@ fn parse_standard_encryption_info_lenient(
         });
     }
 
+    let Some(header_end) = pos.checked_add(header_size) else {
+        return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader end offset overflow",
+        });
+    };
     let header_bytes = encryption_info
-        .get(pos..pos + header_size)
+        .get(pos..header_end)
         .ok_or(formula_offcrypto::OffcryptoError::Truncated {
             context: "EncryptionHeader",
         })?;
-    pos += header_size;
+    pos = header_end;
 
     let mut hpos = 0usize;
     let raw_flags = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.flags")?;
