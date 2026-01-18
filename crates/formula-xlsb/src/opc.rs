@@ -2864,16 +2864,23 @@ mod zip_guardrail_tests {
             if zip_bytes.get(i..i + 4) != Some(&LOCAL_SIG) {
                 continue;
             }
-            if i + 30 > zip_bytes.len() {
+            let Some(header_start) = zip_bytes.get(i..) else {
                 continue;
-            }
-            let name_len =
-                u16::from_le_bytes(zip_bytes[i + 26..i + 28].try_into().unwrap()) as usize;
-            let extra_len =
-                u16::from_le_bytes(zip_bytes[i + 28..i + 30].try_into().unwrap()) as usize;
-            let name_start = i + 30;
-            let name_end = name_start.saturating_add(name_len);
-            let extra_end = name_end.saturating_add(extra_len);
+            };
+            let Some(header) = header_start.get(..30) else {
+                continue;
+            };
+            let name_len = u16::from_le_bytes([header[26], header[27]]) as usize;
+            let extra_len = u16::from_le_bytes([header[28], header[29]]) as usize;
+            let Some(name_start) = i.checked_add(30) else {
+                continue;
+            };
+            let Some(name_end) = name_start.checked_add(name_len) else {
+                continue;
+            };
+            let Some(extra_end) = name_end.checked_add(extra_len) else {
+                continue;
+            };
             if extra_end > zip_bytes.len() {
                 continue;
             }
@@ -2881,7 +2888,16 @@ mod zip_guardrail_tests {
                 continue;
             }
             // Uncompressed size is at offset 22..26 in the local header.
-            zip_bytes[i + 22..i + 26].copy_from_slice(&new_size.to_le_bytes());
+            let Some(field_start) = i.checked_add(22) else {
+                continue;
+            };
+            let Some(field_end) = field_start.checked_add(4) else {
+                continue;
+            };
+            let Some(field) = zip_bytes.get_mut(field_start..field_end) else {
+                continue;
+            };
+            field.copy_from_slice(&new_size.to_le_bytes());
             patched_local = true;
             break;
         }
@@ -2891,19 +2907,27 @@ mod zip_guardrail_tests {
             if zip_bytes.get(i..i + 4) != Some(&CENTRAL_SIG) {
                 continue;
             }
-            if i + 46 > zip_bytes.len() {
+            let Some(header_start) = zip_bytes.get(i..) else {
                 continue;
-            }
-            let name_len =
-                u16::from_le_bytes(zip_bytes[i + 28..i + 30].try_into().unwrap()) as usize;
-            let extra_len =
-                u16::from_le_bytes(zip_bytes[i + 30..i + 32].try_into().unwrap()) as usize;
-            let comment_len =
-                u16::from_le_bytes(zip_bytes[i + 32..i + 34].try_into().unwrap()) as usize;
-            let name_start = i + 46;
-            let name_end = name_start.saturating_add(name_len);
-            let extra_end = name_end.saturating_add(extra_len);
-            let comment_end = extra_end.saturating_add(comment_len);
+            };
+            let Some(header) = header_start.get(..46) else {
+                continue;
+            };
+            let name_len = u16::from_le_bytes([header[28], header[29]]) as usize;
+            let extra_len = u16::from_le_bytes([header[30], header[31]]) as usize;
+            let comment_len = u16::from_le_bytes([header[32], header[33]]) as usize;
+            let Some(name_start) = i.checked_add(46) else {
+                continue;
+            };
+            let Some(name_end) = name_start.checked_add(name_len) else {
+                continue;
+            };
+            let Some(extra_end) = name_end.checked_add(extra_len) else {
+                continue;
+            };
+            let Some(comment_end) = extra_end.checked_add(comment_len) else {
+                continue;
+            };
             if comment_end > zip_bytes.len() {
                 continue;
             }
@@ -2911,7 +2935,16 @@ mod zip_guardrail_tests {
                 continue;
             }
             // Uncompressed size is at offset 24..28 in the central directory header.
-            zip_bytes[i + 24..i + 28].copy_from_slice(&new_size.to_le_bytes());
+            let Some(field_start) = i.checked_add(24) else {
+                continue;
+            };
+            let Some(field_end) = field_start.checked_add(4) else {
+                continue;
+            };
+            let Some(field) = zip_bytes.get_mut(field_start..field_end) else {
+                continue;
+            };
+            field.copy_from_slice(&new_size.to_le_bytes());
             patched_central = true;
             break;
         }
