@@ -118,9 +118,11 @@ impl From<Value> for EncodedValue {
                 detail: None,
             },
             Value::Array(arr) => {
-                let mut rows = Vec::with_capacity(arr.rows);
+                let mut rows = Vec::new();
+                let _ = rows.try_reserve_exact(arr.rows);
                 for r in 0..arr.rows {
-                    let mut row = Vec::with_capacity(arr.cols);
+                    let mut row = Vec::new();
+                    let _ = row.try_reserve_exact(arr.cols);
                     for c in 0..arr.cols {
                         row.push(arr.get(r, c).cloned().unwrap_or(Value::Blank).into());
                     }
@@ -277,7 +279,8 @@ fn main() -> Result<()> {
         filtered_cases.len()
     };
 
-    let mut results = Vec::with_capacity(max_cases);
+    let mut results = Vec::new();
+    let _ = results.try_reserve_exact(max_cases);
 
     for case in filtered_cases.into_iter().take(max_cases) {
         let mut engine = Engine::new();
@@ -365,9 +368,11 @@ fn main() -> Result<()> {
             Some((start, end)) => {
                 let rows = (end.row - start.row + 1) as usize;
                 let cols = (end.col - start.col + 1) as usize;
-                let mut out_rows = Vec::with_capacity(rows);
+                let mut out_rows = Vec::new();
+                let _ = out_rows.try_reserve_exact(rows);
                 for r in 0..rows {
-                    let mut row = Vec::with_capacity(cols);
+                    let mut row = Vec::new();
+                    let _ = row.try_reserve_exact(cols);
                     for c in 0..cols {
                         let addr = coord_to_a1(start.row + r as u32, start.col + c as u32);
                         row.push(engine.get_cell_value(&default_sheet, &addr).into());
