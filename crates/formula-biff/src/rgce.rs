@@ -389,6 +389,52 @@ fn decode_array_constant(
     Ok(out)
 }
 
+fn slice_at<'a>(
+    buf: &'a [u8],
+    i: usize,
+    needed: usize,
+    ptg_offset: usize,
+    ptg: u8,
+) -> Result<&'a [u8], DecodeRgceError> {
+    let remaining = buf.len().saturating_sub(i);
+    if remaining < needed {
+        return Err(DecodeRgceError::UnexpectedEof {
+            offset: ptg_offset,
+            ptg,
+            needed,
+            remaining,
+        });
+    }
+    buf.get(i..)
+        .and_then(|tail| tail.get(..needed))
+        .ok_or(DecodeRgceError::UnexpectedEof {
+            offset: ptg_offset,
+            ptg,
+            needed,
+            remaining,
+        })
+}
+
+fn advance_pos(
+    i: &mut usize,
+    delta: usize,
+    buf_len: usize,
+    ptg_offset: usize,
+    ptg: u8,
+) -> Result<(), DecodeRgceError> {
+    let cur = *i;
+    let Some(next) = cur.checked_add(delta) else {
+        return Err(DecodeRgceError::UnexpectedEof {
+            offset: ptg_offset,
+            ptg,
+            needed: delta,
+            remaining: buf_len.saturating_sub(cur),
+        });
+    };
+    *i = next;
+    Ok(())
+}
+
 /// Scan a nested BIFF12 token subexpression (e.g. the payload of `PtgMemFunc`) and advance the
 /// `rgcb` cursor for any `PtgArray` tokens encountered.
 ///
@@ -458,7 +504,8 @@ fn consume_rgcb_arrays_in_subexpression(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let cch = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let cch = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
                 i += 2;
                 let byte_len = cch.saturating_mul(2);
                 if !has_remaining(rgce, i, byte_len) {
@@ -512,8 +559,9 @@ fn consume_rgcb_arrays_in_subexpression(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let grbit = rgce[i];
-                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]) as usize;
+                let hdr = slice_at(rgce, i, 3, ptg_offset, ptg)?;
+                let grbit = hdr[0];
+                let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]) as usize;
                 i += 3;
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
@@ -654,7 +702,8 @@ fn consume_rgcb_arrays_in_subexpression(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let cce = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let cce = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
                 i += 2;
                 let end = i.checked_add(cce).ok_or(DecodeRgceError::UnexpectedEof {
                     offset: ptg_offset,
@@ -1003,8 +1052,9 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let cch = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
-                i += 2;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let cch = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
                 let byte_len = cch.saturating_mul(2);
                 if rgce.len().saturating_sub(i) < byte_len {
                     return Err(DecodeRgceError::UnexpectedEof {
@@ -1174,9 +1224,10 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let grbit = rgce[i];
-                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]);
-                i += 3;
+                let hdr = slice_at(rgce, i, 3, ptg_offset, ptg)?;
+                let grbit = hdr[0];
+                let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]);
+                advance_pos(&mut i, 3, rgce.len(), ptg_offset, ptg)?;
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 const T_ATTR_SUM: u8 = 0x10;
@@ -1257,8 +1308,9 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let n = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                i += 2;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let n = u16::from_le_bytes([hdr[0], hdr[1]]);
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
                 stack.push(ExprFragment::new(n.to_string()));
             }
             // Num literal.
@@ -1320,8 +1372,9 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let func_id = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                i += 2;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let func_id = u16::from_le_bytes([hdr[0], hdr[1]]);
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
 
                 let Some(spec) = function_spec_from_id(func_id) else {
                     return Err(DecodeRgceError::UnknownFunctionId {
@@ -1381,9 +1434,10 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let argc = rgce[i] as usize;
-                let func_id = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]);
-                i += 3;
+                let hdr = slice_at(rgce, i, 3, ptg_offset, ptg)?;
+                let argc = hdr[0] as usize;
+                let func_id = u16::from_le_bytes([hdr[1], hdr[2]]);
+                advance_pos(&mut i, 3, rgce.len(), ptg_offset, ptg)?;
 
                 // Excel uses a sentinel function id for user-defined functions: the top-of-stack
                 // item is the function name expression (typically from `PtgNameX`), followed by
@@ -1490,9 +1544,10 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let hdr = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                let name_id = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
                 // Skip `[nameId: u32][reserved: u16]`.
-                i = i.saturating_add(6);
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
 
                 // Best-effort: we don't have workbook name context in this crate, so emit a stable
                 // placeholder that is parseable as an Excel identifier.
@@ -1528,9 +1583,10 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
-                i = i.saturating_add(4);
+                let hdr = slice_at(rgce, i, 4, ptg_offset, ptg)?;
+                let ixti = u16::from_le_bytes([hdr[0], hdr[1]]);
+                let name_index = u16::from_le_bytes([hdr[2], hdr[3]]);
+                advance_pos(&mut i, 4, rgce.len(), ptg_offset, ptg)?;
 
                 // Best-effort: emit a stable placeholder identifier for the extern name.
                 //
@@ -1563,12 +1619,12 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
+                let hdr = slice_at(rgce, i, 6, ptg_offset, ptg)?;
                 let row =
-                    u64::from(u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]))
-                        + 1;
-                let col = u16::from_le_bytes([rgce[i + 4], rgce[i + 5] & 0x3F]) as u32;
-                let flags = rgce[i + 5];
-                i += 6;
+                    u64::from(u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]])).saturating_add(1);
+                let col = u16::from_le_bytes([hdr[4], hdr[5] & 0x3F]) as u32;
+                let flags = hdr[5];
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
 
                 let abs_col = flags & 0x80 == 0;
                 let abs_row = flags & 0x40 == 0;
@@ -1586,20 +1642,16 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
+                let hdr = slice_at(rgce, i, 12, ptg_offset, ptg)?;
                 let row1 =
-                    u64::from(u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]))
-                        + 1;
-                let row2 = u64::from(u32::from_le_bytes([
-                    rgce[i + 4],
-                    rgce[i + 5],
-                    rgce[i + 6],
-                    rgce[i + 7],
-                ])) + 1;
-                let col1 = u16::from_le_bytes([rgce[i + 8], rgce[i + 9] & 0x3F]) as u32;
-                let col2 = u16::from_le_bytes([rgce[i + 10], rgce[i + 11] & 0x3F]) as u32;
-                let flags1 = rgce[i + 9];
-                let flags2 = rgce[i + 11];
-                i += 12;
+                    u64::from(u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]])).saturating_add(1);
+                let row2 =
+                    u64::from(u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]])).saturating_add(1);
+                let col1 = u16::from_le_bytes([hdr[8], hdr[9] & 0x3F]) as u32;
+                let col2 = u16::from_le_bytes([hdr[10], hdr[11] & 0x3F]) as u32;
+                let flags1 = hdr[9];
+                let flags2 = hdr[11];
+                advance_pos(&mut i, 12, rgce.len(), ptg_offset, ptg)?;
 
                 let abs_col1 = flags1 & 0x80 == 0;
                 let abs_row1 = flags1 & 0x40 == 0;
@@ -1644,8 +1696,9 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let cce = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
-                i += 2;
+                let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                let cce = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
                 if rgce.len().saturating_sub(i) < cce {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
@@ -1725,10 +1778,10 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let row_off =
-                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
-                let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
-                i += 6;
+                let hdr = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                let row_off = i32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as i64;
+                let col_off = i16::from_le_bytes([hdr[4], hdr[5]]) as i64;
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
@@ -1760,13 +1813,12 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let row1_off =
-                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
-                let row2_off =
-                    i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) as i64;
-                let col1_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
-                let col2_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
-                i += 12;
+                let hdr = slice_at(rgce, i, 12, ptg_offset, ptg)?;
+                let row1_off = i32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as i64;
+                let row2_off = i32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) as i64;
+                let col1_off = i16::from_le_bytes([hdr[8], hdr[9]]) as i64;
+                let col2_off = i16::from_le_bytes([hdr[10], hdr[11]]) as i64;
+                advance_pos(&mut i, 12, rgce.len(), ptg_offset, ptg)?;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
@@ -1820,10 +1872,11 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let row0 = u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
-                let col_field = u16::from_le_bytes([rgce[i + 6], rgce[i + 7]]);
-                i += 8;
+                let hdr = slice_at(rgce, i, 8, ptg_offset, ptg)?;
+                let ixti = u16::from_le_bytes([hdr[0], hdr[1]]);
+                let row0 = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]);
+                let col_field = u16::from_le_bytes([hdr[6], hdr[7]]);
+                advance_pos(&mut i, 8, rgce.len(), ptg_offset, ptg)?;
 
                 let prefix = format_sheet_placeholder(ixti);
                 let mut text = prefix;
@@ -1840,14 +1893,13 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let row_first0 =
-                    u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
-                let row_last0 =
-                    u32::from_le_bytes([rgce[i + 6], rgce[i + 7], rgce[i + 8], rgce[i + 9]]);
-                let col_first = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
-                let col_last = u16::from_le_bytes([rgce[i + 12], rgce[i + 13]]);
-                i += 14;
+                let hdr = slice_at(rgce, i, 14, ptg_offset, ptg)?;
+                let ixti = u16::from_le_bytes([hdr[0], hdr[1]]);
+                let row_first0 = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]);
+                let row_last0 = u32::from_le_bytes([hdr[6], hdr[7], hdr[8], hdr[9]]);
+                let col_first = u16::from_le_bytes([hdr[10], hdr[11]]);
+                let col_last = u16::from_le_bytes([hdr[12], hdr[13]]);
+                advance_pos(&mut i, 14, rgce.len(), ptg_offset, ptg)?;
 
                 let prefix = format_sheet_placeholder(ixti);
 
