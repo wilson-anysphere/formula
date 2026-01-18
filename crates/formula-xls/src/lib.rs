@@ -6354,10 +6354,11 @@ mod tests {
 
     fn first_record_payload<'a>(stream: &'a [u8], record_id: u16) -> Option<&'a [u8]> {
         let mut offset = 0usize;
-        while offset + 4 <= stream.len() {
-            let id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
-            let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
-            let data_start = offset.checked_add(4)?;
+        while stream.len().saturating_sub(offset) >= 4 {
+            let header = stream.get(offset..)?.get(..4)?;
+            let id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = offset.checked_add(header.len())?;
             let next = data_start.checked_add(len)?;
             if next > stream.len() {
                 return None;
@@ -6372,10 +6373,11 @@ mod tests {
 
     fn first_record_header_offset(stream: &[u8], record_id: u16) -> Option<usize> {
         let mut offset = 0usize;
-        while offset + 4 <= stream.len() {
-            let id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
-            let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
-            let data_start = offset.checked_add(4)?;
+        while stream.len().saturating_sub(offset) >= 4 {
+            let header = stream.get(offset..)?.get(..4)?;
+            let id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = offset.checked_add(header.len())?;
             let next = data_start.checked_add(len)?;
             if next > stream.len() {
                 return None;
