@@ -79,19 +79,28 @@ impl XlsxPivots {
         }
 
         for path in table_paths {
-            let xml = entries.get(&path).unwrap();
+            let Some(xml) = entries.get(&path) else {
+                debug_assert!(false, "pivot table entry disappeared: {path}");
+                return Err(XlsxError::MissingPart(path));
+            };
             pivots
                 .pivot_tables
                 .push(PivotTableDefinition::parse(&path, xml)?);
         }
         for path in cache_def_paths {
-            let xml = entries.get(&path).unwrap();
+            let Some(xml) = entries.get(&path) else {
+                debug_assert!(false, "pivot cache definition entry disappeared: {path}");
+                return Err(XlsxError::MissingPart(path));
+            };
             pivots
                 .pivot_cache_definitions
                 .push(parse_pivot_cache_definition_part(&path, xml)?);
         }
         for path in cache_rec_paths {
-            let xml = entries.get(&path).unwrap();
+            let Some(xml) = entries.get(&path) else {
+                debug_assert!(false, "pivot cache records entry disappeared: {path}");
+                return Err(XlsxError::MissingPart(path));
+            };
             pivots
                 .pivot_cache_records
                 .push(parse_pivot_cache_records_part(&path, xml)?);

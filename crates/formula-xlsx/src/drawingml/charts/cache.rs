@@ -46,8 +46,17 @@ pub fn parse_str_cache(
     let inferred_len = max_idx.map(|v| v + 1).unwrap_or(0);
     let len = pt_count.unwrap_or(inferred_len);
 
-    let mut values = vec![String::new(); len];
-    let mut seen = vec![false; len];
+    let mut values: Vec<String> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        return None;
+    }
+    values.resize_with(len, String::new);
+
+    let mut seen: Vec<bool> = Vec::new();
+    if seen.try_reserve_exact(len).is_err() {
+        return None;
+    }
+    seen.resize(len, false);
     for (idx, value) in points {
         if idx >= len {
             warn(
@@ -138,8 +147,17 @@ pub fn parse_num_cache(
     let inferred_len = max_idx.map(|v| v + 1).unwrap_or(0);
     let len = pt_count.unwrap_or(inferred_len);
 
-    let mut values = vec![f64::NAN; len];
-    let mut seen = vec![false; len];
+    let mut values: Vec<f64> = Vec::new();
+    if values.try_reserve_exact(len).is_err() {
+        return (None, format_code);
+    }
+    values.resize(len, f64::NAN);
+
+    let mut seen: Vec<bool> = Vec::new();
+    if seen.try_reserve_exact(len).is_err() {
+        return (None, format_code);
+    }
+    seen.resize(len, false);
     for (idx, value) in points {
         if idx >= len {
             warn(

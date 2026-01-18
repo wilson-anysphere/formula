@@ -151,17 +151,35 @@ pub enum CryptoError {
     UnsupportedHashAlgorithm(String),
     #[error("invalid parameter: {0}")]
     InvalidParameter(&'static str),
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
 }
 
-fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
-    if bytes.len() >= out_len {
-        return bytes[..out_len].to_vec();
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Result<Vec<u8>, CryptoError> {
+    if out_len == 0 {
+        return Err(CryptoError::InvalidParameter("output length must be non-zero"));
+    }
+    if out_len > 1024 {
+        // Excel's Agile encryption key/IV sizes are small (bytes, not KB). Refuse pathological sizes
+        // to avoid attacker-controlled allocations.
+        return Err(CryptoError::InvalidParameter("output length too large"));
     }
 
-    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
-    let mut out = vec![0x36u8; out_len];
-    out[..bytes.len()].copy_from_slice(bytes);
-    out
+    let prefix_len = bytes.len().min(out_len);
+
+    let mut out = Vec::new();
+    if out.try_reserve_exact(out_len).is_err() {
+        return Err(CryptoError::AllocationFailure("normalize_key_material output"));
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` behavior:
+    // - If the digest is longer than needed: truncate.
+    // - If the digest is shorter: pad with 0x36 bytes (matches `msoffcrypto-tool`).
+    out.extend_from_slice(&bytes[..prefix_len]);
+    if prefix_len < out_len {
+        out.resize(out_len, 0x36u8);
+    }
+    Ok(out)
 }
 
 /// MS-OFFCRYPTO Agile: block key used for deriving the "verifierHashInput" key.
@@ -185,7 +203,7 @@ fn update_password_utf16le<D: digest::Digest>(hasher: &mut D, password: &str) {
 #[cfg(test)]
 fn password_utf16le_bytes(password: &str) -> Vec<u8> {
     // UTF-16LE with no BOM and no terminator.
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut out = Vec::new();
     for ch in password.encode_utf16() {
         out.extend_from_slice(&ch.to_le_bytes());
     }
@@ -293,7 +311,7 @@ pub fn derive_key(
     let mut digest = [0u8; MAX_DIGEST_LEN];
     hash_alg.hash_two_into(h, block_key, &mut digest[..digest_len]);
 
-    Ok(normalize_key_material(&digest[..digest_len], key_len))
+    normalize_key_material(&digest[..digest_len], key_len)
 }
 
 /// Derive an IV of `iv_len` bytes per MS-OFFCRYPTO Agile.
@@ -320,7 +338,7 @@ pub fn derive_iv(
     let mut digest = [0u8; MAX_DIGEST_LEN];
     hash_alg.hash_two_into(salt, block_key, &mut digest[..digest_len]);
 
-    Ok(normalize_key_material(&digest[..digest_len], iv_len))
+    normalize_key_material(&digest[..digest_len], iv_len)
 }
 
 /// Block key for `EncryptedPackage` segment IV derivation.
@@ -418,7 +436,7 @@ mod tests {
     #[test]
     fn normalize_key_material_pads_with_0x36() {
         assert_eq!(
-            normalize_key_material(&[0xAA, 0xBB], 5),
+            normalize_key_material(&[0xAA, 0xBB], 5).unwrap(),
             vec![0xAA, 0xBB, 0x36, 0x36, 0x36]
         );
     }
@@ -426,7 +444,7 @@ mod tests {
     #[test]
     fn normalize_key_material_truncates() {
         assert_eq!(
-            normalize_key_material(&[0xAA, 0xBB, 0xCC], 2),
+            normalize_key_material(&[0xAA, 0xBB, 0xCC], 2).unwrap(),
             vec![0xAA, 0xBB]
         );
     }

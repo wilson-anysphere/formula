@@ -138,7 +138,7 @@ fn write_base_cf_rule(rule: &CfRule, priority: u32) -> String {
         }
         CfRuleKind::TopBottom(rule) => write_base_top10(rule, &attrs),
         CfRuleKind::UniqueDuplicate(rule) => write_base_unique_duplicate(rule, &attrs),
-        CfRuleKind::Unsupported { .. } => unreachable!("handled above"),
+        CfRuleKind::Unsupported { raw_xml, .. } => patch_cf_rule_priority(raw_xml, priority),
     }
 }
 

@@ -744,8 +744,14 @@ fn scan_worksheet_xml(
     let mut scan = WorksheetXmlScan::default();
     let mut in_sheet_data = false;
     let mut buf = Vec::new();
-    let mut found_target_cells: HashSet<(u32, u32)> =
-        HashSet::with_capacity(target_cells.map_or(0, HashSet::len));
+    let mut found_target_cells: HashSet<(u32, u32)> = HashSet::new();
+    if let Some(target_cells) = target_cells {
+        if found_target_cells.try_reserve(target_cells.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "scan_worksheet_xml found_target_cells",
+            ));
+        }
+    }
 
     let mut min_row = u32::MAX;
     let mut min_col = u32::MAX;
@@ -969,14 +975,25 @@ fn patch_worksheet_xml(
     });
 
     let row_patches = patches.by_row();
-    let mut remaining_patch_rows: Vec<u32> = row_patches.keys().copied().collect();
+    let mut remaining_patch_rows: Vec<u32> = Vec::new();
+    if remaining_patch_rows.try_reserve(row_patches.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("apply_cell_patches remaining patch rows").into());
+    }
+    for row in row_patches.keys().copied() {
+        remaining_patch_rows.push(row);
+    }
     let mut patch_row_idx = 0usize;
 
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(
-        original.len() + patches.cells.len() * 64,
-    ));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(original.len().saturating_add(patches.cells.len().saturating_mul(64)))
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("apply_cell_patches worksheet xml output").into());
+    }
+    let mut writer = Writer::new(out);
 
     let mut buf = Vec::new();
     let mut worksheet_prefix: Option<String> = None;
@@ -1021,9 +1038,13 @@ fn patch_worksheet_xml(
                     let mut cols_buf = Vec::new();
                     parse_cols_attribute_map_from_reader(&mut reader, &mut cols_buf)?
                 };
+                let Some(col_properties) = col_properties else {
+                    debug_assert!(false, "col_properties was None after is_some() check");
+                    continue;
+                };
                 merge_col_properties_into_attrs_by_col(
                     &mut attrs_by_col,
-                    col_properties.expect("checked is_some above"),
+                    col_properties,
                 );
                 if !cols_written {
                     let cols_xml = render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
@@ -1040,9 +1061,13 @@ fn patch_worksheet_xml(
                 let prefix =
                     element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
                 let mut attrs_by_col = BTreeMap::new();
+                let Some(col_properties) = col_properties else {
+                    debug_assert!(false, "col_properties was None after is_some() check");
+                    continue;
+                };
                 merge_col_properties_into_attrs_by_col(
                     &mut attrs_by_col,
-                    col_properties.expect("checked is_some above"),
+                    col_properties,
                 );
                 if !cols_written {
                     let cols_xml = render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
@@ -2292,9 +2317,16 @@ fn patch_cell_element(
             for ev in inner_events {
                 writer.write_event(ev)?;
             }
-            writer.write_event(Event::End(
-                original_end.expect("non-empty cell must have end tag"),
-            ))?;
+            let Some(original_end) = original_end else {
+                debug_assert!(
+                    false,
+                    "non-empty cell was missing end tag for {cell_ref:?}"
+                );
+                return Err(XlsxError::Invalid(
+                    "internal error: cell missing end tag".to_string(),
+                ));
+            };
+            writer.write_event(Event::End(original_end))?;
         }
         return Ok(false);
     }
@@ -2837,15 +2869,17 @@ fn rich_text_normalized_runs(rich: &RichText) -> Vec<RichTextRun> {
     // This allows callers to represent rich text as a sparse set of style overrides (only
     // including non-empty runs), while still comparing equal to the fully segmented
     // `RichText::from_segments` representation used by XLSX parsers.
-    let mut runs: Vec<RichTextRun> = rich
-        .runs
-        .iter()
-        .filter(|run| run.start < run.end && !run.style.is_empty())
-        .cloned()
-        .collect();
+    let mut runs: Vec<RichTextRun> = Vec::new();
+    let _ = runs.try_reserve(rich.runs.len());
+    for run in &rich.runs {
+        if run.start < run.end && !run.style.is_empty() {
+            runs.push(run.clone());
+        }
+    }
     runs.sort_by_key(|run| (run.start, run.end));
 
-    let mut merged: Vec<RichTextRun> = Vec::with_capacity(runs.len());
+    let mut merged: Vec<RichTextRun> = Vec::new();
+    let _ = merged.try_reserve(runs.len());
     for run in runs {
         match merged.last_mut() {
             Some(prev) if prev.style == run.style && prev.end == run.start => {

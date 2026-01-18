@@ -78,7 +78,8 @@ where
     let selection = match &selection.selected_items {
         None => SlicerSelection::All,
         Some(items) => {
-            let mut selected = HashSet::with_capacity(items.len());
+            let mut selected = HashSet::new();
+            let _ = selected.try_reserve(items.len());
             for item in items {
                 selected.insert(resolve(item).unwrap_or_else(|| ScalarValue::from(item.as_str())));
             }
@@ -151,7 +152,8 @@ pub fn slicer_selection_to_engine_filter_field_with_resolver(
     let allowed = match &selection.selected_items {
         None => None,
         Some(items) => {
-            let mut selected = HashSet::with_capacity(items.len());
+            let mut selected = HashSet::new();
+            let _ = selected.try_reserve(items.len());
             for item in items {
                 selected
                     .insert(resolve(item).unwrap_or_else(|| {
@@ -504,7 +506,10 @@ pub(super) fn infer_slicer_cache_field_index(
             continue;
         }
 
-        let mut candidates: HashSet<String> = HashSet::with_capacity(shared_items.len());
+        let mut candidates: HashSet<String> = HashSet::new();
+        if candidates.try_reserve(shared_items.len()).is_err() {
+            continue;
+        }
         for item in shared_items {
             candidates.insert(pivot_cache_value_to_candidate_string(item));
         }
@@ -1023,7 +1028,11 @@ fn patch_timeline_selection_xml(
 
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut out = Vec::new();
+    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_timeline_selection_xml output"));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut depth = 0usize;
@@ -1301,7 +1310,8 @@ fn canonicalize_part_name_for_discovery(name: &str) -> String {
         return trimmed.to_string();
     }
 
-    let mut out = String::with_capacity(trimmed.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(trimmed.len());
     for &b in bytes {
         let b = if b == b'\\' { b'/' } else { b.to_ascii_lowercase() };
         out.push(b as char);
@@ -1460,7 +1470,12 @@ where
 
     let sheet_name_by_part = sheet_name_by_part_with(&part, &resolve_relationship_target);
 
-    let mut slicers = Vec::with_capacity(slicer_parts.len());
+    let mut slicers = Vec::new();
+    if slicers.try_reserve_exact(slicer_parts.len()).is_err() {
+        return Err(XlsxError::AllocationFailure(
+            "parse_pivot_slicer_parts slicers",
+        ));
+    }
     for part_name in slicer_parts {
         let xml = part(&part_name).ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_slicer_xml(xml)?;
@@ -1531,7 +1546,12 @@ where
         });
     }
 
-    let mut timelines = Vec::with_capacity(timeline_parts.len());
+    let mut timelines = Vec::new();
+    if timelines.try_reserve_exact(timeline_parts.len()).is_err() {
+        return Err(XlsxError::AllocationFailure(
+            "parse_pivot_slicer_parts timelines",
+        ));
+    }
     for part_name in timeline_parts {
         let xml = part(&part_name).ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_timeline_xml(xml)?;
@@ -1734,7 +1754,11 @@ fn patch_slicer_selection_xml(
 ) -> Result<Vec<u8>, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut out = Vec::new();
+    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_slicer_selection_xml output"));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let selected_items = selection.selected_items.as_ref();
@@ -2077,7 +2101,11 @@ fn slicer_cache_xml_set_selection(
 
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut out = Vec::new();
+    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+        return Err(XlsxError::AllocationFailure("slicer_cache_xml_set_selection output"));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     loop {
@@ -2844,7 +2872,7 @@ fn parse_slicer_cache_rels_best_effort<'a>(
         None => Vec::new(),
     };
 
-    let mut rel_by_id = HashMap::with_capacity(relationships.len());
+    let mut rel_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
     let mut connected_tables = BTreeSet::new();
 
     for rel in relationships {
@@ -3269,7 +3297,11 @@ fn matching_fields_for_pivot_table<'a>(
 
     let field_count = def.cache_fields.len();
     let mut matches = HashSet::new();
-    let mut needs_records = vec![true; field_count];
+    let mut needs_records: Vec<bool> = Vec::new();
+    if needs_records.try_reserve_exact(field_count).is_err() {
+        return Some(matches);
+    }
+    needs_records.resize(field_count, true);
 
     // If shared items are available, use them directly to match candidate values without
     // scanning cache records.
@@ -3306,8 +3338,17 @@ fn matching_fields_for_pivot_table<'a>(
         return Some(matches);
     };
 
-    let mut found: Vec<HashSet<String>> = (0..field_count).map(|_| HashSet::new()).collect();
-    let mut done = vec![false; field_count];
+    let mut found: Vec<HashSet<String>> = Vec::new();
+    if found.try_reserve_exact(field_count).is_err() {
+        return Some(matches);
+    }
+    found.resize_with(field_count, HashSet::new);
+
+    let mut done: Vec<bool> = Vec::new();
+    if done.try_reserve_exact(field_count).is_err() {
+        return Some(matches);
+    }
+    done.resize(field_count, false);
 
     let mut reader = crate::pivots::cache_records::PivotCacheRecordsReader::new(records_bytes);
     while let Some(record) = reader.next_record() {

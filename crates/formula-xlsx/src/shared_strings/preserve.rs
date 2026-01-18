@@ -27,6 +27,8 @@ pub(crate) enum PreserveSharedStringsError {
     Attr(#[from] quick_xml::events::attributes::AttrError),
     #[error("utf-8 error: {0}")]
     Utf8(#[from] Utf8Error),
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("malformed sharedStrings.xml: {0}")]
     Malformed(&'static str),
 }
@@ -281,14 +283,28 @@ impl SharedStringsEditor {
     ) -> Result<Vec<u8>, PreserveSharedStringsError> {
         let unique_count = self.len() as u32;
 
-        let mut out = Vec::with_capacity(
-            self.preamble.len()
-                + self.sst_start_tag.len()
-                + self.inner.len()
-                + self.appended.iter().map(|e| e.raw_xml.len()).sum::<usize>()
-                + self.suffix.len()
-                + 64,
-        );
+        let appended_len = self
+            .appended
+            .iter()
+            .try_fold(0usize, |acc, entry| acc.checked_add(entry.raw_xml.len()))
+            .ok_or(PreserveSharedStringsError::Malformed(
+                "appended shared strings XML is too large",
+            ))?;
+        let estimated_len = self
+            .preamble
+            .len()
+            .checked_add(self.sst_start_tag.len())
+            .and_then(|n| n.checked_add(self.inner.len()))
+            .and_then(|n| n.checked_add(appended_len))
+            .and_then(|n| n.checked_add(self.suffix.len()))
+            .and_then(|n| n.checked_add(64))
+            .ok_or(PreserveSharedStringsError::Malformed(
+                "shared strings XML is too large",
+            ))?;
+
+        let mut out = Vec::new();
+        out.try_reserve_exact(estimated_len)
+            .map_err(|_| PreserveSharedStringsError::AllocationFailure("shared strings xml"))?;
         out.extend_from_slice(&self.preamble);
 
         let start_tag = patch_sst_start_tag(
@@ -642,48 +658,43 @@ fn spreadsheetml_namespace_style_from_sst_start(
 
 fn write_si_xml(item: &RichText, spreadsheetml_prefix: Option<&str>) -> Vec<u8> {
     let mut writer = Writer::new(Vec::new());
-    write_si(&mut writer, spreadsheetml_prefix, item);
+    if let Err(err) = write_si(&mut writer, spreadsheetml_prefix, item) {
+        debug_assert!(false, "failed to write <si> xml: {err}");
+    }
     writer.into_inner()
 }
 
-fn write_si(writer: &mut Writer<Vec<u8>>, spreadsheetml_prefix: Option<&str>, item: &RichText) {
+fn write_si(
+    writer: &mut Writer<Vec<u8>>,
+    spreadsheetml_prefix: Option<&str>,
+    item: &RichText,
+) -> Result<(), quick_xml::Error> {
     let si_name = prefixed_tag(spreadsheetml_prefix, "si");
-    writer
-        .write_event(Event::Start(BytesStart::new(si_name.as_str())))
-        .expect("writing to Vec should not fail");
+    writer.write_event(Event::Start(BytesStart::new(si_name.as_str())))?;
 
     if item.runs.is_empty() {
-        write_t(writer, spreadsheetml_prefix, &item.text).expect("writing to Vec should not fail");
+        write_t(writer, spreadsheetml_prefix, &item.text)?;
     } else {
         let r_name = prefixed_tag(spreadsheetml_prefix, "r");
         let rpr_name = prefixed_tag(spreadsheetml_prefix, "rPr");
         for run in &item.runs {
-            writer
-                .write_event(Event::Start(BytesStart::new(r_name.as_str())))
-                .expect("writing to Vec should not fail");
+            writer.write_event(Event::Start(BytesStart::new(r_name.as_str())))?;
 
             if !run.style.is_empty() {
-                writer
-                    .write_event(Event::Start(BytesStart::new(rpr_name.as_str())))
-                    .expect("writing to Vec should not fail");
-                write_rpr(writer, spreadsheetml_prefix, &run.style).expect("writing to Vec should not fail");
-                writer
-                    .write_event(Event::End(BytesEnd::new(rpr_name.as_str())))
-                    .expect("writing to Vec should not fail");
+                writer.write_event(Event::Start(BytesStart::new(rpr_name.as_str())))?;
+                write_rpr(writer, spreadsheetml_prefix, &run.style)?;
+                writer.write_event(Event::End(BytesEnd::new(rpr_name.as_str())))?;
             }
 
             let segment = item.slice_run_text(run);
-            write_t(writer, spreadsheetml_prefix, segment).expect("writing to Vec should not fail");
+            write_t(writer, spreadsheetml_prefix, segment)?;
 
-            writer
-                .write_event(Event::End(BytesEnd::new(r_name.as_str())))
-                .expect("writing to Vec should not fail");
+            writer.write_event(Event::End(BytesEnd::new(r_name.as_str())))?;
         }
     }
 
-    writer
-        .write_event(Event::End(BytesEnd::new(si_name.as_str())))
-        .expect("writing to Vec should not fail");
+    writer.write_event(Event::End(BytesEnd::new(si_name.as_str())))?;
+    Ok(())
 }
 
 fn write_t(

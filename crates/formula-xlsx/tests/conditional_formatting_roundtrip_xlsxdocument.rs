@@ -17,7 +17,8 @@ fn assert_roundtrip_preserves_conditional_formatting_parts(fixture: &[u8]) {
         saved_pkg
             .part("xl/worksheets/sheet1.xml")
             .expect("saved file must contain xl/worksheets/sheet1.xml"),
-    );
+    )
+    .unwrap();
 
     assert_xml_semantic_eq(
         original_pkg
@@ -26,7 +27,8 @@ fn assert_roundtrip_preserves_conditional_formatting_parts(fixture: &[u8]) {
         saved_pkg
             .part("xl/styles.xml")
             .expect("saved file must contain xl/styles.xml"),
-    );
+    )
+    .unwrap();
 }
 
 #[test]
@@ -48,7 +50,7 @@ fn xlsxdocument_roundtrip_preserves_x14_conditional_formatting_and_dxfs() {
     let saved_sheet = saved_pkg
         .part("xl/worksheets/sheet1.xml")
         .expect("saved file must contain xl/worksheets/sheet1.xml");
-    assert_xml_semantic_eq(original_sheet, saved_sheet);
+    assert_xml_semantic_eq(original_sheet, saved_sheet).unwrap();
 
     let original_styles = original_pkg
         .part("xl/styles.xml")
@@ -56,7 +58,7 @@ fn xlsxdocument_roundtrip_preserves_x14_conditional_formatting_and_dxfs() {
     let saved_styles = saved_pkg
         .part("xl/styles.xml")
         .expect("saved file must contain xl/styles.xml");
-    assert_xml_semantic_eq(original_styles, saved_styles);
+    assert_xml_semantic_eq(original_styles, saved_styles).unwrap();
 
     let saved_sheet_xml = std::str::from_utf8(saved_sheet).expect("sheet1.xml should be utf-8");
     assert!(

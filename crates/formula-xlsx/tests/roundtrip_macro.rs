@@ -19,11 +19,13 @@ fn roundtrip_preserves_vba_project_bytes() {
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/workbook.xml"),
         &zip_part(&saved, "xl/workbook.xml"),
-    );
+    )
+    .unwrap();
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/_rels/workbook.xml.rels"),
         &zip_part(&saved, "xl/_rels/workbook.xml.rels"),
-    );
+    )
+    .unwrap();
 }
 
 #[test]

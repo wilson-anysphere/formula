@@ -180,7 +180,11 @@ pub fn rewrite_content_types_workbook_content_type(
 ) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(content_types_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(content_types_xml.len() + 128));
+    let mut out = Vec::new();
+    out.try_reserve(content_types_xml.len() + 128).map_err(|_| {
+        XlsxError::AllocationFailure("rewrite_content_types_workbook_content_type output")
+    })?;
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut override_tag_name: Option<String> = None;
@@ -327,6 +331,8 @@ pub enum XlsxError {
     Zip(#[from] zip::result::ZipError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("xml error: {0}")]
     Xml(#[from] quick_xml::Error),
     #[error("xml error: {0}")]
@@ -510,6 +516,7 @@ impl From<RecalcPolicyError> for XlsxError {
     fn from(err: RecalcPolicyError) -> Self {
         match err {
             RecalcPolicyError::Io(err) => XlsxError::Io(err),
+            RecalcPolicyError::AllocationFailure(ctx) => XlsxError::AllocationFailure(ctx),
             RecalcPolicyError::Xml(err) => XlsxError::Xml(err),
             RecalcPolicyError::XmlAttr(err) => XlsxError::Attr(err),
         }
@@ -646,6 +653,13 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     // targets (e.g. unescaped spaces) to percent-encoded ZIP entries while still returning
     // canonical part names (normalized separators, preserved `%xx` escapes).
     let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
+    let zip_len = zip.len();
+    part_names
+        .try_reserve(zip_len)
+        .map_err(|_| XlsxError::AllocationFailure("worksheet_parts_from_reader part_names"))?;
+    part_name_keys
+        .try_reserve(zip_len)
+        .map_err(|_| XlsxError::AllocationFailure("worksheet_parts_from_reader part_name_keys"))?;
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
@@ -662,7 +676,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         };
         part_names.insert(canonical.clone());
         part_name_keys
-            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
+            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical)?)
             .or_insert(canonical);
     }
 
@@ -695,47 +709,56 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
-    let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
-        .into_iter()
-        .map(|rel| (rel.id.clone(), rel))
-        .collect();
+    let mut rel_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
+    rel_by_id.try_reserve(relationships.len()).map_err(|_| {
+        XlsxError::AllocationFailure("worksheet_parts_from_reader relationship index")
+    })?;
+    for mut rel in relationships {
+        let id = std::mem::take(&mut rel.id);
+        rel_by_id.insert(id, rel);
+    }
 
     let workbook_part = "xl/workbook.xml";
-    let mut out = Vec::with_capacity(sheets.len());
+    let mut out = Vec::new();
+    out.try_reserve(sheets.len())
+        .map_err(|_| XlsxError::AllocationFailure("worksheet_parts_from_reader output"))?;
 
     for sheet in sheets {
-        let resolved = rel_by_id
-            .get(&sheet.rel_id)
-            .filter(|rel| {
-                !rel.target_mode
-                    .as_deref()
-                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-            })
-            .and_then(|rel| {
+        let mut resolved: Option<String> = None;
+        if let Some(rel) = rel_by_id.get(&sheet.rel_id) {
+            let is_external = rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"));
+            if !is_external {
                 let candidates = crate::path::resolve_target_candidates(workbook_part, &rel.target);
-                // Prefer exact matches to keep part-name strings canonical when possible (some
-                // producers percent-encode relationship targets while storing ZIP entry names
-                // unescaped, and vice versa).
                 for candidate in &candidates {
                     if part_names.contains(candidate) {
-                        return Some(candidate.clone());
+                        resolved = Some(candidate.clone());
+                        break;
                     }
                 }
-                candidates.into_iter().find_map(|candidate| {
-                    part_name_keys
-                        .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                        .cloned()
-                })
-            })
-            .or_else(|| {
-                let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                if part_names.contains(&candidate) {
-                    return Some(candidate);
+                if resolved.is_none() {
+                    for candidate in candidates {
+                        let key = crate::zip_util::zip_part_name_lookup_key(&candidate)?;
+                        if let Some(found) = part_name_keys.get(&key) {
+                            resolved = Some(found.clone());
+                            break;
+                        }
+                    }
                 }
-                part_name_keys
-                    .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                    .cloned()
-            });
+            }
+        }
+
+        if resolved.is_none() {
+            let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+            if part_names.contains(&candidate) {
+                resolved = Some(candidate);
+            } else {
+                let key = crate::zip_util::zip_part_name_lookup_key(&candidate)?;
+                resolved = part_name_keys.get(&key).cloned();
+            }
+        }
 
         let Some(worksheet_part) = resolved else {
             continue;
@@ -767,6 +790,13 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     // Map a canonicalized lookup key (case/separator-insensitive, percent-decoding `%xx`) back to
     // the canonical part name we should return (normalized separators, preserved `%xx` escapes).
     let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
+    let zip_len = zip.len();
+    part_names.try_reserve(zip_len).map_err(|_| {
+        XlsxError::AllocationFailure("worksheet_parts_from_reader_limited part_names")
+    })?;
+    part_name_keys.try_reserve(zip_len).map_err(|_| {
+        XlsxError::AllocationFailure("worksheet_parts_from_reader_limited part_name_keys")
+    })?;
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
         if file.is_dir() {
@@ -783,7 +813,7 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         };
         part_names.insert(canonical.clone());
         part_name_keys
-            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical))
+            .entry(crate::zip_util::zip_part_name_lookup_key(&canonical)?)
             .or_insert(canonical);
     }
 
@@ -816,44 +846,56 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
-    let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
-        .into_iter()
-        .map(|rel| (rel.id.clone(), rel))
-        .collect();
+    let mut rel_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
+    rel_by_id.try_reserve(relationships.len()).map_err(|_| {
+        XlsxError::AllocationFailure("worksheet_parts_from_reader_limited relationship index")
+    })?;
+    for mut rel in relationships {
+        let id = std::mem::take(&mut rel.id);
+        rel_by_id.insert(id, rel);
+    }
 
     let workbook_part = "xl/workbook.xml";
-    let mut out = Vec::with_capacity(sheets.len());
+    let mut out = Vec::new();
+    out.try_reserve(sheets.len())
+        .map_err(|_| XlsxError::AllocationFailure("worksheet_parts_from_reader_limited output"))?;
 
     for sheet in sheets {
-        let resolved = rel_by_id
-            .get(&sheet.rel_id)
-            .filter(|rel| {
-                !rel.target_mode
-                    .as_deref()
-                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-            })
-            .and_then(|rel| {
+        let mut resolved: Option<String> = None;
+        if let Some(rel) = rel_by_id.get(&sheet.rel_id) {
+            let is_external = rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"));
+            if !is_external {
                 let candidates = crate::path::resolve_target_candidates(workbook_part, &rel.target);
                 for candidate in &candidates {
                     if part_names.contains(candidate) {
-                        return Some(candidate.clone());
+                        resolved = Some(candidate.clone());
+                        break;
                     }
                 }
-                candidates.into_iter().find_map(|candidate| {
-                    part_name_keys
-                        .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                        .cloned()
-                })
-            })
-            .or_else(|| {
-                let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                if part_names.contains(&candidate) {
-                    return Some(candidate);
+                if resolved.is_none() {
+                    for candidate in candidates {
+                        let key = crate::zip_util::zip_part_name_lookup_key(&candidate)?;
+                        if let Some(found) = part_name_keys.get(&key) {
+                            resolved = Some(found.clone());
+                            break;
+                        }
+                    }
                 }
-                part_name_keys
-                    .get(&crate::zip_util::zip_part_name_lookup_key(&candidate))
-                    .cloned()
-            });
+            }
+        }
+
+        if resolved.is_none() {
+            let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+            if part_names.contains(&candidate) {
+                resolved = Some(candidate);
+            } else {
+                let key = crate::zip_util::zip_part_name_lookup_key(&candidate)?;
+                resolved = part_name_keys.get(&key).cloned();
+            }
+        }
 
         let Some(worksheet_part) = resolved else {
             continue;
@@ -930,11 +972,13 @@ impl XlsxPackage {
             return self.parts.get(stripped).map(|v| v.as_slice());
         }
 
-        let mut with_slash = String::with_capacity(name.len() + 1);
-        with_slash.push('/');
-        with_slash.push_str(name);
-        if let Some(bytes) = self.parts.get(with_slash.as_str()) {
-            return Some(bytes.as_slice());
+        let mut with_slash = String::new();
+        if with_slash.try_reserve(name.len() + 1).is_ok() {
+            with_slash.push('/');
+            with_slash.push_str(name);
+            if let Some(bytes) = self.parts.get(with_slash.as_str()) {
+                return Some(bytes.as_slice());
+            }
         }
 
         // Fall back to a linear scan for non-canonical producer output:
@@ -1000,14 +1044,13 @@ impl XlsxPackage {
         };
 
         for name in self.part_names() {
-            let key = crate::zip_util::zip_part_name_lookup_key(name);
-            if key == b"xl/vbaproject.bin" {
+            if crate::zip_util::zip_part_names_equivalent(name, "xl/vbaProject.bin") {
                 presence.has_vba = true;
             }
-            if key.starts_with(b"xl/macrosheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if key.starts_with(b"xl/dialogsheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 
@@ -1204,12 +1247,18 @@ impl XlsxPackage {
             .part("xl/_rels/workbook.xml.rels")
             .ok_or_else(|| XlsxError::MissingPart("xl/_rels/workbook.xml.rels".to_string()))?;
         let relationships = crate::openxml::parse_relationships(rels_bytes)?;
-        let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
-            .into_iter()
-            .map(|rel| (rel.id.clone(), rel))
-            .collect();
+        let mut rel_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
+        rel_by_id.try_reserve(relationships.len()).map_err(|_| {
+            XlsxError::AllocationFailure("worksheet_parts relationship index")
+        })?;
+        for mut rel in relationships {
+            let id = std::mem::take(&mut rel.id);
+            rel_by_id.insert(id, rel);
+        }
 
-        let mut out = Vec::with_capacity(sheets.len());
+        let mut out = Vec::new();
+        out.try_reserve(sheets.len())
+            .map_err(|_| XlsxError::AllocationFailure("worksheet_parts output"))?;
         for sheet in sheets {
             let rel = rel_by_id.get(&sheet.rel_id).ok_or_else(|| {
                 XlsxError::Invalid(format!("missing relationship for {}", sheet.rel_id))
@@ -1288,11 +1337,20 @@ impl XlsxPackage {
                 );
         }
 
-        let mut patches_by_part: HashMap<String, Vec<crate::streaming::WorksheetCellPatch>> =
-            patches_by_part
-                .into_iter()
-                .map(|(part, cells)| (part, cells.into_values().collect()))
-                .collect();
+        let mut patches_by_part_vec: HashMap<String, Vec<crate::streaming::WorksheetCellPatch>> =
+            HashMap::new();
+        patches_by_part_vec
+            .try_reserve(patches_by_part.len())
+            .map_err(|_| XlsxError::AllocationFailure("apply_cell_patches patches_by_part"))?;
+        for (part, cells) in patches_by_part {
+            let mut out = Vec::new();
+            out.try_reserve(cells.len()).map_err(|_| {
+                XlsxError::AllocationFailure("apply_cell_patches worksheet patch list")
+            })?;
+            out.extend(cells.into_values());
+            patches_by_part_vec.insert(part, out);
+        }
+        let mut patches_by_part = patches_by_part_vec;
         for patches in patches_by_part.values_mut() {
             patches.sort_by_key(|p| (p.cell.row, p.cell.col));
         }
@@ -1316,7 +1374,10 @@ impl XlsxPackage {
         // Route through the full streaming patch pipeline (sharedStrings-aware + recalc-policy
         // aware) rather than directly rewriting worksheet XML parts.
         let input_bytes = self.write_to_bytes()?;
-        let mut streaming_patches = Vec::with_capacity(patches.len());
+        let mut streaming_patches = Vec::new();
+        streaming_patches
+            .try_reserve(patches.len())
+            .map_err(|_| XlsxError::AllocationFailure("apply_cell_patches streaming_patches"))?;
         for patches in patches_by_part.values() {
             streaming_patches.extend_from_slice(patches);
         }
@@ -1495,7 +1556,10 @@ fn workbook_xml_set_date_system(
 
     let mut reader = XmlReader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(workbook_xml.len() + 64));
+    let mut out = Vec::new();
+    out.try_reserve(workbook_xml.len() + 64)
+        .map_err(|_| XlsxError::AllocationFailure("workbook_xml_set_date_system output"))?;
+    let mut writer = XmlWriter::new(out);
 
     let mut buf = Vec::new();
     let mut skipping_workbook_pr = false;
@@ -1641,7 +1705,10 @@ fn ensure_workbook_content_type(
 
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    out.try_reserve(existing.len() + 128)
+        .map_err(|_| XlsxError::AllocationFailure("ensure_workbook_content_type output"))?;
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut changed = false;
@@ -1783,7 +1850,10 @@ pub(crate) fn ensure_content_types_default(
 
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    out.try_reserve(existing.len() + 128)
+        .map_err(|_| XlsxError::AllocationFailure("ensure_content_types_default output"))?;
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut default_tag_name: Option<String> = None;
@@ -1924,14 +1994,13 @@ impl crate::XlsxDocument {
 
         for name in self.parts().keys() {
             let name = name.as_str();
-            let key = crate::zip_util::zip_part_name_lookup_key(name);
-            if key == b"xl/vbaproject.bin" {
+            if crate::zip_util::zip_part_names_equivalent(name, "xl/vbaProject.bin") {
                 presence.has_vba = true;
             }
-            if key.starts_with(b"xl/macrosheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if key.starts_with(b"xl/dialogsheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 

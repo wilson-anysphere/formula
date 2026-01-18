@@ -575,18 +575,15 @@ fn extract_rvb_i(inner_xml: &str) -> Option<u32> {
 }
 
 fn index_candidates(raw: u32, len: usize) -> impl Iterator<Item = usize> {
-    let mut out = Vec::with_capacity(2);
     let raw_idx = raw as usize;
-    if raw_idx < len {
-        out.push(raw_idx);
-    }
-    if raw > 0 {
+    let a = (raw_idx < len).then_some(raw_idx);
+    let b = if raw > 0 {
         let fallback = (raw - 1) as usize;
-        if fallback < len && fallback != raw_idx {
-            out.push(fallback);
-        }
-    }
-    out.into_iter()
+        (fallback < len && fallback != raw_idx).then_some(fallback)
+    } else {
+        None
+    };
+    [a, b].into_iter().filter_map(|v| v)
 }
 
 fn read_attr_local_string(

@@ -50,7 +50,10 @@ where
     let font_size = 10.0;
     let padding = 2.0;
 
-    let mut page_streams = Vec::with_capacity(pages.len());
+    let mut page_streams = Vec::new();
+    if page_streams.try_reserve_exact(pages.len()).is_err() {
+        return Err(PrintError::AllocationFailure("export_range_to_pdf_bytes page_streams"));
+    }
     for (page_idx, page) in pages.iter().enumerate() {
         let mut stream = String::new();
         stream.push_str("BT\n");
@@ -172,7 +175,8 @@ fn sanitize_pdf_text(text: &str) -> String {
 }
 
 fn escape_pdf_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(text.len());
     for ch in text.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
@@ -202,7 +206,8 @@ fn build_pdf(page_w: f64, page_h: f64, page_streams: &[Vec<u8>]) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"%PDF-1.4\n");
 
-    let mut offsets = Vec::with_capacity((total_objs + 1) as usize);
+    let mut offsets = Vec::new();
+    let _ = offsets.try_reserve_exact((total_objs.saturating_add(1)) as usize);
     offsets.push(0u64); // xref entry 0
 
     let write_obj = |obj_no: u32, content: &[u8], bytes: &mut Vec<u8>, offsets: &mut Vec<u64>| {

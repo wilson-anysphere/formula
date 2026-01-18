@@ -13,7 +13,7 @@ fn roundtrip_preserves_markup_compatibility_blocks() {
     let original_sheet = zip_part(FIXTURE, "xl/worksheets/sheet1.xml");
     let saved_sheet = zip_part(&saved, "xl/worksheets/sheet1.xml");
 
-    assert_xml_semantic_eq(&original_sheet, &saved_sheet);
+    assert_xml_semantic_eq(&original_sheet, &saved_sheet).unwrap();
     assert!(std::str::from_utf8(&saved_sheet)
         .expect("utf8")
         .contains("mc:AlternateContent"));

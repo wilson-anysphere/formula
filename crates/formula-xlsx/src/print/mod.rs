@@ -31,6 +31,8 @@ pub const DEFAULT_ROW_HEIGHT_POINTS: f64 = 20.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrintError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

@@ -30,7 +30,8 @@ impl ConditionalFormattingDxfAggregation {
         let mut local_to_global_by_sheet: HashMap<WorksheetId, Vec<u32>> = HashMap::new();
 
         for sheet in worksheets {
-            let mut mapping: Vec<u32> = Vec::with_capacity(sheet.conditional_formatting_dxfs.len());
+            let mut mapping: Vec<u32> = Vec::new();
+            let _ = mapping.try_reserve_exact(sheet.conditional_formatting_dxfs.len());
 
             for local in &sheet.conditional_formatting_dxfs {
                 let existing = global_dxfs.iter().position(|g| g == local);
@@ -73,7 +74,8 @@ impl ConditionalFormattingDxfAggregation {
         let mut local_to_global_by_sheet: HashMap<WorksheetId, Vec<u32>> = HashMap::new();
 
         for sheet in worksheets {
-            let mut mapping: Vec<u32> = Vec::with_capacity(sheet.conditional_formatting_dxfs.len());
+            let mut mapping: Vec<u32> = Vec::new();
+            let _ = mapping.try_reserve_exact(sheet.conditional_formatting_dxfs.len());
 
             for (local_idx, local) in sheet.conditional_formatting_dxfs.iter().enumerate() {
                 // Fast-path: if the worksheet-local dxfs vector is aligned with the current global

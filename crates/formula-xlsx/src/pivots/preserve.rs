@@ -980,7 +980,13 @@ fn rewrite_sheet_name_in_ref(ref_value: &str, mapping: &HashMap<String, String>)
     let new_sheet = lookup_sheet_name(&sheet_name, mapping)?;
     let quote = was_quoted || formula_model::sheet_name_needs_quotes_a1(new_sheet);
     let new_token = if quote {
-        let mut out = String::with_capacity(new_sheet.len().saturating_add(2));
+        let mut out = String::new();
+        if out
+            .try_reserve(new_sheet.len().saturating_add(2))
+            .is_err()
+        {
+            return Some(ref_value.to_string());
+        }
         formula_model::push_excel_single_quoted_identifier(&mut out, new_sheet);
         out
     } else {
@@ -1003,7 +1009,13 @@ fn rewrite_pivot_cache_definition_worksheet_source_sheets(
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(xml_bytes.len()));
+    let mut out = Vec::new();
+    if out.try_reserve_exact(xml_bytes.len()).is_err() {
+        return Err(ChartExtractionError::AllocationFailure(
+            "rewrite_pivot_cache_definition_worksheet_source_sheets output",
+        ));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
     let mut rewritten = false;
 
@@ -1321,8 +1333,15 @@ fn merge_pivot_caches(
                 "workbook.xml: missing {close_tag} in <pivotCaches>"
             ))
         })?;
-        let mut section =
-            String::with_capacity(existing_section.len().saturating_add(inserted_xml.len()));
+        let mut section = String::new();
+        if section
+            .try_reserve(existing_section.len().saturating_add(inserted_xml.len()))
+            .is_err()
+        {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches section",
+            ));
+        }
         section.push_str(&existing_section[..close_tag_pos]);
         section.push_str(&inserted_xml);
         section.push_str(&existing_section[close_tag_pos..]);
@@ -1333,7 +1352,15 @@ fn merge_pivot_caches(
     let new_count = existing_pivot_cache_count + to_insert.len();
     new_section = update_pivot_caches_count_attr(&new_section, new_count);
 
-    let mut out = String::with_capacity(workbook_xml.len() + inserted_xml.len());
+    let mut out = String::new();
+    if out
+        .try_reserve(workbook_xml.len().saturating_add(inserted_xml.len()))
+        .is_err()
+    {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_pivot_caches workbook.xml output",
+        ));
+    }
     out.push_str(&workbook_xml[..pivot_caches_range.start]);
     out.push_str(&new_section);
     out.push_str(&workbook_xml[pivot_caches_range.end..]);
@@ -1372,18 +1399,42 @@ fn insert_pivot_caches(
         let start = start.strip_suffix("/>").unwrap_or(start);
         let start = start.trim_end();
 
-        let mut expanded_root = String::with_capacity(
-            start.len() + 1 + preserved_pivot_caches_xml.len() + close_tag.len() + trailing_ws.len(),
-        );
+        let mut expanded_root = String::new();
+        if expanded_root
+            .try_reserve(
+                start.len()
+                    .saturating_add(1)
+                    .saturating_add(preserved_pivot_caches_xml.len())
+                    .saturating_add(close_tag.len())
+                    .saturating_add(trailing_ws.len()),
+            )
+            .is_err()
+        {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches expanded workbook root",
+            ));
+        }
         expanded_root.push_str(start);
         expanded_root.push('>');
         expanded_root.push_str(&preserved_pivot_caches_xml);
         expanded_root.push_str(&close_tag);
         expanded_root.push_str(trailing_ws);
 
-        let mut out = String::with_capacity(
-            workbook_xml.len() + preserved_pivot_caches_xml.len() + close_tag.len() + 1,
-        );
+        let mut out = String::new();
+        if out
+            .try_reserve(
+                workbook_xml
+                    .len()
+                    .saturating_add(preserved_pivot_caches_xml.len())
+                    .saturating_add(close_tag.len())
+                    .saturating_add(1),
+            )
+            .is_err()
+        {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches workbook.xml output",
+            ));
+        }
         out.push_str(&workbook_xml[..workbook_range.start]);
         out.push_str(&expanded_root);
         out.push_str(&workbook_xml[workbook_range.end..]);
@@ -1435,7 +1486,15 @@ fn insert_pivot_caches(
         }
     };
 
-    let mut out = String::with_capacity(workbook_xml.len() + preserved_pivot_caches_xml.len());
+    let mut out = String::new();
+    if out
+        .try_reserve(workbook_xml.len().saturating_add(preserved_pivot_caches_xml.len()))
+        .is_err()
+    {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_pivot_caches workbook.xml output",
+        ));
+    }
     out.push_str(&workbook_xml[..insert_idx]);
     out.push_str(&preserved_pivot_caches_xml);
     out.push_str(&workbook_xml[insert_idx..]);
@@ -1626,8 +1685,15 @@ fn merge_workbook_cache_refs(
                 "workbook.xml: missing {close_tag} in <{container}>"
             ))
         })?;
-        let mut section =
-            String::with_capacity(existing_section.len().saturating_add(inserted_xml.len()));
+        let mut section = String::new();
+        if section
+            .try_reserve(existing_section.len().saturating_add(inserted_xml.len()))
+            .is_err()
+        {
+            return Err(ChartExtractionError::AllocationFailure(
+                "merge_workbook_cache_refs section",
+            ));
+        }
         section.push_str(&existing_section[..close_tag_pos]);
         section.push_str(&inserted_xml);
         section.push_str(&existing_section[close_tag_pos..]);
@@ -1637,7 +1703,15 @@ fn merge_workbook_cache_refs(
     let new_count = existing_count + to_insert.len();
     new_section = update_pivot_caches_count_attr(&new_section, new_count);
 
-    let mut out = String::with_capacity(workbook_xml.len() + inserted_xml.len());
+    let mut out = String::new();
+    if out
+        .try_reserve(workbook_xml.len().saturating_add(inserted_xml.len()))
+        .is_err()
+    {
+        return Err(ChartExtractionError::AllocationFailure(
+            "merge_workbook_cache_refs workbook.xml output",
+        ));
+    }
     out.push_str(&workbook_xml[..range.start]);
     out.push_str(&new_section);
     out.push_str(&workbook_xml[range.end..]);
@@ -1703,7 +1777,15 @@ fn insert_workbook_cache_refs(
         }
     };
 
-    let mut out = String::with_capacity(workbook_xml.len() + preserved_xml.len());
+    let mut out = String::new();
+    if out
+        .try_reserve(workbook_xml.len().saturating_add(preserved_xml.len()))
+        .is_err()
+    {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_workbook_cache_refs workbook.xml output",
+        ));
+    }
     out.push_str(&workbook_xml[..insert_idx]);
     out.push_str(&preserved_xml);
     out.push_str(&workbook_xml[insert_idx..]);
@@ -1924,7 +2006,15 @@ fn expand_self_closing_workbook_root_if_needed<'a>(
                 })?;
                 let tag_start = tag_start.trim_end();
 
-                let mut out = String::with_capacity(workbook_xml.len() + close_tag.len() + 1);
+                let mut out = String::new();
+                if out
+                    .try_reserve(workbook_xml.len().saturating_add(close_tag.len()).saturating_add(1))
+                    .is_err()
+                {
+                    return Err(ChartExtractionError::AllocationFailure(
+                        "expand_self_closing_workbook_root_if_needed output",
+                    ));
+                }
                 out.push_str(&workbook_xml[..pos_before]);
                 out.push_str(tag_start);
                 out.push('>');
@@ -2202,7 +2292,13 @@ fn rewrite_relationship_ids(
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(xml_bytes.len()));
+    let mut out = Vec::new();
+    if out.try_reserve_exact(xml_bytes.len()).is_err() {
+        return Err(ChartExtractionError::AllocationFailure(
+            "rewrite_relationship_prefixes_in_pivot_xml output",
+        ));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     // Namespace stack, one entry per open element. The top represents the in-scope mappings.
@@ -2534,7 +2630,13 @@ fn rewrite_spreadsheetml_prefix_in_fragment(
 ) -> Result<String, ChartExtractionError> {
     let mut reader = Reader::from_str(fragment);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(fragment.len()));
+    let mut out = Vec::new();
+    if out.try_reserve_exact(fragment.len()).is_err() {
+        return Err(ChartExtractionError::AllocationFailure(
+            "rewrite_spreadsheetml_prefix_in_fragment output",
+        ));
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     loop {

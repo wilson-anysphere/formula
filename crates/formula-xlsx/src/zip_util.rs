@@ -179,6 +179,72 @@ mod tests {
     }
 }
 
+pub(crate) fn zip_part_name_starts_with(name: &str, canonical_prefix: &[u8]) -> bool {
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    struct Normalized<'a> {
+        bytes: &'a [u8],
+        in_leading_separators: bool,
+    }
+
+    impl<'a> Normalized<'a> {
+        fn new(s: &'a str) -> Self {
+            Self {
+                bytes: s.as_bytes(),
+                in_leading_separators: true,
+            }
+        }
+
+        fn next_byte(&mut self) -> Option<u8> {
+            loop {
+                let b = *self.bytes.first()?;
+                let decoded = if b == b'%' && self.bytes.len() >= 3 {
+                    let hi = self.bytes[1];
+                    let lo = self.bytes[2];
+                    if let (Some(hi), Some(lo)) = (hex_val(hi), hex_val(lo)) {
+                        self.bytes = &self.bytes[3..];
+                        (hi << 4) | lo
+                    } else {
+                        self.bytes = &self.bytes[1..];
+                        b
+                    }
+                } else {
+                    self.bytes = &self.bytes[1..];
+                    b
+                };
+
+                if self.in_leading_separators && matches!(decoded, b'/' | b'\\') {
+                    continue;
+                }
+                self.in_leading_separators = false;
+
+                let normalized = if decoded == b'\\' {
+                    b'/'
+                } else {
+                    decoded.to_ascii_lowercase()
+                };
+                return Some(normalized);
+            }
+        }
+    }
+
+    let mut n = Normalized::new(name);
+    for &b in canonical_prefix {
+        match n.next_byte() {
+            Some(got) if got == b => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Compute a canonicalized key for a ZIP entry/part name suitable for case- and separator-insensitive
 /// lookup.
 ///
@@ -190,7 +256,7 @@ mod tests {
 ///
 /// We return a byte vector (not a `String`) so we can represent arbitrary percent-decoded bytes
 /// without requiring valid UTF-8.
-pub(crate) fn zip_part_name_lookup_key(name: &str) -> Vec<u8> {
+pub(crate) fn zip_part_name_lookup_key(name: &str) -> Result<Vec<u8>, XlsxError> {
     fn hex_val(b: u8) -> Option<u8> {
         match b {
             b'0'..=b'9' => Some(b - b'0'),
@@ -201,7 +267,9 @@ pub(crate) fn zip_part_name_lookup_key(name: &str) -> Vec<u8> {
     }
 
     let mut bytes = name.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
+    let mut out = Vec::new();
+    out.try_reserve(bytes.len())
+        .map_err(|_| XlsxError::AllocationFailure("zip_part_name_lookup_key"))?;
     let mut in_leading_separators = true;
     while let Some(&b) = bytes.first() {
         let decoded = if b == b'%' && bytes.len() >= 3 {
@@ -232,7 +300,7 @@ pub(crate) fn zip_part_name_lookup_key(name: &str) -> Vec<u8> {
         };
         out.push(normalized);
     }
-    out
+    Ok(out)
 }
 
 /// Open a ZIP entry by name, tolerating common producer mistakes:

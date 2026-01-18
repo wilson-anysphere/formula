@@ -1,5 +1,6 @@
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use thiserror::Error;
 
 /// Normalize XML for semantic comparisons by:
 /// - parsing the document
@@ -83,10 +84,25 @@ fn is_xml_space_attr(key: &[u8]) -> bool {
     key == b"xml:space"
 }
 
-pub fn assert_xml_semantic_eq(expected: &[u8], actual: &[u8]) {
-    let expected_norm = normalize_xml(expected).expect("normalize expected xml");
-    let actual_norm = normalize_xml(actual).expect("normalize actual xml");
-    assert_eq!(expected_norm, actual_norm);
+#[derive(Debug, Error)]
+pub enum XmlSemanticEqError {
+    #[error("failed to parse xml: {0}")]
+    Parse(#[from] quick_xml::Error),
+    #[error("xml differs after normalization\nexpected: {expected}\nactual: {actual}")]
+    Mismatch { expected: String, actual: String },
+}
+
+pub fn assert_xml_semantic_eq(expected: &[u8], actual: &[u8]) -> Result<(), XmlSemanticEqError> {
+    let expected_norm = normalize_xml(expected)?;
+    let actual_norm = normalize_xml(actual)?;
+    if expected_norm == actual_norm {
+        Ok(())
+    } else {
+        Err(XmlSemanticEqError::Mismatch {
+            expected: expected_norm,
+            actual: actual_norm,
+        })
+    }
 }
 
 fn write_sorted_attrs(

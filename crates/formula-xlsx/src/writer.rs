@@ -1744,11 +1744,16 @@ fn sheet_xml(
             used_rel_ids.insert(id.clone());
         }
 
-        let id = rel_id.expect("rel id ensured for external hyperlinks");
+        let Some(id) = rel_id.clone() else {
+            debug_assert!(
+                false,
+                "missing hyperlink rel_id for external target {target:?} (sheet={:?})",
+                sheet.name
+            );
+            continue;
+        };
         link.rel_id = Some(id.clone());
-        target_by_rel_id
-            .entry(id)
-            .or_insert_with(|| target.to_string());
+        target_by_rel_id.entry(id).or_insert_with(|| target.to_string());
     }
 
     if !links.is_empty() {

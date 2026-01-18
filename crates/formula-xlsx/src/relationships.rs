@@ -95,7 +95,7 @@ impl Relationships {
     }
 
     pub fn new(rels: Vec<Relationship>) -> Self {
-        let mut by_id = HashMap::with_capacity(rels.len());
+        let mut by_id: HashMap<String, usize> = HashMap::new();
         for (idx, rel) in rels.iter().enumerate() {
             by_id.insert(rel.id.clone(), idx);
         }
@@ -182,7 +182,8 @@ fn xml_escape(input: &str) -> String {
         return input.to_string();
     }
 
-    let mut out = String::with_capacity(input.len() + extra);
+    let mut out = String::new();
+    let _ = out.try_reserve(input.len().saturating_add(extra));
     let mut start = 0usize;
     for (i, ch) in input.char_indices() {
         let escaped = match ch {

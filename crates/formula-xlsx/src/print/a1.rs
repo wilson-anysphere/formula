@@ -270,10 +270,14 @@ fn split_sheet_name(input: &str) -> Result<(String, &str), PrintError> {
                     return Ok((sheet, rest));
                 }
                 _ => {
-                    let ch = input[i..]
-                        .chars()
-                        .next()
-                        .expect("i always at char boundary");
+                    let ch = input
+                        .get(i..)
+                        .and_then(|s| s.chars().next())
+                        .ok_or_else(|| {
+                            PrintError::InvalidA1(format!(
+                                "invalid utf-8 boundary while parsing quoted sheet name in {input:?}"
+                            ))
+                        })?;
                     sheet.push(ch);
                     i += ch.len_utf8();
                     continue;

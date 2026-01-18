@@ -229,14 +229,13 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         };
 
         for name in self.part_names() {
-            let key = crate::zip_util::zip_part_name_lookup_key(name);
-            if key == b"xl/vbaproject.bin" {
+            if crate::zip_util::zip_part_names_equivalent(name, "xl/vbaProject.bin") {
                 presence.has_vba = true;
             }
-            if key.starts_with(b"xl/macrosheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/macrosheets/") {
                 presence.has_xlm_macrosheets = true;
             }
-            if key.starts_with(b"xl/dialogsheets/") {
+            if crate::zip_util::zip_part_name_starts_with(name, b"xl/dialogsheets/") {
                 presence.has_dialog_sheets = true;
             }
 

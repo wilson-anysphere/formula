@@ -152,23 +152,17 @@ fn resolve_image_target_for_local_image_identifier<'a>(
     rel_ids: &'a [String],
     rid_to_target: &'a HashMap<String, String>,
 ) -> Option<&'a String> {
-    let mut candidates: Vec<u32> = Vec::with_capacity(2);
-    match base {
-        RelationshipIndexBase::ZeroBased => candidates.push(local_image_identifier),
-        RelationshipIndexBase::OneBased => {
-            candidates.push(local_image_identifier.checked_sub(1)?);
-        }
-        RelationshipIndexBase::Unknown => {
-            candidates.push(local_image_identifier);
-            if let Some(v) = local_image_identifier.checked_sub(1) {
-                if v != local_image_identifier {
-                    candidates.push(v);
-                }
-            }
-        }
-    }
+    let a = match base {
+        RelationshipIndexBase::ZeroBased => Some(local_image_identifier),
+        RelationshipIndexBase::OneBased => local_image_identifier.checked_sub(1),
+        RelationshipIndexBase::Unknown => Some(local_image_identifier),
+    };
+    let b = match base {
+        RelationshipIndexBase::Unknown => local_image_identifier.checked_sub(1),
+        _ => None,
+    };
 
-    for idx in candidates {
+    for idx in [a, b].into_iter().filter_map(|v| v) {
         let Ok(idx) = usize::try_from(idx) else {
             continue;
         };

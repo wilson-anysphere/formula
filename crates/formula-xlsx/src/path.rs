@@ -115,7 +115,10 @@ fn percent_decode_best_effort(input: &str) -> Cow<'_, str> {
         return Cow::Borrowed(input);
     }
 
-    let mut out = Vec::with_capacity(bytes.len());
+    let mut out = Vec::new();
+    if out.try_reserve_exact(bytes.len()).is_err() {
+        return Cow::Borrowed(input);
+    }
     out.extend_from_slice(&bytes[..first_pct]);
     let mut i = first_pct;
     while i < bytes.len() {
@@ -143,7 +146,10 @@ fn percent_encode_best_effort(input: &str) -> Cow<'_, str> {
         return Cow::Borrowed(input);
     }
 
-    let mut out = String::with_capacity(input.len() + 2);
+    let mut out = String::new();
+    if out.try_reserve(input.len().saturating_add(2)).is_err() {
+        return Cow::Borrowed(input);
+    }
     for ch in input.chars() {
         if ch == ' ' {
             out.push_str("%20");

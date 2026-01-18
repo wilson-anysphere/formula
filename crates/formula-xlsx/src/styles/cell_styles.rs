@@ -57,6 +57,8 @@ const DEFAULT_STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standal
 
 #[derive(Debug, thiserror::Error)]
 pub enum StylesPartError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("styles.xml root is not <styleSheet>")]
     InvalidRoot,
     #[error("unknown style_id {0}")]
@@ -347,7 +349,12 @@ impl StylesPart {
         ids.sort_unstable();
         ids.dedup();
 
-        let mut out = HashMap::with_capacity(ids.len());
+        let mut out = HashMap::new();
+        if out.try_reserve(ids.len()).is_err() {
+            return Err(StylesPartError::AllocationFailure(
+                "xf_indices_for_style_ids output map",
+            ));
+        }
         for style_id in ids {
             let xf_index = self.xf_index_for_style(style_id, style_table)?;
             out.insert(style_id, xf_index);
@@ -1205,34 +1212,37 @@ fn format_vertical_alignment(alignment: VerticalAlignment) -> &'static str {
 }
 
 fn ensure_styles_child<'a>(root: &'a mut XmlElement, local: &str) -> &'a mut XmlElement {
-    let existing_idx = root
+    let mut idx = root
         .children
         .iter()
-        .position(|child| matches!(child, XmlNode::Element(el) if el.name.local == local));
+        .position(|child| matches!(child, XmlNode::Element(el) if el.name.local == local))
+        .unwrap_or_else(|| {
+            let idx = insertion_index(root, local);
+            root.children.insert(idx, XmlNode::Element(empty_element(local)));
+            idx
+        });
 
-    if let Some(idx) = existing_idx {
-        return match &mut root.children[idx] {
-            XmlNode::Element(el) => el,
-            _ => unreachable!("position matched XmlNode::Element"),
-        };
+    if idx >= root.children.len() {
+        debug_assert!(
+            false,
+            "styles child insertion produced out-of-bounds index; falling back to append"
+        );
+        idx = root.children.len();
+        root.children.push(XmlNode::Element(empty_element(local)));
     }
 
-    let idx = insertion_index(root, local);
-    root.children.insert(
-        idx,
-        XmlNode::Element(XmlElement {
-            name: QName {
-                ns: Some(NS_MAIN.to_string()),
-                local: local.to_string(),
-            },
-            attrs: Default::default(),
-            children: Vec::new(),
-        }),
-    );
-
-    match &mut root.children[idx] {
-        XmlNode::Element(el) => el,
-        _ => unreachable!("inserted XmlNode::Element"),
+    let node = &mut root.children[idx];
+    loop {
+        match node {
+            XmlNode::Element(el) => return el,
+            _ => {
+                debug_assert!(
+                    false,
+                    "styles child index should point at an XmlNode::Element; repairing in place"
+                );
+                *node = XmlNode::Element(empty_element(local));
+            }
+        }
     }
 }
 

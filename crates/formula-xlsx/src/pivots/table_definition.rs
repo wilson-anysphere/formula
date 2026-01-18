@@ -180,7 +180,10 @@ impl XlsxPackage {
             }
         }
 
-        let mut out = Vec::with_capacity(paths.len());
+        let mut out = Vec::new();
+        if out.try_reserve_exact(paths.len()).is_err() {
+            return Err(XlsxError::AllocationFailure("pivot_table_definitions output"));
+        }
         for path in paths {
             out.push(self.pivot_table_definition(&path)?);
         }

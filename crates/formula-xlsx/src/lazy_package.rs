@@ -697,7 +697,11 @@ fn is_macro_part_name(name: &str) -> bool {
 fn strip_content_types_macro_overrides(xml: &[u8]) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut out = Vec::new();
+    if out.try_reserve_exact(xml.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("strip_content_types_macro_overrides output"));
+    }
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
     let mut changed = false;
     let mut skip_depth = 0usize;

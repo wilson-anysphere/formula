@@ -121,7 +121,16 @@ fn insert_relationships_before_close(
 
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len() + (to_insert.len() * 128)));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(xml.len().saturating_add(to_insert.len().saturating_mul(128)))
+        .is_err()
+    {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_relationships_before_close output",
+        ));
+    }
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut root_prefix: Option<String> = None;

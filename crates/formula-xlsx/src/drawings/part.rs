@@ -1531,7 +1531,8 @@ fn client_data_with_xdr_prefix(raw: &str) -> String {
 }
 
 fn escape_attr_value(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(value.len());
     for ch in value.chars() {
         match ch {
             '&' => out.push_str("&amp;"),

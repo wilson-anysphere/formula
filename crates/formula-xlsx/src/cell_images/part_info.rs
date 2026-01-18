@@ -79,7 +79,10 @@ impl XlsxPackage {
         let embed_rids = parse_cell_images_embeds(part_bytes)?;
         let rid_to_target = parse_cell_images_image_relationships(&part_path, rels_bytes)?;
 
-        let mut embeds = Vec::with_capacity(embed_rids.len());
+        let mut embeds = Vec::new();
+        if embeds.try_reserve_exact(embed_rids.len()).is_err() {
+            return Err(XlsxError::AllocationFailure("cell_images_part_info embeds"));
+        }
         for rid in embed_rids {
             let target_part = rid_to_target.get(&rid).cloned().ok_or_else(|| {
                 XlsxError::Invalid(format!(

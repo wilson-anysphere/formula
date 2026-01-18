@@ -80,7 +80,8 @@ const PIVOT_BINDING_NAMESPACE: PivotTableId =
 
 fn pivot_table_id_from_part_name(part_name: &str) -> PivotTableId {
     let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
-    let mut key = String::with_capacity("pivotTable:".len() + part_name.len());
+    let mut key = String::new();
+    let _ = key.try_reserve("pivotTable:".len().saturating_add(part_name.len()));
     key.push_str("pivotTable:");
     key.push_str(part_name);
     PivotTableId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
@@ -88,7 +89,8 @@ fn pivot_table_id_from_part_name(part_name: &str) -> PivotTableId {
 
 fn pivot_chart_id_from_part_name(part_name: &str) -> PivotChartId {
     let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
-    let mut key = String::with_capacity("pivotChart:".len() + part_name.len());
+    let mut key = String::new();
+    let _ = key.try_reserve("pivotChart:".len().saturating_add(part_name.len()));
     key.push_str("pivotChart:");
     key.push_str(part_name);
     PivotChartId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
@@ -217,8 +219,8 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     if let Some(theme) = read_theme_palette_from_zip(archive, &rels_info) {
         workbook.theme = theme;
     }
-    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
-        Vec::with_capacity(sheets.len());
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
+    let _ = worksheet_ids_by_index.try_reserve(sheets.len());
 
     let styles_bytes = if let Some(target) = rels_info.styles_target.as_deref() {
         let mut found = None;
@@ -320,9 +322,16 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         worksheet_ids_by_index.push(ws_id);
 
         {
-            let ws = workbook
-                .sheet_mut(ws_id)
-                .expect("sheet just inserted must exist");
+            let Some(ws) = workbook.sheet_mut(ws_id) else {
+                debug_assert!(
+                    false,
+                    "sheet id {ws_id:?} missing immediately after add_sheet({:?})",
+                    sheet.name
+                );
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "internal error: sheet id missing immediately after add_sheet".to_string(),
+                )));
+            };
             ws.xlsx_sheet_id = Some(sheet.sheet_id);
             ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
             ws.visibility = match sheet.state.as_deref() {
@@ -350,7 +359,15 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         let worksheet_part = worksheet_part.ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
-        let sheet_xml = sheet_xml.expect("worksheet_part implies sheet_xml is Some");
+        let Some(sheet_xml) = sheet_xml else {
+            debug_assert!(
+                false,
+                "worksheet_part is set ({worksheet_part:?}) but sheet_xml bytes are missing"
+            );
+            return Err(ReadError::Xlsx(XlsxError::Invalid(
+                "internal error: worksheet bytes missing after resolving worksheet part".to_string(),
+            )));
+        };
 
         // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet XML.
         // This is parsed via a streaming extractor (quick-xml) to avoid DOM parsing.
@@ -404,9 +421,16 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             &mut workbook,
         );
 
-        let ws = workbook
-            .sheet_mut(ws_id)
-            .expect("sheet just inserted must exist");
+        let Some(ws) = workbook.sheet_mut(ws_id) else {
+            debug_assert!(
+                false,
+                "sheet id {ws_id:?} missing immediately after add_sheet({:?})",
+                sheet.name
+            );
+            return Err(ReadError::Xlsx(XlsxError::Invalid(
+                "internal error: sheet id missing immediately after add_sheet".to_string(),
+            )));
+        };
 
         ws.tab_color = tab_color;
 
@@ -648,8 +672,7 @@ fn attach_tables_from_part_getter<'a, F>(
         Err(_) => return,
     };
 
-    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
-        HashMap::with_capacity(relationships.len());
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
     for rel in relationships {
         rels_by_id.insert(rel.id.clone(), rel);
     }
@@ -726,8 +749,7 @@ fn load_sheet_drawings_from_archive<R: Read + Seek>(
         Err(_) => return Vec::new(),
     };
 
-    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
-        HashMap::with_capacity(relationships.len());
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
     for rel in relationships {
         let rel_id = rel.id.trim();
         if rel_id.is_empty() {
@@ -768,7 +790,7 @@ fn load_sheet_drawings_from_archive<R: Read + Seek>(
         //   more common `Target="../drawings/drawing1.xml"` (relative to `xl/worksheets/`).
         // - Some producers emit `Target="xl/drawings/drawing1.xml"` without a leading `/`, which
         //   incorrectly resolves under `xl/worksheets/xl/...`.
-        let mut candidates: Vec<String> = Vec::with_capacity(3);
+        let mut candidates: Vec<String> = Vec::new();
         candidates.push(drawing_part.clone());
         if let Some(rest) = drawing_part.strip_prefix("xl/worksheets/") {
             if rest.starts_with("drawings/") {
@@ -818,8 +840,7 @@ fn load_sheet_drawings_from_parts(
         Err(_) => return Vec::new(),
     };
 
-    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
-        HashMap::with_capacity(relationships.len());
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> = HashMap::new();
     for rel in relationships {
         let rel_id = rel.id.trim();
         if rel_id.is_empty() {
@@ -1129,7 +1150,8 @@ fn load_from_zip_archive<R: Read + Seek>(
     if let Some(metadata_part) = metadata_part.as_mut() {
         metadata_part.vm_index_base = infer_vm_index_base_for_workbook(&parts, &sheets);
     }
-    let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
+    let mut sheet_meta: Vec<SheetMeta> = Vec::new();
+    let _ = sheet_meta.try_reserve(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
     let mut conditional_formatting = std::collections::HashMap::new();
@@ -1252,9 +1274,16 @@ fn load_from_zip_archive<R: Read + Seek>(
         }
 
         {
-            let ws = workbook
-                .sheet_mut(ws_id)
-                .expect("sheet just inserted must exist");
+            let Some(ws) = workbook.sheet_mut(ws_id) else {
+                debug_assert!(
+                    false,
+                    "sheet id {ws_id:?} missing immediately after add_sheet({:?})",
+                    sheet.name
+                );
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "internal error: sheet id missing immediately after add_sheet".to_string(),
+                )));
+            };
 
             ws.xlsx_sheet_id = Some(sheet.sheet_id);
             ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
@@ -3877,7 +3906,14 @@ fn parse_data_validation_start<R: std::io::BufRead>(
         return Ok(None);
     }
 
-    let kind = kind.expect("checked in should_store");
+    let Some(kind) = kind else {
+        debug_assert!(
+            false,
+            "should_store was true but data validation kind was None (ranges={})",
+            ranges.len()
+        );
+        return Ok(None);
+    };
 
     // Only list validations have an in-cell dropdown affordance. When the OOXML attribute is
     // omitted, Excel shows the arrow by default.

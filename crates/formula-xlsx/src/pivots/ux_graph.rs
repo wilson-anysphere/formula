@@ -46,7 +46,7 @@ fn build_pivot_ux_graph(
     pivot_charts: Vec<PivotChartPart>,
     slicers: Vec<SlicerDefinition>,
     timelines: Vec<TimelineDefinition>,
-) -> XlsxPivotUxGraph {
+) -> Result<XlsxPivotUxGraph, XlsxError> {
     let mut pivot_table_index_by_part: BTreeMap<String, usize> = BTreeMap::new();
     for (idx, table) in pivot_tables.iter().enumerate() {
         // Deterministic: first wins.
@@ -55,8 +55,23 @@ fn build_pivot_ux_graph(
             .or_insert(idx);
     }
 
-    let mut slicer_to_pivot_tables: Vec<Vec<usize>> = Vec::with_capacity(slicers.len());
-    let mut pivot_table_to_slicers: Vec<Vec<usize>> = vec![Vec::new(); pivot_tables.len()];
+    let mut slicer_to_pivot_tables: Vec<Vec<usize>> = Vec::new();
+    if slicer_to_pivot_tables.try_reserve_exact(slicers.len()).is_err() {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph slicer_to_pivot_tables",
+        ));
+    }
+
+    let mut pivot_table_to_slicers: Vec<Vec<usize>> = Vec::new();
+    if pivot_table_to_slicers
+        .try_reserve_exact(pivot_tables.len())
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph pivot_table_to_slicers",
+        ));
+    }
+    pivot_table_to_slicers.resize_with(pivot_tables.len(), Vec::new);
     for (slicer_idx, slicer) in slicers.iter().enumerate() {
         let mut connected = Vec::new();
         for part in &slicer.connected_pivot_tables {
@@ -78,8 +93,26 @@ fn build_pivot_ux_graph(
         list.dedup();
     }
 
-    let mut timeline_to_pivot_tables: Vec<Vec<usize>> = Vec::with_capacity(timelines.len());
-    let mut pivot_table_to_timelines: Vec<Vec<usize>> = vec![Vec::new(); pivot_tables.len()];
+    let mut timeline_to_pivot_tables: Vec<Vec<usize>> = Vec::new();
+    if timeline_to_pivot_tables
+        .try_reserve_exact(timelines.len())
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph timeline_to_pivot_tables",
+        ));
+    }
+
+    let mut pivot_table_to_timelines: Vec<Vec<usize>> = Vec::new();
+    if pivot_table_to_timelines
+        .try_reserve_exact(pivot_tables.len())
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph pivot_table_to_timelines",
+        ));
+    }
+    pivot_table_to_timelines.resize_with(pivot_tables.len(), Vec::new);
     for (timeline_idx, timeline) in timelines.iter().enumerate() {
         let mut connected = Vec::new();
         for part in &timeline.connected_pivot_tables {
@@ -101,8 +134,26 @@ fn build_pivot_ux_graph(
         list.dedup();
     }
 
-    let mut pivot_chart_to_pivot_table: Vec<Option<usize>> = Vec::with_capacity(pivot_charts.len());
-    let mut pivot_table_to_pivot_charts: Vec<Vec<usize>> = vec![Vec::new(); pivot_tables.len()];
+    let mut pivot_chart_to_pivot_table: Vec<Option<usize>> = Vec::new();
+    if pivot_chart_to_pivot_table
+        .try_reserve_exact(pivot_charts.len())
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph pivot_chart_to_pivot_table",
+        ));
+    }
+
+    let mut pivot_table_to_pivot_charts: Vec<Vec<usize>> = Vec::new();
+    if pivot_table_to_pivot_charts
+        .try_reserve_exact(pivot_tables.len())
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure(
+            "build_pivot_ux_graph pivot_table_to_pivot_charts",
+        ));
+    }
+    pivot_table_to_pivot_charts.resize_with(pivot_tables.len(), Vec::new);
     for (chart_idx, chart) in pivot_charts.iter().enumerate() {
         let target = chart
             .pivot_source_part
@@ -120,7 +171,7 @@ fn build_pivot_ux_graph(
         list.dedup();
     }
 
-    XlsxPivotUxGraph {
+    Ok(XlsxPivotUxGraph {
         pivot_tables,
         pivot_charts,
         slicers,
@@ -131,7 +182,7 @@ fn build_pivot_ux_graph(
         pivot_table_to_slicers,
         pivot_table_to_timelines,
         pivot_table_to_pivot_charts,
-    }
+    })
 }
 
 impl XlsxPackage {
@@ -143,12 +194,12 @@ impl XlsxPackage {
         let pivot_graph = self.pivot_graph()?;
         let pivot_charts = self.pivot_chart_parts()?;
         let slicer_parts = self.pivot_slicer_parts()?;
-        Ok(build_pivot_ux_graph(
+        build_pivot_ux_graph(
             pivot_graph.pivot_tables,
             pivot_charts,
             slicer_parts.slicers,
             slicer_parts.timelines,
-        ))
+        )
     }
 }
 
@@ -158,11 +209,11 @@ impl XlsxDocument {
         let pivot_graph = self.pivot_graph()?;
         let pivot_charts = self.pivot_chart_parts()?;
         let slicer_parts = self.pivot_slicer_parts()?;
-        Ok(build_pivot_ux_graph(
+        build_pivot_ux_graph(
             pivot_graph.pivot_tables,
             pivot_charts,
             slicer_parts.slicers,
             slicer_parts.timelines,
-        ))
+        )
     }
 }

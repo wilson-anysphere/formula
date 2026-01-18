@@ -64,18 +64,37 @@ pub fn resolve_rich_value_image_targets(
     }
 
     let Some(rich_value_rel_xml) = parts.get(RICH_VALUE_REL_XML) else {
-        return Ok(vec![None; rel_indices.len()]);
+        let mut out: Vec<Option<String>> = Vec::new();
+        if out.try_reserve_exact(rel_indices.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "resolve_rich_value_image_targets missing richValueRel.xml fallback",
+            ));
+        }
+        out.resize_with(rel_indices.len(), || None);
+        return Ok(out);
     };
     let rel_id_table = parse_rich_value_rel_table(rich_value_rel_xml)?;
 
     // Resolve relationship IDs (`rId*`) to concrete targets via the `.rels` part.
     let rels_part_name = crate::openxml::rels_part_name(RICH_VALUE_REL_XML);
     let Some(rich_value_rel_rels) = parts.get(&rels_part_name) else {
-        return Ok(vec![None; rel_indices.len()]);
+        let mut out: Vec<Option<String>> = Vec::new();
+        if out.try_reserve_exact(rel_indices.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "resolve_rich_value_image_targets missing .rels fallback",
+            ));
+        }
+        out.resize_with(rel_indices.len(), || None);
+        return Ok(out);
     };
 
     let relationships = crate::openxml::parse_relationships(rich_value_rel_rels)?;
-    let mut targets_by_id: HashMap<String, String> = HashMap::with_capacity(relationships.len());
+    let mut targets_by_id: HashMap<String, String> = HashMap::new();
+    if targets_by_id.try_reserve(relationships.len()).is_err() {
+        return Err(XlsxError::AllocationFailure(
+            "resolve_rich_value_image_targets targets_by_id",
+        ));
+    }
     for rel in relationships {
         if rel
             .target_mode
@@ -98,7 +117,10 @@ pub fn resolve_rich_value_image_targets(
         targets_by_id.insert(rel.id, target);
     }
 
-    let mut out = Vec::with_capacity(rel_indices.len());
+    let mut out: Vec<Option<String>> = Vec::new();
+    if out.try_reserve_exact(rel_indices.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("resolve_rich_value_image_targets output"));
+    }
     for rel_idx in rel_indices {
         let Some(rel_idx) = rel_idx else {
             out.push(None);

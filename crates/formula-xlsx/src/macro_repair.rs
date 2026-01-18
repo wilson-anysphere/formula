@@ -72,10 +72,10 @@ pub(crate) fn ensure_xlsm_content_types(
         // preservation in this minimal crate assumes an existing workbook.
         return Ok(());
     };
-    let existing = parts
-        .get(&ct_key)
-        .cloned()
-        .expect("content types key resolved but missing");
+    let Some(existing) = parts.get(&ct_key).cloned() else {
+        debug_assert!(false, "content types key resolved but missing");
+        return Err(XlsxError::MissingPart(ct_key));
+    };
 
     // Only repair to XLSM if the package actually contains the VBA project payload.
     if !part_exists(parts, "xl/vbaProject.bin") {
@@ -112,7 +112,11 @@ pub(crate) fn ensure_xlsm_content_types(
 
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 256));
+    let mut out = Vec::new();
+    if out.try_reserve(existing.len().saturating_add(256)).is_err() {
+        return Err(XlsxError::AllocationFailure("macro_repair [Content_Types].xml output"));
+    }
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut override_tag_name: Option<String> = None;
@@ -398,14 +402,21 @@ pub(crate) fn ensure_workbook_rels_has_vba(
     let existing = parts
         .get(&rels_key)
         .cloned()
-        .expect("workbook rels key resolved but missing");
+        .ok_or_else(|| {
+            debug_assert!(false, "workbook rels key resolved but missing");
+            XlsxError::MissingPart(rels_key.clone())
+        })?;
 
     const VBA_REL_TYPE: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
     const VBA_TARGET: &str = "vbaProject.bin";
 
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    if out.try_reserve(existing.len().saturating_add(128)).is_err() {
+        return Err(XlsxError::AllocationFailure("ensure_workbook_rels_has_vba output"));
+    }
+    let mut writer = XmlWriter::new(out);
     let mut buf = Vec::new();
 
     let mut relationship_tag_name: Option<String> = None;
@@ -603,7 +614,11 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
         Some(existing) => {
             let mut reader = XmlReader::from_reader(existing.as_slice());
             reader.config_mut().trim_text(false);
-            let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+            let mut out = Vec::new();
+            if out.try_reserve(existing.len().saturating_add(128)).is_err() {
+                return Err(XlsxError::AllocationFailure("ensure_vba_signature_relationship output"));
+            }
+            let mut writer = XmlWriter::new(out);
             let mut buf = Vec::new();
 
             let mut relationship_tag_name: Option<String> = None;

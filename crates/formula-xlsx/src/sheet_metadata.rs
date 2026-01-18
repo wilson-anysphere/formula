@@ -578,12 +578,16 @@ pub fn write_sheet_tab_color(
             Event::Start(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 writer.write_event(Event::Start(e.to_owned()))?;
                 if tab_color.is_some() && !has_sheet_pr && !inserted_sheet_pr {
+                    let Some(color) = tab_color else {
+                        debug_assert!(false, "tab_color was None after is_some() check");
+                        continue;
+                    };
                     writer.write_event(Event::Start(BytesStart::new(
                         inserted_sheet_pr_tag.as_str(),
                     )))?;
                     writer.write_event(Event::Empty(build_tab_color_element(
                         inserted_tab_color_tag.as_str(),
-                        tab_color.expect("color present"),
+                        color,
                     )))?;
                     writer.write_event(Event::End(BytesEnd::new(
                         inserted_sheet_pr_tag.as_str(),
@@ -628,9 +632,16 @@ pub fn write_sheet_tab_color(
                 if in_sheet_pr && tab_color.is_some() && !tab_color_written {
                     let tab_color_tag =
                         crate::xml::prefixed_tag(sheet_pr_prefix.as_deref(), "tabColor");
+                    let Some(color) = tab_color else {
+                        debug_assert!(false, "tab_color was None after is_some() check");
+                        in_sheet_pr = false;
+                        sheet_pr_prefix = None;
+                        writer.write_event(Event::End(e.to_owned()))?;
+                        continue;
+                    };
                     writer.write_event(Event::Empty(build_tab_color_element(
                         tab_color_tag.as_str(),
-                        tab_color.expect("color present"),
+                        color,
                     )))?;
                 }
                 in_sheet_pr = false;

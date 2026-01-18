@@ -20,6 +20,8 @@ use crate::relationships::parse_relationships;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartExtractionError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("missing part: {0}")]
     MissingPart(String),
     #[error("part is not valid UTF-8: {0}: {1}")]
@@ -33,7 +35,10 @@ pub enum ChartExtractionError {
 impl XlsxPackage {
     pub fn extract_charts(&self) -> Result<Vec<Chart>, ChartExtractionError> {
         let chart_objects = self.extract_chart_objects()?;
-        let mut charts = Vec::with_capacity(chart_objects.len());
+        let mut charts = Vec::new();
+        if charts.try_reserve_exact(chart_objects.len()).is_err() {
+            return Err(ChartExtractionError::AllocationFailure("extract_charts output"));
+        }
 
         for chart_object in chart_objects {
             let parsed = chart_object
@@ -751,7 +756,10 @@ fn merge_chart_models(
 
         let mut chars = base.chars();
         let first = chars.next()?;
-        let mut out = String::with_capacity(base.len());
+        let mut out = String::new();
+        if out.try_reserve(base.len()).is_err() {
+            return None;
+        }
         out.push(first.to_ascii_lowercase());
         out.push_str(chars.as_str());
         Some(out)

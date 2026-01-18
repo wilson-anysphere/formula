@@ -65,6 +65,9 @@ impl From<RecalcPolicyError> for WriteError {
     fn from(err: RecalcPolicyError) -> Self {
         match err {
             RecalcPolicyError::Io(err) => WriteError::Io(err),
+            RecalcPolicyError::AllocationFailure(ctx) => {
+                WriteError::Xlsx(XlsxError::AllocationFailure(ctx))
+            }
             RecalcPolicyError::Xml(err) => WriteError::Xml(err),
             RecalcPolicyError::XmlAttr(err) => WriteError::XmlAttr(err),
         }
@@ -190,17 +193,32 @@ fn plan_sheet_structure(
     // available. This makes sheet structure edits robust even if the workbook model
     // was reconstructed (e.g. loaded from persisted state) with different internal
     // `WorksheetId`s.
-    let mut meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
-    let mut meta_by_rel_id: HashMap<&str, usize> = HashMap::new();
-    let mut meta_by_sheet_id: HashMap<u32, usize> = HashMap::new();
+  let mut meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+  let mut meta_by_rel_id: HashMap<&str, usize> = HashMap::new();
+  let mut meta_by_sheet_id: HashMap<u32, usize> = HashMap::new();
+  meta_by_ws_id
+    .try_reserve(doc.meta.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure meta_by_ws_id"))?;
+  meta_by_rel_id
+    .try_reserve(doc.meta.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure meta_by_rel_id"))?;
+  meta_by_sheet_id
+    .try_reserve(doc.meta.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure meta_by_sheet_id"))?;
     for (idx, meta) in doc.meta.sheets.iter().enumerate() {
         meta_by_ws_id.insert(meta.worksheet_id, idx);
         meta_by_rel_id.insert(meta.relationship_id.as_str(), idx);
         meta_by_sheet_id.insert(meta.sheet_id, idx);
     }
 
-    let mut matched_meta_idxs: HashSet<usize> = HashSet::new();
-    let mut matched_meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+  let mut matched_meta_idxs: HashSet<usize> = HashSet::new();
+  let mut matched_meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+  matched_meta_idxs
+    .try_reserve(doc.workbook.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure matched_meta_idxs"))?;
+  matched_meta_by_ws_id
+    .try_reserve(doc.workbook.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure matched_meta_by_ws_id"))?;
     for sheet in &doc.workbook.sheets {
         let idx = sheet
             .xlsx_rel_id
@@ -219,7 +237,10 @@ fn plan_sheet_structure(
         }
     }
 
-    let mut cell_meta_sheet_ids: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+  let mut cell_meta_sheet_ids: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+  cell_meta_sheet_ids
+    .try_reserve(matched_meta_by_ws_id.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure cell_meta_sheet_ids"))?;
     for (worksheet_id, idx) in &matched_meta_by_ws_id {
         let meta_sheet_id = doc
             .meta
@@ -230,14 +251,15 @@ fn plan_sheet_structure(
         cell_meta_sheet_ids.insert(*worksheet_id, meta_sheet_id);
     }
 
-    let removed: Vec<SheetMeta> = doc
-        .meta
-        .sheets
-        .iter()
-        .enumerate()
-        .filter(|(idx, _)| !matched_meta_idxs.contains(idx))
-        .map(|(_, meta)| meta.clone())
-        .collect();
+  let mut removed: Vec<SheetMeta> = Vec::new();
+  removed
+    .try_reserve(doc.meta.sheets.len().saturating_sub(matched_meta_idxs.len()))
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure removed"))?;
+  for (idx, meta) in doc.meta.sheets.iter().enumerate() {
+    if !matched_meta_idxs.contains(&idx) {
+      removed.push(meta.clone());
+    }
+  }
 
     // Excel allocates new `sheetId` values as `max(existing)+1`. We intentionally consider the
     // entire original workbook sheet list (including sheets that may be deleted in this edit)
@@ -277,10 +299,22 @@ fn plan_sheet_structure(
     let existing_paths = doc.meta.sheets.iter().map(|meta| meta.path.as_str());
     let part_paths = parts.keys().map(|p| p.as_str());
     let mut next_sheet_part = next_sheet_part_number(existing_paths.chain(part_paths));
-    let mut used_paths: HashSet<String> = doc.meta.sheets.iter().map(|m| m.path.clone()).collect();
+  let mut used_paths: HashSet<String> = HashSet::new();
+  used_paths
+    .try_reserve(doc.meta.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure used_paths"))?;
+  for meta in &doc.meta.sheets {
+    used_paths.insert(meta.path.clone());
+  }
 
-    let mut sheets: Vec<SheetMeta> = Vec::with_capacity(doc.workbook.sheets.len());
+  let mut sheets: Vec<SheetMeta> = Vec::new();
+  sheets
+    .try_reserve(doc.workbook.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure sheets"))?;
     let mut added: Vec<SheetMeta> = Vec::new();
+  added
+    .try_reserve(doc.workbook.sheets.len().saturating_sub(matched_meta_by_ws_id.len()))
+    .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure added"))?;
 
     for sheet in &doc.workbook.sheets {
         if let Some(idx) = matched_meta_by_ws_id.get(&sheet.id).copied() {
@@ -755,10 +789,11 @@ fn build_parts(
             &format!("/{shared_strings_part_name}"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
         )?;
+        let shared_strings_target = relationship_target_from_workbook(&shared_strings_part_name)?;
         ensure_workbook_rels_has_relationship(
             &mut parts,
             REL_TYPE_SHARED_STRINGS,
-            &relationship_target_from_workbook(&shared_strings_part_name),
+            &shared_strings_target,
         )?;
     }
     if parts.contains_key(&styles_part_name) {
@@ -767,10 +802,11 @@ fn build_parts(
             &format!("/{styles_part_name}"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
         )?;
+        let styles_target = relationship_target_from_workbook(&styles_part_name)?;
         ensure_workbook_rels_has_relationship(
             &mut parts,
             REL_TYPE_STYLES,
-            &relationship_target_from_workbook(&styles_part_name),
+            &styles_target,
         )?;
     }
 
@@ -1242,7 +1278,7 @@ fn build_parts(
                         .rsplit_once('/')
                         .map(|(dir, _)| dir)
                         .unwrap_or("");
-                    let drawing_target = relative_target(sheet_dir, &drawing_part_path);
+                    let drawing_target = relative_target(sheet_dir, &drawing_part_path)?;
 
                     let drawing_rel_id = rels.next_r_id();
                     rels.push(crate::relationships::Relationship {
@@ -1290,16 +1326,23 @@ fn build_parts(
                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
             {
                 let rels = crate::relationships::Relationships::from_xml(existing_rels)?;
-                let filtered: Vec<crate::relationships::Relationship> = rels
-                    .iter()
-                    .filter(|rel| {
-                        let Some(drawing_rid) = drawing_rid.as_deref() else {
-                            return true;
-                        };
-                        !(rel.id == drawing_rid && rel.type_ == DRAWING_REL_TYPE)
-                    })
-                    .cloned()
-                    .collect();
+                let mut filtered: Vec<crate::relationships::Relationship> = Vec::new();
+                let capacity_hint = rels.iter().size_hint().0;
+                if filtered.try_reserve(capacity_hint).is_err() {
+                    return Err(
+                        XlsxError::AllocationFailure("remove worksheet drawing relationships")
+                            .into(),
+                    );
+                }
+                for rel in rels.iter() {
+                    let Some(drawing_rid) = drawing_rid.as_deref() else {
+                        filtered.push(rel.clone());
+                        continue;
+                    };
+                    if rel.id != drawing_rid || rel.type_ != DRAWING_REL_TYPE {
+                        filtered.push(rel.clone());
+                    }
+                }
                 if filtered.is_empty() {
                     parts.remove(&rels_part);
                 } else {
@@ -1343,6 +1386,9 @@ fn apply_print_settings_patches(
 
     fn to_write_error(err: crate::print::PrintError) -> WriteError {
         match err {
+            crate::print::PrintError::AllocationFailure(ctx) => {
+                WriteError::Xlsx(XlsxError::AllocationFailure(ctx))
+            }
             crate::print::PrintError::Io(e) => WriteError::Io(e),
             crate::print::PrintError::Zip(e) => WriteError::Zip(e),
             crate::print::PrintError::Xml(e) => WriteError::Xml(e),
@@ -3068,7 +3114,19 @@ fn write_sheet_format_pr_element(
                 wrote_default_row_height = true;
                 writer.get_mut().extend_from_slice(
                     {
-                        let height = settings.default_row_height.expect("checked is_some");
+                        let height = match settings.default_row_height {
+                            Some(height) => height,
+                            None => {
+                                debug_assert!(
+                                    false,
+                                    "default_row_height was None after is_some() check"
+                                );
+                                return Err(WriteError::Io(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidInput,
+                                    "internal error: default_row_height missing",
+                                )));
+                            }
+                        };
                         let height = if height == 0.0 { 0.0 } else { height };
                         height.to_string()
                     }
@@ -3079,7 +3137,19 @@ fn write_sheet_format_pr_element(
                 wrote_default_col_width = true;
                 writer.get_mut().extend_from_slice(
                     {
-                        let width = settings.default_col_width.expect("checked is_some");
+                        let width = match settings.default_col_width {
+                            Some(width) => width,
+                            None => {
+                                debug_assert!(
+                                    false,
+                                    "default_col_width was None after is_some() check"
+                                );
+                                return Err(WriteError::Io(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidInput,
+                                    "internal error: default_col_width missing",
+                                )));
+                            }
+                        };
                         let width = if width == 0.0 { 0.0 } else { width };
                         width.to_string()
                     }
@@ -3088,13 +3158,18 @@ fn write_sheet_format_pr_element(
             }
             b"baseColWidth" if settings.base_col_width.is_some() => {
                 wrote_base_col_width = true;
-                writer.get_mut().extend_from_slice(
-                    settings
-                        .base_col_width
-                        .expect("checked is_some")
-                        .to_string()
-                        .as_bytes(),
-                );
+                let Some(base) = settings.base_col_width else {
+                    debug_assert!(
+                        false,
+                        "base_col_width was None after is_some() check"
+                    );
+                    writer.get_mut().extend_from_slice(
+                        escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
+                    );
+                    writer.get_mut().push(b'"');
+                    continue;
+                };
+                writer.get_mut().extend_from_slice(base.to_string().as_bytes());
             }
             _ => {
                 writer.get_mut().extend_from_slice(
@@ -4680,22 +4755,29 @@ fn patch_workbook_xml(
     original: &[u8],
     sheets: &[SheetMeta],
 ) -> Result<Vec<u8>, WriteError> {
-    let mut rel_id_to_index: HashMap<&str, usize> = HashMap::with_capacity(sheets.len());
+  let mut rel_id_to_index: HashMap<&str, usize> = HashMap::new();
+  rel_id_to_index
+    .try_reserve(sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("patch_workbook_xml rel_id_to_index"))?;
     for (idx, sheet) in sheets.iter().enumerate() {
         rel_id_to_index.insert(sheet.relationship_id.as_str(), idx);
     }
-    let old_sheet_index_to_new_index: Vec<Option<usize>> = doc
-        .meta
-        .sheets
-        .iter()
-        .map(|meta| rel_id_to_index.get(meta.relationship_id.as_str()).copied())
-        .collect();
+  let mut old_sheet_index_to_new_index: Vec<Option<usize>> = Vec::new();
+  old_sheet_index_to_new_index
+    .try_reserve(doc.meta.sheets.len())
+    .map_err(|_| XlsxError::AllocationFailure("patch_workbook_xml old_sheet_index_to_new_index"))?;
+  for meta in &doc.meta.sheets {
+    old_sheet_index_to_new_index.push(rel_id_to_index.get(meta.relationship_id.as_str()).copied());
+  }
     let new_sheet_len = sheets.len();
 
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut writer = Writer::new(Vec::with_capacity(original.len()));
+  let mut out = Vec::new();
+  out.try_reserve(original.len())
+    .map_err(|_| XlsxError::AllocationFailure("patch_workbook_xml output"))?;
+  let mut writer = Writer::new(out);
 
     let mut spreadsheetml_prefix: Option<String> = None;
     let mut office_rels_prefix: Option<String> = None;
@@ -4940,11 +5022,7 @@ fn patch_workbook_xml(
 
             Event::Start(e) if e.local_name().as_ref() == b"workbookPr" => {
                 skipping_workbook_pr = true;
-                let empty = Event::Empty(e.into_owned());
-                match empty {
-                    Event::Empty(e) => write_workbook_pr(doc, &mut writer, &e)?,
-                    _ => unreachable!(),
-                }
+                write_workbook_pr(doc, &mut writer, &e)?;
             }
             Event::Empty(e) if e.local_name().as_ref() == b"workbookPr" => {
                 write_workbook_pr(doc, &mut writer, &e)?
@@ -4961,11 +5039,7 @@ fn patch_workbook_xml(
                 saw_workbook_protection = true;
                 skipping_workbook_protection = true;
                 if want_workbook_protection && !inserted_workbook_protection {
-                    let empty = Event::Empty(e.into_owned());
-                    match empty {
-                        Event::Empty(e) => write_workbook_protection(doc, &mut writer, &e)?,
-                        _ => unreachable!(),
-                    }
+                    write_workbook_protection(doc, &mut writer, &e)?;
                 }
             }
             Event::Empty(e) if e.local_name().as_ref() == b"workbookProtection" => {
@@ -4984,11 +5058,7 @@ fn patch_workbook_xml(
 
             Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 skipping_calc_pr = true;
-                let empty = Event::Empty(e.into_owned());
-                match empty {
-                    Event::Empty(e) => write_calc_pr(doc, &mut writer, &e)?,
-                    _ => unreachable!(),
-                }
+                write_calc_pr(doc, &mut writer, &e)?;
             }
             Event::Empty(e) if e.local_name().as_ref() == b"calcPr" => {
                 write_calc_pr(doc, &mut writer, &e)?
@@ -6421,7 +6491,10 @@ fn strip_worksheet_conditional_formatting_blocks(sheet_xml: &[u8]) -> Result<Vec
     let mut reader = Reader::from_reader(sheet_xml);
     reader.config_mut().trim_text(false);
 
-    let mut writer = Writer::new(Vec::with_capacity(sheet_xml.len()));
+  let mut out = Vec::new();
+  out.try_reserve(sheet_xml.len())
+    .map_err(|_| XlsxError::AllocationFailure("strip_worksheet_conditional_formatting_blocks output"))?;
+  let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut saw_root = false;
@@ -6519,9 +6592,10 @@ fn patch_worksheet_dimension(
     let mut reader = Reader::from_reader(worksheet_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut writer = Writer::new(Vec::with_capacity(
-        worksheet_xml.len() + dimension_ref.len(),
-    ));
+  let mut out = Vec::new();
+  out.try_reserve(worksheet_xml.len() + dimension_ref.len())
+    .map_err(|_| XlsxError::AllocationFailure("patch_worksheet_dimension output"))?;
+  let mut writer = Writer::new(out);
 
     let mut inserted_dimension = false;
     let mut saw_sheet_pr = false;
@@ -8168,7 +8242,7 @@ fn generate_minimal_package(
     // Minimal workbook relationships; existing packages preserve the original bytes.
     parts.insert(
         "xl/_rels/workbook.xml.rels".to_string(),
-        minimal_workbook_rels_xml(sheets).into_bytes(),
+        minimal_workbook_rels_xml(sheets)?.into_bytes(),
     );
 
     parts.insert(
@@ -8179,7 +8253,7 @@ fn generate_minimal_package(
     Ok(parts)
 }
 
-fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
+fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> Result<String, WriteError> {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(
@@ -8187,7 +8261,7 @@ fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
     );
 
     for sheet_meta in sheets {
-        let target = relationship_target_from_workbook(&sheet_meta.path);
+        let target = relationship_target_from_workbook(&sheet_meta.path)?;
         xml.push_str(r#"<Relationship Id=""#);
         xml.push_str(&escape_attr(&sheet_meta.relationship_id));
         xml.push_str(r#"" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target=""#);
@@ -8204,10 +8278,10 @@ fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
         r#"<Relationship Id="rId{next2}" Type="{REL_TYPE_SHARED_STRINGS}" Target="sharedStrings.xml"/>"#
     ));
     xml.push_str("</Relationships>");
-    xml
+    Ok(xml)
 }
 
-fn relationship_target_from_workbook(part_name: &str) -> String {
+fn relationship_target_from_workbook(part_name: &str) -> Result<String, WriteError> {
     let base_dir = WORKBOOK_PART
         .rsplit_once('/')
         .map(|(dir, _)| dir)
@@ -8215,9 +8289,34 @@ fn relationship_target_from_workbook(part_name: &str) -> String {
     relative_target(base_dir, part_name)
 }
 
-fn relative_target(base_dir: &str, part_name: &str) -> String {
-    let base_parts: Vec<&str> = base_dir.split('/').filter(|p| !p.is_empty()).collect();
-    let target_parts: Vec<&str> = part_name.split('/').filter(|p| !p.is_empty()).collect();
+fn relative_target(base_dir: &str, part_name: &str) -> Result<String, WriteError> {
+    let mut base_parts: Vec<&str> = Vec::new();
+    let base_parts_capacity = base_dir
+        .as_bytes()
+        .iter()
+        .filter(|&&b| b == b'/')
+        .count()
+        .saturating_add(1);
+    if base_parts.try_reserve(base_parts_capacity).is_err() {
+        return Err(XlsxError::AllocationFailure("relative_target base parts").into());
+    }
+    for part in base_dir.split('/').filter(|p| !p.is_empty()) {
+        base_parts.push(part);
+    }
+
+    let mut target_parts: Vec<&str> = Vec::new();
+    let target_parts_capacity = part_name
+        .as_bytes()
+        .iter()
+        .filter(|&&b| b == b'/')
+        .count()
+        .saturating_add(1);
+    if target_parts.try_reserve(target_parts_capacity).is_err() {
+        return Err(XlsxError::AllocationFailure("relative_target target parts").into());
+    }
+    for part in part_name.split('/').filter(|p| !p.is_empty()) {
+        target_parts.push(part);
+    }
 
     let mut common = 0usize;
     while common < base_parts.len()
@@ -8227,17 +8326,43 @@ fn relative_target(base_dir: &str, part_name: &str) -> String {
         common += 1;
     }
 
-    let mut out: Vec<&str> = Vec::new();
-    for _ in common..base_parts.len() {
-        out.push("..");
+    let up = base_parts.len().saturating_sub(common);
+    let down = target_parts.len().saturating_sub(common);
+    let segments = up.saturating_add(down);
+    if segments == 0 {
+        return Ok(".".to_string());
     }
-    out.extend_from_slice(&target_parts[common..]);
 
-    if out.is_empty() {
-        ".".to_string()
-    } else {
-        out.join("/")
+    let mut estimated_len = 0usize;
+    if segments > 1 {
+        estimated_len = estimated_len.saturating_add(segments - 1);
     }
+    estimated_len = estimated_len.saturating_add(up.saturating_mul(2));
+    for part in &target_parts[common..] {
+        estimated_len = estimated_len.saturating_add(part.len());
+    }
+
+    let mut out = String::new();
+    if out.try_reserve_exact(estimated_len).is_err() {
+        return Err(XlsxError::AllocationFailure("relative_target output").into());
+    }
+
+    let mut first = true;
+    for _ in 0..up {
+        if !first {
+            out.push('/');
+        }
+        first = false;
+        out.push_str("..");
+    }
+    for part in &target_parts[common..] {
+        if !first {
+            out.push('/');
+        }
+        first = false;
+        out.push_str(part);
+    }
+    Ok(out)
 }
 
 fn minimal_content_types_xml(sheets: &[SheetMeta], workbook_kind: WorkbookKind) -> String {
@@ -8274,13 +8399,30 @@ fn ensure_content_types_override(
     // output stable.
     let xml = std::str::from_utf8(&existing)
         .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    if xml.contains(&format!(r#"PartName="{part_name}""#)) {
+    let mut needle = String::new();
+    if needle
+        .try_reserve_exact("PartName=\"".len() + part_name.len() + 1)
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("ensure_content_types_override needle").into());
+    }
+    needle.push_str("PartName=\"");
+    needle.push_str(part_name);
+    needle.push('"');
+    if xml.contains(&needle) {
         return Ok(());
     }
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(existing.len().saturating_add(128))
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("ensure_content_types_override output").into());
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut saw_part = false;
@@ -8416,7 +8558,14 @@ fn ensure_content_types_default(
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(existing.len().saturating_add(128))
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("ensure_content_types_default output").into());
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut saw_ext = false;
@@ -8849,14 +8998,29 @@ fn ensure_workbook_rels_has_relationship(
         return Ok(());
     }
 
-    let xml = String::from_utf8(existing.clone())
+    let xml = std::str::from_utf8(&existing)
         .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    let next = next_relationship_id_in_xml(&xml);
-    let id = format!("rId{next}");
+    let next = next_relationship_id_in_xml(xml);
+    let mut id = String::new();
+    if id.try_reserve_exact(24).is_err() {
+        return Err(XlsxError::AllocationFailure("ensure_workbook_rels_has_relationship id").into());
+    }
+    id.push_str("rId");
+    use std::fmt::Write as _;
+    let _ = write!(&mut id, "{next}");
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(existing.len().saturating_add(128))
+        .is_err()
+    {
+        return Err(
+            XlsxError::AllocationFailure("ensure_workbook_rels_has_relationship output").into(),
+        );
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut root_prefix: Option<String> = None;
@@ -9007,11 +9171,24 @@ fn patch_workbook_rels_for_sheet_edits(
         return Ok(());
     };
 
-    let remove_ids: HashSet<&str> = removed.iter().map(|m| m.relationship_id.as_str()).collect();
+    let mut remove_ids: HashSet<&str> = HashSet::new();
+    if remove_ids.try_reserve(removed.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_workbook_rels remove ids").into());
+    }
+    for m in removed {
+        remove_ids.insert(m.relationship_id.as_str());
+    }
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(existing.len() + added.len() * 128));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(existing.len().saturating_add(added.len().saturating_mul(128)))
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("patch_workbook_rels output").into());
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut root_prefix: Option<String> = None;
@@ -9102,7 +9279,7 @@ fn patch_workbook_rels_for_sheet_edits(
                         });
                     let relationship_tag = prefixed_tag(prefix, "Relationship");
                     for sheet in added {
-                        let target = relationship_target_from_workbook(&sheet.path);
+                        let target = relationship_target_from_workbook(&sheet.path)?;
                         let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
                         rel.push_attribute(("Id", sheet.relationship_id.as_str()));
                         rel.push_attribute(("Type", WORKSHEET_REL_TYPE));
@@ -9177,7 +9354,7 @@ fn patch_workbook_rels_for_sheet_edits(
                     });
                 let relationship_tag = prefixed_tag(prefix, "Relationship");
                 for sheet in added {
-                    let target = relationship_target_from_workbook(&sheet.path);
+                    let target = relationship_target_from_workbook(&sheet.path)?;
                     let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
                     rel.push_attribute(("Id", sheet.relationship_id.as_str()));
                     rel.push_attribute(("Type", WORKSHEET_REL_TYPE));
@@ -9206,20 +9383,37 @@ fn patch_content_types_for_sheet_edits(
         return Ok(());
     };
 
-    let removed_parts: HashSet<String> = removed
-        .iter()
-        .map(|m| {
-            if m.path.starts_with('/') {
-                m.path.clone()
-            } else {
-                format!("/{}", m.path)
+    let mut removed_parts: HashSet<String> = HashSet::new();
+    if removed_parts.try_reserve(removed.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_content_types removed parts").into());
+    }
+    for m in removed {
+        let part_name = if m.path.starts_with('/') {
+            m.path.clone()
+        } else {
+            let mut s = String::new();
+            if s.try_reserve_exact(1 + m.path.len()).is_err() {
+                return Err(
+                    XlsxError::AllocationFailure("patch_content_types removed part name").into(),
+                );
             }
-        })
-        .collect();
+            s.push('/');
+            s.push_str(&m.path);
+            s
+        };
+        removed_parts.insert(part_name);
+    }
 
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(existing.len() + added.len() * 128));
+    let mut out = Vec::new();
+    if out
+        .try_reserve(existing.len().saturating_add(added.len().saturating_mul(128)))
+        .is_err()
+    {
+        return Err(XlsxError::AllocationFailure("patch_content_types output").into());
+    }
+    let mut writer = Writer::new(out);
     let mut buf = Vec::new();
 
     let mut existing_overrides: HashSet<String> = HashSet::new();

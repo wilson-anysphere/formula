@@ -13,11 +13,13 @@ fn roundtrip_preserves_rich_text_shared_strings() {
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/sharedStrings.xml"),
         &zip_part(&saved, "xl/sharedStrings.xml"),
-    );
+    )
+    .unwrap();
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/worksheets/sheet1.xml"),
         &zip_part(&saved, "xl/worksheets/sheet1.xml"),
-    );
+    )
+    .unwrap();
 }
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {

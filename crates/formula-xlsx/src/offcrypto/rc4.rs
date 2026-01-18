@@ -10,6 +10,22 @@ use rc4::Rc4;
 #[error("unsupported RC4 key length: {0}")]
 pub(crate) struct UnsupportedRc4KeyLength(pub(crate) usize);
 
+fn rc4_xor_in_place_with_cipher<C: KeyInit + StreamCipher>(
+    key: &[u8],
+    data: &mut [u8],
+) -> Result<(), UnsupportedRc4KeyLength> {
+    let mut cipher = C::new_from_slice(key).map_err(|_| {
+        debug_assert!(
+            false,
+            "RC4 cipher rejected key length {}",
+            key.len()
+        );
+        UnsupportedRc4KeyLength(key.len())
+    })?;
+    cipher.apply_keystream(data);
+    Ok(())
+}
+
 /// Apply the RC4 keystream (XOR) to `data` in-place using `key`.
 ///
 /// RC4 encryption and decryption are the same operation: `ciphertext = plaintext XOR keystream`.
@@ -18,30 +34,12 @@ pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), Unsupp
     use rc4::cipher::consts::{U16, U3, U4, U5, U6, U7};
 
     match key.len() {
-        3 => {
-            let mut cipher = Rc4::<U3>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
-        4 => {
-            let mut cipher = Rc4::<U4>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
-        5 => {
-            let mut cipher = Rc4::<U5>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
-        6 => {
-            let mut cipher = Rc4::<U6>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
-        7 => {
-            let mut cipher = Rc4::<U7>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
-        16 => {
-            let mut cipher = Rc4::<U16>::new_from_slice(key).expect("length checked");
-            cipher.apply_keystream(data);
-        }
+        3 => rc4_xor_in_place_with_cipher::<Rc4<U3>>(key, data)?,
+        4 => rc4_xor_in_place_with_cipher::<Rc4<U4>>(key, data)?,
+        5 => rc4_xor_in_place_with_cipher::<Rc4<U5>>(key, data)?,
+        6 => rc4_xor_in_place_with_cipher::<Rc4<U6>>(key, data)?,
+        7 => rc4_xor_in_place_with_cipher::<Rc4<U7>>(key, data)?,
+        16 => rc4_xor_in_place_with_cipher::<Rc4<U16>>(key, data)?,
         other => return Err(UnsupportedRc4KeyLength(other)),
     }
 

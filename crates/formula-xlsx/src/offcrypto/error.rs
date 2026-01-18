@@ -37,6 +37,9 @@ pub enum OffCryptoError {
     #[error("invalid OOXML Agile encryption parameter: {param}")]
     InvalidAgileParameter { param: &'static str },
 
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
+
     // --- OLE/CFB container helpers --------------------------------------------------------------
     #[error("missing required OLE stream `{stream}`")]
     MissingRequiredStream { stream: String },
@@ -173,6 +176,7 @@ impl From<CryptoError> for OffCryptoError {
         match source {
             CryptoError::UnsupportedHashAlgorithm(hash) => Self::UnsupportedHashAlgorithm { hash },
             CryptoError::InvalidParameter(param) => Self::InvalidAgileParameter { param },
+            CryptoError::AllocationFailure(ctx) => Self::AllocationFailure(ctx),
         }
     }
 }

@@ -788,7 +788,7 @@ fn dump_vm_mappings(pkg: &XlsxPackage) -> bool {
         }
     };
 
-    let mut rows: Vec<MappingRow> = Vec::with_capacity(vm_cells.len());
+    let mut rows: Vec<MappingRow> = Vec::new();
     for cell in vm_cells {
         let resolution = cell
             .vm
@@ -1044,7 +1044,7 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
             return;
         }
 
-        let mut manifest: Vec<String> = Vec::with_capacity(images_by_cell.len() + 1);
+        let mut manifest: Vec<String> = Vec::new();
         manifest.push(
             "sheet\tcell\tbytes\tfile\timage_part\tcalc_origin\talt_text\thyperlink".to_string(),
         );
@@ -1056,7 +1056,7 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
 
         // Keep output deterministic for repeated runs / log comparisons.
         let mut entries: Vec<(&str, CellRef, &formula_xlsx::EmbeddedCellImage)> =
-            Vec::with_capacity(images_by_cell.len());
+            Vec::new();
         for ((worksheet_part, cell), image) in &images_by_cell {
             let sheet = sheet_name_by_part
                 .get(worksheet_part)
@@ -1138,7 +1138,7 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn sanitize_filename_component(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    let mut out = String::new();
     for ch in s.chars() {
         if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
             out.push(ch);

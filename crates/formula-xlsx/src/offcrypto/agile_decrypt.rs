@@ -441,7 +441,12 @@ fn decrypt_agile_encrypted_package_impl(
         });
     }
 
-    let mut plaintext = Vec::with_capacity(ciphertext.len());
+    let mut plaintext = Vec::new();
+    if plaintext.try_reserve_exact(ciphertext.len()).is_err() {
+        return Err(OffCryptoError::AllocationFailure(
+            "decrypt_agile_encrypted_package plaintext",
+        ));
+    }
     for (idx, chunk) in ciphertext.chunks(SEGMENT_SIZE).enumerate() {
         if chunk.len() % AES_BLOCK_SIZE != 0 {
             return Err(OffCryptoError::CiphertextNotBlockAligned {
@@ -752,8 +757,10 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     //
     // Avoid falling back when the low DWORD is zero: some real files may have true 64-bit sizes
     // that are exact multiples of 2^32 (lo=0, hi!=0).
-    let len_lo = u32::from_le_bytes(header[..4].try_into().expect("slice length checked")) as u64;
-    let len_hi = u32::from_le_bytes(header[4..].try_into().expect("slice length checked")) as u64;
+    let len_lo =
+        u32::from_le_bytes([header[0], header[1], header[2], header[3]]) as u64;
+    let len_hi =
+        u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as u64;
     let declared_len_u64 = len_lo | (len_hi << 32);
     let ciphertext_len = encrypted_package_len.saturating_sub(8);
     let declared_len =
@@ -840,12 +847,28 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     }
 
     if let Some(expected_hmac) = expected_hmac {
-        let ciphertext_mac = ciphertext_mac
-            .take()
-            .expect("expected ciphertext HMAC context when expected_hmac is present");
-        let plaintext_mac = plaintext_mac
-            .take()
-            .expect("expected plaintext HMAC context when expected_hmac is present");
+        let Some(ciphertext_mac) = ciphertext_mac.take() else {
+            debug_assert!(
+                false,
+                "expected ciphertext HMAC context when expected_hmac is present"
+            );
+            return Err(OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "encryptedHmacKey".to_string(),
+                reason: "missing ciphertext HMAC context".to_string(),
+            });
+        };
+        let Some(plaintext_mac) = plaintext_mac.take() else {
+            debug_assert!(
+                false,
+                "expected plaintext HMAC context when expected_hmac is present"
+            );
+            return Err(OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "encryptedHmacKey".to_string(),
+                reason: "missing plaintext HMAC context".to_string(),
+            });
+        };
 
         let actual_ciphertext_hmac_full = ciphertext_mac.finalize();
         let actual_ciphertext_hmac = actual_ciphertext_hmac_full
@@ -890,16 +913,18 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
     //
     // Avoid falling back when the low DWORD is zero: some real files may have true 64-bit sizes
     // that are exact multiples of 2^32 (lo=0, hi!=0).
-    let len_lo = u32::from_le_bytes(
-        encrypted_package[..4]
-            .try_into()
-            .expect("slice length already checked"),
-    ) as u64;
-    let len_hi = u32::from_le_bytes(
-        encrypted_package[4..8]
-            .try_into()
-            .expect("slice length already checked"),
-    ) as u64;
+    let len_lo = u32::from_le_bytes([
+        encrypted_package[0],
+        encrypted_package[1],
+        encrypted_package[2],
+        encrypted_package[3],
+    ]) as u64;
+    let len_hi = u32::from_le_bytes([
+        encrypted_package[4],
+        encrypted_package[5],
+        encrypted_package[6],
+        encrypted_package[7],
+    ]) as u64;
     let declared_len_u64 = len_lo | (len_hi << 32);
 
     let ciphertext_len = encrypted_package.len() - 8;
@@ -2365,7 +2390,7 @@ mod fuzz_tests {
         //
         // Note: the Agile `EncryptionInfo` stream header is 8 bytes:
         // `major (u16le), minor (u16le), flags (u32le)`. The XML payload begins at byte offset 8.
-        let mut out = Vec::with_capacity(8 + 2 + tail.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&[0x04, 0x00, 0x04, 0x00]); // major=4, minor=4
         out.extend_from_slice(&0u32.to_le_bytes()); // flags
         out.push(b'<');
@@ -2497,7 +2522,7 @@ mod fuzz_tests {
                 declared_len % (ciphertext.len() as u64 + 1)
             };
 
-            let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
+            let mut encrypted_package = Vec::new();
             encrypted_package.extend_from_slice(&declared_len.to_le_bytes());
             encrypted_package.extend_from_slice(&ciphertext);
 
@@ -2533,7 +2558,7 @@ mod fuzz_tests {
                 declared_len.saturating_add(ciphertext.len() as u64 + 1)
             };
 
-            let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
+            let mut encrypted_package = Vec::new();
             encrypted_package.extend_from_slice(&declared_len.to_le_bytes());
             encrypted_package.extend_from_slice(&ciphertext);
 

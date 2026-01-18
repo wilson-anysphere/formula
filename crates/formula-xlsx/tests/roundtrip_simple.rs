@@ -17,19 +17,23 @@ fn roundtrip_simple_preserves_key_parts() {
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/workbook.xml"),
         &zip_part(&saved, "xl/workbook.xml"),
-    );
+    )
+    .unwrap();
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/worksheets/sheet1.xml"),
         &zip_part(&saved, "xl/worksheets/sheet1.xml"),
-    );
+    )
+    .unwrap();
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/sharedStrings.xml"),
         &zip_part(&saved, "xl/sharedStrings.xml"),
-    );
+    )
+    .unwrap();
     assert_xml_semantic_eq(
         &zip_part(FIXTURE, "xl/styles.xml"),
         &zip_part(&saved, "xl/styles.xml"),
-    );
+    )
+    .unwrap();
 
     // Parts we don't model should be preserved byte-for-byte.
     assert_eq!(

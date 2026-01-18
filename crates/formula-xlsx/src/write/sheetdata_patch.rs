@@ -7,6 +7,7 @@ use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
 use crate::SheetMeta;
+use crate::package::XlsxError;
 
 use super::{CellValueKind, SharedStringKey, WriteError, XlsxDocument};
 
@@ -52,14 +53,24 @@ pub(super) fn patch_worksheet_xml(
     let shared_formulas = super::shared_formula_groups(doc, meta_sheet_id);
 
     // Desired cells in row-major order.
-    let mut desired_cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
+    let mut desired_cells: Vec<(CellRef, &formula_model::Cell)> = Vec::new();
+    if desired_cells.try_reserve(sheet.cell_count()).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_worksheet_xml desired cells").into());
+    }
+    for (cell_ref, cell) in sheet.iter_cells() {
+        desired_cells.push((cell_ref, cell));
+    }
     desired_cells.sort_by_key(|(r, _)| (r.row, r.col));
     let mut desired_idx = 0usize;
 
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut writer = Writer::new(Vec::with_capacity(original.len()));
+    let mut out = Vec::new();
+    if out.try_reserve_exact(original.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("patch_worksheet_xml output").into());
+    }
+    let mut writer = Writer::new(out);
     let mut worksheet_prefix: Option<String> = None;
     let mut worksheet_has_default_ns = false;
     let mut saw_sheet_data = false;
@@ -1847,15 +1858,17 @@ fn rich_text_normalized_runs(rich: &RichText) -> Vec<RichTextRun> {
     //
     // This matches the semantic equality logic used by the in-memory cell patcher so that the
     // sheet-data patcher can avoid unnecessary rewrites (and preserve unknown OOXML tags).
-    let mut runs: Vec<RichTextRun> = rich
-        .runs
-        .iter()
-        .filter(|run| run.start < run.end && !run.style.is_empty())
-        .cloned()
-        .collect();
+    let mut runs: Vec<RichTextRun> = Vec::new();
+    let _ = runs.try_reserve(rich.runs.len());
+    for run in &rich.runs {
+        if run.start < run.end && !run.style.is_empty() {
+            runs.push(run.clone());
+        }
+    }
     runs.sort_by_key(|run| (run.start, run.end));
 
-    let mut merged: Vec<RichTextRun> = Vec::with_capacity(runs.len());
+    let mut merged: Vec<RichTextRun> = Vec::new();
+    let _ = merged.try_reserve(runs.len());
     for run in runs {
         match merged.last_mut() {
             Some(prev) if prev.style == run.style && prev.end == run.start => {

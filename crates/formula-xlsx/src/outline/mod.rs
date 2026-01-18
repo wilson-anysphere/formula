@@ -15,6 +15,8 @@ pub enum OutlineXlsxError {
     Package(#[from] XlsxError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("utf8 error: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
     #[error("xml attribute error: {0}")]
     XmlAttr(#[from] quick_xml::events::attributes::AttrError),
     #[error("xml error: {0}")]
@@ -186,8 +188,8 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
             Event::Eof => break,
             Event::Start(e) => {
                 let name = e.local_name();
-                if skipping_cols_depth.is_some() {
-                    skipping_cols_depth = Some(skipping_cols_depth.unwrap() + 1);
+                if let Some(depth) = skipping_cols_depth {
+                    skipping_cols_depth = Some(depth.saturating_add(1));
                 } else if name.as_ref() == b"cols" && !outline.cols.is_empty() {
                     // Replace the entire <cols> section.
                     let cols_name = e.name();
@@ -325,7 +327,7 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
     }
 
     let cursor = writer.into_inner();
-    Ok(String::from_utf8(cursor.into_inner()).expect("xml writer must produce utf-8"))
+    Ok(String::from_utf8(cursor.into_inner())?)
 }
 
 fn update_row_attrs<'a>(

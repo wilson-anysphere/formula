@@ -20,7 +20,7 @@ fn canonical_part_name(name: &str) -> &str {
     name.trim_start_matches(|c| c == '/' || c == '\\')
 }
 
-fn part_name_key(name: &str) -> PartNameKey {
+fn part_name_key(name: &str) -> Result<PartNameKey, XlsxError> {
     crate::zip_util::zip_part_name_lookup_key(name)
 }
 
@@ -69,21 +69,23 @@ pub(crate) fn strip_macros_with_kind(
     parts: &mut BTreeMap<String, Vec<u8>>,
     target_kind: WorkbookKind,
 ) -> Result<(), XlsxError> {
-    let present_parts: BTreeSet<PartNameKey> = parts
-        .keys()
-        .map(|name| crate::zip_util::zip_part_name_lookup_key(name))
-        .collect();
+    let mut present_parts: BTreeSet<PartNameKey> = BTreeSet::new();
+    for name in parts.keys() {
+        present_parts.insert(crate::zip_util::zip_part_name_lookup_key(name)?);
+    }
 
     let delete_parts = compute_macro_delete_set(parts, &present_parts)?;
 
     // Delete any ZIP part whose normalized key is in the delete set. This removes macro surfaces
     // even when a producer used non-canonical naming (case differences, `\` separators, leading
     // separators, percent-encoding).
-    let to_remove: Vec<String> = parts
-        .keys()
-        .filter(|name| delete_parts.contains(&crate::zip_util::zip_part_name_lookup_key(name)))
-        .cloned()
-        .collect();
+    let mut to_remove: Vec<String> = Vec::new();
+    for name in parts.keys() {
+        let key = crate::zip_util::zip_part_name_lookup_key(name)?;
+        if delete_parts.contains(&key) {
+            to_remove.push(name.clone());
+        }
+    }
     for name in to_remove {
         parts.remove(&name);
     }
@@ -101,13 +103,13 @@ fn compute_macro_delete_set(
     let mut delete: BTreeSet<PartNameKey> = BTreeSet::new();
 
     // VBA project payloads.
-    delete.insert(part_name_key("xl/vbaProject.bin"));
-    delete.insert(part_name_key("xl/vbaData.xml"));
-    delete.insert(part_name_key("xl/vbaProjectSignature.bin"));
+    delete.insert(part_name_key("xl/vbaProject.bin")?);
+    delete.insert(part_name_key("xl/vbaData.xml")?);
+    delete.insert(part_name_key("xl/vbaProjectSignature.bin")?);
 
     // Ribbon customizations.
     for name in parts.keys() {
-        let key = part_name_key(name);
+        let key = part_name_key(name)?;
         if key.starts_with(b"customui/") {
             delete.insert(key);
         }
@@ -115,7 +117,7 @@ fn compute_macro_delete_set(
 
     // ActiveX + legacy form controls.
     for name in parts.keys() {
-        let key = part_name_key(name);
+        let key = part_name_key(name)?;
         if key.starts_with(b"xl/activex/")
             || key.starts_with(b"xl/ctrlprops/")
             || key.starts_with(b"xl/controls/")
@@ -128,7 +130,7 @@ fn compute_macro_delete_set(
     // - Excel 4.0 macro sheets (XLM) stored under `xl/macrosheets/**`
     // - Dialog sheets stored under `xl/dialogsheets/**`
     for name in parts.keys() {
-        let key = part_name_key(name);
+        let key = part_name_key(name)?;
         if key.starts_with(b"xl/macrosheets/") || key.starts_with(b"xl/dialogsheets/") {
             delete.insert(key);
         }
@@ -158,7 +160,7 @@ fn compute_macro_delete_set(
     // Build a relationship graph so we can delete any extra parts that are only
     // referenced by macro-related parts (e.g. `xl/embeddings/*` referenced by ActiveX rels).
     let graph = RelationshipGraph::build(parts, present_parts)?;
-    delete_orphan_targets(&graph, &mut delete);
+    delete_orphan_targets(&graph, &mut delete)?;
 
     // If a part is deleted, its relationship part must also be deleted.
     //
@@ -167,31 +169,34 @@ fn compute_macro_delete_set(
         .iter()
         .filter(|name| !name.ends_with(b".rels"))
         .map(|name| rels_for_part_key(name))
-        .collect();
+        .collect::<Result<_, _>>()?;
     delete.extend(rels_to_remove);
 
     Ok(delete)
 }
 
-fn rels_for_part_key(part: &[u8]) -> PartNameKey {
+fn rels_for_part_key(part: &[u8]) -> Result<PartNameKey, XlsxError> {
     match part.iter().rposition(|b| *b == b'/') {
         Some(idx) => {
             let dir = &part[..idx];
             let file = &part[idx + 1..];
-            let mut out =
-                Vec::with_capacity(dir.len() + b"/_rels/".len() + file.len() + b".rels".len());
+            let mut out = Vec::new();
+            out.try_reserve(dir.len() + b"/_rels/".len() + file.len() + b".rels".len())
+                .map_err(|_| XlsxError::AllocationFailure("rels_for_part_key"))?;
             out.extend_from_slice(dir);
             out.extend_from_slice(b"/_rels/");
             out.extend_from_slice(file);
             out.extend_from_slice(b".rels");
-            out
+            Ok(out)
         }
         None => {
-            let mut out = Vec::with_capacity(b"_rels/".len() + part.len() + b".rels".len());
+            let mut out = Vec::new();
+            out.try_reserve(b"_rels/".len() + part.len() + b".rels".len())
+                .map_err(|_| XlsxError::AllocationFailure("rels_for_part_key"))?;
             out.extend_from_slice(b"_rels/");
             out.extend_from_slice(part);
             out.extend_from_slice(b".rels");
-            out
+            Ok(out)
         }
     }
 }
@@ -202,7 +207,7 @@ fn find_vml_ole_object_targets(
     let mut out: BTreeSet<PartNameKey> = BTreeSet::new();
 
     for (vml_part, vml_bytes) in parts {
-        let vml_key = part_name_key(vml_part);
+        let vml_key = part_name_key(vml_part)?;
         if !vml_key.ends_with(b".vml") {
             continue;
         }
@@ -218,12 +223,15 @@ fn find_vml_ole_object_targets(
             continue;
         }
 
-        let rels_key = rels_for_part_key(&vml_key);
-        let Some((_rels_part, rels_bytes)) = parts
-            .iter()
-            .find(|(name, _)| part_name_key(name) == rels_key)
-            .map(|(name, bytes)| (name.clone(), bytes.clone()))
-        else {
+        let rels_key = rels_for_part_key(&vml_key)?;
+        let mut rels_bytes = None;
+        for (name, bytes) in parts {
+            if part_name_key(name)? == rels_key {
+                rels_bytes = Some(bytes.clone());
+                break;
+            }
+        }
+        let Some(rels_bytes) = rels_bytes else {
             continue;
         };
 
@@ -320,7 +328,7 @@ fn parse_relationship_targets_for_ids(
                 };
                 let target = strip_fragment(&target);
                 let resolved = resolve_target_for_source(source_part, target);
-                let resolved_key = part_name_key(&resolved);
+                let resolved_key = part_name_key(&resolved)?;
                 // Worksheet OLE objects are stored under `xl/embeddings/` and referenced from
                 // `<oleObjects>` in sheet XML (valid in `.xlsx`). For macro stripping we only
                 // delete embedding binaries referenced by VML `<o:OLEObject>` control shapes.
@@ -336,8 +344,15 @@ fn parse_relationship_targets_for_ids(
     Ok(out)
 }
 
-fn delete_orphan_targets(graph: &RelationshipGraph, delete: &mut BTreeSet<PartNameKey>) {
-    let mut queue: VecDeque<PartNameKey> = delete.iter().cloned().collect();
+fn delete_orphan_targets(
+    graph: &RelationshipGraph,
+    delete: &mut BTreeSet<PartNameKey>,
+) -> Result<(), XlsxError> {
+    let mut queue: VecDeque<PartNameKey> = VecDeque::new();
+    queue
+        .try_reserve(delete.len())
+        .map_err(|_| XlsxError::AllocationFailure("delete_orphan_targets queue"))?;
+    queue.extend(delete.iter().cloned());
     while let Some(source) = queue.pop_front() {
         let Some(targets) = graph.outgoing.get(&source) else {
             continue;
@@ -356,6 +371,7 @@ fn delete_orphan_targets(graph: &RelationshipGraph, delete: &mut BTreeSet<PartNa
             }
         }
     }
+    Ok(())
 }
 
 fn clean_relationship_parts(
@@ -363,19 +379,24 @@ fn clean_relationship_parts(
     delete_parts: &BTreeSet<PartNameKey>,
     present_parts: &BTreeSet<PartNameKey>,
 ) -> Result<(), XlsxError> {
-    let remaining_parts: BTreeSet<PartNameKey> = parts.keys().map(|name| part_name_key(name)).collect();
-    let rels_names: Vec<String> = parts
-        .keys()
-        .filter(|name| part_name_key(name).ends_with(b".rels"))
-        .cloned()
-        .collect();
+    let mut remaining_parts: BTreeSet<PartNameKey> = BTreeSet::new();
+    for name in parts.keys() {
+        remaining_parts.insert(part_name_key(name)?);
+    }
+
+    let mut rels_names: Vec<String> = Vec::new();
+    for name in parts.keys() {
+        if part_name_key(name)?.ends_with(b".rels") {
+            rels_names.push(name.clone());
+        }
+    }
 
     for rels_name in rels_names {
         let Some(source_part) = source_part_from_rels_part(&rels_name) else {
             continue;
         };
         let source_part = canonical_part_name(&source_part).to_string();
-        let source_key = part_name_key(&source_part);
+        let source_key = part_name_key(&source_part)?;
 
         // If the relationship source is gone, remove the `.rels` part as well.
         if !source_part.is_empty() && !remaining_parts.contains(&source_key) {
@@ -430,37 +451,37 @@ fn resolve_target_best_effort_key(
     target: &str,
     present_parts: &BTreeSet<PartNameKey>,
     delete_parts: Option<&BTreeSet<PartNameKey>>,
-) -> PartNameKey {
+) -> Result<PartNameKey, XlsxError> {
     // OPC relationship targets are typically resolved relative to the source part's directory.
     // However, some producers appear to emit paths relative to the `.rels` directory instead
     // (e.g. `../media/*` from a workbook-level part). When the standard resolution doesn't match
     // an existing part, try alternative interpretations so macro stripping doesn't delete shared
     // parts that are still required elsewhere (for example by `xl/cellimages.xml`).
     let direct = resolve_target_for_source(source_part, target);
-    let direct_key = part_name_key(&direct);
+    let direct_key = part_name_key(&direct)?;
     if present_parts.contains(&direct_key) || delete_parts.is_some_and(|d| d.contains(&direct_key)) {
-        return direct_key;
+        return Ok(direct_key);
     }
 
     let rels_relative = crate::path::resolve_target(rels_part, target);
-    let rels_relative_key = part_name_key(&rels_relative);
+    let rels_relative_key = part_name_key(&rels_relative)?;
     if present_parts.contains(&rels_relative_key)
         || delete_parts.is_some_and(|d| d.contains(&rels_relative_key))
     {
-        return rels_relative_key;
+        return Ok(rels_relative_key);
     }
 
     if !direct_key.starts_with(b"xl/") {
         let xl_prefixed = format!("xl/{direct}");
-        let xl_prefixed_key = part_name_key(&xl_prefixed);
+        let xl_prefixed_key = part_name_key(&xl_prefixed)?;
         if present_parts.contains(&xl_prefixed_key)
             || delete_parts.is_some_and(|d| d.contains(&xl_prefixed_key))
         {
-            return xl_prefixed_key;
+            return Ok(xl_prefixed_key);
         }
     }
 
-    direct_key
+    Ok(direct_key)
 }
 
 fn strip_deleted_relationships(
@@ -472,7 +493,10 @@ fn strip_deleted_relationships(
 ) -> Result<(Option<Vec<u8>>, BTreeSet<String>), XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut out = Vec::new();
+    out.try_reserve(xml.len())
+        .map_err(|_| XlsxError::AllocationFailure("strip_deleted_relationships output"))?;
+    let mut writer = XmlWriter::new(out);
 
     let mut buf = Vec::new();
     let mut changed = false;
@@ -575,7 +599,7 @@ fn should_remove_relationship(
         return Ok(false);
     }
 
-    if part_name_key(rels_part_name) == b"_rels/.rels"
+    if part_name_key(rels_part_name)? == b"_rels/.rels"
         && rel_type
             .as_deref()
             .is_some_and(|ty| CUSTOM_UI_REL_TYPES.iter().any(|known| ty == *known))
@@ -594,7 +618,7 @@ fn should_remove_relationship(
         target,
         present_parts,
         Some(delete_parts),
-    );
+    )?;
     Ok(delete_parts.contains(&resolved_key))
 }
 
@@ -615,7 +639,10 @@ fn strip_content_types(
 ) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut out = Vec::new();
+    out.try_reserve(xml.len())
+        .map_err(|_| XlsxError::AllocationFailure("strip_content_types output"))?;
+    let mut writer = XmlWriter::new(out);
 
     let mut buf = Vec::new();
     let mut changed = false;
@@ -714,7 +741,7 @@ fn patched_override(
         return Ok(None);
     };
 
-    let key = part_name_key(part_name.as_str());
+    let key = part_name_key(part_name.as_str())?;
     if delete_parts.contains(&key) {
         return Ok(Some(None));
     }
@@ -767,7 +794,7 @@ mod tests {
 </ct:Types>"#;
 
         let mut delete_parts = BTreeSet::new();
-        delete_parts.insert(part_name_key("xl/vbaProject.bin"));
+        delete_parts.insert(part_name_key("xl/vbaProject.bin").unwrap());
 
         let updated = strip_content_types(xml, &delete_parts, WorkbookKind::Workbook)
             .expect("strip_content_types ok")
@@ -861,7 +888,7 @@ fn parse_internal_relationship_targets(
                     target,
                     present_parts,
                     delete_parts,
-                ));
+                )?);
             }
             _ => {}
         }
@@ -891,7 +918,7 @@ fn strip_source_relationship_references(
     source_part: &str,
     removed_ids: &BTreeSet<String>,
 ) -> Result<(), XlsxError> {
-    let source_key = part_name_key(source_part);
+    let source_key = part_name_key(source_part)?;
     if source_part.is_empty()
         || !(source_key.ends_with(b".xml") || source_key.ends_with(b".vml"))
         || removed_ids.is_empty()
@@ -916,7 +943,10 @@ fn strip_relationship_id_references(
 ) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut out = Vec::new();
+    out.try_reserve(xml.len())
+        .map_err(|_| XlsxError::AllocationFailure("strip_relationship_id_references output"))?;
+    let mut writer = XmlWriter::new(out);
 
     let mut buf = Vec::new();
     let mut changed = false;
@@ -1149,7 +1179,7 @@ impl RelationshipGraph {
         let mut inbound: BTreeMap<PartNameKey, BTreeSet<PartNameKey>> = BTreeMap::new();
 
         for (rels_part, bytes) in parts {
-            let rels_part_key = part_name_key(rels_part);
+            let rels_part_key = part_name_key(rels_part)?;
             if !rels_part_key.ends_with(b".rels") {
                 continue;
             }
@@ -1158,7 +1188,7 @@ impl RelationshipGraph {
                 continue;
             };
             let source_part = canonical_part_name(&source_part).to_string();
-            let source_key = part_name_key(&source_part);
+            let source_key = part_name_key(&source_part)?;
 
             // Ignore orphan `.rels` parts; they'll be removed during cleanup.
             if !source_part.is_empty() && !present_parts.contains(&source_key) {
@@ -1188,17 +1218,24 @@ impl RelationshipGraph {
 pub fn validate_opc_relationships(
     parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(), XlsxError> {
-    let present_parts: BTreeSet<PartNameKey> = parts.keys().map(|name| part_name_key(name)).collect();
+    let mut present_parts: BTreeSet<PartNameKey> = BTreeSet::new();
+    for name in parts.keys() {
+        present_parts.insert(part_name_key(name)?);
+    }
 
-    for rels_part in parts
-        .keys()
-        .filter(|name| part_name_key(name).ends_with(b".rels"))
-    {
-        let Some(source_part) = source_part_from_rels_part(rels_part) else {
+    let mut rels_parts: Vec<String> = Vec::new();
+    for name in parts.keys() {
+        if part_name_key(name)?.ends_with(b".rels") {
+            rels_parts.push(name.clone());
+        }
+    }
+
+    for rels_part in rels_parts {
+        let Some(source_part) = source_part_from_rels_part(&rels_part) else {
             continue;
         };
         let source_part = canonical_part_name(&source_part).to_string();
-        let source_key = part_name_key(&source_part);
+        let source_key = part_name_key(&source_part)?;
 
         if !source_part.is_empty() && !present_parts.contains(&source_key) {
             return Err(XlsxError::Invalid(format!(
@@ -1207,13 +1244,13 @@ pub fn validate_opc_relationships(
         }
 
         let xml = parts
-            .get(rels_part)
+            .get(&rels_part)
             .ok_or_else(|| XlsxError::MissingPart(rels_part.to_string()))?;
         let ids = parse_relationship_ids(xml)?;
         let targets = parse_internal_relationship_targets(
             xml,
             &source_part,
-            rels_part,
+            &rels_part,
             &present_parts,
             None,
         )?;

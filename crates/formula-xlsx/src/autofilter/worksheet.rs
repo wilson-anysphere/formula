@@ -72,14 +72,15 @@ pub fn write_worksheet_autofilter(
             Event::Start(ref e) | Event::Empty(ref e)
                 if skip_depth == 0
                     && !wrote_autofilter
-                    && filter.is_some()
                     && matches!(
                         e.local_name().as_ref(),
                         b"mergeCells" | b"tableParts" | b"extLst"
                     ) =>
             {
-                write_autofilter_to(&mut writer, filter.unwrap(), worksheet_prefix.as_deref())?;
-                wrote_autofilter = true;
+                if let Some(filter) = filter {
+                    write_autofilter_to(&mut writer, filter, worksheet_prefix.as_deref())?;
+                    wrote_autofilter = true;
+                }
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {

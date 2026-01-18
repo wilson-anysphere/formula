@@ -83,18 +83,15 @@ pub fn extract_encryption_info_xml<'a>(
     // Accept both forms by looking for a plausible length prefix and ensuring the resulting slice
     // looks like XML to avoid false positives.
     let mut xml = encryption_info_stream.get(8..).unwrap_or(&[]);
-    if encryption_info_stream.len() >= 12 {
-        let len = u32::from_le_bytes([
-            encryption_info_stream[8],
-            encryption_info_stream[9],
-            encryption_info_stream[10],
-            encryption_info_stream[11],
-        ]) as usize;
+    if let Some(len_bytes) = encryption_info_stream.get(8..12) {
+        let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]])
+            as usize;
         let available = encryption_info_stream.len().saturating_sub(12);
         if len > 0 && len <= available {
-            let candidate = &encryption_info_stream[12..12 + len];
-            if candidate_looks_like_xml(candidate) {
-                xml = candidate;
+            if let Some(candidate) = encryption_info_stream.get(12..12 + len) {
+                if candidate_looks_like_xml(candidate) {
+                    xml = candidate;
+                }
             }
         }
     }
@@ -216,7 +213,10 @@ fn decode_utf16_xml(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
     let bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
 
-    let mut code_units = Vec::with_capacity(bytes.len() / 2);
+    let mut code_units: Vec<u16> = Vec::new();
+    if code_units.try_reserve_exact(bytes.len() / 2).is_err() {
+        return Err(OffCryptoError::AllocationFailure("decode_utf16_xml code_units"));
+    }
     for pair in bytes.chunks_exact(2) {
         code_units.push(match endian {
             Utf16Endian::Le => u16::from_le_bytes([pair[0], pair[1]]),
@@ -478,7 +478,10 @@ pub fn decode_base64_field_limited(
             .decode(bytes)
             .or_else(|_| STANDARD_NO_PAD.decode(bytes))
     } else {
-        let mut stripped = Vec::with_capacity(stripped_len);
+        let mut stripped: Vec<u8> = Vec::new();
+        if stripped.try_reserve_exact(stripped_len).is_err() {
+            return Err(OffCryptoError::AllocationFailure("decode_base64_field stripped"));
+        }
         stripped.extend(bytes.iter().copied().filter(|b| !b.is_ascii_whitespace()));
         STANDARD
             .decode(&stripped)

@@ -629,7 +629,15 @@ fn parse_rich_value_rel_image_targets(
             resolve_target("xl/workbook.xml", target)
         } else if target.starts_with("xl/") {
             // Treat `xl/...` targets as absolute part names (some producers omit the leading `/`).
-            let mut absolute = String::with_capacity(target.len() + 1);
+            let mut absolute = String::new();
+            if absolute
+                .try_reserve(target.len().saturating_add(1))
+                .is_err()
+            {
+                return Err(XlsxError::AllocationFailure(
+                    "parse_rich_value_rel_image_targets absolute target",
+                ));
+            }
             absolute.push('/');
             absolute.push_str(target);
             resolve_target(source_part, &absolute)

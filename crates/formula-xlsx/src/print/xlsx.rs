@@ -55,7 +55,12 @@ pub(crate) fn parse_workbook_defined_print_names(
 ) -> Result<Vec<SheetDefinedPrintNames>, PrintError> {
     let workbook = parse_workbook_xml(workbook_xml)?;
 
-    let mut out = Vec::with_capacity(workbook.sheets.len());
+    let mut out = Vec::new();
+    if out.try_reserve_exact(workbook.sheets.len()).is_err() {
+        return Err(PrintError::AllocationFailure(
+            "parse_workbook_defined_print_names output",
+        ));
+    }
     for (sheet_index, sheet) in workbook.sheets.into_iter().enumerate() {
         let sheet_name = sheet.name;
         let print_area = workbook
@@ -139,7 +144,12 @@ fn read_workbook_print_settings_from_reader_with_limit<R: Read + Seek>(
     let workbook_print_names = parse_workbook_defined_print_names(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
 
-    let mut sheets = Vec::with_capacity(workbook_print_names.len());
+    let mut sheets = Vec::new();
+    if sheets.try_reserve_exact(workbook_print_names.len()).is_err() {
+        return Err(PrintError::AllocationFailure(
+            "read_workbook_print_settings sheets",
+        ));
+    }
     for sheet in workbook_print_names {
         let sheet_target = rels
             .get(&sheet.r_id)
@@ -1046,12 +1056,15 @@ pub(crate) fn update_worksheet_xml(
                 sheet_pr_prefix = None;
                 writer.write_event(event)?;
             }
-            Event::Start(ref e) | Event::Empty(ref e)
-                if in_sheet_pr && e.local_name().as_ref() == b"pageSetUpPr" =>
-            {
+            Event::Start(ref e) if in_sheet_pr && e.local_name().as_ref() == b"pageSetUpPr" => {
                 seen_page_setup_pr = true;
                 let fit_to_page = settings.page_setup.scaling.is_fit_to();
-                writer.write_event(update_page_setup_pr_event(&event, fit_to_page)?)?;
+                writer.write_event(Event::Start(build_page_setup_pr_start(e, fit_to_page)?))?;
+            }
+            Event::Empty(ref e) if in_sheet_pr && e.local_name().as_ref() == b"pageSetUpPr" => {
+                seen_page_setup_pr = true;
+                let fit_to_page = settings.page_setup.scaling.is_fit_to();
+                writer.write_event(Event::Empty(build_page_setup_pr_start(e, fit_to_page)?))?;
             }
             Event::Start(ref e) if e.local_name().as_ref() == b"pageMargins" => {
                 seen_page_margins = true;
@@ -1197,29 +1210,22 @@ impl ScalingExt for Scaling {
     }
 }
 
-fn update_page_setup_pr_event(
-    event: &Event<'_>,
+fn build_page_setup_pr_start(
+    e: &BytesStart<'_>,
     fit_to_page: bool,
-) -> Result<Event<'static>, PrintError> {
-    let tag = match event {
-        Event::Start(e) | Event::Empty(e) => {
-            String::from_utf8_lossy(e.name().as_ref()).into_owned()
-        }
-        _ => unreachable!(),
-    };
+) -> Result<BytesStart<'static>, PrintError> {
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
     let mut start = BytesStart::new(tag.as_str()).into_owned();
 
     let mut has_fit = false;
-    if let Event::Start(e) | Event::Empty(e) = event {
-        for attr in e.attributes().with_checks(false) {
-            let attr = attr?;
-            if attr.key.as_ref() == b"fitToPage" {
-                has_fit = true;
-                let v = if fit_to_page { "1" } else { "0" };
-                start.push_attribute(("fitToPage", v));
-            } else {
-                start.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
-            }
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if attr.key.as_ref() == b"fitToPage" {
+            has_fit = true;
+            let v = if fit_to_page { "1" } else { "0" };
+            start.push_attribute(("fitToPage", v));
+        } else {
+            start.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
     }
 
@@ -1227,11 +1233,7 @@ fn update_page_setup_pr_event(
         start.push_attribute(("fitToPage", "1"));
     }
 
-    Ok(match event {
-        Event::Start(_) => Event::Start(start),
-        Event::Empty(_) => Event::Empty(start),
-        _ => unreachable!(),
-    })
+    Ok(start)
 }
 
 fn write_page_setup_pr(

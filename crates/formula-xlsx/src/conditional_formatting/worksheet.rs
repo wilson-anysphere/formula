@@ -120,7 +120,13 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
 
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(sheet_xml.len() + 256));
+    let mut out = Vec::new();
+    if out.try_reserve(sheet_xml.len().saturating_add(256)).is_err() {
+        return Err(XlsxError::AllocationFailure(
+            "update_worksheet_conditional_formatting_xml output",
+        ));
+    }
+    let mut writer = Writer::new(out);
 
     let mut buf = Vec::new();
 

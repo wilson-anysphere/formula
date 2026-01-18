@@ -1937,7 +1937,8 @@ fn remap_relationship_ids(fragment: &str, rid_map: &HashMap<String, String>) -> 
         ("id=\"", '"'),
         ("id='", '\''),
     ];
-    let mut out = String::with_capacity(fragment.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(fragment.len());
     let mut cursor = 0usize;
 
     while cursor < fragment.len() {

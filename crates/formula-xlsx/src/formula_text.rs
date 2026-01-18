@@ -162,7 +162,10 @@ pub(crate) fn normalize_display_formula(input: &str) -> String {
 
 pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
     let bytes = formula.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::new();
+    if out.try_reserve_exact(bytes.len()).is_err() {
+        return formula.to_string();
+    }
 
     let mut i = 0;
     let mut in_string = false;
@@ -192,23 +195,23 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
                 if i > 0 && is_ident_byte(bytes[i - 1]) {
                     // Fall through: emit the current byte verbatim.
                 } else {
-                let after_prefix = i + XL_FN_PREFIX.len();
-                let mut j = after_prefix;
-                while j < bytes.len() && is_ident_byte(bytes[j]) {
-                    j += 1;
-                }
+                    let after_prefix = i + XL_FN_PREFIX.len();
+                    let mut j = after_prefix;
+                    while j < bytes.len() && is_ident_byte(bytes[j]) {
+                        j += 1;
+                    }
 
-                if j > after_prefix {
-                    let mut k = j;
-                    while k < bytes.len() && bytes[k].is_ascii_whitespace() {
-                        k += 1;
+                    if j > after_prefix {
+                        let mut k = j;
+                        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                            k += 1;
+                        }
+                        if k < bytes.len() && bytes[k] == b'(' {
+                            // Only strip when it prefixes a function call.
+                            i = after_prefix;
+                            continue;
+                        }
                     }
-                    if k < bytes.len() && bytes[k] == b'(' {
-                        // Only strip when it prefixes a function call.
-                        i = after_prefix;
-                        continue;
-                    }
-                }
                 }
             }
             _ => {}
@@ -218,7 +221,13 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
         i += 1;
     }
 
-    String::from_utf8(out).expect("formula rewrite should preserve utf-8")
+    match String::from_utf8(out) {
+        Ok(s) => s,
+        Err(_) => {
+            debug_assert!(false, "strip_xlfn_prefixes produced invalid utf-8");
+            formula.to_string()
+        }
+    }
 }
 
 fn has_xlfn_prefix_at(bytes: &[u8], i: usize) -> bool {
@@ -231,7 +240,10 @@ fn has_xlfn_prefix_at(bytes: &[u8], i: usize) -> bool {
 
 pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
     let bytes = formula.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::new();
+    if out.try_reserve_exact(bytes.len()).is_err() {
+        return formula.to_string();
+    }
 
     let mut i = 0;
     let mut in_string = false;
@@ -286,7 +298,13 @@ pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
         i += 1;
     }
 
-    String::from_utf8(out).expect("formula rewrite should preserve utf-8")
+    match String::from_utf8(out) {
+        Ok(s) => s,
+        Err(_) => {
+            debug_assert!(false, "add_xlfn_prefixes produced invalid utf-8");
+            formula.to_string()
+        }
+    }
 }
 
 fn needs_xlfn_prefix(ident: &str) -> bool {
@@ -372,7 +390,7 @@ mod tests {
     #[test]
     fn xlfn_required_functions_are_sorted_and_unique() {
         let mut prev: Option<&str> = None;
-        let mut seen = HashSet::with_capacity(XL_FN_REQUIRED_FUNCTIONS.len());
+        let mut seen = HashSet::new();
 
         for &name in XL_FN_REQUIRED_FUNCTIONS {
             if let Some(prev) = prev {

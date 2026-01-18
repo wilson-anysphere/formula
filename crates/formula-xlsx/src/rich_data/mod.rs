@@ -528,9 +528,13 @@ pub fn extract_rich_cell_images(
                 } else {
                     let parsed = parse_rich_value_part_relationship_targets(pkg, source_part)?;
                     rich_value_part_rels.insert(source_part.clone(), parsed);
-                    rich_value_part_rels
-                        .get(source_part)
-                        .expect("just inserted")
+                    let Some(rels) = rich_value_part_rels.get(source_part) else {
+                        // Best-effort: if we cannot read back what we just inserted (should be
+                        // impossible in normal operation), skip this cell rather than panicking.
+                        debug_assert!(false, "rich value rels cache insert could not be read back");
+                        continue;
+                    };
+                    rels
                 };
 
                 let Some(target_part) = rels.get(rel_id.as_str()) else {
@@ -681,7 +685,15 @@ fn build_rich_value_rel_index_to_target_part(
 
     let rels_part_name = path::rels_for_part(&source_part);
     let Some(rels_bytes) = pkg.part(&rels_part_name) else {
-        return Ok(vec![None; rel_index_to_rid.len()]);
+        let mut out: Vec<Option<String>> = Vec::new();
+        if out.try_reserve_exact(rel_index_to_rid.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "build_rich_value_rel_index_to_target_part missing rels fallback",
+            )
+            .into());
+        }
+        out.resize_with(rel_index_to_rid.len(), || None);
+        return Ok(out);
     };
 
     let relationships = crate::openxml::parse_relationships(rels_bytes)?;
@@ -722,7 +734,12 @@ fn build_rich_value_rel_index_to_target_part(
         rid_to_target_part.insert(rel.id, target_part);
     }
 
-    let mut out: Vec<Option<String>> = Vec::with_capacity(rel_index_to_rid.len());
+    let mut out: Vec<Option<String>> = Vec::new();
+    if out.try_reserve_exact(rel_index_to_rid.len()).is_err() {
+        return Err(
+            XlsxError::AllocationFailure("build_rich_value_rel_index_to_target_part output").into(),
+        );
+    }
     for rid in rel_index_to_rid {
         if rid.is_empty() {
             out.push(None);
@@ -1268,7 +1285,10 @@ fn build_rich_value_type_schema_index_best_effort(
                         continue;
                     }
 
-                    let mut props = Vec::with_capacity(structure.members.len());
+                    let mut props = Vec::new();
+                    if props.try_reserve_exact(structure.members.len()).is_err() {
+                        continue;
+                    }
                     for (position, member) in structure.members.iter().enumerate() {
                         props.push(RichValueTypePropertyDescriptor {
                             name: Some(member.name.clone()),
@@ -1354,7 +1374,10 @@ fn parse_rich_value_types_xml_best_effort(
             continue;
         }
 
-        let mut props = Vec::with_capacity(prop_nodes.len());
+        let mut props = Vec::new();
+        if props.try_reserve_exact(prop_nodes.len()).is_err() {
+            continue;
+        }
         for (position, prop) in prop_nodes.into_iter().enumerate() {
             let name =
                 find_node_attr_value(prop, &["name", "n", "id", "key", "k", "pid", "propId"]);

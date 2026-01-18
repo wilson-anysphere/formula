@@ -362,7 +362,13 @@ fn parse_plot_area_chart(
                 model,
                 series: series_range,
             },
-            PlotAreaModel::Combo(_) => unreachable!("nested combo plot area is not supported"),
+            PlotAreaModel::Combo(_) => {
+                warn(diagnostics, "comboChart: nested combo plot area is not supported");
+                ComboChartEntry::Unknown {
+                    name: "combo".to_string(),
+                    series: series_range,
+                }
+            }
             PlotAreaModel::Unknown { name } => ComboChartEntry::Unknown {
                 name,
                 series: series_range,

@@ -47,6 +47,8 @@ impl Default for RecalcPolicy {
 pub(crate) enum RecalcPolicyError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("xml error: {0}")]
     Xml(#[from] quick_xml::Error),
     #[error("xml attribute error: {0}")]
@@ -61,24 +63,37 @@ pub(crate) fn apply_recalc_policy_to_parts(
         return Ok(());
     }
 
-    fn part_key_variants(parts: &BTreeMap<String, Vec<u8>>, canonical: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        if parts.contains_key(canonical) {
-            out.push(canonical.to_string());
+    fn part_key_variants(
+        parts: &BTreeMap<String, Vec<u8>>,
+        canonical: &str,
+    ) -> Result<Vec<String>, RecalcPolicyError> {
+        let mut out: Vec<String> = Vec::new();
+        out.try_reserve(2)
+            .map_err(|_| RecalcPolicyError::AllocationFailure("recalc_policy part_key_variants"))?;
+
+        if let Some((key, _)) = parts.get_key_value(canonical) {
+            out.push(key.clone());
         }
-        let mut with_slash = String::with_capacity(canonical.len() + 1);
-        with_slash.push('/');
-        with_slash.push_str(canonical);
-        if parts.contains_key(with_slash.as_str()) {
-            out.push(with_slash);
+
+        // ZIP entry names should not start with `/`, but tolerate producers that include it by
+        // matching the existing key rather than allocating `format!("/{canonical}")`.
+        for key in parts.keys() {
+            let Some(stripped) = key.strip_prefix('/') else {
+                continue;
+            };
+            if stripped == canonical {
+                out.push(key.clone());
+                break;
+            }
         }
-        out
+
+        Ok(out)
     }
 
     if policy.force_full_calc_on_formula_change {
         // ZIP entry names should not start with `/`, but tolerate producers that include it by
         // patching both the canonical and `/`-prefixed variants when present.
-        for key in part_key_variants(parts, "xl/workbook.xml") {
+        for key in part_key_variants(parts, "xl/workbook.xml")? {
             if let Some(workbook_xml) = parts.get(&key).cloned() {
                 let updated = workbook_xml_force_full_calc_on_load(&workbook_xml)?;
                 parts.insert(key, updated);
@@ -87,18 +102,18 @@ pub(crate) fn apply_recalc_policy_to_parts(
     }
 
     if policy.drop_calc_chain_on_formula_change {
-        for key in part_key_variants(parts, "xl/calcChain.xml") {
+        for key in part_key_variants(parts, "xl/calcChain.xml")? {
             parts.remove(&key);
         }
 
-        for key in part_key_variants(parts, "xl/_rels/workbook.xml.rels") {
+        for key in part_key_variants(parts, "xl/_rels/workbook.xml.rels")? {
             if let Some(rels_xml) = parts.get(&key).cloned() {
                 let updated = workbook_rels_remove_calc_chain(&rels_xml)?;
                 parts.insert(key, updated);
             }
         }
 
-        for key in part_key_variants(parts, "[Content_Types].xml") {
+        for key in part_key_variants(parts, "[Content_Types].xml")? {
             if let Some(content_types_xml) = parts.get(&key).cloned() {
                 let updated = content_types_remove_calc_chain(&content_types_xml)?;
                 parts.insert(key, updated);
@@ -114,7 +129,10 @@ pub(crate) fn workbook_xml_force_full_calc_on_load(
 ) -> Result<Vec<u8>, RecalcPolicyError> {
     let mut reader = Reader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(workbook_xml.len() + 64));
+    let mut out = Vec::new();
+    out.try_reserve(workbook_xml.len() + 64)
+        .map_err(|_| RecalcPolicyError::AllocationFailure("workbook_xml_force_full_calc_on_load"))?;
+    let mut writer = Writer::new(out);
 
     let mut buf = Vec::new();
     let mut saw_calc_pr = false;
@@ -199,7 +217,10 @@ pub(crate) fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>
 
     let mut reader = Reader::from_reader(rels_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(rels_xml.len()));
+    let mut out = Vec::new();
+    out.try_reserve(rels_xml.len())
+        .map_err(|_| RecalcPolicyError::AllocationFailure("workbook_rels_remove_calc_chain"))?;
+    let mut writer = Writer::new(out);
 
     let mut buf = Vec::new();
     let mut skipping = false;
@@ -284,7 +305,10 @@ fn relationship_is_calc_chain(e: &BytesStart<'_>, expected_type: &str) -> Result
 pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
     let mut reader = Reader::from_reader(ct_xml);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(ct_xml.len()));
+    let mut out = Vec::new();
+    out.try_reserve(ct_xml.len())
+        .map_err(|_| RecalcPolicyError::AllocationFailure("content_types_remove_calc_chain"))?;
+    let mut writer = Writer::new(out);
 
     let mut buf = Vec::new();
     let mut skipping = false;

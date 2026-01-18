@@ -699,6 +699,7 @@ fn decrypt_key_encryptor_blob(
                 reason: reason.to_string(),
             }
         }
+        crate::offcrypto::CryptoError::AllocationFailure(ctx) => OffCryptoError::AllocationFailure(ctx),
     })?;
     // MS-OFFCRYPTO: for password key-encryptor fields (`p:encryptedKey`), the AES-CBC IV is the
     // `saltValue` itself (truncated to `blockSize`). The `block_key` is used only for key derivation.
@@ -761,6 +762,7 @@ fn decrypt_key_encryptor_blob_derived_iv(
                 reason: reason.to_string(),
             }
         }
+        crate::offcrypto::CryptoError::AllocationFailure(ctx) => OffCryptoError::AllocationFailure(ctx),
     })?;
     let iv = derive_iv(
         &key_encryptor.salt_value,
@@ -779,6 +781,7 @@ fn decrypt_key_encryptor_blob_derived_iv(
                 reason: reason.to_string(),
             }
         }
+        crate::offcrypto::CryptoError::AllocationFailure(ctx) => OffCryptoError::AllocationFailure(ctx),
     })?;
 
     let mut buf = ciphertext.to_vec();
@@ -868,6 +871,7 @@ pub fn decrypt_agile_keys_with_options(
                 reason: reason.to_string(),
             }
         }
+        crate::offcrypto::CryptoError::AllocationFailure(ctx) => OffCryptoError::AllocationFailure(ctx),
     })?;
 
     // Decrypt verifierHashInput and verifierHashValue for password verification.
@@ -985,6 +989,9 @@ pub fn decrypt_agile_keys_with_options(
                         reason: reason.to_string(),
                     }
                 }
+                crate::offcrypto::CryptoError::AllocationFailure(ctx) => {
+                    OffCryptoError::AllocationFailure(ctx)
+                }
             })?;
             let mut raw_key = di.encrypted_hmac_key.clone();
             decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_key, &mut raw_key)?;
@@ -1005,6 +1012,9 @@ pub fn decrypt_agile_keys_with_options(
                         attr: "saltValue".to_string(),
                         reason: reason.to_string(),
                     }
+                }
+                crate::offcrypto::CryptoError::AllocationFailure(ctx) => {
+                    OffCryptoError::AllocationFailure(ctx)
                 }
             })?;
             let mut raw_val = di.encrypted_hmac_value.clone();
@@ -1145,7 +1155,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
         });
     }
     // Decrypt segment-by-segment until we have produced `declared_len` bytes.
-    let mut out = Vec::with_capacity(declared_len);
+    let mut out = Vec::new();
+    if out.try_reserve_exact(declared_len).is_err() {
+        return Err(OffCryptoError::AllocationFailure(
+            "decrypt_agile_encrypted_package_stream_with_key output",
+        ));
+    }
     let mut offset = 0usize;
     let mut segment_index: u32 = 0;
     while offset < ciphertext.len() && out.len() < declared_len {
@@ -1164,7 +1179,13 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
             key_data.block_size as usize,
             key_data.hash_algorithm,
         )?;
-        let mut decrypted = ciphertext[offset..offset + seg_len].to_vec();
+        let mut decrypted = Vec::new();
+        if decrypted.try_reserve_exact(seg_len).is_err() {
+            return Err(OffCryptoError::AllocationFailure(
+                "decrypt_agile_encrypted_package_stream_with_key segment buffer",
+            ));
+        }
+        decrypted.extend_from_slice(&ciphertext[offset..offset + seg_len]);
         decrypt_aes_cbc_no_padding_in_place(package_key, &iv, &mut decrypted).map_err(|err| {
             match err {
                 AesCbcDecryptError::UnsupportedKeyLength(key_len) => {

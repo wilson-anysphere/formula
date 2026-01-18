@@ -90,6 +90,8 @@ pub enum WorkbookPackageError {
     MissingSheetAttribute(&'static str),
     #[error("missing worksheet relationship target for sheet {0}")]
     MissingSheetRelationship(String),
+    #[error("internal error: {0}")]
+    Internal(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -236,7 +238,15 @@ impl WorkbookPackage {
                 })?;
 
             let sheet_id = workbook.add_sheet(name.clone())?;
-            let sheet_model = workbook.sheet_mut(sheet_id).expect("sheet just added");
+            let Some(sheet_model) = workbook.sheet_mut(sheet_id) else {
+                debug_assert!(
+                    false,
+                    "sheet id {sheet_id:?} missing immediately after add_sheet({name:?})"
+                );
+                return Err(WorkbookPackageError::Internal(
+                    "sheet id missing immediately after add_sheet",
+                ));
+            };
             sheet_model.xlsx_sheet_id = xlsx_sheet_id;
             sheet_model.xlsx_rel_id = Some(rel_id.to_string());
             sheet_model.visibility = visibility;

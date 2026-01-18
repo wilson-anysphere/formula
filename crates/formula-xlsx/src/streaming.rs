@@ -67,6 +67,9 @@ impl From<RecalcPolicyError> for StreamingPatchError {
     fn from(value: RecalcPolicyError) -> Self {
         match value {
             RecalcPolicyError::Io(err) => StreamingPatchError::Io(err),
+            RecalcPolicyError::AllocationFailure(ctx) => {
+                StreamingPatchError::Xlsx(crate::XlsxError::AllocationFailure(ctx))
+            }
             RecalcPolicyError::Xml(err) => StreamingPatchError::Xml(err),
             RecalcPolicyError::XmlAttr(err) => StreamingPatchError::XmlAttr(err),
         }
@@ -634,19 +637,22 @@ mod macro_strip_streaming {
     const RELATIONSHIPS_NS: &[u8] =
         b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-    fn canonical_part_name(name: &str) -> String {
+    fn canonical_part_name(name: &str) -> Result<String, StreamingPatchError> {
         // Normalize producer bugs so macro stripping is robust:
         // - strip leading separators (`/` or `\`, including percent-encoded)
         // - normalize `\` to `/`
         // - ASCII-lowercase
         // - percent-decode valid `%xx` sequences
-        //
         // This matches `zip_part_names_equivalent`.
-        String::from_utf8_lossy(&crate::zip_util::zip_part_name_lookup_key(name)).into_owned()
+        let key = crate::zip_util::zip_part_name_lookup_key(name)?;
+        Ok(String::from_utf8_lossy(&key).into_owned())
     }
-    fn find_part_name(part_names: &BTreeSet<String>, candidate: &str) -> Option<String> {
-        let candidate = canonical_part_name(candidate);
-        part_names.get(&candidate).cloned()
+    fn find_part_name(
+        part_names: &BTreeSet<String>,
+        candidate: &str,
+    ) -> Result<Option<String>, StreamingPatchError> {
+        let candidate = canonical_part_name(candidate)?;
+        Ok(part_names.get(&candidate).cloned())
     }
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         archive: &mut ZipArchive<R>,
@@ -685,7 +691,7 @@ mod macro_strip_streaming {
             }
 
             let name = file.name().to_string();
-            let canonical_name = canonical_part_name(&name);
+            let canonical_name = canonical_part_name(&name)?;
             if delete_parts.contains(&canonical_name) {
                 continue;
             }
@@ -711,7 +717,7 @@ mod macro_strip_streaming {
             if file.is_dir() {
                 continue;
             }
-            out.insert(canonical_part_name(file.name()));
+            out.insert(canonical_part_name(file.name())?);
         }
         Ok(out)
     }
@@ -755,7 +761,7 @@ mod macro_strip_streaming {
         }
 
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
-        if let Some(rels_part) = find_part_name(part_names, "xl/_rels/vbaProject.bin.rels") {
+        if let Some(rels_part) = find_part_name(part_names, "xl/_rels/vbaProject.bin.rels")? {
             let rels_bytes = read_zip_part(archive, &rels_part, read_cache)?;
             let targets = parse_internal_relationship_targets(
                 &rels_bytes,
@@ -773,14 +779,19 @@ mod macro_strip_streaming {
 
         // Delete parts referenced exclusively by deleted macro parts (e.g. `xl/embeddings/*`).
         let graph = RelationshipGraph::build(archive, part_names, read_cache)?;
-        delete_orphan_targets(&graph, &mut delete);
+        delete_orphan_targets(&graph, &mut delete)?;
 
         // If a part is deleted, its relationship part must also be deleted.
-        let rels_to_remove: Vec<String> = delete
-            .iter()
-            .filter(|name| !name.ends_with(".rels"))
-            .map(|name| crate::path::rels_for_part(name))
-            .collect();
+        let mut rels_to_remove: Vec<String> = Vec::new();
+        rels_to_remove
+            .try_reserve(delete.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming rels_to_remove"))?;
+        for name in &delete {
+            if name.ends_with(".rels") {
+                continue;
+            }
+            rels_to_remove.push(crate::path::rels_for_part(name));
+        }
         delete.extend(rels_to_remove);
 
         Ok(delete)
@@ -810,7 +821,7 @@ mod macro_strip_streaming {
             }
 
             let rels_part = crate::path::rels_for_part(vml_part);
-            let Some(rels_part) = find_part_name(part_names, &rels_part) else {
+            let Some(rels_part) = find_part_name(part_names, &rels_part)? else {
                 continue;
             };
             let rels_bytes = read_zip_part(archive, &rels_part, read_cache)?;
@@ -916,7 +927,7 @@ mod macro_strip_streaming {
                     };
                     let target = strip_fragment(&target);
                     let resolved = resolve_target_for_source(source_part, target);
-                    let resolved = canonical_part_name(&resolved);
+                    let resolved = canonical_part_name(&resolved)?;
 
                     // Worksheet OLE objects are stored under `xl/embeddings/` and referenced from
                     // `<oleObjects>` in sheet XML (valid in `.xlsx`). For macro stripping we only
@@ -933,8 +944,15 @@ mod macro_strip_streaming {
         Ok(out)
     }
 
-    fn delete_orphan_targets(graph: &RelationshipGraph, delete: &mut BTreeSet<String>) {
-        let mut queue: VecDeque<String> = delete.iter().cloned().collect();
+    fn delete_orphan_targets(
+        graph: &RelationshipGraph,
+        delete: &mut BTreeSet<String>,
+    ) -> Result<(), StreamingPatchError> {
+        let mut queue: VecDeque<String> = VecDeque::new();
+        queue
+            .try_reserve(delete.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming queue"))?;
+        queue.extend(delete.iter().cloned());
         while let Some(source) = queue.pop_front() {
             let Some(targets) = graph.outgoing.get(&source) else {
                 continue;
@@ -953,6 +971,7 @@ mod macro_strip_streaming {
                 }
             }
         }
+        Ok(())
     }
 
     fn plan_relationship_part_updates<R: Read + Seek>(
@@ -962,11 +981,15 @@ mod macro_strip_streaming {
         read_cache: &mut HashMap<String, Vec<u8>>,
         updated_parts: &mut HashMap<String, Vec<u8>>,
     ) -> Result<(), StreamingPatchError> {
-        let rels_names: Vec<String> = part_names
-            .iter()
-            .filter(|name| name.ends_with(".rels"))
-            .cloned()
-            .collect();
+        let mut rels_names: Vec<String> = Vec::new();
+        rels_names
+            .try_reserve(part_names.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming rels_names"))?;
+        for name in part_names {
+            if name.ends_with(".rels") {
+                rels_names.push(name.clone());
+            }
+        }
 
         for rels_name in rels_names {
             if delete_parts.contains(&rels_name) {
@@ -1020,7 +1043,7 @@ mod macro_strip_streaming {
         updated_parts: &mut HashMap<String, Vec<u8>>,
         target_kind: WorkbookKind,
     ) -> Result<(), StreamingPatchError> {
-        let ct_name = canonical_part_name("[Content_Types].xml");
+        let ct_name = canonical_part_name("[Content_Types].xml")?;
         if !delete_parts.contains(&ct_name) && zip_part_exists(archive, &ct_name)? {
             let existing = read_zip_part(archive, &ct_name, read_cache)?;
             if let Some(updated) = strip_content_types(&existing, delete_parts, target_kind)? {
@@ -1047,7 +1070,10 @@ mod macro_strip_streaming {
     ) -> Result<(Option<Vec<u8>>, BTreeSet<String>), StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
-        let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+        let mut out = Vec::new();
+        out.try_reserve(xml.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming strip_deleted_relationships output"))?;
+        let mut writer = XmlWriter::new(out);
 
         let mut buf = Vec::new();
         let mut changed = false;
@@ -1167,7 +1193,7 @@ mod macro_strip_streaming {
         };
 
         let target = strip_fragment(&target);
-        let resolved = resolve_target_best_effort(source_part, rels_part_name, target, part_names);
+        let resolved = resolve_target_best_effort(source_part, rels_part_name, target, part_names)?;
         Ok(delete_parts.contains(&resolved))
     }
 
@@ -1211,7 +1237,10 @@ mod macro_strip_streaming {
     ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
-        let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+        let mut out = Vec::new();
+        out.try_reserve(xml.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming strip_content_types output"))?;
+        let mut writer = XmlWriter::new(out);
 
         let mut buf = Vec::new();
         let mut changed = false;
@@ -1333,7 +1362,10 @@ mod macro_strip_streaming {
     ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
-        let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+        let mut out = Vec::new();
+        out.try_reserve(xml.len())
+            .map_err(|_| crate::XlsxError::AllocationFailure("macro_strip_streaming strip_relationship_id_references output"))?;
+        let mut writer = XmlWriter::new(out);
 
         let mut buf = Vec::new();
         let mut changed = false;
@@ -1432,7 +1464,7 @@ mod macro_strip_streaming {
         };
 
         let normalized = part_name.strip_prefix('/').unwrap_or(part_name.as_str());
-        let normalized = canonical_part_name(normalized);
+        let normalized = canonical_part_name(normalized)?;
         if delete_parts.contains(&normalized) {
             return Ok(Some(None));
         }
@@ -1518,7 +1550,7 @@ mod macro_strip_streaming {
                         rels_part,
                         target,
                         part_names,
-                    ));
+                    )?);
                 }
                 _ => {}
             }
@@ -1548,29 +1580,29 @@ mod macro_strip_streaming {
         rels_part: &str,
         target: &str,
         part_names: &BTreeSet<String>,
-    ) -> String {
+    ) -> Result<String, StreamingPatchError> {
         // Match the in-memory macro stripper: prefer the standard source-relative resolution, but
         // fall back to interpreting the target as relative to the `.rels` directory when the
         // canonical path doesn't exist (common in some producers for workbook-level parts).
         let direct = resolve_target_for_source(source_part, target);
-        if let Some(found) = find_part_name(part_names, &direct) {
-            return found;
+        if let Some(found) = find_part_name(part_names, &direct)? {
+            return Ok(found);
         }
 
         let rels_relative = crate::path::resolve_target(rels_part, target);
-        if let Some(found) = find_part_name(part_names, &rels_relative) {
-            return found;
+        if let Some(found) = find_part_name(part_names, &rels_relative)? {
+            return Ok(found);
         }
 
-        let direct_canonical = canonical_part_name(&direct);
+        let direct_canonical = canonical_part_name(&direct)?;
         if !direct_canonical.starts_with("xl/") {
             let xl_prefixed = format!("xl/{direct_canonical}");
-            if let Some(found) = find_part_name(part_names, &xl_prefixed) {
-                return found;
+            if let Some(found) = find_part_name(part_names, &xl_prefixed)? {
+                return Ok(found);
             }
         }
 
-        direct_canonical
+        Ok(direct_canonical)
     }
 
     fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
@@ -1614,10 +1646,10 @@ mod macro_strip_streaming {
                 let source_part = if source_part.is_empty() {
                     source_part
                 } else {
-                    match find_part_name(part_names, &source_part) {
-                        Some(found) => found,
-                        None => continue,
-                    }
+                    let Some(found) = find_part_name(part_names, &source_part)? else {
+                        continue;
+                    };
+                    found
                 };
 
                 // Ignore orphan `.rels` parts; they'll be removed during cleanup.
@@ -1834,9 +1866,14 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_part_overrides
         }
         for key in sorted_keys {
             if crate::zip_util::zip_part_names_equivalent(key.as_str(), part_name) {
-                let op = overrides
-                    .get(key.as_str())
-                    .expect("override key came from override map");
+                let Some(op) = overrides.get(key.as_str()) else {
+                    debug_assert!(
+                        false,
+                        "override key {key:?} missing from overrides map (len={})",
+                        overrides.len()
+                    );
+                    continue;
+                };
                 return Some((key.as_str(), op));
             }
         }
@@ -2515,7 +2552,13 @@ fn scan_worksheet_shared_string_indices<R: Read>(
             Event::End(ref e)
                 if current_target.is_some() && local_name(e.name().as_ref()) == b"c" =>
             {
-                let coord = current_target.take().unwrap();
+                let Some(coord) = current_target.take() else {
+                    debug_assert!(
+                        false,
+                        "current_target should be Some when handling </c> with active target"
+                    );
+                    continue;
+                };
                 out.insert(coord, current_idx);
                 current_t = None;
                 in_v = false;
@@ -2555,8 +2598,15 @@ fn scan_worksheet_xml_metadata<R: Read>(
     let mut has_sheet_pr = false;
     let mut sheet_uses_row_spans = false;
     let mut used_range: Option<PatchBounds> = None;
-    let mut found_target_cells: HashSet<(u32, u32)> =
-        HashSet::with_capacity(target_cells.map_or(0, HashSet::len));
+    let mut found_target_cells: HashSet<(u32, u32)> = HashSet::new();
+    if let Some(target_cells) = target_cells {
+        if found_target_cells.try_reserve(target_cells.len()).is_err() {
+            return Err(crate::XlsxError::AllocationFailure(
+                "scan_worksheet_xml_metadata found_target_cells",
+            )
+            .into());
+        }
+    }
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -2867,9 +2917,14 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         }
         for key in sorted_keys {
             if crate::zip_util::zip_part_names_equivalent(key.as_str(), part_name) {
-                let op = overrides
-                    .get(key.as_str())
-                    .expect("override key came from override map");
+                let Some(op) = overrides.get(key.as_str()) else {
+                    debug_assert!(
+                        false,
+                        "override key {key:?} missing from overrides map (len={})",
+                        overrides.len()
+                    );
+                    continue;
+                };
                 return Some((key.as_str(), op));
             }
         }
@@ -2957,11 +3012,16 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             && shared_strings_updated.is_some()
         {
             zip.start_file(raw_name.clone(), options)?;
-            zip.write_all(
-                shared_strings_updated
-                    .as_deref()
-                    .expect("checked is_some above"),
-            )?;
+            let Some(bytes) = shared_strings_updated.as_deref() else {
+                debug_assert!(
+                    false,
+                    "shared_strings_updated should be Some when shared_strings_part matches and is_some() is true"
+                );
+                return Err(StreamingPatchError::Xlsx(crate::XlsxError::Invalid(
+                    "internal error: missing sharedStrings.xml payload".to_string(),
+                )));
+            };
+            zip.write_all(bytes)?;
         } else if let Some(bytes) = pre_read_parts.get(canonical_name) {
             if should_patch_recalc_part(canonical_name, recalc_policy) {
                 zip.start_file(raw_name.clone(), options)?;
@@ -3729,9 +3789,13 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     let mut cols_buf = Vec::new();
                     parse_cols_attribute_map_from_reader(&mut reader, &mut cols_buf)?
                 };
+                let Some(col_properties) = col_properties else {
+                    debug_assert!(false, "col_properties was None after is_some() check");
+                    continue;
+                };
                 crate::patch::merge_col_properties_into_attrs_by_col(
                     &mut attrs_by_col,
-                    col_properties.expect("checked is_some above"),
+                    col_properties,
                 );
                 if !cols_written {
                     let cols_xml = crate::patch::render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
@@ -3748,9 +3812,13 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 let prefix =
                     element_prefix(name.as_ref()).and_then(|p| std::str::from_utf8(p).ok());
                 let mut attrs_by_col = BTreeMap::new();
+                let Some(col_properties) = col_properties else {
+                    debug_assert!(false, "col_properties was None after is_some() check");
+                    continue;
+                };
                 crate::patch::merge_col_properties_into_attrs_by_col(
                     &mut attrs_by_col,
-                    col_properties.expect("checked is_some above"),
+                    col_properties,
                 );
                 if !cols_written {
                     let cols_xml = crate::patch::render_cols_xml_from_attrs_by_col(prefix, &attrs_by_col);
@@ -4047,7 +4115,12 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     && row_state.is_some()
                     && local_name(e.name().as_ref()) == b"c" =>
             {
-                let state = row_state.as_mut().expect("row_state just checked");
+                let Some(state) = row_state.as_mut() else {
+                    debug_assert!(false, "row_state was None after is_some() check");
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    in_cell = true;
+                    continue;
+                };
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
                 let cell_prefix_owned = element_prefix(e.name().as_ref())
                     .and_then(|p| std::str::from_utf8(p).ok())
@@ -4079,7 +4152,11 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     && row_state.is_some()
                     && local_name(e.name().as_ref()) == b"c" =>
             {
-                let state = row_state.as_mut().expect("row_state just checked");
+                let Some(state) = row_state.as_mut() else {
+                    debug_assert!(false, "row_state was None after is_some() check");
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                    continue;
+                };
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
                 let cell_prefix_owned = element_prefix(e.name().as_ref())
                     .and_then(|p| std::str::from_utf8(p).ok())
@@ -4113,7 +4190,11 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     && !in_cell
                     && local_name(e.name().as_ref()) != b"c" =>
             {
-                let state = row_state.as_mut().expect("row_state just checked");
+                let Some(state) = row_state.as_mut() else {
+                    debug_assert!(false, "row_state was None after is_some() check");
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    continue;
+                };
                 let prefix = state.cell_prefix.clone();
                 let prefix = prefix.as_deref().or(sheet_prefix.as_deref());
                 insert_pending_before_non_cell(&mut writer, state, prefix)?;
@@ -4125,7 +4206,11 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     && !in_cell
                     && local_name(e.name().as_ref()) != b"c" =>
             {
-                let state = row_state.as_mut().expect("row_state just checked");
+                let Some(state) = row_state.as_mut() else {
+                    debug_assert!(false, "row_state was None after is_some() check");
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                    continue;
+                };
                 let prefix = state.cell_prefix.clone();
                 let prefix = prefix.as_deref().or(sheet_prefix.as_deref());
                 insert_pending_before_non_cell(&mut writer, state, prefix)?;

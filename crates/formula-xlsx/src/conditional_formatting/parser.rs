@@ -228,8 +228,8 @@ fn parse_data_bar(rule_node: roxmltree::Node<'_, '_>, main_ns: &str) -> Option<C
     if cfvos.len() < 2 {
         return None;
     }
-    let max = cfvos.pop().unwrap();
-    let min = cfvos.pop().unwrap();
+    let max = cfvos.pop()?;
+    let min = cfvos.pop()?;
     let color = data_bar
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "color")
@@ -261,8 +261,8 @@ fn parse_x14_data_bar(rule_node: roxmltree::Node<'_, '_>, x14_ns: &str) -> Optio
     if cfvos.len() < 2 {
         return None;
     }
-    let max = cfvos.pop().unwrap();
-    let min = cfvos.pop().unwrap();
+    let max = cfvos.pop()?;
+    let min = cfvos.pop()?;
 
     let min_length = data_bar.attribute("minLength").and_then(|v| v.parse::<u8>().ok());
     let max_length = data_bar.attribute("maxLength").and_then(|v| v.parse::<u8>().ok());

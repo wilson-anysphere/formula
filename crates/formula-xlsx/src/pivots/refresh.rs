@@ -328,7 +328,22 @@ fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
                     return (None, s);
                 }
                 _ => {
-                    let ch = s[i..].chars().next().expect("i always at char boundary");
+                    let Some(tail) = s.get(i..) else {
+                        debug_assert!(
+                            false,
+                            "expected char boundary at i={i} (len={}) for {s:?}",
+                            s.len()
+                        );
+                        return (None, s);
+                    };
+                    let Some(ch) = tail.chars().next() else {
+                        debug_assert!(
+                            false,
+                            "expected non-empty tail at i={i} (len={}) for {s:?}",
+                            s.len()
+                        );
+                        return (None, s);
+                    };
                     sheet.push(ch);
                     i += ch.len_utf8();
                     continue;
@@ -794,7 +809,10 @@ fn detect_date_fields(
     let num_fmt_ids = parse_cache_definition_num_fmt_ids(cache_definition_xml)?;
     let num_fmts = load_styles_num_fmts(package)?;
 
-    let mut flags = Vec::with_capacity(field_count);
+    let mut flags = Vec::new();
+    if flags.try_reserve_exact(field_count).is_err() {
+        return Err(XlsxError::AllocationFailure("detect_date_fields output"));
+    }
     for idx in 0..field_count {
         let num_fmt_id = num_fmt_ids.get(idx).copied().unwrap_or(0);
         flags.push(is_datetime_num_fmt_id(num_fmt_id, &num_fmts));

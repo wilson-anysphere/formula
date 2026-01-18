@@ -48,7 +48,10 @@ pub(crate) fn apply_rich_values_to_workbook(
         Err(_) => return,
     };
 
-    let mut types_by_id = HashMap::with_capacity(types.len());
+    let mut types_by_id = HashMap::new();
+    if types_by_id.try_reserve(types.len()).is_err() {
+        return;
+    }
     for ty in types {
         types_by_id.insert(ty.id, ty);
     }

@@ -92,5 +92,5 @@ fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
         .expect("drawing written");
 
     // Round-trip should preserve anchor editAs and clientData attributes.
-    formula_xlsx::assert_xml_semantic_eq(drawing_xml, out_xml);
+    formula_xlsx::assert_xml_semantic_eq(drawing_xml, out_xml).unwrap();
 }

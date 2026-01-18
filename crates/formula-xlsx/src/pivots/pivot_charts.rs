@@ -51,7 +51,12 @@ impl XlsxPackage {
         // `pivot_chart_parts()` now resolves placement metadata directly on `PivotChartPart`, so this
         // API is just a convenience wrapper that avoids duplicating relationship traversal.
         let charts = self.pivot_chart_parts()?;
-        let mut out = Vec::with_capacity(charts.len());
+        let mut out = Vec::new();
+        if out.try_reserve_exact(charts.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "pivot_chart_parts_with_placement output",
+            ));
+        }
         for chart in charts {
             out.push(PivotChartWithPlacement {
                 placed_on_drawings: chart.placed_on_drawings.clone(),
@@ -100,7 +105,12 @@ impl XlsxDocument {
         // `pivot_chart_parts()` now resolves placement metadata directly on `PivotChartPart`, so this
         // API is just a convenience wrapper that avoids duplicating relationship traversal.
         let charts = self.pivot_chart_parts()?;
-        let mut out = Vec::with_capacity(charts.len());
+        let mut out = Vec::new();
+        if out.try_reserve_exact(charts.len()).is_err() {
+            return Err(XlsxError::AllocationFailure(
+                "pivot_chart_parts_with_placement output",
+            ));
+        }
         for chart in charts {
             out.push(PivotChartWithPlacement {
                 placed_on_drawings: chart.placed_on_drawings.clone(),
@@ -239,7 +249,10 @@ where
 
     let sheet_name_by_part = sheet_name_by_part_with(&part, &resolve_relationship_target);
 
-    let mut parts = Vec::with_capacity(chart_parts.len());
+    let mut parts = Vec::new();
+    if parts.try_reserve_exact(chart_parts.len()).is_err() {
+        return Err(XlsxError::AllocationFailure("pivot_chart_parts output"));
+    }
     for part_name in chart_parts {
         let xml = part(&part_name)
             .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;

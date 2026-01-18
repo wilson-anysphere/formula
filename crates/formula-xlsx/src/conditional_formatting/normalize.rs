@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use formula_model::CfRule;
 
 /// Normalize `cfRule/@priority` values for serialization.
@@ -14,13 +12,18 @@ pub(crate) fn normalize_cf_priorities(rules: &[CfRule]) -> Vec<u32> {
         return Vec::new();
     }
 
-    let mut seen: HashSet<u32> = HashSet::with_capacity(rules.len());
     let mut all_valid_unique = true;
 
-    for rule in rules {
+    // Avoid allocating a `HashSet` here: conditional formatting rule counts are typically small,
+    // and we prefer predictable, allocation-light behavior in serialization code.
+    for (i, rule) in rules.iter().enumerate() {
         let p = rule.priority;
         // `u32::MAX` is used throughout the codebase as "unset".
-        if p == 0 || p == u32::MAX || !seen.insert(p) {
+        if p == 0 || p == u32::MAX {
+            all_valid_unique = false;
+            break;
+        }
+        if rules[..i].iter().any(|other| other.priority == p) {
             all_valid_unique = false;
             break;
         }
@@ -59,7 +62,10 @@ pub(crate) fn patch_cf_rule_priority(raw_xml: &str, priority: u32) -> String {
             return raw_xml.to_string();
         }
 
-        let mut out = String::with_capacity(raw_xml.len() + 12);
+        let mut out = String::new();
+        if out.try_reserve(raw_xml.len().saturating_add(12)).is_err() {
+            return raw_xml.to_string();
+        }
         out.push_str(&raw_xml[..value_start]);
         out.push_str(&priority.to_string());
         out.push_str(&raw_xml[value_end..]);
@@ -68,7 +74,10 @@ pub(crate) fn patch_cf_rule_priority(raw_xml: &str, priority: u32) -> String {
 
     // Otherwise insert a new attribute.
     let insert_pos = priority_insert_pos(bytes, tag_start, tag_end);
-    let mut out = String::with_capacity(raw_xml.len() + 24);
+    let mut out = String::new();
+    if out.try_reserve(raw_xml.len().saturating_add(24)).is_err() {
+        return raw_xml.to_string();
+    }
     out.push_str(&raw_xml[..insert_pos]);
     out.push_str(r#" priority=""#);
     out.push_str(&priority.to_string());

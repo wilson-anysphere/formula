@@ -125,7 +125,13 @@ where
                 if let Some(stripped) = candidate.strip_prefix('/') {
                     return get_part(stripped).is_some();
                 }
-                let mut with_slash = String::with_capacity(candidate.len() + 1);
+                let mut with_slash = String::new();
+                if with_slash
+                    .try_reserve(candidate.len().saturating_add(1))
+                    .is_err()
+                {
+                    return false;
+                }
                 with_slash.push('/');
                 with_slash.push_str(candidate);
                 get_part(with_slash.as_str()).is_some()

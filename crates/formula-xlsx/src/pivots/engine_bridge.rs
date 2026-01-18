@@ -44,7 +44,8 @@ pub fn pivot_cache_to_engine_source(
 
     let field_count = def.cache_fields.len();
     for record in records {
-        let mut row = Vec::with_capacity(field_count);
+        let mut row = Vec::new();
+        let _ = row.try_reserve_exact(field_count);
         // Pivot caches can encode record values via a per-field "shared items" table (written as
         // `<x v="..."/>` indices in `pivotCacheRecords*.xml`). Resolve those indices using the
         // field position in the record (not the field name).
@@ -198,7 +199,10 @@ fn slicer_cache_field_idx_best_effort(
             continue;
         };
 
-        let mut value_strings = HashSet::with_capacity(values.len());
+        let mut value_strings = HashSet::new();
+        if value_strings.try_reserve(values.len()).is_err() {
+            continue;
+        }
         for value in values {
             // Avoid allocating twice: `display_string()` already produces an owned `String`.
             let mut s = value.to_key_part().display_string();
@@ -341,7 +345,8 @@ where
     let allowed = match &selection.selected_items {
         None => None,
         Some(items) => {
-            let mut allowed = HashSet::with_capacity(items.len());
+            let mut allowed = HashSet::new();
+            let _ = allowed.try_reserve(items.len());
             for item in items {
                 let scalar = resolve(item).unwrap_or_else(|| ScalarValue::from(item.as_str()));
                 allowed.insert(scalar_value_to_engine_key_part(&scalar));
