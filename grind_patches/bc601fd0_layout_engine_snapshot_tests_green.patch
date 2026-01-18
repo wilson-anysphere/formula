@@ -1,0 +1,41 @@
+From bc601fd01098e97ed8822fb9957c8e86cb9e4b2c Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 12:52:37 -0800
+Subject: [PATCH] fix: keep layout_engine snapshot tests green
+
+- Fix src/net/websocket/mod.rs to declare maybe_tls_stream exactly once (avoids E0428 when building fastrender-websocket).
+- Re-export Length from the layout_engine snapshot style::values stubs so the included grid item constraint tests compile.
+
+Validated with: cargo test -p layout_engine --locked --offline
+---
+ crates/layout_engine/tests/network_process_client_compile.rs | 1 +
+ src/net/websocket/mod.rs                                     | 1 -
+ 2 files changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/crates/layout_engine/tests/network_process_client_compile.rs b/crates/layout_engine/tests/network_process_client_compile.rs
+index bb70e9cf14..df11512069 100644
+--- a/crates/layout_engine/tests/network_process_client_compile.rs
++++ b/crates/layout_engine/tests/network_process_client_compile.rs
+@@ -761,6 +761,7 @@ mod style {
+ 
+   pub mod values {
+     use super::types::CalcSizeExpr;
++    pub use super::types::Length;
+ 
+     pub fn intern_calc_size_expr(_input: &str) -> CalcSizeExpr {
+       CalcSizeExpr(0)
+diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
+index cc4f35337a..3795295297 100644
+--- a/src/net/websocket/mod.rs
++++ b/src/net/websocket/mod.rs
+@@ -16,7 +16,6 @@ pub mod http_response_head;
+ pub mod http_headers;
+ pub mod maybe_tls_stream;
+ pub mod message;
+-pub mod maybe_tls_stream;
+ pub mod ws_url;
+ pub mod origin;
+ pub mod server;
+-- 
+2.43.0
+
