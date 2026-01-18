@@ -532,7 +532,18 @@ impl<'a> Parser<'a> {
             let name = match &self.lookahead.kind {
                 TokenKind::Identifier(id) => id.clone(),
                 TokenKind::Keyword(k) => k.clone(),
-                _ => unreachable!(),
+                other => {
+                    debug_assert!(
+                        false,
+                        "is_named implies Identifier/Keyword; got {other:?} at {}:{}",
+                        self.lookahead.line,
+                        self.lookahead.col
+                    );
+                    return Err(VbaError::Parse(format!(
+                        "Expected named argument identifier but found {other:?} at {}:{}",
+                        self.lookahead.line, self.lookahead.col
+                    )));
+                }
             };
             self.bump()?;
             self.expect_token(TokenKind::ColonEq)?;

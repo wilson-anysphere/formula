@@ -96,7 +96,14 @@ impl<'a> Lexer<'a> {
         buf.push(first);
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() || ch == '.' {
-                buf.push(self.bump().unwrap());
+                let Some(bumped) = self.bump() else {
+                    debug_assert!(
+                        false,
+                        "Lexer peek() returned Some but bump() returned None at {line}:{col}"
+                    );
+                    break;
+                };
+                buf.push(bumped);
             } else {
                 break;
             }
@@ -116,7 +123,14 @@ impl<'a> Lexer<'a> {
         buf.push(first);
         while let Some(ch) = self.peek() {
             if Self::is_ident_continue(ch) {
-                buf.push(self.bump().unwrap());
+                let Some(bumped) = self.bump() else {
+                    debug_assert!(
+                        false,
+                        "Lexer peek() returned Some but bump() returned None at {line}:{col}"
+                    );
+                    break;
+                };
+                buf.push(bumped);
             } else {
                 break;
             }

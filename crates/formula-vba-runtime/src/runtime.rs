@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{
+    DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, Timelike, Utc,
+};
 use formula_model::column_label_to_index;
 use thiserror::Error;
 
@@ -305,7 +307,8 @@ fn default_value_for_decl(decl: &VarDecl) -> Result<VbaValue, VbaError> {
         })? as i32;
 
     let len = (upper - lower + 1).max(0) as usize;
-    let mut values = Vec::with_capacity(len);
+    let mut values = Vec::new();
+    let _ = values.try_reserve_exact(len);
     for _ in 0..len {
         values.push(default_value_for_type(decl.ty));
     }
@@ -1332,13 +1335,11 @@ impl<'a> Executor<'a> {
         }
 
         // Lazy constant eval.
-        if self.globals.borrow().const_exprs.contains_key(&name_lc) {
-            let expr = self
-                .globals
-                .borrow_mut()
-                .const_exprs
-                .remove(&name_lc)
-                .unwrap();
+        let expr = {
+            let mut globals = self.globals.borrow_mut();
+            globals.const_exprs.remove(&name_lc)
+        };
+        if let Some(expr) = expr {
             let value = self.eval_expr(frame, &expr)?;
             self.globals.borrow_mut().values.insert(name_lc.clone(), value.clone());
             return Ok(value);
@@ -1533,7 +1534,12 @@ impl<'a> Executor<'a> {
                 BinOp::Le => a <= b,
                 BinOp::Gt => a > b,
                 BinOp::Ge => a >= b,
-                _ => unreachable!(),
+                other => {
+                    debug_assert!(false, "eval_compare called with non-compare op: {other:?}");
+                    return Err(VbaError::Runtime(format!(
+                        "unsupported comparison operator {other:?}"
+                    )));
+                }
             };
             return Ok(VbaValue::Boolean(res));
         }
@@ -1548,7 +1554,12 @@ impl<'a> Executor<'a> {
             BinOp::Le => cmp != std::cmp::Ordering::Greater,
             BinOp::Gt => cmp == std::cmp::Ordering::Greater,
             BinOp::Ge => cmp != std::cmp::Ordering::Less,
-            _ => unreachable!(),
+            other => {
+                debug_assert!(false, "eval_compare called with non-compare op: {other:?}");
+                return Err(VbaError::Runtime(format!(
+                    "unsupported comparison operator {other:?}"
+                )));
+            }
         };
         Ok(VbaValue::Boolean(res))
     }
@@ -1870,9 +1881,13 @@ impl<'a> Executor<'a> {
             }
             _ if name.eq_ignore_ascii_case("date") => {
                 let today = Local::now().date_naive();
-                Ok(VbaValue::Date(datetime_to_ole_date(
-                    today.and_hms_opt(0, 0, 0).unwrap(),
-                )))
+                let Some(dt) = today.and_hms_opt(0, 0, 0) else {
+                    debug_assert!(false, "failed to construct midnight NaiveDateTime for {today}");
+                    return Err(VbaError::Runtime(
+                        "internal error: failed to construct today's midnight".to_string(),
+                    ));
+                };
+                Ok(VbaValue::Date(datetime_to_ole_date(dt)))
             }
             _ if name.eq_ignore_ascii_case("time") => {
                 let now = Local::now().naive_local().time();
@@ -2903,9 +2918,11 @@ impl<'a> Executor<'a> {
         let rows = range.end_row.saturating_sub(range.start_row) + 1;
         let cols = range.end_col.saturating_sub(range.start_col) + 1;
 
-        let mut outer = Vec::with_capacity(rows as usize);
+        let mut outer = Vec::new();
+        let _ = outer.try_reserve_exact(rows as usize);
         for r_off in 0..rows {
-            let mut inner = Vec::with_capacity(cols as usize);
+            let mut inner = Vec::new();
+            let _ = inner.try_reserve_exact(cols as usize);
             for c_off in 0..cols {
                 let value = self.sheet.get_cell_value(
                     range.sheet,
@@ -2935,9 +2952,11 @@ impl<'a> Executor<'a> {
         let rows = range.end_row.saturating_sub(range.start_row) + 1;
         let cols = range.end_col.saturating_sub(range.start_col) + 1;
 
-        let mut outer = Vec::with_capacity(rows as usize);
+        let mut outer = Vec::new();
+        let _ = outer.try_reserve_exact(rows as usize);
         for r_off in 0..rows {
-            let mut inner = Vec::with_capacity(cols as usize);
+            let mut inner = Vec::new();
+            let _ = inner.try_reserve_exact(cols as usize);
             for c_off in 0..cols {
                 let value = self
                     .sheet
@@ -3355,7 +3374,8 @@ fn range_address(range: VbaRangeRef) -> Result<String, VbaError> {
 
 fn absolute_a1(row: u32, col: u32) -> Result<String, VbaError> {
     let a1 = row_col_to_a1(row, col)?;
-    let mut out = String::with_capacity(a1.len() + 2);
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(a1.len() + 2);
     let mut seen_digit = false;
     for ch in a1.chars() {
         if !seen_digit && ch.is_ascii_digit() {
@@ -3423,7 +3443,10 @@ fn parse_vba_date_string(s: &str) -> Option<NaiveDateTime> {
             return Some(dt);
         }
         if let Ok(d) = NaiveDate::parse_from_str(s, fmt) {
-            return Some(d.and_hms_opt(0, 0, 0).unwrap());
+            if let Some(dt) = d.and_hms_opt(0, 0, 0) {
+                return Some(dt);
+            }
+            debug_assert!(false, "failed to construct midnight NaiveDateTime for {d}");
         }
     }
     None
@@ -3461,10 +3484,15 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 }
 
 fn ole_base_datetime() -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(1899, 12, 30)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
+    let Some(date) = NaiveDate::from_ymd_opt(1899, 12, 30) else {
+        debug_assert!(false, "failed to construct OLE base date 1899-12-30");
+        return DateTime::<Utc>::UNIX_EPOCH.naive_utc();
+    };
+    let Some(dt) = date.and_hms_opt(0, 0, 0) else {
+        debug_assert!(false, "failed to construct OLE base datetime at midnight");
+        return DateTime::<Utc>::UNIX_EPOCH.naive_utc();
+    };
+    dt
 }
 
 fn datetime_to_ole_date(dt: NaiveDateTime) -> f64 {
@@ -3544,9 +3572,14 @@ fn add_months(dt: NaiveDateTime, months: i64) -> NaiveDateTime {
     let last_day = last_day_of_month(year as i32, month);
     let day = day.min(last_day);
 
-    NaiveDate::from_ymd_opt(year as i32, month, day)
-        .unwrap()
-        .and_time(dt.time())
+    let Some(date) = NaiveDate::from_ymd_opt(year as i32, month, day) else {
+        debug_assert!(
+            false,
+            "add_months failed to construct date for year={year} month={month} day={day}"
+        );
+        return dt;
+    };
+    date.and_time(dt.time())
 }
 
 fn last_day_of_month(year: i32, month: u32) -> u32 {
@@ -3555,8 +3588,13 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
     } else {
         (year, month + 1)
     };
-    let first_next =
-        NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid date for next month");
+    let Some(first_next) = NaiveDate::from_ymd_opt(next_year, next_month, 1) else {
+        debug_assert!(
+            false,
+            "last_day_of_month failed to construct next month date for year={next_year} month={next_month}"
+        );
+        return 31;
+    };
     (first_next - ChronoDuration::days(1)).day()
 }
 
@@ -3633,7 +3671,10 @@ fn format_datetime_vba(dt: NaiveDateTime, fmt: &str) -> String {
             out.push_str("%p");
             i += 5;
         } else {
-            let ch = rest.chars().next().unwrap();
+            let Some(ch) = rest.chars().next() else {
+                debug_assert!(false, "format string remainder unexpectedly empty at byte {i}");
+                break;
+            };
             out.push(ch);
             i += ch.len_utf8();
         }
