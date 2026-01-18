@@ -96,10 +96,10 @@ pub fn extract_encryption_info_xml<'a>(
         if len > 0 && len <= available {
             if let Some(end) = 12usize.checked_add(len) {
                 if let Some(candidate) = encryption_info_stream.get(12..end) {
-                if candidate_looks_like_xml(candidate) {
-                    xml = candidate;
+                    if candidate_looks_like_xml(candidate) {
+                        xml = candidate;
+                    }
                 }
-            }
             }
         }
     }
