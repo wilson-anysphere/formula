@@ -136,10 +136,10 @@ fn detect_mime_type(file: &mut fs::File, path: &str, len: u64) -> io::Result<(St
 }
 
 fn random_boundary() -> String {
-    let mut x = [0_u8; 30];
+    let mut bytes = [0_u8; 30];
     // `rand_core` is already a dependency of the desktop backend.
-    rand_core::OsRng.fill_bytes(&mut x);
-    x.iter().map(|b| format!("{b:x}")).collect::<String>()
+    rand_core::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 /// Pure-Rust `asset://` file responder.
