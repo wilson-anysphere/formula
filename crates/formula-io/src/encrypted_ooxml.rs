@@ -53,7 +53,7 @@ pub(crate) fn decrypted_package_reader<R: Read + Seek>(
     password: &str,
 ) -> Result<DecryptedPackageReader<R>, DecryptError> {
     ensure_decrypted_package_len_is_within_limits(plaintext_len)?;
-    if encryption_info.len() < 4 {
+    if encryption_info.len() < 8 {
         return Err(DecryptError::InvalidInfo(
             "EncryptionInfo truncated (missing version header)".to_string(),
         ));
@@ -89,7 +89,7 @@ pub(crate) fn decrypt_encrypted_package(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, DecryptError> {
-    if encryption_info.len() < 4 {
+    if encryption_info.len() < 8 {
         return Err(DecryptError::InvalidInfo(
             "EncryptionInfo truncated (missing version header)".to_string(),
         ));

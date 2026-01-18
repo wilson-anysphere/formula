@@ -3902,8 +3902,13 @@ fn decrypt_encrypted_ooxml_package(
             }
             let verifier = &verifier_plain[..16];
             let hash_len = verifier_hash_size as usize;
+            let Some(hash_end) = 16usize.checked_add(hash_len) else {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            };
             let decrypted_hash = verifier_plain
-                .get(16..16 + hash_len)
+                .get(16..hash_end)
                 .ok_or_else(|| Error::InvalidPassword {
                     path: path.to_path_buf(),
                 })?;
