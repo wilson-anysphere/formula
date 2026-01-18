@@ -692,7 +692,21 @@ fn run(args: &Args) -> TriageOutput {
 
             output
         }
-        WorkbookFormat::Auto => unreachable!("auto resolved earlier"),
+        WorkbookFormat::Auto => {
+            debug_assert!(false, "WorkbookFormat::Auto should be resolved before triage");
+            let start = Instant::now();
+            output.steps.insert(
+                "load".to_string(),
+                StepResult::failed(start, "internal error: workbook format unresolved"),
+            );
+            output.result.open_ok = false;
+            for step in ["recalc", "render", "round_trip", "diff"] {
+                output
+                    .steps
+                    .insert(step.to_string(), StepResult::skipped("open_failed"));
+            }
+            output
+        }
     }
 }
 
