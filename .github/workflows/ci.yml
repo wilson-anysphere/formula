@@ -32,6 +32,8 @@ jobs:
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: TOML files parse cleanly"
         run: python3 scripts/ci/check-toml-validity.py
+      - name: "Guard: production Rust code avoids panic-style constructs"
+        run: python3 scripts/ci/check-no-production-panics.py
       - name: "Guard: workflow actions are pinned to commit SHAs"
         run: bash scripts/ci/check-gha-action-sha-pins.sh .github/workflows
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
