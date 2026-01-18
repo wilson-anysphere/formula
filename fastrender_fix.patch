@@ -1,0 +1,1351 @@
+From d60de13b3c8180727fd081a377fb574f76dee1bb Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 07:46:16 -0800
+Subject: [PATCH] fix: stabilize non-macOS harness grid percent bases and
+ fragmentation
+
+- Drop selector parity test module that referenced a blocked legacy CSS parser crate\n- Add inline/block percentage bases to minimal LayoutConstraints and propagate via thread-local hints\n- Implement grid row/column gaps in the minimal grid layout (track ranges exclude gutters)\n- Sort grid track bands in fragmentation-axis flow order for orthogonal writing modes\n- Preserve unpaired surrogate \uXXXX sequences in JS escape unescaper\n- Keep WebSocket crate cfg/feature shims consistent for snapshot builds
+---
+ Cargo.lock                               |   5 +-
+ crates/fastrender-websocket/Cargo.toml   |   7 +-
+ src/css/selector/matcher_parity_tests.rs | 515 -----------------------
+ src/css/selector/mod.rs                  |   2 -
+ src/layout/fragmentation.rs              |  93 ++--
+ src/layout_minimal/constraints.rs        |  17 +-
+ src/layout_minimal/contexts/block.rs     |   8 +-
+ src/layout_minimal/contexts/flex.rs      |   8 +-
+ src/layout_minimal/contexts/grid.rs      |   8 +-
+ src/layout_minimal/engine.rs             | 172 ++++++--
+ src/layout_minimal/formatting_context.rs |  43 ++
+ src/lib_non_macos_impl.rs                |   3 -
+ src/net/websocket/mod.rs                 |   3 +-
+ src/net/websocket/stream.rs              |   1 -
+ src/svg_preprocess.rs                    |   9 +
+ src/svg_render/attributes.rs             |   2 +
+ src/svg_style.rs                         |  12 +
+ src/utils/js_escapes.rs                  |  26 +-
+ 18 files changed, 335 insertions(+), 599 deletions(-)
+ delete mode 100644 src/css/selector/matcher_parity_tests.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 9bad4fd80..899df02b5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2359,13 +2359,14 @@ dependencies = [
+ 
+ [[package]]
+ name = "proptest"
+-version = "1.9.0"
++version = "1.8.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "bee689443a2bd0a16ab0348b52ee43e3b2d1b1f931c8aa5c9f8de4c86fbe8c40"
++checksum = "2bb0be07becd10686a0bb407298fb425360a5c44a663774406340c59a22de4ce"
+ dependencies = [
+  "bit-set",
+  "bit-vec",
+  "bitflags 2.10.0",
++ "lazy_static",
+  "num-traits",
+  "rand 0.9.2",
+  "rand_chacha 0.9.0",
+diff --git a/crates/fastrender-websocket/Cargo.toml b/crates/fastrender-websocket/Cargo.toml
+index 7cf8b69b5..e9a4ce224 100644
+--- a/crates/fastrender-websocket/Cargo.toml
++++ b/crates/fastrender-websocket/Cargo.toml
+@@ -6,16 +6,13 @@ publish = false
+ 
+ [features]
+ default = ["websocket_proptests"]
+-# Keep `cfg(feature = "renderer")` checks in shared sources quiet when this crate is built
+-# standalone (it does not ship the full renderer graph).
++# Compatibility shims for renderer-only cfg flags used in shared sources.
+ renderer = []
++renderer_minimal = []
+ # Compatibility shim: the shared in-tree WebSocket sources gate some helpers on the
+ # `renderer_integration_tests` feature. Define the flag here so `check-cfg` lints stay quiet when the
+ # modules are compiled via `#[path]`.
+ renderer_integration_tests = []
+-# Compatibility shims for renderer-only cfg flags used in shared sources.
+-renderer = []
+-renderer_minimal = []
+ # Tokio-backed async `AsyncWebSocket` wrapper (only `io-util` traits).
+ websocket_async = ["dep:tokio"]
+ # Enable property-based tests for frame/message codecs.
+diff --git a/src/css/selector/matcher_parity_tests.rs b/src/css/selector/matcher_parity_tests.rs
+deleted file mode 100644
+index 77b38f5c2..000000000
+--- a/src/css/selector/matcher_parity_tests.rs
++++ /dev/null
+@@ -1,515 +0,0 @@
+-use super::ast::{
+-  AttrSelector as AstAttrSelector, AttrSelectorOperator as AstAttrSelectorOperator, Combinator,
+-  CompoundSelector, KnownPseudoClass, NamespaceConstraint, PseudoClassSelector, Selector,
+-  SelectorList as InternalSelectorList, SimpleSelector, TypeSelector,
+-};
+-use super::parse_selector_list;
+-use crate::css::selector::attr::{AttrSelectorOperator as EvalAttrSelectorOperator, CaseSensitivity};
+-use crate::css::selectors::{FastRenderSelectorImpl, PseudoClass, PseudoClassParser, ShadowMatchData};
+-use crate::dom::{next_selector_cache_epoch, DomNode, DomNodeType, ElementRef, HTML_NAMESPACE, ShadowRootMode};
+-use cssparser::{Parser, ParserInput};
+-use selectors::context::{QuirksMode, SelectorCaches};
+-use selectors::matching::{
+-  matches_selector, MatchingContext, MatchingForInvalidation, MatchingMode, NeedsSelectorFlags,
+-};
+-use selectors::parser::{ParseRelative, SelectorList as ServoSelectorList};
+-use selectors::Element;
+-use std::ptr;
+-
+-#[derive(Clone, Copy)]
+-struct InternalMatchContext {
+-  scope: Option<*const DomNode>,
+-}
+-
+-impl InternalMatchContext {
+-  fn new(scope: Option<&DomNode>) -> Self {
+-    Self {
+-      scope: scope.map(|node| node as *const DomNode),
+-    }
+-  }
+-
+-  fn is_scope(self, element: ElementRef) -> bool {
+-    self
+-      .scope
+-      .is_some_and(|scope| ptr::eq(scope, element.node as *const DomNode))
+-  }
+-}
+-
+-#[derive(Debug)]
+-struct SelectorCase {
+-  text: &'static str,
+-  internal: InternalSelectorList,
+-  servo: ServoSelectorList<FastRenderSelectorImpl>,
+-}
+-
+-#[derive(Debug)]
+-struct ElementCase<'a> {
+-  node: &'a DomNode,
+-  ancestors: Vec<&'a DomNode>,
+-  label: String,
+-}
+-
+-#[derive(Debug)]
+-struct Fixture {
+-  name: &'static str,
+-  root: DomNode,
+-  scope_id: &'static str,
+-}
+-
+-fn element(tag: &str, attrs: &[(&str, &str)], children: Vec<DomNode>) -> DomNode {
+-  DomNode {
+-    node_type: DomNodeType::Element {
+-      tag_name: tag.to_string(),
+-      namespace: HTML_NAMESPACE.to_string(),
+-      attributes: attrs
+-        .iter()
+-        .map(|(name, value)| (name.to_string(), value.to_string()))
+-        .collect(),
+-    },
+-    children,
+-  }
+-}
+-
+-fn shadow_root(children: Vec<DomNode>) -> DomNode {
+-  DomNode {
+-    node_type: DomNodeType::ShadowRoot {
+-      mode: ShadowRootMode::Open,
+-      delegates_focus: false,
+-    },
+-    children,
+-  }
+-}
+-
+-fn basic_fixture() -> Fixture {
+-  Fixture {
+-    name: "basic",
+-    scope_id: "root",
+-    root: element(
+-      "div",
+-      &[("id", "root"), ("class", "root"), ("data-kind", "container")],
+-      vec![
+-        element(
+-          "div",
+-          &[("id", "parent"), ("class", "p"), ("data-kind", "alpha")],
+-          vec![
+-            element(
+-              "span",
+-              &[("id", "child1"), ("class", "foo bar"), ("data-role", "x")],
+-              vec![],
+-            ),
+-            element(
+-              "span",
+-              &[("id", "child2"), ("class", "foo baz"), ("data-role", "y")],
+-              vec![],
+-            ),
+-            element(
+-              "a",
+-              &[("id", "child3"), ("class", "link"), ("href", "#")],
+-              vec![],
+-            ),
+-          ],
+-        ),
+-        element(
+-          "p",
+-          &[("id", "sibling"), ("class", "sib")],
+-          vec![element("span", &[("id", "sib-child"), ("class", "foo")], vec![])],
+-        ),
+-      ],
+-    ),
+-  }
+-}
+-
+-fn shadow_fixture() -> Fixture {
+-  Fixture {
+-    name: "shadow-root",
+-    scope_id: "host",
+-    root: element(
+-      "section",
+-      &[("id", "outer"), ("class", "outer")],
+-      vec![element(
+-        "div",
+-        &[("id", "host"), ("class", "host")],
+-        vec![
+-          shadow_root(vec![element(
+-            "span",
+-            &[("id", "shadow-child"), ("class", "inside")],
+-            vec![],
+-          )]),
+-          element(
+-            "span",
+-            &[("id", "light-child"), ("class", "inside")],
+-            vec![],
+-          ),
+-        ],
+-      )],
+-    ),
+-  }
+-}
+-
+-fn selector_cases() -> Vec<SelectorCase> {
+-  let selectors = [
+-    "div",
+-    "#parent",
+-    ".foo",
+-    "span.foo.bar",
+-    "[data-role]",
+-    "[data-role=\"x\"]",
+-    "#parent > span",
+-    "#parent span",
+-    "span + span",
+-    "span ~ a",
+-    ":scope",
+-    ":scope > #parent",
+-    ":scope .foo",
+-    ":scope > #parent > span.foo",
+-    "span:is(#parent > span, .foo)",
+-    "span.foo:where(.bar, .baz)",
+-    "span.foo:not(.baz)",
+-    "span.foo:not(:is(.bar, .baz))",
+-    "div:is(.p, :where(.sib, :not(.missing)))",
+-    "#host .inside",
+-    "#host > .inside",
+-    "#outer .inside",
+-    ":scope .inside",
+-    ":scope > .inside",
+-  ];
+-
+-  selectors
+-    .iter()
+-    .map(|text| SelectorCase {
+-      text,
+-      internal: parse_selector_list(text)
+-        .unwrap_or_else(|err| panic!("internal selector parse failed for {text:?}: {err:?}")),
+-      servo: parse_servo_selector_list(text),
+-    })
+-    .collect()
+-}
+-
+-fn parse_servo_selector_list(text: &str) -> ServoSelectorList<FastRenderSelectorImpl> {
+-  let mut input = ParserInput::new(text);
+-  let mut parser = Parser::new(&mut input);
+-  ServoSelectorList::parse(&PseudoClassParser, &mut parser, ParseRelative::No)
+-    .unwrap_or_else(|err| panic!("servo selector parse failed for {text:?}: {err:?}"))
+-}
+-
+-fn collect_elements<'a>(
+-  node: &'a DomNode,
+-  ancestors: &mut Vec<&'a DomNode>,
+-  out: &mut Vec<ElementCase<'a>>,
+-) {
+-  if node.is_element() {
+-    out.push(ElementCase {
+-      node,
+-      ancestors: ancestors.clone(),
+-      label: element_label(node),
+-    });
+-  }
+-
+-  ancestors.push(node);
+-  for child in node.traversal_children().iter() {
+-    collect_elements(child, ancestors, out);
+-  }
+-  ancestors.pop();
+-}
+-
+-fn element_label(node: &DomNode) -> String {
+-  let tag = node.tag_name().unwrap_or("unknown");
+-  if let Some(id) = node.get_attribute_ref("id") {
+-    format!("{tag}#{id}")
+-  } else {
+-    tag.to_string()
+-  }
+-}
+-
+-fn find_node_with_ancestors<'a>(
+-  node: &'a DomNode,
+-  id: &str,
+-  ancestors: &mut Vec<&'a DomNode>,
+-) -> Option<(&'a DomNode, Vec<&'a DomNode>)> {
+-  if node
+-    .get_attribute_ref("id")
+-    .is_some_and(|value| value == id)
+-  {
+-    return Some((node, ancestors.clone()));
+-  }
+-
+-  ancestors.push(node);
+-  for child in node.traversal_children().iter() {
+-    if let Some(found) = find_node_with_ancestors(child, id, ancestors) {
+-      ancestors.pop();
+-      return Some(found);
+-    }
+-  }
+-  ancestors.pop();
+-  None
+-}
+-
+-fn servo_matches(
+-  selector_list: &ServoSelectorList<FastRenderSelectorImpl>,
+-  element: ElementRef,
+-  scope: ElementRef,
+-) -> bool {
+-  let mut caches = SelectorCaches::default();
+-  caches.set_epoch(next_selector_cache_epoch());
+-  let mut context = MatchingContext::new(
+-    MatchingMode::Normal,
+-    Some(scope.opaque()),
+-    &mut caches,
+-    QuirksMode::NoQuirks,
+-    NeedsSelectorFlags::No,
+-    MatchingForInvalidation::No,
+-  );
+-  context.extra_data = ShadowMatchData::for_document();
+-  selector_list
+-    .slice()
+-    .iter()
+-    .any(|selector| matches_selector(selector, 0, None, &element, &mut context))
+-}
+-
+-fn internal_matches_selector_list(
+-  list: &InternalSelectorList,
+-  element: ElementRef,
+-  ctx: InternalMatchContext,
+-) -> bool {
+-  list
+-    .0
+-    .iter()
+-    .any(|selector| internal_matches_selector(selector, element, ctx))
+-}
+-
+-fn internal_matches_selector(selector: &Selector, element: ElementRef, ctx: InternalMatchContext) -> bool {
+-  let Some(subject) = selector.steps.last() else {
+-    return false;
+-  };
+-  if !matches_compound(&subject.compound, element, ctx) {
+-    return false;
+-  }
+-
+-  let mut current = element;
+-  for right_index in (1..selector.steps.len()).rev() {
+-    let Some(combinator) = selector.steps[right_index].combinator_to_left else {
+-      return false;
+-    };
+-    let left = &selector.steps[right_index - 1].compound;
+-    match combinator {
+-      Combinator::Descendant => {
+-        let mut ancestor = current.parent_element();
+-        let mut found = None;
+-        while let Some(node) = ancestor {
+-          if matches_compound(left, node, ctx) {
+-            found = Some(node);
+-            break;
+-          }
+-          ancestor = node.parent_element();
+-        }
+-        let Some(node) = found else {
+-          return false;
+-        };
+-        current = node;
+-      }
+-      Combinator::Child => {
+-        let Some(parent) = current.parent_element() else {
+-          return false;
+-        };
+-        if !matches_compound(left, parent, ctx) {
+-          return false;
+-        }
+-        current = parent;
+-      }
+-      Combinator::NextSibling => {
+-        let Some(prev) = current.prev_sibling_element() else {
+-          return false;
+-        };
+-        if !matches_compound(left, prev, ctx) {
+-          return false;
+-        }
+-        current = prev;
+-      }
+-      Combinator::LaterSibling => {
+-        let mut sibling = current.prev_sibling_element();
+-        let mut found = None;
+-        while let Some(node) = sibling {
+-          if matches_compound(left, node, ctx) {
+-            found = Some(node);
+-            break;
+-          }
+-          sibling = node.prev_sibling_element();
+-        }
+-        let Some(node) = found else {
+-          return false;
+-        };
+-        current = node;
+-      }
+-    }
+-  }
+-
+-  if let Some(leading) = selector.steps.first().and_then(|step| step.combinator_to_left) {
+-    return matches_scope_relation(current, leading, ctx);
+-  }
+-
+-  true
+-}
+-
+-fn matches_scope_relation(element: ElementRef, combinator: Combinator, ctx: InternalMatchContext) -> bool {
+-  let Some(scope) = ctx.scope else {
+-    return false;
+-  };
+-  match combinator {
+-    Combinator::Descendant => {
+-      let mut ancestor = element.parent_element();
+-      while let Some(node) = ancestor {
+-        if ptr::eq(scope, node.node as *const DomNode) {
+-          return true;
+-        }
+-        ancestor = node.parent_element();
+-      }
+-      false
+-    }
+-    Combinator::Child => element
+-      .parent_element()
+-      .is_some_and(|parent| ptr::eq(scope, parent.node as *const DomNode)),
+-    Combinator::NextSibling => element
+-      .prev_sibling_element()
+-      .is_some_and(|prev| ptr::eq(scope, prev.node as *const DomNode)),
+-    Combinator::LaterSibling => {
+-      let mut sibling = element.prev_sibling_element();
+-      while let Some(node) = sibling {
+-        if ptr::eq(scope, node.node as *const DomNode) {
+-          return true;
+-        }
+-        sibling = node.prev_sibling_element();
+-      }
+-      false
+-    }
+-  }
+-}
+-
+-fn matches_compound(compound: &CompoundSelector, element: ElementRef, ctx: InternalMatchContext) -> bool {
+-  if let Some(type_selector) = &compound.type_selector {
+-    if !matches_type_selector(type_selector, element) {
+-      return false;
+-    }
+-  }
+-
+-  for simple in compound.simple_selectors.iter() {
+-    if !matches_simple_selector(simple, element, ctx) {
+-      return false;
+-    }
+-  }
+-
+-  true
+-}
+-
+-fn matches_type_selector(selector: &TypeSelector, element: ElementRef) -> bool {
+-  match selector {
+-    TypeSelector::Universal(namespace) => matches_namespace_constraint(namespace, element),
+-    TypeSelector::Tag {
+-      namespace,
+-      local_name,
+-    } => matches_namespace_constraint(namespace, element) && element.has_local_name(local_name),
+-  }
+-}
+-
+-fn matches_namespace_constraint(namespace: &NamespaceConstraint, element: ElementRef) -> bool {
+-  match namespace {
+-    NamespaceConstraint::Any => true,
+-    NamespaceConstraint::None => element.has_namespace(crate::dom::NULL_NAMESPACE),
+-    NamespaceConstraint::Specific(url) => element.has_namespace(url),
+-  }
+-}
+-
+-fn matches_simple_selector(simple: &SimpleSelector, element: ElementRef, ctx: InternalMatchContext) -> bool {
+-  match simple {
+-    SimpleSelector::Id(id) => element.node.get_attribute_ref("id").is_some_and(|value| value == id),
+-    SimpleSelector::Class(class) => element
+-      .node
+-      .get_attribute_ref("class")
+-      .is_some_and(|value| value.split_ascii_whitespace().any(|item| item == class)),
+-    SimpleSelector::Attribute(attr) => matches_attr_selector(attr, element),
+-    SimpleSelector::PseudoClass(pseudo) => matches_pseudo_class(pseudo, element, ctx),
+-    SimpleSelector::PseudoElement(_) => false,
+-  }
+-}
+-
+-fn matches_attr_selector(attr: &AstAttrSelector, element: ElementRef) -> bool {
+-  match &attr.namespace {
+-    NamespaceConstraint::Any | NamespaceConstraint::None => {}
+-    NamespaceConstraint::Specific(_) => return false,
+-  }
+-
+-  let Some(attr_value) = element.node.get_attribute_ref(&attr.local_name) else {
+-    return false;
+-  };
+-
+-  if matches!(attr.operator, AstAttrSelectorOperator::Exists) {
+-    return true;
+-  }
+-
+-  let Some(selector_value) = attr.value.as_ref() else {
+-    return false;
+-  };
+-
+-  let case_sensitivity = attr
+-    .case_sensitivity
+-    .unwrap_or(CaseSensitivity::CaseSensitive);
+-  let operator = match attr.operator {
+-    AstAttrSelectorOperator::Equals => EvalAttrSelectorOperator::Equal,
+-    AstAttrSelectorOperator::Includes => EvalAttrSelectorOperator::Includes,
+-    AstAttrSelectorOperator::DashMatch => EvalAttrSelectorOperator::DashMatch,
+-    AstAttrSelectorOperator::Prefix => EvalAttrSelectorOperator::Prefix,
+-    AstAttrSelectorOperator::Suffix => EvalAttrSelectorOperator::Suffix,
+-    AstAttrSelectorOperator::Substring => EvalAttrSelectorOperator::Substring,
+-    AstAttrSelectorOperator::Exists => EvalAttrSelectorOperator::Equal,
+-  };
+-
+-  operator.eval_str(attr_value, selector_value, case_sensitivity)
+-}
+-
+-fn matches_pseudo_class(pseudo: &PseudoClassSelector, element: ElementRef, ctx: InternalMatchContext) -> bool {
+-  match pseudo {
+-    PseudoClassSelector::Known(pseudo) => matches_known_pseudo_class(pseudo, element, ctx),
+-    PseudoClassSelector::Is(list) | PseudoClassSelector::Where(list) => {
+-      list.0.iter().any(|selector| internal_matches_selector(selector, element, ctx))
+-    }
+-    PseudoClassSelector::Not(list) => {
+-      !list.0.iter().any(|selector| internal_matches_selector(selector, element, ctx))
+-    }
+-    _ => false,
+-  }
+-}
+-
+-fn matches_known_pseudo_class(pseudo: &KnownPseudoClass, element: ElementRef, ctx: InternalMatchContext) -> bool {
+-  match pseudo.as_pseudo_class() {
+-    PseudoClass::Scope => ctx.is_scope(element),
+-    PseudoClass::Root => element.parent_element().is_none(),
+-    _ => false,
+-  }
+-}
+-
+-#[test]
+-fn matcher_parity_matches_servo_for_supported_subset() {
+-  let selector_cases = selector_cases();
+-  let fixtures = [basic_fixture(), shadow_fixture()];
+-
+-  for fixture in fixtures.iter() {
+-    let mut elements = Vec::new();
+-    collect_elements(&fixture.root, &mut Vec::new(), &mut elements);
+-    let (scope_node, scope_ancestors) = find_node_with_ancestors(&fixture.root, fixture.scope_id, &mut Vec::new())
+-      .unwrap_or_else(|| panic!("missing scope id '{}' in fixture '{}'", fixture.scope_id, fixture.name));
+-    let scope_ref = ElementRef::with_ancestors(scope_node, &scope_ancestors);
+-    let internal_ctx = InternalMatchContext::new(Some(scope_node));
+-
+-    for element_case in elements.iter() {
+-      let element_ref = ElementRef::with_ancestors(element_case.node, &element_case.ancestors);
+-      for selector in selector_cases.iter() {
+-        let servo_match = servo_matches(&selector.servo, element_ref, scope_ref);
+-        let internal_match = internal_matches_selector_list(&selector.internal, element_ref, internal_ctx);
+-        assert_eq!(
+-          servo_match, internal_match,
+-          "matcher mismatch in fixture '{}': selector {:?} element {}",
+-          fixture.name, selector.text, element_case.label
+-        );
+-      }
+-    }
+-  }
+-}
+diff --git a/src/css/selector/mod.rs b/src/css/selector/mod.rs
+index 14a20a6f2..b2b3df4c3 100644
+--- a/src/css/selector/mod.rs
++++ b/src/css/selector/mod.rs
+@@ -168,5 +168,3 @@ mod matcher_attr_case_test;
+ mod has_tests;
+ #[cfg(test)]
+ mod pruning_compare_tests;
+-#[cfg(test)]
+-mod matcher_parity_tests;
+diff --git a/src/layout/fragmentation.rs b/src/layout/fragmentation.rs
+index 31360e2b3..e258dd050 100644
+--- a/src/layout/fragmentation.rs
++++ b/src/layout/fragmentation.rs
+@@ -1362,6 +1362,37 @@ fn grid_tracks_in_fragmentation_axis<'a>(
+   }
+ }
+ 
++fn grid_tracks_sorted_in_flow_order(
++  tracks: &[(f32, f32)],
++  axis: &FragmentAxis,
++  parent_block_size: f32,
++) -> Vec<(f32, f32)> {
++  if tracks.len() < 2 || !parent_block_size.is_finite() {
++    return tracks.to_vec();
++  }
++
++  let mut keyed: Vec<(usize, f32, (f32, f32))> = Vec::with_capacity(tracks.len());
++  for (idx, &(track_start, track_end)) in tracks.iter().enumerate() {
++    let track_size = (track_end - track_start).max(0.0);
++    let flow_start = axis.flow_offset(track_start, track_size, parent_block_size);
++    let key = if flow_start.is_finite() {
++      flow_start
++    } else {
++      f32::INFINITY
++    };
++    keyed.push((idx, key, (track_start, track_end)));
++  }
++
++  keyed.sort_by(|(idx_a, key_a, _), (idx_b, key_b, _)| {
++    key_a
++      .partial_cmp(key_b)
++      .unwrap_or(std::cmp::Ordering::Equal)
++      .then_with(|| idx_a.cmp(idx_b))
++  });
++
++  keyed.into_iter().map(|(_, _, range)| range).collect()
++}
++
+ #[cfg(debug_assertions)]
+ pub(crate) fn debug_assert_grid_tracks_in_flow_order(
+   tracks: &[(f32, f32)],
+@@ -5648,7 +5679,8 @@ fn collect_atomic_candidate_for_node(
+   if matches!(style.display, Display::Grid | Display::InlineGrid) {
+     if let Some(grid_tracks) = node.grid_tracks.as_deref() {
+       let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
+-      debug_assert_grid_tracks_in_flow_order(tracks, axis, node_block_size);
++      let tracks = grid_tracks_sorted_in_flow_order(tracks, axis, node_block_size);
++      debug_assert_grid_tracks_in_flow_order(&tracks, axis, node_block_size);
+ 
+       // Treat each grid track as indivisible. Additionally, treat the inter-track gutter preceding
+       // each track as part of the following track so pagination never splits a `row-gap`/`column-gap`
+@@ -5881,7 +5913,8 @@ fn collect_atomic_range_for_node(
+   if matches!(style.display, Display::Grid | Display::InlineGrid) {
+     if let Some(grid_tracks) = node.grid_tracks.as_deref() {
+       let tracks = grid_tracks_in_fragmentation_axis(grid_tracks, axis);
+-      debug_assert_grid_tracks_in_flow_order(tracks, axis, node_block_size);
++      let tracks = grid_tracks_sorted_in_flow_order(tracks, axis, node_block_size);
++      debug_assert_grid_tracks_in_flow_order(&tracks, axis, node_block_size);
+ 
+       // Treat each grid track as indivisible. Additionally, treat the inter-track gutter preceding
+       // each track as part of the following track so pagination never splits a `row-gap`/`column-gap`
+@@ -6920,16 +6953,20 @@ mod tests {
+     second_style.break_before = BreakBetween::Left;
+     let second_style = Arc::new(second_style);
+ 
++    let mut first =
++      FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], first_style);
++    first.content = FragmentContent::Block { box_id: Some(1) };
++
++    let mut second = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      second_style,
++    );
++    second.content = FragmentContent::Block { box_id: Some(2) };
++
+     let mut grid = FragmentNode::new_block_styled(
+       Rect::from_xywh(0.0, 0.0, 100.0, 120.0),
+-      vec![
+-        FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], first_style),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          second_style,
+-        ),
+-      ],
++      vec![first, second],
+       grid_style,
+     );
+     grid.grid_tracks = Some(Arc::new(GridTrackRanges {
+@@ -7498,21 +7535,27 @@ mod tests {
+     left_again_style.break_before = BreakBetween::Left;
+     let left_again_style = Arc::new(left_again_style);
+ 
++    let mut left =
++      FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], left_style);
++    left.content = FragmentContent::Block { box_id: Some(1) };
++
++    let mut right = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      right_style,
++    );
++    right.content = FragmentContent::Block { box_id: Some(2) };
++
++    let mut left_again = FragmentNode::new_block_styled(
++      Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
++      vec![],
++      left_again_style,
++    );
++    left_again.content = FragmentContent::Block { box_id: Some(3) };
++
+     let mut grid = FragmentNode::new_block_styled(
+       Rect::from_xywh(0.0, 0.0, 100.0, 120.0),
+-      vec![
+-        FragmentNode::new_block_styled(Rect::from_xywh(0.0, 0.0, 100.0, 60.0), vec![], left_style),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          right_style,
+-        ),
+-        FragmentNode::new_block_styled(
+-          Rect::from_xywh(0.0, 60.0, 100.0, 60.0),
+-          vec![],
+-          left_again_style,
+-        ),
+-      ],
++      vec![left, right, left_again],
+       grid_style,
+     );
+     grid.grid_tracks = Some(Arc::new(GridTrackRanges {
+@@ -8839,7 +8882,9 @@ mod tests {
+     let mut first = FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 10.0), vec![]);
+     first.style = Some(break_style);
+     let second = FragmentNode::new_block(Rect::from_xywh(0.0, 10.0, 100.0, 10.0), vec![]);
+-    let item = FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 20.0), vec![first, second]);
++    let mut item =
++      FragmentNode::new_block(Rect::from_xywh(0.0, 0.0, 100.0, 20.0), vec![first, second]);
++    item.content = FragmentContent::Block { box_id: Some(1) };
+ 
+     let mut grid_style = ComputedStyle::default();
+     grid_style.display = Display::Grid;
+diff --git a/src/layout_minimal/constraints.rs b/src/layout_minimal/constraints.rs
+index e6a12299a..7816567d8 100644
+--- a/src/layout_minimal/constraints.rs
++++ b/src/layout_minimal/constraints.rs
+@@ -30,6 +30,15 @@ impl AvailableSpace {
+ pub struct LayoutConstraints {
+   pub available_width: AvailableSpace,
+   pub available_height: AvailableSpace,
++  /// Percentage base for resolving values that depend on the containing block's inline size.
++  ///
++  /// The minimal non-macOS layout harness keeps available sizes in physical coordinates
++  /// (`available_width` = physical X, `available_height` = physical Y). Some regression tests need to
++  /// resolve percentage lengths even when the available size is `Indefinite`, so we carry explicit
++  /// bases separately rather than forcing `available_*` to be definite.
++  pub inline_percentage_base: Option<f32>,
++  /// Percentage base for resolving values that depend on the containing block's block size.
++  pub block_percentage_base: Option<f32>,
+ }
+ 
+ impl LayoutConstraints {
+@@ -37,6 +46,8 @@ impl LayoutConstraints {
+     Self {
+       available_width,
+       available_height,
++      inline_percentage_base: None,
++      block_percentage_base: None,
+     }
+   }
+ 
+@@ -55,11 +66,13 @@ impl LayoutConstraints {
+     )
+   }
+ 
+-  pub fn with_block_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_block_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.block_percentage_base = base;
+     self
+   }
+ 
+-  pub fn with_inline_percentage_base(self, _base: Option<f32>) -> Self {
++  pub fn with_inline_percentage_base(mut self, base: Option<f32>) -> Self {
++    self.inline_percentage_base = base;
+     self
+   }
+ }
+diff --git a/src/layout_minimal/contexts/block.rs b/src/layout_minimal/contexts/block.rs
+index 89a75b40b..b0dcff98f 100644
+--- a/src/layout_minimal/contexts/block.rs
++++ b/src/layout_minimal/contexts/block.rs
+@@ -1,6 +1,8 @@
+ use crate::layout::constraints::LayoutConstraints;
+ use crate::layout::engine::{LayoutConfig, LayoutEngine, LayoutParallelism};
+-use crate::layout::formatting_context::{FormattingContext, LayoutError};
++use crate::layout::formatting_context::{
++  set_percentage_base_hint, FormattingContext, LayoutError, PercentageBases,
++};
+ use crate::tree::box_tree::{BoxNode, BoxTree};
+ use crate::tree::fragment_tree::FragmentNode;
+ 
+@@ -23,6 +25,10 @@ impl BlockFormattingContext {
+ 
+   pub fn layout(&self, box_node: &BoxNode, constraints: &LayoutConstraints) -> Result<FragmentNode, LayoutError> {
+     let _ = self.parallelism;
++    let _percentage_base_guard = set_percentage_base_hint(PercentageBases {
++      inline: constraints.inline_percentage_base,
++      block: constraints.block_percentage_base,
++    });
+     let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree).map(|tree| tree.root)
+diff --git a/src/layout_minimal/contexts/flex.rs b/src/layout_minimal/contexts/flex.rs
+index 49d88080c..f8b447782 100644
+--- a/src/layout_minimal/contexts/flex.rs
++++ b/src/layout_minimal/contexts/flex.rs
+@@ -17,7 +17,9 @@ pub mod gap;
+ 
+ use crate::layout::constraints::LayoutConstraints;
+ use crate::layout::engine::{LayoutConfig, LayoutEngine, LayoutParallelism};
+-use crate::layout::formatting_context::{FormattingContext, LayoutError};
++use crate::layout::formatting_context::{
++  set_percentage_base_hint, FormattingContext, LayoutError, PercentageBases,
++};
+ use crate::tree::box_tree::{BoxNode, BoxTree};
+ use crate::tree::fragment_tree::FragmentNode;
+ 
+@@ -44,6 +46,10 @@ impl FlexFormattingContext {
+ 
+   pub fn layout(&self, box_node: &BoxNode, constraints: &LayoutConstraints) -> Result<FragmentNode, LayoutError> {
+     let _ = self.parallelism;
++    let _percentage_base_guard = set_percentage_base_hint(PercentageBases {
++      inline: constraints.inline_percentage_base,
++      block: constraints.block_percentage_base,
++    });
+     let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree).map(|tree| tree.root)
+diff --git a/src/layout_minimal/contexts/grid.rs b/src/layout_minimal/contexts/grid.rs
+index cbe0a1142..0640d088e 100644
+--- a/src/layout_minimal/contexts/grid.rs
++++ b/src/layout_minimal/contexts/grid.rs
+@@ -10,7 +10,9 @@ use crate::geometry::Point;
+ use crate::layout::axis::{FragmentAxes, PhysicalAxis};
+ use crate::layout::constraints::{AvailableSpace, LayoutConstraints};
+ use crate::layout::engine::{LayoutConfig, LayoutEngine, LayoutParallelism};
+-use crate::layout::formatting_context::{FormattingContext, IntrinsicSizingMode, LayoutError};
++use crate::layout::formatting_context::{
++  set_percentage_base_hint, FormattingContext, IntrinsicSizingMode, LayoutError, PercentageBases,
++};
+ use crate::style::types::GridTrack;
+ use crate::tree::box_tree::{BoxNode, BoxTree};
+ use crate::tree::fragment_tree::{FragmentNode, FragmentTree};
+@@ -39,6 +41,10 @@ impl GridFormattingContext {
+     constraints: &LayoutConstraints,
+   ) -> Result<FragmentTree, LayoutError> {
+     let _ = self.parallelism;
++    let _percentage_base_guard = set_percentage_base_hint(PercentageBases {
++      inline: constraints.inline_percentage_base,
++      block: constraints.block_percentage_base,
++    });
+     let engine = LayoutEngine::new(LayoutConfig::new(constraints.available_size()));
+     let tree = BoxTree::new(box_node.clone());
+     engine.layout_tree(&tree)
+diff --git a/src/layout_minimal/engine.rs b/src/layout_minimal/engine.rs
+index 306529dd4..8ebed40d5 100644
+--- a/src/layout_minimal/engine.rs
++++ b/src/layout_minimal/engine.rs
+@@ -15,8 +15,8 @@ use crate::layout::fragmentation::{
+ };
+ use crate::layout::formatting_context::{
+   fragmentainer_axes_hint, fragmentainer_block_offset_hint, fragmentainer_block_size_hint,
+-  set_fragmentainer_axes_hint, set_fragmentainer_block_offset_hint, set_fragmentainer_block_size_hint,
+-  set_viewport_size_hint, viewport_size_hint, LayoutError,
++  percentage_base_hint, set_fragmentainer_axes_hint, set_fragmentainer_block_offset_hint,
++  set_fragmentainer_block_size_hint, set_viewport_size_hint, viewport_size_hint, LayoutError,
+ };
+ use crate::style::display::FormattingContextType;
+ use crate::style::page::PageSide;
+@@ -1456,6 +1456,7 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   let style = node.style.as_ref();
+   let axes = FragmentAxes::from_writing_mode_and_direction(style.writing_mode, style.direction);
+   let viewport = viewport_size_hint().unwrap_or(available);
++  let percentage_bases = percentage_base_hint();
+ 
+   let resolve_track_length = |length: crate::style::values::Length, base: f32| {
+     let base = if base.is_finite() { base.max(0.0) } else { 0.0 };
+@@ -1474,16 +1475,43 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       .unwrap_or_else(|| length.to_px())
+   };
+ 
+-  let inline_base = if axes.block_axis() == PhysicalAxis::X {
++  let mut inline_base = if axes.block_axis() == PhysicalAxis::X {
+     available.height
+   } else {
+     available.width
+   };
+-  let block_base = if axes.block_axis() == PhysicalAxis::X {
++  let mut block_base = if axes.block_axis() == PhysicalAxis::X {
+     available.width
+   } else {
+     available.height
+   };
++  if !inline_base.is_finite() {
++    if let Some(base) = percentage_bases.inline {
++      inline_base = base;
++    }
++  }
++  if !block_base.is_finite() {
++    if let Some(base) = percentage_bases.block {
++      block_base = base;
++    }
++  }
++
++  let sanitize_gap = |gap: f32| {
++    if gap.is_finite() { gap.max(0.0) } else { 0.0 }
++  };
++  // Match the full renderer: percentages in `row-gap`/`column-gap` resolve against the grid
++  // container's inline size. The minimal harness approximates this by using the available inline
++  // size when it is definite (plus optional percentage-base overrides).
++  let row_gap = if style.grid_row_gap_is_normal {
++    0.0
++  } else {
++    sanitize_gap(resolve_track_length(style.grid_row_gap, inline_base))
++  };
++  let column_gap = if style.grid_column_gap_is_normal {
++    0.0
++  } else {
++    sanitize_gap(resolve_track_length(style.grid_column_gap, inline_base))
++  };
+ 
+   // Minimal implicit track sizing: when no explicit template tracks are specified, fall back to the
+   // implicit `grid-auto-*` tracks. If both are missing, default to a single `auto` track. This
+@@ -1588,8 +1616,14 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     row_sizes.push(implicit.max(0.0));
+   }
+ 
+-  let track_block_sum: f32 = row_sizes.iter().sum();
+-  let track_inline_sum: f32 = column_sizes.iter().sum();
++  let track_sum_with_gaps = |sizes: &[f32], gap: f32| {
++    let sum: f32 = sizes.iter().copied().sum();
++    let gap_count = sizes.len().saturating_sub(1) as f32;
++    sum + gap * gap_count
++  };
++
++  let track_block_sum = track_sum_with_gaps(&row_sizes, row_gap);
++  let track_inline_sum = track_sum_with_gaps(&column_sizes, column_gap);
+ 
+   let (track_width, track_height) = if axes.block_axis() == PhysicalAxis::X {
+     (track_block_sum, track_inline_sum)
+@@ -1597,17 +1631,57 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     (track_inline_sum, track_block_sum)
+   };
+ 
++  let width_percentage_base = if axes.inline_axis() == PhysicalAxis::X {
++    inline_base
++  } else {
++    block_base
++  };
++  let height_percentage_base = if axes.inline_axis() == PhysicalAxis::Y {
++    inline_base
++  } else {
++    block_base
++  };
++  let width_percentage_base =
++    width_percentage_base.is_finite().then_some(width_percentage_base.max(0.0));
++  let height_percentage_base =
++    height_percentage_base.is_finite().then_some(height_percentage_base.max(0.0));
++
++  let resolve_container_length = |length: Length, percentage_base: Option<f32>| {
++    length
++      .resolve_px_with_fonts(percentage_base, style.font_size, style.root_font_size)
++      .or_else(|| match length {
++        Length::Calc(calc) => {
++          let base = percentage_base?;
++          if !viewport.width.is_finite() || !viewport.height.is_finite() {
++            return None;
++          }
++          Some(calc.resolve_with_fonts_and_viewport(
++            base,
++            style.font_size,
++            style.root_font_size,
++            viewport.width,
++            viewport.height,
++          ))
++        }
++        _ => None,
++      })
++  };
++
+   let mut width = style
+     .width
+-    .and_then(|length| {
+-      length.resolve_px_with_fonts(Some(available.width), style.font_size, style.root_font_size)
+-    })
+-    .unwrap_or_else(|| if track_width > 0.0 { track_width } else { available.width });
++    .and_then(|length| resolve_container_length(length, width_percentage_base))
++    .unwrap_or_else(|| {
++      if track_width > 0.0 {
++        track_width
++      } else if available.width.is_finite() {
++        available.width
++      } else {
++        0.0
++      }
++    });
+   let mut height = style
+     .height
+-    .and_then(|length| {
+-      length.resolve_px_with_fonts(Some(available.height), style.font_size, style.root_font_size)
+-    })
++    .and_then(|length| resolve_container_length(length, height_percentage_base))
+     .unwrap_or_else(|| if track_height > 0.0 { track_height } else { 0.0 });
+ 
+   // CSS Sizing: if the grid container has a preferred aspect ratio and one axis has a definite used
+@@ -1645,7 +1719,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   // This is required for regression tests that expect a single implicit `auto` row/column to fill
+   // the container and allow default `align-items: stretch` / `justify-items: stretch` to size grid
+   // items.
+-  let mut stretch_auto_tracks = |tracks: &[GridTrack], sizes: &mut [f32], container_size: f32| {
++  let mut stretch_auto_tracks =
++    |tracks: &[GridTrack], sizes: &mut [f32], gap: f32, container_size: f32| {
+     if tracks.is_empty() || sizes.is_empty() || tracks.len() != sizes.len() {
+       return;
+     }
+@@ -1654,7 +1729,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     }
+     let container_size = container_size.max(0.0);
+ 
+-    let total: f32 = sizes.iter().copied().sum();
++    let total_tracks: f32 = sizes.iter().copied().sum();
++    let total = total_tracks + gap * sizes.len().saturating_sub(1) as f32;
+     if !total.is_finite() {
+       return;
+     }
+@@ -1678,10 +1754,10 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     }
+   };
+   if matches!(style.justify_content, JustifyContent::FlexStart) {
+-    stretch_auto_tracks(&column_tracks, &mut column_sizes, container_inline_size);
++    stretch_auto_tracks(&column_tracks, &mut column_sizes, column_gap, container_inline_size);
+   }
+   if matches!(style.align_content, AlignContent::Stretch) {
+-    stretch_auto_tracks(&row_tracks, &mut row_sizes, container_block_size);
++    stretch_auto_tracks(&row_tracks, &mut row_sizes, row_gap, container_block_size);
+   }
+ 
+   let block_size = container_block_size;
+@@ -1803,8 +1879,8 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+ 
+   let stretch_block = matches!(style.align_items, AlignItems::Stretch);
+ 
+-  let track_block_sum: f32 = row_sizes.iter().sum();
+-  let track_inline_sum: f32 = column_sizes.iter().sum();
++  let track_block_sum = track_sum_with_gaps(&row_sizes, row_gap);
++  let track_inline_sum = track_sum_with_gaps(&column_sizes, column_gap);
+   let mut block_free = (container_block_size - track_block_sum).max(0.0);
+   let inline_free = (container_inline_size - track_inline_sum).max(0.0);
+ 
+@@ -1840,19 +1916,22 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     | JustifyContent::SpaceEvenly => 0.0,
+   };
+ 
+-  let mut row_edges: Vec<f32> = Vec::with_capacity(row_count + 1);
+-  row_edges.push(block_offset);
+-  for size in row_sizes.iter().copied() {
+-    let next = row_edges.last().copied().unwrap_or(block_offset) + size;
+-    row_edges.push(next);
++  fn build_track_line_positions(sizes: &[f32], gap: f32, start: f32) -> Vec<f32> {
++    let gap = if gap.is_finite() { gap.max(0.0) } else { 0.0 };
++    let mut edges = Vec::with_capacity(sizes.len() + 1);
++    edges.push(start);
++    for (idx, size) in sizes.iter().copied().enumerate() {
++      let mut next = edges.last().copied().unwrap_or(start) + size;
++      if idx + 1 < sizes.len() {
++        next += gap;
++      }
++      edges.push(next);
++    }
++    edges
+   }
+ 
+-  let mut column_edges: Vec<f32> = Vec::with_capacity(column_count + 1);
+-  column_edges.push(inline_offset);
+-  for size in column_sizes.iter().copied() {
+-    let next = column_edges.last().copied().unwrap_or(inline_offset) + size;
+-    column_edges.push(next);
+-  }
++  let row_edges = build_track_line_positions(&row_sizes, row_gap, block_offset);
++  let column_edges = build_track_line_positions(&column_sizes, column_gap, inline_offset);
+ 
+   fn mirror_ranges(ranges: &mut [(f32, f32)], span_start: f32, span_end: f32) {
+     if ranges.is_empty() {
+@@ -1875,17 +1954,22 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+   }
+ 
+   let mut row_ranges = Vec::with_capacity(row_count);
+-  for window in row_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
++  for (idx, size) in row_sizes.iter().copied().enumerate() {
++    let Some(&start) = row_edges.get(idx) else {
++      continue;
++    };
++    let end = start + size;
+     if start.is_finite() && end.is_finite() && end >= start {
+       row_ranges.push((start, end));
+     }
+   }
++
+   let mut col_ranges = Vec::with_capacity(column_count);
+-  for window in column_edges.windows(2) {
+-    let start = window[0];
+-    let end = window[1];
++  for (idx, size) in column_sizes.iter().copied().enumerate() {
++    let Some(&start) = column_edges.get(idx) else {
++      continue;
++    };
++    let end = start + size;
+     if start.is_finite() && end.is_finite() && end >= start {
+       col_ranges.push((start, end));
+     }
+@@ -1938,8 +2022,20 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+       continue;
+     };
+ 
+-    let block_end = row_edges.get(row_end_edge).copied().unwrap_or(block_start);
+-    let inline_end = column_edges.get(col_end_edge).copied().unwrap_or(inline_start);
++    let mut block_end = row_edges.get(row_end_edge).copied().unwrap_or(block_start);
++    // Grid line positions include the following gap. Exclude the trailing gap from the grid area
++    // unless the item spans to the last line.
++    if row_gap > 0.0 && row_end_edge < row_count {
++      block_end = (block_end - row_gap).max(block_start);
++    }
++
++    let mut inline_end = column_edges
++      .get(col_end_edge)
++      .copied()
++      .unwrap_or(inline_start);
++    if column_gap > 0.0 && col_end_edge < column_count {
++      inline_end = (inline_end - column_gap).max(inline_start);
++    }
+     let cell_block = (block_end - block_start).max(0.0);
+     let cell_inline = (inline_end - inline_start).max(0.0);
+ 
+diff --git a/src/layout_minimal/formatting_context.rs b/src/layout_minimal/formatting_context.rs
+index c56bcebf7..68765aed0 100644
+--- a/src/layout_minimal/formatting_context.rs
++++ b/src/layout_minimal/formatting_context.rs
+@@ -157,6 +157,49 @@ thread_local! {
+   static FRAGMENTAINER_BLOCK_SIZE_HINT: Cell<Option<f32>> = Cell::new(None);
+   static FRAGMENTAINER_BLOCK_OFFSET_HINT: Cell<f32> = Cell::new(0.0);
+   static FRAGMENTAINER_AXES_HINT: Cell<Option<FragmentAxes>> = Cell::new(None);
++  static PERCENTAGE_BASE_HINT: Cell<PercentageBases> = Cell::new(PercentageBases { inline: None, block: None });
++}
++
++#[derive(Debug, Clone, Copy, Default, PartialEq)]
++pub(crate) struct PercentageBases {
++  pub inline: Option<f32>,
++  pub block: Option<f32>,
++}
++
++pub(crate) struct PercentageBaseHintGuard {
++  previous: PercentageBases,
++}
++
++impl Drop for PercentageBaseHintGuard {
++  fn drop(&mut self) {
++    PERCENTAGE_BASE_HINT.with(|hint| {
++      hint.set(self.previous);
++    });
++  }
++}
++
++pub(crate) fn percentage_base_hint() -> PercentageBases {
++  PERCENTAGE_BASE_HINT.with(|hint| hint.get())
++}
++
++pub(crate) fn set_percentage_base_hint(mut bases: PercentageBases) -> PercentageBaseHintGuard {
++  let sanitize = |value: &mut Option<f32>| {
++    let base = value.take()?;
++    if !base.is_finite() {
++      return None;
++    }
++    Some(base.max(0.0))
++  };
++
++  bases.inline = sanitize(&mut bases.inline);
++  bases.block = sanitize(&mut bases.block);
++
++  let previous = PERCENTAGE_BASE_HINT.with(|cell| {
++    let previous = cell.get();
++    cell.set(bases);
++    previous
++  });
++  PercentageBaseHintGuard { previous }
+ }
+ 
+ pub(crate) struct ViewportSizeHintGuard {
+diff --git a/src/lib_non_macos_impl.rs b/src/lib_non_macos_impl.rs
+index 418d6ddb5..3ed97b42c 100644
+--- a/src/lib_non_macos_impl.rs
++++ b/src/lib_non_macos_impl.rs
+@@ -217,9 +217,6 @@ pub mod dom;
+ #[path = "style_minimal/mod.rs"]
+ pub mod style;
+ 
+-// Layout regression tests compile the (mostly platform-independent) layout subsystem under
+-// `cfg(test)` so cross-platform CI/agent environments can execute focused regressions without
+-// pulling in the full UI / DOM stack.
+ #[cfg(test)]
+ #[path = "image_loader_stub.rs"]
+ pub mod image_loader;
+diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
+index df0e9408e..445415065 100644
+--- a/src/net/websocket/mod.rs
++++ b/src/net/websocket/mod.rs
+@@ -47,9 +47,8 @@ pub use message::{
+   decode_close_payload, encode_close_payload, Message, MessageCodec, MessageDecodeError,
+   MessageEncodeError, MessageLimits, MAX_CLOSE_REASON_BYTES,
+ };
+-pub use maybe_tls_stream::MaybeTlsStream;
+ pub use origin::{is_secure_context_for_document_url, serialized_origin_for_document_url};
+-pub use stream::{WebSocketStream, WebSocketStreamError, WsMessage};
++pub use stream::{MaybeTlsStream, WebSocketStream, WebSocketStreamError, WsMessage};
+ 
+ #[cfg(feature = "websocket_async")]
+ pub use async_websocket::{AsyncWebSocket, AsyncWebSocketError, AsyncWebSocketMessage};
+diff --git a/src/net/websocket/stream.rs b/src/net/websocket/stream.rs
+index 1f2a02fb3..a712b10ad 100644
+--- a/src/net/websocket/stream.rs
++++ b/src/net/websocket/stream.rs
+@@ -21,7 +21,6 @@ use super::frame::close_code;
+ use super::{
+   FrameCodec, FrameDecodeError, FrameEncodeError, FrameLimits, OpCode, Role, MAX_CLOSE_REASON_BYTES,
+ };
+-pub use super::maybe_tls_stream::MaybeTlsStream;
+ /// High-level WebSocket message/control event.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub enum WsMessage {
+diff --git a/src/svg_preprocess.rs b/src/svg_preprocess.rs
+index a85846059..ccac9bef6 100644
+--- a/src/svg_preprocess.rs
++++ b/src/svg_preprocess.rs
+@@ -115,6 +115,15 @@ pub(crate) fn apply_svg_url_fragment<'a>(svg_content: &'a str, requested_url: &s
+   let mut root_closed = false;
+ 
+   while let Some(event) = tokenizer.next() {
++    let event_end = match &event {
++      XmlEvent::Text(text) => text.range.end,
++      XmlEvent::StartTag(tag) => tag.range.end,
++      XmlEvent::EndTag(tag) => tag.range.end,
++    };
++    if event_end > MAX_FRAGMENT_SCAN_BYTES {
++      return Cow::Borrowed(svg_content);
++    }
++
+     match event {
+       XmlEvent::Text(_) => {}
+       XmlEvent::StartTag(tag) => {
+diff --git a/src/svg_render/attributes.rs b/src/svg_render/attributes.rs
+index c02ff2fd2..19201eee3 100644
+--- a/src/svg_render/attributes.rs
++++ b/src/svg_render/attributes.rs
+@@ -439,6 +439,8 @@ mod dasharray_tests {
+   fn dasharray_rejects_missing_separator_after_unit() {
+     assert!(parse_dasharray("4px2", 10.0).is_none());
+     assert!(parse_dasharray("4px.5", 10.0).is_none());
++    assert!(parse_dasharray("4%.5", 10.0).is_none());
++    assert!(parse_dasharray("4in.5", 10.0).is_none());
+   }
+ }
+ 
+diff --git a/src/svg_style.rs b/src/svg_style.rs
+index 5f4b308a7..d91a907e1 100644
+--- a/src/svg_style.rs
++++ b/src/svg_style.rs
+@@ -1539,6 +1539,18 @@ mod tests {
+     );
+   }
+ 
++  #[test]
++  fn svg_style_dasharray_rejects_dot_separator_after_unit() {
++    let mut parent = SvgStyle::default();
++    parent.dasharray = vec![4.0, 2.0];
++    let delta = parse_style_attribute("stroke-dasharray: 4px.5");
++    let style = apply_delta(&parent, delta);
++    assert_eq!(
++      style.dasharray, parent.dasharray,
++      "invalid tokens like `4px.5` must not be misparsed as `4px .5`"
++    );
++  }
++
+   #[test]
+   fn svg_style_lengths_reject_whitespace_between_number_and_unit() {
+     let mut parent = SvgStyle::default();
+diff --git a/src/utils/js_escapes.rs b/src/utils/js_escapes.rs
+index cc5dc4975..636bebdb9 100644
+--- a/src/utils/js_escapes.rs
++++ b/src/utils/js_escapes.rs
+@@ -114,9 +114,13 @@ pub(crate) fn unescape_js_escapes(input: &str) -> Cow<'_, str> {
+             // Classic JS escape: `\uXXXX`
+             if i + 5 < bytes.len() {
+               if let Ok(code) = u16::from_str_radix(&input[i + 2..i + 6], 16) {
++                let is_high_surrogate = (0xD800..=0xDBFF).contains(&code);
++                let is_low_surrogate = (0xDC00..=0xDFFF).contains(&code);
++
+                 // Surrogate pair handling for non-BMP code points.
+-                if (0xD800..=0xDBFF).contains(&code) && i + 11 < bytes.len() {
+-                  if bytes.get(i + 6) == Some(&b'\\')
++                if is_high_surrogate {
++                  if i + 11 < bytes.len()
++                    && bytes.get(i + 6) == Some(&b'\\')
+                     && matches!(bytes.get(i + 7), Some(b'u' | b'U'))
+                   {
+                     if let Ok(low) = u16::from_str_radix(&input[i + 8..i + 12], 16) {
+@@ -130,8 +134,26 @@ pub(crate) fn unescape_js_escapes(input: &str) -> Cow<'_, str> {
+                           continue;
+                         }
+                       }
++
++                      // The next escape is not a valid low surrogate; preserve both escapes
++                      // literally so callers do not lose the original JavaScript source.
++                      out.push_str(&input[i..i + 12]);
++                      i += 12;
++                      continue;
+                     }
+                   }
++
++                  // Unpaired high surrogate: preserve the escape sequence verbatim.
++                  out.push_str(&input[i..i + 6]);
++                  i += 6;
++                  continue;
++                }
++
++                if is_low_surrogate {
++                  // Unpaired low surrogate: preserve the escape sequence verbatim.
++                  out.push_str(&input[i..i + 6]);
++                  i += 6;
++                  continue;
+                 }
+ 
+                 if let Some(ch) = char::from_u32(code as u32) {
+-- 
+2.43.0
+
