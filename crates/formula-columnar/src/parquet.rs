@@ -93,7 +93,8 @@ fn append_record_batch(
     let cols = batch.num_columns();
 
     for row in 0..rows {
-        let mut values: Vec<Value> = Vec::with_capacity(cols);
+        let mut values: Vec<Value> = Vec::new();
+        let _ = values.try_reserve_exact(cols);
         for col in 0..cols {
             let ty = column_schema[col].column_type;
             let array = batch.column(col).as_ref();

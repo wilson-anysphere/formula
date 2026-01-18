@@ -65,7 +65,8 @@ impl RleEncodedU64 {
     }
 
     pub fn decode(&self) -> Vec<u64> {
-        let mut out = Vec::with_capacity(self.len());
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(self.len());
         let mut start: u32 = 0;
         for (value, end) in self.values.iter().copied().zip(self.ends.iter().copied()) {
             let count = end.saturating_sub(start);
@@ -136,7 +137,8 @@ impl RleEncodedU32 {
     }
 
     pub fn decode(&self) -> Vec<u32> {
-        let mut out = Vec::with_capacity(self.len());
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(self.len());
         let mut start: u32 = 0;
         for (value, end) in self.values.iter().copied().zip(self.ends.iter().copied()) {
             let count = end.saturating_sub(start);

@@ -141,7 +141,8 @@ where
             return;
         }
 
-        let mut new_order = VecDeque::with_capacity(self.map.len());
+        let mut new_order = VecDeque::new();
+        let _ = new_order.try_reserve(self.map.len());
         for (key, (_, token)) in self.map.iter() {
             new_order.push_back((key.clone(), *token));
         }

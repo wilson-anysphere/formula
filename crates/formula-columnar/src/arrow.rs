@@ -706,7 +706,7 @@ fn array_from_column(
 
     let array: ArrayRef = match column_schema.column_type {
         ColumnType::Number => {
-            let mut builder = Float64Builder::with_capacity(rows);
+            let mut builder = Float64Builder::new();
             for row in 0..rows {
                 match table.get_cell(row, col) {
                     Value::Number(v) => builder.append_value(v),
@@ -717,7 +717,7 @@ fn array_from_column(
             Arc::new(builder.finish())
         }
         ColumnType::Boolean => {
-            let mut builder = BooleanBuilder::with_capacity(rows);
+            let mut builder = BooleanBuilder::new();
             for row in 0..rows {
                 match table.get_cell(row, col) {
                     Value::Boolean(v) => builder.append_value(v),
@@ -741,7 +741,7 @@ fn array_from_column(
             Arc::new(builder.finish())
         }
         ColumnType::DateTime => {
-            let mut builder = Int64Builder::with_capacity(rows);
+            let mut builder = Int64Builder::new();
             for row in 0..rows {
                 match table.get_cell(row, col) {
                     Value::DateTime(v) => builder.append_value(v),
@@ -752,7 +752,7 @@ fn array_from_column(
             Arc::new(builder.finish())
         }
         ColumnType::Currency { .. } => {
-            let mut builder = Int64Builder::with_capacity(rows);
+            let mut builder = Int64Builder::new();
             for row in 0..rows {
                 match table.get_cell(row, col) {
                     Value::Currency(v) => builder.append_value(v),
@@ -763,7 +763,7 @@ fn array_from_column(
             Arc::new(builder.finish())
         }
         ColumnType::Percentage { .. } => {
-            let mut builder = Int64Builder::with_capacity(rows);
+            let mut builder = Int64Builder::new();
             for row in 0..rows {
                 match table.get_cell(row, col) {
                     Value::Percentage(v) => builder.append_value(v),
@@ -780,8 +780,11 @@ fn array_from_column(
 
 /// Convert a [`ColumnarTable`] into an Arrow [`RecordBatch`].
 pub fn columnar_to_record_batch(table: &ColumnarTable) -> Result<RecordBatch, ArrowInteropError> {
-    let mut fields = Vec::with_capacity(table.column_count());
-    let mut arrays = Vec::with_capacity(table.column_count());
+    let col_count = table.column_count();
+    let mut fields = Vec::new();
+    let _ = fields.try_reserve_exact(col_count);
+    let mut arrays = Vec::new();
+    let _ = arrays.try_reserve_exact(col_count);
 
     for (col_idx, col_schema) in table.schema().iter().enumerate() {
         let nullable = table
@@ -807,7 +810,9 @@ pub fn record_batch_to_columnar_with_options(
     options: TableOptions,
 ) -> Result<ColumnarTable, ArrowInteropError> {
     let schema = batch.schema();
-    let mut column_schema = Vec::with_capacity(schema.fields().len());
+    let field_count = schema.fields().len();
+    let mut column_schema = Vec::new();
+    let _ = column_schema.try_reserve_exact(field_count);
     for field in schema.fields() {
         let column_type = column_type_from_field(field).map_err(|err| ArrowInteropError::Context {
             context: format!("while parsing Arrow field {:?}", field.name()),
@@ -823,7 +828,8 @@ pub fn record_batch_to_columnar_with_options(
     let rows = batch.num_rows();
     let cols = batch.num_columns();
     for row in 0..rows {
-        let mut values = Vec::with_capacity(cols);
+        let mut values = Vec::new();
+        let _ = values.try_reserve_exact(cols);
         for col in 0..cols {
             let ty = column_schema[col].column_type;
             let array = batch.column(col).as_ref();

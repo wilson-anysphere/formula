@@ -149,6 +149,8 @@ pub enum ColumnAppendError {
         expected: usize,
         actual: usize,
     },
+    /// Internal invariant violation.
+    Internal { message: String },
 }
 
 impl fmt::Display for ColumnAppendError {
@@ -169,6 +171,7 @@ impl fmt::Display for ColumnAppendError {
                 "encoded column chunk {} has length {} (expected {})",
                 chunk_index, actual, expected
             ),
+            Self::Internal { message } => write!(f, "internal error: {message}"),
         }
     }
 }
@@ -286,10 +289,11 @@ impl ColumnarTable {
             builder.append_row(std::slice::from_ref(value));
         }
         let mut encoded = builder.finalize();
-        let column = encoded
-            .columns
-            .pop()
-            .expect("ColumnarTableBuilder produced a table with one column");
+        let Some(column) = encoded.columns.pop() else {
+            return Err(ColumnAppendError::Internal {
+                message: "append-column builder produced no columns".to_string(),
+            });
+        };
 
         self.schema.push(schema);
         self.columns.push(column);
@@ -305,7 +309,8 @@ impl ColumnarTable {
         rows: usize,
         options: TableOptions,
     ) -> Self {
-        let mut out_cols: Vec<Column> = Vec::with_capacity(columns.len());
+        let mut out_cols: Vec<Column> = Vec::new();
+        let _ = out_cols.try_reserve_exact(columns.len());
         for col in columns {
             out_cols.push(Column {
                 schema: col.schema,
@@ -501,9 +506,11 @@ impl ColumnarTable {
         let rows = row_end - row_start;
         let cols = col_end - col_start;
 
-        let mut out_columns: Vec<Vec<Value>> = Vec::with_capacity(cols);
+        let mut out_columns: Vec<Vec<Value>> = Vec::new();
+        let _ = out_columns.try_reserve_exact(cols);
         for col in col_start..col_end {
-            let mut values = Vec::with_capacity(rows);
+            let mut values = Vec::new();
+            let _ = values.try_reserve_exact(rows);
             let column_type = self.columns.get(col).map(|c| c.schema.column_type);
 
             let mut r = row_start;
@@ -1120,7 +1127,8 @@ impl MutableColumnarTable {
         }
 
         let mut rebuilt = MutableColumnarTable::new(self.schema.clone(), self.options);
-        let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
+        let mut row_buf: Vec<Value> = Vec::new();
+        let _ = row_buf.try_reserve_exact(self.columns.len());
         for row in 0..self.rows {
             if row >= row_start && row < row_end {
                 continue;
@@ -1333,9 +1341,11 @@ impl MutableColumnarTable {
         let rows = row_end - row_start;
         let cols = col_end - col_start;
 
-        let mut out_columns: Vec<Vec<Value>> = Vec::with_capacity(cols);
+        let mut out_columns: Vec<Vec<Value>> = Vec::new();
+        let _ = out_columns.try_reserve_exact(cols);
         for col in col_start..col_end {
-            let mut values = Vec::with_capacity(rows);
+            let mut values = Vec::new();
+            let _ = values.try_reserve_exact(rows);
             let column_type = self.columns.get(col).map(|c| c.column_type());
             let overlay = self.overlays.get(col);
             let has_overlay = overlay.is_some_and(|m| !m.is_empty());
@@ -1605,10 +1615,12 @@ impl MutableColumn {
 
 impl MutableIntColumn {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             distinct_base: 0,
@@ -1673,10 +1685,12 @@ impl MutableIntColumn {
         let sum = stats.sum.unwrap_or(0.0) as i128;
         let null_count = stats.null_count;
 
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks,
             distinct_base,
@@ -2005,10 +2019,12 @@ impl MutableIntColumn {
 
 impl MutableFloatColumn {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             distinct_base: 0,
@@ -2074,10 +2090,12 @@ impl MutableFloatColumn {
         };
         let sum = stats.sum.unwrap_or(0.0);
 
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks,
             distinct_base,
@@ -2625,12 +2643,14 @@ impl MutableBoolColumn {
 
 impl MutableDictColumn {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
             dictionary: Arc::new(Vec::new()),
             dict_map: HashMap::new(),
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             null_count: 0,
@@ -2655,7 +2675,8 @@ impl MutableDictColumn {
         };
 
         let dict = dictionary.unwrap_or_else(|| Arc::new(Vec::new()));
-        let mut dict_map = HashMap::with_capacity(dict.len());
+        let mut dict_map = HashMap::new();
+        let _ = dict_map.try_reserve(dict.len());
         for (idx, s) in dict.iter().cloned().enumerate() {
             dict_map.insert(s, idx as u32);
         }
@@ -2677,12 +2698,14 @@ impl MutableDictColumn {
             (min, max, total_len)
         };
 
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             schema,
             page_size,
             dictionary: dict,
             dict_map,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks,
             null_count: stats.null_count,
@@ -3228,7 +3251,8 @@ impl<'a> TableScan<'a> {
         }
 
         use std::collections::HashSet;
-        let mut targets: HashSet<u64> = HashSet::with_capacity(values.len());
+        let mut targets: HashSet<u64> = HashSet::new();
+        let _ = targets.try_reserve(values.len());
         for v in values {
             targets.insert(canonical_f64_bits(*v));
         }
@@ -3613,7 +3637,8 @@ impl ColumnarTableBuilder {
             }
         }
 
-        let mut columns: Vec<Column> = Vec::with_capacity(self.builders.len());
+        let mut columns: Vec<Column> = Vec::new();
+        let _ = columns.try_reserve_exact(self.builders.len());
         for builder in self.builders {
             columns.push(match builder {
                 ColumnBuilder::Int(b) => b.finish(),
@@ -3635,6 +3660,8 @@ impl ColumnarTableBuilder {
 
 impl IntBuilder {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             stats: ColumnStats {
                 column_type: schema.column_type,
@@ -3642,7 +3669,7 @@ impl IntBuilder {
             },
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             distinct: DistinctCounter::new(),
@@ -3745,6 +3772,8 @@ impl IntBuilder {
 
 impl FloatBuilder {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             stats: ColumnStats {
                 column_type: schema.column_type,
@@ -3752,7 +3781,7 @@ impl FloatBuilder {
             },
             schema,
             page_size,
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             distinct: DistinctCounter::new(),
@@ -3905,6 +3934,8 @@ impl BoolBuilder {
 
 impl DictBuilder {
     fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        let mut current = Vec::new();
+        let _ = current.try_reserve_exact(page_size);
         Self {
             stats: ColumnStats {
                 column_type: schema.column_type,
@@ -3914,7 +3945,7 @@ impl DictBuilder {
             page_size,
             dictionary: Vec::new(),
             dict_map: std::collections::HashMap::new(),
-            current: Vec::with_capacity(page_size),
+            current,
             validity: BitVec::with_capacity_bits(page_size),
             chunks: Vec::new(),
             min: None,

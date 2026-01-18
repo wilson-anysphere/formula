@@ -385,7 +385,8 @@ pub fn filter_indices(table: &ColumnarTable, expr: &FilterExpr) -> Result<Vec<us
     if mask.all_true() {
         return Ok((0..table.row_count()).collect());
     }
-    let mut out = Vec::with_capacity(mask.count_ones());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(mask.count_ones());
     out.extend(mask.iter_ones());
     Ok(out)
 }
@@ -1139,7 +1140,17 @@ fn eval_filter_string_ci(
         return match op {
             CmpOp::Eq => Ok(BitVec::with_len_all_false(rows)),
             CmpOp::Ne => eval_filter_is_null(table, col, false),
-            _ => unreachable!("checked op above"),
+            other => {
+                debug_assert!(
+                    false,
+                    "unexpected comparison op for case-insensitive string filter: {other:?}"
+                );
+                Err(QueryError::UnsupportedColumnType {
+                    col,
+                    column_type,
+                    operation: "filter case-insensitive string comparison",
+                })
+            }
         };
     }
 
@@ -1148,7 +1159,17 @@ fn eval_filter_string_ci(
         return match op {
             CmpOp::Eq => eval_filter_is_null(table, col, false),
             CmpOp::Ne => Ok(BitVec::with_len_all_false(rows)),
-            _ => unreachable!("checked op above"),
+            other => {
+                debug_assert!(
+                    false,
+                    "unexpected comparison op for case-insensitive string filter: {other:?}"
+                );
+                Err(QueryError::UnsupportedColumnType {
+                    col,
+                    column_type,
+                    operation: "filter case-insensitive string comparison",
+                })
+            }
         };
     }
 
@@ -1872,10 +1893,12 @@ impl GroupByResult {
     }
 
     pub fn to_values(&self) -> Vec<Vec<Value>> {
-        let mut out: Vec<Vec<Value>> = Vec::with_capacity(self.columns.len());
+        let mut out: Vec<Vec<Value>> = Vec::new();
+        let _ = out.try_reserve_exact(self.columns.len());
         for (col_idx, column) in self.columns.iter().enumerate() {
             let column_type = self.schema.get(col_idx).map(|s| s.column_type);
-            let mut values: Vec<Value> = Vec::with_capacity(self.rows);
+            let mut values: Vec<Value> = Vec::new();
+            let _ = values.try_reserve_exact(self.rows);
             match (column, column_type) {
                 (ResultColumn::Float { values: v, validity }, Some(_)) => {
                     for i in 0..self.rows {
@@ -2567,10 +2590,14 @@ impl GroupByEngine {
             }
         }
 
-        let mut schema: Vec<ColumnSchema> = Vec::with_capacity(keys.len() + aggs.len());
-        let mut key_cols: Vec<usize> = Vec::with_capacity(keys.len());
-        let mut key_builders: Vec<KeyColumnBuilder> = Vec::with_capacity(keys.len());
-        let mut key_kinds: Vec<KeyKind> = Vec::with_capacity(keys.len());
+        let mut schema: Vec<ColumnSchema> = Vec::new();
+        let _ = schema.try_reserve_exact(keys.len() + aggs.len());
+        let mut key_cols: Vec<usize> = Vec::new();
+        let _ = key_cols.try_reserve_exact(keys.len());
+        let mut key_builders: Vec<KeyColumnBuilder> = Vec::new();
+        let _ = key_builders.try_reserve_exact(keys.len());
+        let mut key_kinds: Vec<KeyKind> = Vec::new();
+        let _ = key_kinds.try_reserve_exact(keys.len());
         for &key_col in keys {
             let col_schema = table.schema()[key_col].clone();
             let kind = key_kind_for_column_type(col_schema.column_type).ok_or(
@@ -2591,7 +2618,8 @@ impl GroupByEngine {
             schema.push(col_schema);
         }
 
-        let mut agg_states: Vec<AggState> = Vec::with_capacity(aggs.len());
+        let mut agg_states: Vec<AggState> = Vec::new();
+        let _ = agg_states.try_reserve_exact(aggs.len());
         let mut count_row_aggs: Vec<usize> = Vec::new();
         for (idx, spec) in aggs.iter().enumerate() {
             let name = spec
@@ -2764,7 +2792,7 @@ impl GroupByEngine {
                         name,
                         column_type: ColumnType::Number,
                     });
-                    agg_states.push(match spec.op {
+                    let state = match spec.op {
                         AggOp::Var => AggState::Var {
                             counts: Vec::new(),
                             means: Vec::new(),
@@ -2789,8 +2817,19 @@ impl GroupByEngine {
                             m2: Vec::new(),
                             col,
                         },
-                        _ => unreachable!("only VAR/STDDEV ops handled here"),
-                    });
+                        other => {
+                            debug_assert!(
+                                false,
+                                "unexpected agg op in VAR/STDDEV branch: {other:?}",
+                            );
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "VAR/STDDEV",
+                            });
+                        }
+                    };
+                    agg_states.push(state);
                 }
                 AggOp::Min | AggOp::Max => {
                     let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
@@ -2873,7 +2912,8 @@ impl GroupByEngine {
             }
         }
 
-        let mut agg_plans: Vec<AggColumnPlan> = Vec::with_capacity(by_col.len());
+        let mut agg_plans: Vec<AggColumnPlan> = Vec::new();
+        let _ = agg_plans.try_reserve_exact(by_col.len());
         for (col, agg_indices) in by_col {
             let from_key_pos = key_pos_by_col.get(&col).copied();
             agg_plans.push(AggColumnPlan {
@@ -2924,7 +2964,8 @@ impl GroupByEngine {
             }
             let chunk_rows = (rows - base).min(page);
 
-            let mut key_cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(self.key_kinds.len());
+            let mut key_cursors: Vec<ScalarChunkCursor<'_>> = Vec::new();
+            let _ = key_cursors.try_reserve_exact(self.key_kinds.len());
             for &col_idx in &self.key_cols {
                 let chunks = table
                     .encoded_chunks(col_idx)
@@ -2937,7 +2978,8 @@ impl GroupByEngine {
                 key_cursors.push(ScalarChunkCursor::from_column_chunk(col_idx, ty, chunk)?);
             }
 
-            let mut agg_cursors: Vec<Option<ScalarChunkCursor<'_>>> = Vec::with_capacity(self.agg_plans.len());
+            let mut agg_cursors: Vec<Option<ScalarChunkCursor<'_>>> = Vec::new();
+            let _ = agg_cursors.try_reserve_exact(self.agg_plans.len());
             for plan in &self.agg_plans {
                 if plan.from_key_pos.is_some() {
                     agg_cursors.push(None);
@@ -3009,7 +3051,8 @@ impl GroupByEngine {
         let page = table.page_size_rows();
 
         // Gather chunk slices for each key column once.
-        let mut key_chunks: Vec<&[EncodedChunk]> = Vec::with_capacity(self.key_cols.len());
+        let mut key_chunks: Vec<&[EncodedChunk]> = Vec::new();
+        let _ = key_chunks.try_reserve_exact(self.key_cols.len());
         for &col_idx in &self.key_cols {
             let chunks = table.encoded_chunks(col_idx).ok_or(QueryError::ColumnOutOfBounds {
                 col: col_idx,
@@ -3019,7 +3062,8 @@ impl GroupByEngine {
         }
 
         // Gather chunk slices for each agg plan column once.
-        let mut agg_chunks: Vec<Option<&[EncodedChunk]>> = Vec::with_capacity(self.agg_plans.len());
+        let mut agg_chunks: Vec<Option<&[EncodedChunk]>> = Vec::new();
+        let _ = agg_chunks.try_reserve_exact(self.agg_plans.len());
         for plan in &self.agg_plans {
             if plan.from_key_pos.is_some() {
                 agg_chunks.push(None);
@@ -3033,9 +3077,10 @@ impl GroupByEngine {
         }
 
         let mut current_chunk_idx = usize::MAX;
-        let mut key_chunk_refs: Vec<&EncodedChunk> = Vec::with_capacity(self.key_cols.len());
-        let mut agg_chunk_refs: Vec<Option<&EncodedChunk>> =
-            Vec::with_capacity(self.agg_plans.len());
+        let mut key_chunk_refs: Vec<&EncodedChunk> = Vec::new();
+        let _ = key_chunk_refs.try_reserve_exact(self.key_cols.len());
+        let mut agg_chunk_refs: Vec<Option<&EncodedChunk>> = Vec::new();
+        let _ = agg_chunk_refs.try_reserve_exact(self.agg_plans.len());
 
         for &row in rows {
             if row >= row_count {
@@ -3145,7 +3190,8 @@ impl GroupByEngine {
         let page = table.page_size_rows();
 
         // Gather chunk slices for each key column once.
-        let mut key_chunks: Vec<&[EncodedChunk]> = Vec::with_capacity(self.key_cols.len());
+        let mut key_chunks: Vec<&[EncodedChunk]> = Vec::new();
+        let _ = key_chunks.try_reserve_exact(self.key_cols.len());
         for &col_idx in &self.key_cols {
             let chunks = table.encoded_chunks(col_idx).ok_or(QueryError::ColumnOutOfBounds {
                 col: col_idx,
@@ -3155,7 +3201,8 @@ impl GroupByEngine {
         }
 
         // Gather chunk slices for each agg plan column once.
-        let mut agg_chunks: Vec<Option<&[EncodedChunk]>> = Vec::with_capacity(self.agg_plans.len());
+        let mut agg_chunks: Vec<Option<&[EncodedChunk]>> = Vec::new();
+        let _ = agg_chunks.try_reserve_exact(self.agg_plans.len());
         for plan in &self.agg_plans {
             if plan.from_key_pos.is_some() {
                 agg_chunks.push(None);
@@ -3169,9 +3216,10 @@ impl GroupByEngine {
         }
 
         let mut current_chunk_idx = usize::MAX;
-        let mut key_chunk_refs: Vec<&EncodedChunk> = Vec::with_capacity(self.key_cols.len());
-        let mut agg_chunk_refs: Vec<Option<&EncodedChunk>> =
-            Vec::with_capacity(self.agg_plans.len());
+        let mut key_chunk_refs: Vec<&EncodedChunk> = Vec::new();
+        let _ = key_chunk_refs.try_reserve_exact(self.key_cols.len());
+        let mut agg_chunk_refs: Vec<Option<&EncodedChunk>> = Vec::new();
+        let _ = agg_chunk_refs.try_reserve_exact(self.agg_plans.len());
 
         for row in mask.iter_ones() {
             // Mask iteration should keep us in bounds, but keep defensive behavior.
@@ -3275,7 +3323,8 @@ impl GroupByEngine {
     }
 
     pub fn finish(self) -> GroupByResult {
-        let mut columns: Vec<ResultColumn> = Vec::with_capacity(self.key_builders.len() + self.agg_states.len());
+        let mut columns: Vec<ResultColumn> = Vec::new();
+        let _ = columns.try_reserve_exact(self.key_builders.len() + self.agg_states.len());
         for b in self.key_builders {
             columns.push(b.finish());
         }
@@ -3618,7 +3667,8 @@ fn plan_join_keys(
         });
     }
 
-    let mut plans = Vec::with_capacity(left_keys.len());
+    let mut plans = Vec::new();
+    let _ = plans.try_reserve_exact(left_keys.len());
     for (&left_col, &right_col) in left_keys.iter().zip(right_keys.iter()) {
         let left_type = left
             .schema()
@@ -3766,7 +3816,8 @@ where
     let page = right.page_size_rows();
     let chunk_count = (right_rows + page - 1) / page;
     let mut scratch_keys: Vec<KeyValue> = vec![KeyValue::Null; plans.len()];
-    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
+    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::new();
+    let _ = cursors.try_reserve_exact(plans.len());
     for chunk_idx in 0..chunk_count {
         let base = chunk_idx * page;
         if base >= right_rows {
@@ -3844,7 +3895,8 @@ where
                 })
         })
         .collect::<Result<_, _>>()?;
-    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
+    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::new();
+    let _ = cursors.try_reserve_exact(plans.len());
     for chunk_idx in 0..chunk_count {
         let base = chunk_idx * page;
         if base >= left_rows {

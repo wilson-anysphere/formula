@@ -23,8 +23,10 @@ impl BitVec {
 
     pub fn with_capacity_bits(bits: usize) -> Self {
         let words = (bits + 63) / 64;
+        let mut word_vec = Vec::new();
+        let _ = word_vec.try_reserve_exact(words);
         Self {
-            words: Vec::with_capacity(words),
+            words: word_vec,
             len: 0,
             ones: 0,
         }
@@ -89,25 +91,39 @@ impl BitVec {
 
     pub fn get(&self, index: usize) -> bool {
         debug_assert!(index < self.len, "BitVec index out of bounds");
-        let word = self.words[index / 64];
+        if index >= self.len {
+            return false;
+        }
+        let word_idx = index / 64;
+        let Some(&word) = self.words.get(word_idx) else {
+            debug_assert!(false, "BitVec word missing (get)");
+            return false;
+        };
         let bit = index % 64;
         ((word >> bit) & 1) == 1
     }
 
     pub fn set(&mut self, index: usize, value: bool) {
         debug_assert!(index < self.len, "BitVec index out of bounds");
+        if index >= self.len {
+            return;
+        }
         let word_idx = index / 64;
         let bit = index % 64;
         let mask = 1u64 << bit;
-        let was_set = (self.words[word_idx] & mask) != 0;
+        let Some(word) = self.words.get_mut(word_idx) else {
+            debug_assert!(false, "BitVec word missing (set)");
+            return;
+        };
+        let was_set = (*word & mask) != 0;
 
         match (was_set, value) {
             (true, false) => {
-                self.words[word_idx] &= !mask;
+                *word &= !mask;
                 self.ones -= 1;
             }
             (false, true) => {
-                self.words[word_idx] |= mask;
+                *word |= mask;
                 self.ones += 1;
             }
             _ => {}
@@ -132,9 +148,19 @@ impl BitVec {
         let full_words = len / 64;
         let rem_bits = len % 64;
 
+        let required_words = (len + 63) / 64;
+        if self.words.len() < required_words {
+            let missing = required_words - self.words.len();
+            if self.words.try_reserve_exact(missing).is_err() {
+                debug_assert!(false, "allocation failed (BitVec.and_inplace repair)");
+                return;
+            }
+            self.words.resize(required_words, 0);
+        }
+
         let mut ones: usize = 0;
         for i in 0..full_words {
-            let w = self.words.get_mut(i).expect("BitVec word missing");
+            let w = &mut self.words[i];
             *w &= other.words.get(i).copied().unwrap_or(0);
             ones = ones.saturating_add(w.count_ones() as usize);
         }
@@ -162,9 +188,19 @@ impl BitVec {
         let full_words = len / 64;
         let rem_bits = len % 64;
 
+        let required_words = (len + 63) / 64;
+        if self.words.len() < required_words {
+            let missing = required_words - self.words.len();
+            if self.words.try_reserve_exact(missing).is_err() {
+                debug_assert!(false, "allocation failed (BitVec.or_inplace repair)");
+                return;
+            }
+            self.words.resize(required_words, 0);
+        }
+
         let mut ones: usize = 0;
         for i in 0..full_words {
-            let w = self.words.get_mut(i).expect("BitVec word missing");
+            let w = &mut self.words[i];
             *w |= other.words.get(i).copied().unwrap_or(0);
             ones = ones.saturating_add(w.count_ones() as usize);
         }

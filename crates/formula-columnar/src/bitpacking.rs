@@ -26,7 +26,8 @@ pub fn pack_u64(values: &[u64], bit_width: u8) -> Vec<u8> {
     }
 
     let total_bits = values.len().saturating_mul(bit_width as usize);
-    let mut out = Vec::with_capacity((total_bits + 7) / 8);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact((total_bits + 7) / 8);
 
     let mut acc: u128 = 0;
     let mut acc_bits: u32 = 0;
@@ -56,7 +57,8 @@ pub fn pack_u32(values: &[u32], bit_width: u8) -> Vec<u8> {
     }
 
     let total_bits = values.len().saturating_mul(bit_width as usize);
-    let mut out = Vec::with_capacity((total_bits + 7) / 8);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact((total_bits + 7) / 8);
 
     let mut acc: u128 = 0;
     let mut acc_bits: u32 = 0;
@@ -89,7 +91,8 @@ pub fn unpack_u64(data: &[u8], bit_width: u8, count: usize) -> Vec<u64> {
     }
 
     let mask: u128 = (1u128 << bit_width) - 1;
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(count);
 
     let mut acc: u128 = 0;
     let mut acc_bits: u32 = 0;
@@ -121,7 +124,8 @@ pub fn unpack_u32(data: &[u8], bit_width: u8, count: usize) -> Vec<u32> {
     }
 
     let mask: u128 = (1u128 << bit_width) - 1;
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(count);
 
     let mut acc: u128 = 0;
     let mut acc_bits: u32 = 0;
