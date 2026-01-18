@@ -7,7 +7,8 @@ pub(crate) fn escape_dax_bracket_identifier(ident: &str) -> String {
     }
 
     let extra = ident.as_bytes().iter().filter(|&&b| b == b']').count();
-    let mut out = String::with_capacity(ident.len() + extra);
+    let mut out = String::new();
+    let _ = out.try_reserve(ident.len() + extra);
     push_escaped_dax_bracket_identifier(ident, &mut out);
     out
 }
@@ -51,7 +52,8 @@ fn push_escaped_dax_single_quotes(raw: &str, out: &mut String) {
 #[cfg(feature = "pivot-model")]
 pub(crate) fn format_dax_table_name(table: &str) -> String {
     let extra = table.as_bytes().iter().filter(|&&b| b == b'\'').count();
-    let mut out = String::with_capacity(table.len() + extra + 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(table.len() + extra + 2);
     out.push('\'');
     push_escaped_dax_single_quotes(table, &mut out);
     out.push('\'');
@@ -63,7 +65,8 @@ pub(crate) fn format_dax_table_name(table: &str) -> String {
 pub(crate) fn format_dax_column_ref(table: &str, column: &str) -> String {
     let extra_table = table.as_bytes().iter().filter(|&&b| b == b'\'').count();
     let extra_col = column.as_bytes().iter().filter(|&&b| b == b']').count();
-    let mut out = String::with_capacity(table.len() + column.len() + 4 + extra_table + extra_col);
+    let mut out = String::new();
+    let _ = out.try_reserve(table.len() + column.len() + 4 + extra_table + extra_col);
 
     out.push('\'');
     push_escaped_dax_single_quotes(table, &mut out);
@@ -79,7 +82,8 @@ pub(crate) fn format_dax_column_ref(table: &str, column: &str) -> String {
 pub(crate) fn format_dax_measure_ref(measure: &str) -> String {
     let name = DataModel::normalize_measure_name(measure);
     let extra = name.as_bytes().iter().filter(|&&b| b == b']').count();
-    let mut out = String::with_capacity(name.len() + extra + 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(name.len() + extra + 2);
     out.push('[');
     push_escaped_dax_bracket_identifier(name, &mut out);
     out.push(']');

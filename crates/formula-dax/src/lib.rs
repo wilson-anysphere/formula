@@ -83,8 +83,13 @@ pub(crate) fn with_ascii_uppercase<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
         for (dst, src) in buf[..s.len()].iter_mut().zip(s.as_bytes()) {
             *dst = src.to_ascii_uppercase();
         }
-        let upper =
-            std::str::from_utf8(&buf[..s.len()]).expect("ASCII uppercasing preserves UTF-8");
+        let upper = match std::str::from_utf8(&buf[..s.len()]) {
+            Ok(upper) => upper,
+            Err(_) => {
+                debug_assert!(false, "ASCII uppercasing preserves UTF-8");
+                return f(s);
+            }
+        };
         return f(upper);
     }
 

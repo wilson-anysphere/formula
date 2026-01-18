@@ -413,7 +413,10 @@ impl VarEnv {
         if self.scopes.is_empty() {
             self.push_scope();
         }
-        let scope = self.scopes.last_mut().expect("just pushed if empty");
+        let Some(scope) = self.scopes.last_mut() else {
+            debug_assert!(false, "VarEnv scope stack is empty after push_scope()");
+            return;
+        };
         scope.insert(Self::normalize_name(name), value);
     }
 }
@@ -438,7 +441,8 @@ impl DaxEngine {
         filter: &FilterContext,
         filter_args: &[&str],
     ) -> DaxResult<FilterContext> {
-        let mut parsed_args = Vec::with_capacity(filter_args.len());
+        let mut parsed_args = Vec::new();
+        let _ = parsed_args.try_reserve_exact(filter_args.len());
         for arg in filter_args {
             parsed_args.push(crate::parser::parse(arg)?);
         }
@@ -861,7 +865,12 @@ impl DaxEngine {
                             Ok(values) => values,
                             Err(_) => return Err(table_err),
                         };
-                        let lhs = lhs_values.into_iter().next().expect("expected_cols == 1");
+                        let Some(lhs) = lhs_values.into_iter().next() else {
+                            debug_assert!(false, "expected_cols==1 but lhs_values is empty");
+                            return Err(DaxError::Eval(
+                                "IN operator requires a left-hand value".into(),
+                            ));
+                        };
                         for candidate in rhs_values {
                             if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
                                 return Ok(Value::Boolean(true));
@@ -955,22 +964,31 @@ impl DaxEngine {
 
     fn eval_binary(&self, op: &BinaryOp, left: Value, right: Value) -> DaxResult<Value> {
         match op {
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+            BinaryOp::Add => {
                 let l = coerce_number(&left)?;
                 let r = coerce_number(&right)?;
-                let out = match op {
-                    BinaryOp::Add => l + r,
-                    BinaryOp::Subtract => l - r,
-                    BinaryOp::Multiply => l * r,
-                    BinaryOp::Divide => l / r,
-                    _ => unreachable!(),
-                };
-                Ok(Value::from(out))
+                Ok(Value::from(l + r))
+            }
+            BinaryOp::Subtract => {
+                let l = coerce_number(&left)?;
+                let r = coerce_number(&right)?;
+                Ok(Value::from(l - r))
+            }
+            BinaryOp::Multiply => {
+                let l = coerce_number(&left)?;
+                let r = coerce_number(&right)?;
+                Ok(Value::from(l * r))
+            }
+            BinaryOp::Divide => {
+                let l = coerce_number(&left)?;
+                let r = coerce_number(&right)?;
+                Ok(Value::from(l / r))
             }
             BinaryOp::Concat => {
                 let l = coerce_text(&left);
                 let r = coerce_text(&right);
-                let mut out = String::with_capacity(l.len() + r.len());
+                let mut out = String::new();
+                let _ = out.try_reserve(l.len() + r.len());
                 out.push_str(&l);
                 out.push_str(&r);
                 Ok(Value::from(out))
@@ -981,14 +999,15 @@ impl DaxEngine {
             | BinaryOp::LessEquals
             | BinaryOp::Greater
             | BinaryOp::GreaterEquals => Ok(Value::Boolean(compare_values(op, &left, &right)?)),
-            BinaryOp::And | BinaryOp::Or => {
+            BinaryOp::And => {
                 let l = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 let r = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
-                Ok(Value::Boolean(match op {
-                    BinaryOp::And => l && r,
-                    BinaryOp::Or => l || r,
-                    _ => unreachable!(),
-                }))
+                Ok(Value::Boolean(l && r))
+            }
+            BinaryOp::Or => {
+                let l = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                let r = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                Ok(Value::Boolean(l || r))
             }
             BinaryOp::In => Err(DaxError::Type(
                 "IN operator is only supported with a table constructor on the right-hand side"
@@ -1022,7 +1041,8 @@ impl DaxEngine {
             }
         };
 
-        let mut out = Vec::with_capacity(rows.len());
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(rows.len());
         for row in rows {
             let [cell] = row.as_slice() else {
                 return Err(DaxError::Type(
@@ -1050,8 +1070,10 @@ impl DaxEngine {
             for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
                 *dst = src.to_ascii_uppercase();
             }
-            std::str::from_utf8(&buf[..name.len()])
-                .expect("ASCII uppercasing preserves UTF-8")
+            std::str::from_utf8(&buf[..name.len()]).unwrap_or_else(|_| {
+                debug_assert!(false, "ASCII uppercasing preserves UTF-8");
+                name
+            })
         } else {
             upper_owned = name.to_ascii_uppercase();
             &upper_owned
@@ -1223,7 +1245,11 @@ impl DaxEngine {
                 }
                 let values = self.distinct_column_values(model, &args[0], filter)?;
                 if values.len() == 1 {
-                    Ok(values.into_iter().next().expect("len==1"))
+                    let Some(value) = values.into_iter().next() else {
+                        debug_assert!(false, "distinct_column_values returned empty with len==1");
+                        return Ok(Value::Blank);
+                    };
+                    Ok(value)
                 } else if args.len() == 2 {
                     self.eval_scalar(model, &args[1], filter, row_ctx, env)
                 } else {
@@ -1397,12 +1423,14 @@ impl DaxEngine {
                             column: result_column.clone(),
                         })?;
 
-                let mut search_cols: Vec<usize> = Vec::with_capacity(search_args.len() / 2);
-                let mut search_values: Vec<Value> = Vec::with_capacity(search_args.len() / 2);
-                for pair in search_args.chunks(2) {
-                    let [search_col_expr, search_value_expr] = pair else {
-                        unreachable!("validated even number of search args");
-                    };
+                let search_pair_count = search_args.len() / 2;
+                let mut search_cols: Vec<usize> = Vec::new();
+                let _ = search_cols.try_reserve_exact(search_pair_count);
+                let mut search_values: Vec<Value> = Vec::new();
+                let _ = search_values.try_reserve_exact(search_pair_count);
+                for pair in search_args.chunks_exact(2) {
+                    let search_col_expr = &pair[0];
+                    let search_value_expr = &pair[1];
 
                     let Expr::ColumnRef {
                         table: search_table,
@@ -1551,8 +1579,10 @@ impl DaxEngine {
                         for (dst, src) in buf[..order.len()].iter_mut().zip(order.as_bytes()) {
                             *dst = src.to_ascii_uppercase();
                         }
-                        std::str::from_utf8(&buf[..order.len()])
-                            .expect("ASCII uppercasing preserves UTF-8")
+                        std::str::from_utf8(&buf[..order.len()]).unwrap_or_else(|_| {
+                            debug_assert!(false, "ASCII uppercasing preserves UTF-8");
+                            order
+                        })
                     } else {
                         upper_owned = order.to_ascii_uppercase();
                         &upper_owned
@@ -1578,7 +1608,8 @@ impl DaxEngine {
                 if args.len() >= 4 {
                     let order_by_expr = &args[3];
                     let mut keyed: Vec<(Value, String)> =
-                        Vec::with_capacity(table_result.row_count());
+                        Vec::new();
+                    let _ = keyed.try_reserve_exact(table_result.row_count());
                     let mut saw_text = false;
 
                     for row in table_result.iter_rows() {
@@ -1624,7 +1655,8 @@ impl DaxEngine {
                         }
                     } else {
                         let mut items: Vec<(OrderedFloat<f64>, String)> =
-                            Vec::with_capacity(keyed.len());
+                            Vec::new();
+                        let _ = items.try_reserve_exact(keyed.len());
                         for (key, text) in keyed {
                             let n = coerce_number(&key)?;
                             if !n.is_finite() {
@@ -1682,7 +1714,10 @@ impl DaxEngine {
                         "CONTAINSROW expects at least 2 arguments".into(),
                     ));
                 }
-                let (table_expr, value_exprs) = args.split_first().expect("checked above");
+                let Some((table_expr, value_exprs)) = args.split_first() else {
+                    debug_assert!(false, "CONTAINSROW args unexpectedly empty after len() check");
+                    return Err(DaxError::Eval("CONTAINSROW expects at least 2 arguments".into()));
+                };
 
                 let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                 match table_result {
@@ -2484,11 +2519,16 @@ impl DaxEngine {
                 }
                 IteratorKind::Max | IteratorKind::Min => match value {
                     Value::Number(n) => {
-                        best = Some(match (kind, best) {
-                            (IteratorKind::Max, Some(current)) => current.max(n.0),
-                            (IteratorKind::Min, Some(current)) => current.min(n.0),
-                            (_, None) => n.0,
-                            _ => unreachable!(),
+                        best = Some(match kind {
+                            IteratorKind::Max => best.map_or(n.0, |current| current.max(n.0)),
+                            IteratorKind::Min => best.map_or(n.0, |current| current.min(n.0)),
+                            other => {
+                                debug_assert!(
+                                    false,
+                                    "iterator kind mismatch in MAX/MIN branch: {other:?}"
+                                );
+                                best.unwrap_or(n.0)
+                            }
                         });
                         count += 1;
                     }
@@ -2712,7 +2752,10 @@ impl DaxEngine {
         row_ctx: &RowContext,
         env: &mut VarEnv,
     ) -> DaxResult<Value> {
-        let (expr, filter_args) = args.split_first().expect("checked above");
+        let Some((expr, filter_args)) = args.split_first() else {
+            debug_assert!(false, "CALCULATE args unexpectedly empty after is_empty() check");
+            return Err(DaxError::Eval("CALCULATE expects at least 1 argument".into()));
+        };
         let new_filter = self.build_calculate_filter(model, filter, row_ctx, filter_args, env)?;
         let mut expr_filter = new_filter;
         // `CALCULATE` already performs context transition before evaluating the expression, so
@@ -2876,7 +2919,13 @@ impl DaxEngine {
                             let relationship = model
                                 .relationships()
                                 .get(rel_idx)
-                                .expect("relationship index from find_relationship_index");
+                                .ok_or_else(|| {
+                                    debug_assert!(
+                                        false,
+                                        "relationship index from find_relationship_index out of bounds"
+                                    );
+                                    DaxError::Eval("internal relationship index out of bounds".into())
+                                })?;
                             return Err(DaxError::Eval(format!(
                                 "CALCULATE contains multiple conflicting CROSSFILTER modifiers for relationship {}",
                                 relationship.rel.name
@@ -2955,7 +3004,13 @@ impl DaxEngine {
             collect_column_refs(expr, &mut referenced_tables, &mut referenced_columns);
 
             let table = if referenced_tables.len() == 1 {
-                referenced_tables.into_iter().next().expect("len==1")
+                let Some(table) = referenced_tables.into_iter().next() else {
+                    debug_assert!(false, "referenced_tables len==1 but iterator is empty");
+                    return Err(DaxError::Eval(
+                        "CALCULATE boolean filter expression references no tables".into(),
+                    ));
+                };
+                table
             } else {
                 let mut tables: Vec<String> = referenced_tables
                     .into_iter()
@@ -3337,8 +3392,17 @@ impl DaxEngine {
                     // These filters cannot be expressed as independent per-column value filters
                     // because they preserve correlation across columns, so we evaluate them as a
                     // row filter against the referenced table.
-                    let Expr::Tuple(tuple_exprs) = left.as_ref() else {
-                        unreachable!("guarded by matches! above")
+                    let tuple_exprs = match left.as_ref() {
+                        Expr::Tuple(tuple_exprs) => tuple_exprs,
+                        other => {
+                            debug_assert!(
+                                false,
+                                "IN row constructor filter expected Tuple, got {other:?}"
+                            );
+                            return Err(DaxError::Eval(
+                                "IN row constructor filter is malformed".into(),
+                            ));
+                        }
                     };
 
                     if tuple_exprs.is_empty() {
@@ -3349,8 +3413,8 @@ impl DaxEngine {
 
                     let mut target_table_key: Option<String> = None;
                     let mut target_table_display: Option<String> = None;
-                    let mut target_columns: Vec<(String, String)> =
-                        Vec::with_capacity(tuple_exprs.len());
+                    let mut target_columns: Vec<(String, String)> = Vec::new();
+                    let _ = target_columns.try_reserve_exact(tuple_exprs.len());
                     for expr in tuple_exprs {
                         let Expr::ColumnRef { table, column } = expr else {
                             return Err(DaxError::Eval(
@@ -3375,17 +3439,22 @@ impl DaxEngine {
                         target_columns.push((column.clone(), normalize_ident(column)));
                     }
 
-                    let target_table_key = target_table_key.expect("set above");
+                    let Some(target_table_key) = target_table_key else {
+                        debug_assert!(false, "target_table_key not set for IN row constructor");
+                        return Err(DaxError::Eval(
+                            "IN row constructor filter must reference exactly one table".into(),
+                        ));
+                    };
                     let target_table_display =
                         target_table_display.unwrap_or_else(|| target_table_key.clone());
                     let target_table_ref = model
                         .table(&target_table_key)
                         .ok_or_else(|| DaxError::UnknownTable(target_table_display.clone()))?;
 
-                    let mut target_col_indices: Vec<usize> =
-                        Vec::with_capacity(target_columns.len());
-                    let mut referenced_column_keys: Vec<(String, String)> =
-                        Vec::with_capacity(target_columns.len());
+                    let mut target_col_indices: Vec<usize> = Vec::new();
+                    let _ = target_col_indices.try_reserve_exact(target_columns.len());
+                    let mut referenced_column_keys: Vec<(String, String)> = Vec::new();
+                    let _ = referenced_column_keys.try_reserve_exact(target_columns.len());
                     for (column_display, column_key) in &target_columns {
                         let idx = target_table_ref.column_idx(column_display).ok_or_else(|| {
                             DaxError::UnknownColumn {
@@ -3430,7 +3499,8 @@ impl DaxEngine {
                                      "IN row constructor expected {expected_cols} columns, got {col_count}"
                                  )));
                             }
-                            let mut out = Vec::with_capacity(rows.len());
+                            let mut out = Vec::new();
+                            let _ = out.try_reserve_exact(rows.len());
                             if let Some(cols) = visible_cols {
                                 for row in rows {
                                     out.push(
@@ -3475,7 +3545,8 @@ impl DaxEngine {
                                      "IN row constructor expected {expected_cols} columns, got {col_count}"
                                  )));
                             }
-                            let mut out = Vec::with_capacity(row_count);
+                            let mut out = Vec::new();
+                            let _ = out.try_reserve_exact(row_count);
                             if let Some(cols) = visible_cols {
                                 for row in 0..row_count {
                                     out.push(
@@ -3520,7 +3591,8 @@ impl DaxEngine {
                                      "IN row constructor expected {expected_cols} columns, got {col_count}"
                                  )));
                             }
-                            let mut out = Vec::with_capacity(mask.count_ones());
+                            let mut out = Vec::new();
+                            let _ = out.try_reserve_exact(mask.count_ones());
                             if let Some(cols) = visible_cols {
                                 for row in mask.iter_ones() {
                                     out.push(
@@ -3574,7 +3646,8 @@ impl DaxEngine {
                             .ok_or_else(|| DaxError::UnknownTable(target_table_display.clone()))?;
                         candidate_count = allowed.count_ones();
                         for row in allowed.iter_ones() {
-                            let mut row_values = Vec::with_capacity(expected_cols);
+                            let mut row_values = Vec::new();
+                            let _ = row_values.try_reserve_exact(expected_cols);
                             for &col_idx in &target_col_indices {
                                 row_values.push(
                                     target_table_ref
@@ -3605,7 +3678,8 @@ impl DaxEngine {
                     } else {
                         candidate_count = target_table_ref.row_count();
                         for row in 0..target_table_ref.row_count() {
-                            let mut row_values = Vec::with_capacity(expected_cols);
+                            let mut row_values = Vec::new();
+                            let _ = row_values.try_reserve_exact(expected_cols);
                             for &col_idx in &target_col_indices {
                                 row_values.push(
                                     target_table_ref
@@ -3893,7 +3967,10 @@ impl DaxEngine {
                         && matches!(args.as_slice(), [Expr::ColumnRef { .. }]) =>
                 {
                     let Expr::ColumnRef { table, column } = &args[0] else {
-                        unreachable!("checked above");
+                        debug_assert!(false, "VALUES/DISTINCT arg is not a ColumnRef after match");
+                        return Err(DaxError::Type(
+                            "VALUES/DISTINCT expects a column reference".into(),
+                        ));
                     };
                     let key = (normalize_ident(table), normalize_ident(column));
                     if !keep_filters {
@@ -4268,7 +4345,13 @@ impl DaxEngine {
         let rel = model
             .relationships()
             .get(rel_idx)
-            .expect("relationship index from find_relationship_index");
+            .ok_or_else(|| {
+                debug_assert!(
+                    false,
+                    "relationship index from find_relationship_index out of bounds"
+                );
+                DaxError::Eval("internal relationship index out of bounds".into())
+            })?;
 
         let resolve_one_way = |source_table: &str,
                                source_column: &str,
@@ -4383,7 +4466,10 @@ impl DaxEngine {
             let rel_info = model
                 .relationships()
                 .get(rel_idx)
-                .expect("relationship index from path");
+                .ok_or_else(|| {
+                    debug_assert!(false, "relationship index from path out of bounds");
+                    DaxError::Eval("internal relationship index out of bounds".into())
+                })?;
 
             // If the current row context is restricted (e.g. iterating `VALUES(Table[Column])`),
             // prevent `RELATED` from reading join key columns that are not visible in the row
@@ -4556,7 +4642,8 @@ impl DaxEngine {
             },
             Expr::TableLiteral { .. } => {
                 let Expr::TableLiteral { rows } = expr else {
-                    unreachable!();
+                    debug_assert!(false, "eval_table TableLiteral arm without TableLiteral expr");
+                    return Err(DaxError::Type("expected a table constructor".into()));
                 };
 
                 let col_count = rows.first().map(|row| row.len()).unwrap_or(1);
@@ -4580,9 +4667,11 @@ impl DaxEngine {
                         .collect()
                 };
 
-                let mut out_rows: Vec<Vec<Value>> = Vec::with_capacity(rows.len());
+                let mut out_rows: Vec<Vec<Value>> = Vec::new();
+                let _ = out_rows.try_reserve_exact(rows.len());
                 for row in rows {
-                    let mut out_row: Vec<Value> = Vec::with_capacity(col_count);
+                    let mut out_row: Vec<Value> = Vec::new();
+                    let _ = out_row.try_reserve_exact(col_count);
                     for cell in row {
                         out_row.push(self.eval_scalar(model, cell, filter, row_ctx, env)?);
                     }
@@ -4602,8 +4691,10 @@ impl DaxEngine {
                     for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
                         *dst = src.to_ascii_uppercase();
                     }
-                    std::str::from_utf8(&buf[..name.len()])
-                        .expect("ASCII uppercasing preserves UTF-8")
+                    std::str::from_utf8(&buf[..name.len()]).unwrap_or_else(|_| {
+                        debug_assert!(false, "ASCII uppercasing preserves UTF-8");
+                        name
+                    })
                 } else {
                     upper_owned = name.to_ascii_uppercase();
                     &upper_owned
@@ -5170,7 +5261,15 @@ impl DaxEngine {
                             "CALCULATETABLE expects at least 1 argument".into(),
                         ));
                     }
-                    let (table_expr, filter_args) = args.split_first().expect("checked above");
+                    let Some((table_expr, filter_args)) = args.split_first() else {
+                        debug_assert!(
+                            false,
+                            "CALCULATETABLE args unexpectedly empty after is_empty() check"
+                        );
+                        return Err(DaxError::Eval(
+                            "CALCULATETABLE expects at least 1 argument".into(),
+                        ));
+                    };
                     let new_filter =
                         self.build_calculate_filter(model, filter, row_ctx, filter_args, env)?;
                     let mut table_filter = new_filter;
@@ -5233,9 +5332,10 @@ impl DaxEngine {
                         RelatedPath { hops: Vec<Hop>, to_col_idx: usize },
                     }
 
-                    let mut out_columns: Vec<(String, String)> =
-                        Vec::with_capacity(group_exprs.len());
-                    let mut accessors = Vec::with_capacity(group_exprs.len());
+                    let mut out_columns: Vec<(String, String)> = Vec::new();
+                    let _ = out_columns.try_reserve_exact(group_exprs.len());
+                    let mut accessors = Vec::new();
+                    let _ = accessors.try_reserve_exact(group_exprs.len());
                     for expr in group_exprs {
                         let Expr::ColumnRef { table, column } = expr else {
                             return Err(DaxError::Type(
@@ -5257,12 +5357,21 @@ impl DaxEngine {
                                 )));
                             };
 
-                            let mut hops: Vec<Hop> = Vec::with_capacity(path.len());
+                            let mut hops: Vec<Hop> = Vec::new();
+                            let _ = hops.try_reserve_exact(path.len());
                             for rel_idx in path {
                                 let rel_info = model
                                     .relationships()
                                     .get(rel_idx)
-                                    .expect("relationship index from path");
+                                    .ok_or_else(|| {
+                                        debug_assert!(
+                                            false,
+                                            "relationship index from path out of bounds"
+                                        );
+                                        DaxError::Eval(
+                                            "internal relationship index out of bounds".into(),
+                                        )
+                                    })?;
 
                                 let from_table_ref =
                                     model.table(&rel_info.rel.from_table).ok_or_else(|| {
@@ -5342,7 +5451,13 @@ impl DaxEngine {
                         let rel_info = model
                             .relationships()
                             .get(hop.relationship_idx)
-                            .expect("valid relationship index");
+                            .ok_or_else(|| {
+                                debug_assert!(
+                                    false,
+                                    "relationship index out of bounds for hop"
+                                );
+                                DaxError::Eval("internal relationship index out of bounds".into())
+                            })?;
 
                         let allowed_to = row_sets
                             .get(rel_info.to_table_key.as_str())
@@ -5429,7 +5544,15 @@ impl DaxEngine {
                                 let rel_info = model
                                     .relationships()
                                     .get(hop.relationship_idx)
-                                    .expect("valid relationship index");
+                                    .ok_or_else(|| {
+                                        debug_assert!(
+                                            false,
+                                            "relationship index out of bounds in SUMMARIZE trie"
+                                        );
+                                        DaxError::Eval(
+                                            "internal relationship index out of bounds".into(),
+                                        )
+                                    })?;
                                 let to_table_ref =
                                     model.table(rel_info.rel.to_table.as_str()).ok_or_else(
                                         || DaxError::UnknownTable(rel_info.rel.to_table.clone()),
@@ -5485,8 +5608,15 @@ impl DaxEngine {
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut out_rows: Vec<Vec<Value>> = Vec::new();
                     for row_handle in base.iter_rows() {
-                        let RowHandle::Physical(row) = row_handle else {
-                            unreachable!("SUMMARIZE base table is always physical");
+                        let row = match row_handle {
+                            RowHandle::Physical(row) => row,
+                            other => {
+                                debug_assert!(
+                                    false,
+                                    "SUMMARIZE expected physical row handle, got {other:?}"
+                                );
+                                continue;
+                            }
                         };
                         for key in collect_keys_for_node(
                             &root,
@@ -5614,7 +5744,10 @@ impl DaxEngine {
 
                     // Determine the base table to scan for groups.
                     let base_table = if group_tables.len() == 1 {
-                        group_tables.iter().next().expect("len==1").clone()
+                        group_tables.iter().next().cloned().ok_or_else(|| {
+                            debug_assert!(false, "group_tables len==1 but is empty");
+                            DaxError::Eval("SUMMARIZECOLUMNS has no grouping tables".into())
+                        })?
                     } else {
                         let mut tables_vec: Vec<&String> = group_tables.iter().collect();
                         tables_vec.sort();
@@ -5690,7 +5823,8 @@ impl DaxEngine {
                         RelatedColumn { hops: Vec<Hop>, to_col_idx: usize },
                     }
 
-                    let mut accessors = Vec::with_capacity(group_cols.len());
+                    let mut accessors = Vec::new();
+                    let _ = accessors.try_reserve_exact(group_cols.len());
                     for (table, column) in &group_cols {
                         if table == &base_table {
                             let idx = base_table_ref.column_idx(column).ok_or_else(|| {
@@ -5715,12 +5849,21 @@ impl DaxEngine {
                             )));
                         };
 
-                        let mut hops: Vec<Hop> = Vec::with_capacity(path.len());
+                        let mut hops: Vec<Hop> = Vec::new();
+                        let _ = hops.try_reserve_exact(path.len());
                         for rel_idx in path {
                             let rel_info = model
                                 .relationships()
                                 .get(rel_idx)
-                                .expect("relationship index from path");
+                                .ok_or_else(|| {
+                                    debug_assert!(
+                                        false,
+                                        "relationship index from path out of bounds"
+                                    );
+                                    DaxError::Eval(
+                                        "internal relationship index out of bounds".into(),
+                                    )
+                                })?;
 
                             let from_table_ref =
                                 model.table(&rel_info.rel.from_table).ok_or_else(|| {
@@ -5806,7 +5949,10 @@ impl DaxEngine {
                         let rel_info = model
                             .relationships()
                             .get(hop.relationship_idx)
-                            .expect("valid relationship index");
+                            .ok_or_else(|| {
+                                debug_assert!(false, "relationship index out of bounds for hop");
+                                DaxError::Eval("internal relationship index out of bounds".into())
+                            })?;
 
                         let allowed_to = row_sets
                             .get(rel_info.to_table_key.as_str())
@@ -5890,7 +6036,15 @@ impl DaxEngine {
                                 let rel_info = model
                                     .relationships()
                                     .get(hop.relationship_idx)
-                                    .expect("valid relationship index");
+                                    .ok_or_else(|| {
+                                        debug_assert!(
+                                            false,
+                                            "relationship index out of bounds in SUMMARIZECOLUMNS trie"
+                                        );
+                                        DaxError::Eval(
+                                            "internal relationship index out of bounds".into(),
+                                        )
+                                    })?;
                                 let to_table_ref =
                                     model.table(rel_info.rel.to_table.as_str()).ok_or_else(
                                         || DaxError::UnknownTable(rel_info.rel.to_table.clone()),
@@ -6026,7 +6180,15 @@ impl DaxEngine {
                             let rel_info = model
                                 .relationships()
                                 .get(first_rel_idx)
-                                .expect("relationship index from path");
+                                .ok_or_else(|| {
+                                    debug_assert!(
+                                        false,
+                                        "relationship index from path out of bounds"
+                                    );
+                                    DaxError::Eval(
+                                        "internal relationship index out of bounds".into(),
+                                    )
+                                })?;
                             if rel_info.to_table_key == current_table
                                 && !visible_cols.contains(&rel_info.to_idx)
                             {
@@ -6043,7 +6205,15 @@ impl DaxEngine {
                         let rel = model
                             .relationships()
                             .get(path[0])
-                            .expect("relationship index from path");
+                            .ok_or_else(|| {
+                                debug_assert!(
+                                    false,
+                                    "relationship index from path out of bounds"
+                                );
+                                DaxError::Eval(
+                                    "internal relationship index out of bounds".into(),
+                                )
+                            })?;
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
@@ -6127,7 +6297,15 @@ impl DaxEngine {
                         let rel_info = model
                             .relationships()
                             .get(rel_idx)
-                            .expect("relationship index from path");
+                            .ok_or_else(|| {
+                                debug_assert!(
+                                    false,
+                                    "relationship index from path out of bounds"
+                                );
+                                DaxError::Eval(
+                                    "internal relationship index out of bounds".into(),
+                                )
+                            })?;
 
                         let to_table_ref = model
                             .table(&rel_info.rel.to_table)
@@ -6459,7 +6637,12 @@ impl TableResult {
                     .collect();
                 out.push_virtual(bindings);
             }
-            _ => unreachable!("row handle type does not match table result kind"),
+            _ => {
+                debug_assert!(
+                    false,
+                    "row handle type does not match table result kind (row={row:?}, table={self:?})"
+                );
+            }
         }
         out
     }
@@ -6572,7 +6755,11 @@ pub(crate) fn resolve_row_sets(
 
             // Fast path: equality filter backed by a columnar dictionary scan.
             if values.len() == 1 {
-                let value = values.iter().next().expect("len==1");
+                let Some(value) = values.iter().next() else {
+                    debug_assert!(false, "values len==1 but iterator is empty");
+                    allowed = BitVec::with_len_all_false(row_count);
+                    continue;
+                };
                 if let Some(rows) = table.filter_eq(idx, value) {
                     let mut next = BitVec::with_len_all_false(row_count);
                     for row in rows {
@@ -6711,7 +6898,10 @@ pub(crate) fn resolve_row_sets(
                         changed |= changed_to_one;
                     }
                 }
-                Some(RelationshipOverride::Disabled) => unreachable!("checked above"),
+                Some(RelationshipOverride::Disabled) => {
+                    debug_assert!(false, "disabled relationship override not filtered out");
+                    continue;
+                }
                 None => {
                     if trace_enabled {
                         propagate_calls += 1;
@@ -6775,6 +6965,10 @@ fn maybe_trace_resolve_row_sets(
     propagate_calls: usize,
     propagate_changes: usize,
 ) {
+    if !resolve_row_sets_trace_enabled() {
+        return;
+    }
+
     static EMITTED: AtomicBool = AtomicBool::new(false);
     if EMITTED.swap(true, AtomicOrdering::Relaxed) {
         return;
@@ -6791,7 +6985,8 @@ fn maybe_trace_resolve_row_sets(
         .collect::<Vec<_>>()
         .join(", ");
 
-    eprintln!(
+    log::info!(
+        target: "formula_dax::relationships",
         "formula-dax resolve_row_sets: tables={} relationships={} filters(col={}, row={}) iterations={} propagate_calls={} propagate_changes={} sets=[{}]",
         model.tables.len(),
         model.relationships().len(),
@@ -7414,7 +7609,10 @@ fn compare_values(op: &BinaryOp, left: &Value, right: &Value) -> DaxResult<bool>
         }
     };
 
-    let cmp = cmp.expect("always set");
+    let Some(cmp) = cmp else {
+        debug_assert!(false, "compare_values cmp missing for {left:?} vs {right:?}");
+        return Err(DaxError::Eval("comparison failed".into()));
+    };
     Ok(match op {
         BinaryOp::Equals => cmp == std::cmp::Ordering::Equal,
         BinaryOp::NotEquals => cmp != std::cmp::Ordering::Equal,
@@ -7422,7 +7620,11 @@ fn compare_values(op: &BinaryOp, left: &Value, right: &Value) -> DaxResult<bool>
         BinaryOp::LessEquals => cmp != std::cmp::Ordering::Greater,
         BinaryOp::Greater => cmp == std::cmp::Ordering::Greater,
         BinaryOp::GreaterEquals => cmp != std::cmp::Ordering::Less,
-        _ => unreachable!("unexpected comparison operator {op:?}"),
+        other => {
+            return Err(DaxError::Type(format!(
+                "cannot compare {left} and {right} with {other:?}"
+            )))
+        }
     })
 }
 
@@ -7637,7 +7839,10 @@ fn virtual_blank_row_exists(
                 Some(unmatched) if !unmatched.is_empty()
             )
         } else {
-            let sets = sets.expect("row sets are computed when filter is not empty");
+            let Some(sets) = sets else {
+                debug_assert!(false, "row sets missing when filter is not empty");
+                return Err(DaxError::Eval("internal missing row sets".into()));
+            };
             let from_set = sets
                 .get(rel.from_table_key.as_str())
                 .ok_or_else(|| DaxError::UnknownTable(rel.rel.from_table.clone()))?;

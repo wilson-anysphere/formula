@@ -255,7 +255,8 @@ fn canonicalize_group_by_columns(
     model: &DataModel,
     columns: &[GroupByColumn],
 ) -> DaxResult<Vec<GroupByColumn>> {
-    let mut out = Vec::with_capacity(columns.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(columns.len());
     for col in columns {
         let table_ref = model
             .table(&col.table)
@@ -529,7 +530,8 @@ fn build_group_key_accessors<'a>(
         is_active && !filter.is_relationship_disabled(idx)
     };
 
-    let mut accessors = Vec::with_capacity(group_by.len());
+    let mut accessors = Vec::new();
+    let _ = accessors.try_reserve_exact(group_by.len());
     for col in group_by {
         let col_table_key = normalize_ident(&col.table);
         if col_table_key == base_table_key {
@@ -557,12 +559,16 @@ fn build_group_key_accessors<'a>(
             )));
         };
 
-        let mut hops = Vec::with_capacity(path.len());
+        let mut hops = Vec::new();
+        let _ = hops.try_reserve_exact(path.len());
         for rel_idx in path {
             let rel_info = model
                 .relationships()
                 .get(rel_idx)
-                .expect("relationship index from path");
+                .ok_or_else(|| {
+                    debug_assert!(false, "relationship index from path out of bounds");
+                    DaxError::Eval("internal relationship index out of bounds".into())
+                })?;
 
             let from_idx = rel_info.from_idx;
 
@@ -826,19 +832,25 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
                     let Some(r) = coerce_number_planned(&r) else {
                         return Value::Blank;
                     };
-                    let out = match op {
-                        BinaryOp::Add => l + r,
-                        BinaryOp::Subtract => l - r,
-                        BinaryOp::Multiply => l * r,
-                        BinaryOp::Divide => l / r,
-                        _ => unreachable!(),
-                    };
-                    Value::from(out)
+                    match op {
+                        BinaryOp::Add => Value::from(l + r),
+                        BinaryOp::Subtract => Value::from(l - r),
+                        BinaryOp::Multiply => Value::from(l * r),
+                        BinaryOp::Divide => Value::from(l / r),
+                        other => {
+                            debug_assert!(
+                                false,
+                                "planned numeric binary op mismatch: {other:?}"
+                            );
+                            Value::Blank
+                        }
+                    }
                 }
                 BinaryOp::Concat => {
                     let l = coerce_text_planned(&l);
                     let r = coerce_text_planned(&r);
-                    let mut out = String::with_capacity(l.len() + r.len());
+                    let mut out = String::new();
+                    let _ = out.try_reserve(l.len() + r.len());
                     out.push_str(&l);
                     out.push_str(&r);
                     Value::from(out)
@@ -858,11 +870,14 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
                     let Ok(r) = r.truthy() else {
                         return Value::Blank;
                     };
-                    Value::from(match op {
-                        BinaryOp::And => l && r,
-                        BinaryOp::Or => l || r,
-                        _ => unreachable!(),
-                    })
+                    match op {
+                        BinaryOp::And => Value::from(l && r),
+                        BinaryOp::Or => Value::from(l || r),
+                        other => {
+                            debug_assert!(false, "planned logical binary op mismatch: {other:?}");
+                            Value::Blank
+                        }
+                    }
                 }
                 BinaryOp::In => Value::Blank,
             }
@@ -1113,7 +1128,8 @@ fn plan_pivot_expr(
                 if args.is_empty() {
                     return Ok(None);
                 }
-                let mut planned_args = Vec::with_capacity(args.len());
+                let mut planned_args = Vec::new();
+                let _ = planned_args.try_reserve_exact(args.len());
                 for arg in args {
                     let Some(planned) = plan_pivot_expr(
                         model,
@@ -1180,7 +1196,10 @@ fn plan_pivot_expr(
                 let op = match name {
                     "AND" => BinaryOp::And,
                     "OR" => BinaryOp::Or,
-                    _ => unreachable!(),
+                    other => {
+                        debug_assert!(false, "unexpected logical operator {other}");
+                        return Ok(None);
+                    }
                 };
                 Ok(Some(PlannedExpr::Binary {
                     op,
@@ -1292,7 +1311,10 @@ fn plan_pivot_expr(
                     "COUNT" => AggregationKind::CountNumbers,
                     "COUNTA" => AggregationKind::CountNonBlank,
                     "DISTINCTCOUNT" => AggregationKind::DistinctCount,
-                    _ => unreachable!(),
+                    other => {
+                        debug_assert!(false, "unexpected aggregation function {other}");
+                        return Ok(None);
+                    }
                 };
                 let agg_idx = ensure_agg(kind, Some(idx), agg_specs, agg_map);
                 Ok(Some(PlannedExpr::AggRef(agg_idx)))
@@ -1367,7 +1389,8 @@ fn pivot_columnar_group_by(
         return Ok(None);
     }
 
-    let mut group_idxs = Vec::with_capacity(group_by.len());
+    let mut group_idxs = Vec::new();
+    let _ = group_idxs.try_reserve_exact(group_by.len());
     for col in group_by {
         let idx = table_ref
             .column_idx(&col.column)
@@ -1380,7 +1403,8 @@ fn pivot_columnar_group_by(
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
-    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
+    let mut plans: Vec<PlannedExpr> = Vec::new();
+    let _ = plans.try_reserve_exact(measures.len());
     for measure in measures {
         let Some(plan) = plan_pivot_expr(
             model,
@@ -1415,10 +1439,12 @@ fn pivot_columnar_group_by(
     };
 
     let key_len = group_idxs.len();
-    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(grouped_rows.len());
+    let mut rows_out: Vec<Vec<Value>> = Vec::new();
+    let _ = rows_out.try_reserve_exact(grouped_rows.len());
     for mut row in grouped_rows {
         let agg_values = row.get(key_len..).unwrap_or(&[]);
-        let mut measure_values = Vec::with_capacity(plans.len());
+        let mut measure_values = Vec::new();
+        let _ = measure_values.try_reserve_exact(plans.len());
         for plan in &plans {
             measure_values.push(eval_planned(plan, agg_values));
         }
@@ -1466,7 +1492,8 @@ fn pivot_columnar_groups_with_measure_eval(
         return Ok(None);
     }
 
-    let mut group_idxs = Vec::with_capacity(group_by.len());
+    let mut group_idxs = Vec::new();
+    let _ = group_idxs.try_reserve_exact(group_by.len());
     for col in group_by {
         let idx = table_ref
             .column_idx(&col.column)
@@ -1501,7 +1528,8 @@ fn pivot_columnar_groups_with_measure_eval(
         .collect();
     columns.extend(measures.iter().map(|m| m.name.clone()));
 
-    let mut rows_out = Vec::with_capacity(groups.len());
+    let mut rows_out = Vec::new();
+    let _ = rows_out.try_reserve_exact(groups.len());
     let mut group_filter = filter.clone();
     group_filter.in_scope_columns = group_by
         .iter()
@@ -1586,7 +1614,8 @@ fn pivot_columnar_star_schema_group_by(
 
     let mut group_idxs: Vec<usize> = Vec::new();
     let mut idx_to_pos: HashMap<usize, usize> = HashMap::new();
-    let mut accessors: Vec<StarSchemaGroupKeyAccessor<'_>> = Vec::with_capacity(group_by.len());
+    let mut accessors: Vec<StarSchemaGroupKeyAccessor<'_>> = Vec::new();
+    let _ = accessors.try_reserve_exact(group_by.len());
     let mut base_group_idxs: HashSet<usize> = HashSet::new();
 
     for col in group_by {
@@ -1624,10 +1653,10 @@ fn pivot_columnar_star_schema_group_by(
             return Ok(None);
         }
 
-        let rel_info = model
-            .relationships()
-            .get(path[0])
-            .expect("relationship index from path");
+        let Some(rel_info) = model.relationships().get(path[0]) else {
+            debug_assert!(false, "relationship index from path out of bounds");
+            return Ok(None);
+        };
         // This fast path assumes each foreign-key value maps to at most one row on the related
         // table (i.e. "one" side). Many-to-many relationships can map to multiple rows and require
         // full row-wise evaluation.
@@ -1665,7 +1694,8 @@ fn pivot_columnar_star_schema_group_by(
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
-    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
+    let mut plans: Vec<PlannedExpr> = Vec::new();
+    let _ = plans.try_reserve_exact(measures.len());
     for measure in measures {
         let Some(plan) = plan_pivot_expr(
             model,
@@ -1810,7 +1840,8 @@ fn pivot_columnar_star_schema_group_by(
         }
     }
 
-    let mut state_template: Vec<RollupAggState> = Vec::with_capacity(agg_specs.len());
+    let mut state_template: Vec<RollupAggState> = Vec::new();
+    let _ = state_template.try_reserve_exact(agg_specs.len());
     for spec in &agg_specs {
         let Some(state) = RollupAggState::new(spec) else {
             return Ok(None);
@@ -1820,7 +1851,8 @@ fn pivot_columnar_star_schema_group_by(
 
     let key_len = group_idxs.len();
     let mut groups: HashMap<Vec<Value>, Vec<RollupAggState>> = HashMap::new();
-    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+    let mut key_buf: Vec<Value> = Vec::new();
+    let _ = key_buf.try_reserve_exact(group_by.len());
 
     for row in grouped_rows {
         let keys = row.get(..key_len).unwrap_or(&[]);
@@ -1908,7 +1940,8 @@ fn pivot_columnar_star_schema_group_by(
     }
 
     let final_key_len = group_by.len();
-    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(groups.len());
+    let mut rows_out: Vec<Vec<Value>> = Vec::new();
+    let _ = rows_out.try_reserve_exact(groups.len());
     for (key, states) in groups {
         let agg_values: Vec<Value> = states.into_iter().map(RollupAggState::finalize).collect();
         let mut row = key;
@@ -1950,7 +1983,8 @@ fn pivot_planned_row_group_by(
         build_group_key_accessors(model, base_table, group_by, filter)?;
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
-    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
+    let mut plans: Vec<PlannedExpr> = Vec::new();
+    let _ = plans.try_reserve_exact(measures.len());
     for measure in measures {
         let Some(plan) = plan_pivot_expr(
             model,
@@ -2098,7 +2132,8 @@ fn pivot_planned_row_group_by(
         .transpose()?;
 
     let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
-    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+    let mut key_buf: Vec<Value> = Vec::new();
+    let _ = key_buf.try_reserve_exact(group_by.len());
 
     let mut process_row = |row: usize| -> DaxResult<()> {
         fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf)?;
@@ -2132,7 +2167,8 @@ fn pivot_planned_row_group_by(
     }
 
     let key_len = group_by.len();
-    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(groups.len());
+    let mut rows_out: Vec<Vec<Value>> = Vec::new();
+    let _ = rows_out.try_reserve_exact(groups.len());
     for (key, states) in groups {
         let agg_values: Vec<Value> = states.into_iter().map(AggState::finalize).collect();
         let mut row = key;
@@ -2174,7 +2210,8 @@ fn pivot_row_scan(
         .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
-    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+    let mut key_buf: Vec<Value> = Vec::new();
+    let _ = key_buf.try_reserve_exact(group_by.len());
 
     // Build the set of groups by scanning the base table rows. This ensures we only create
     // groups that actually exist in the fact table under the current filter context.
@@ -2206,7 +2243,8 @@ fn pivot_row_scan(
         .collect();
     columns.extend(measures.iter().map(|m| m.name.clone()));
 
-    let mut rows_out = Vec::with_capacity(groups.len());
+    let mut rows_out = Vec::new();
+    let _ = rows_out.try_reserve_exact(groups.len());
     let mut group_filter = filter.clone();
     group_filter.in_scope_columns = group_by
         .iter()
@@ -2457,7 +2495,8 @@ fn pivot_row_scan_many_to_many(
         .collect();
     columns.extend(measures.iter().map(|m| m.name.clone()));
 
-    let mut rows_out = Vec::with_capacity(groups.len());
+    let mut rows_out = Vec::new();
+    let _ = rows_out.try_reserve_exact(groups.len());
     let mut group_filter = filter.clone();
     group_filter.in_scope_columns = group_by
         .iter()
@@ -2592,7 +2631,8 @@ pub fn pivot_crosstab_with_options(
     let row_fields = canonicalize_group_by_columns(model, row_fields)?;
     let column_fields = canonicalize_group_by_columns(model, column_fields)?;
 
-    let mut group_by = Vec::with_capacity(row_fields.len() + column_fields.len());
+    let mut group_by = Vec::new();
+    let _ = group_by.try_reserve_exact(row_fields.len() + column_fields.len());
     group_by.extend_from_slice(&row_fields);
     group_by.extend_from_slice(&column_fields);
 
@@ -2721,7 +2761,7 @@ fn maybe_trace_pivot_path(path: PivotPath) {
     let bit = path as u8;
     let prev = EMITTED.fetch_or(bit, AtomicOrdering::Relaxed);
     if prev & bit == 0 {
-        eprintln!("formula-dax pivot path: {}", path.label());
+        log::info!(target: "formula_dax::pivot", "pivot_path={}", path.label());
     }
 }
 

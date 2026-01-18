@@ -41,7 +41,8 @@ pub fn build_data_model_pivot_plan(
         .map(|t| t.name().to_string())
         .ok_or_else(|| DaxError::UnknownTable(base_table.clone()))?;
 
-    let mut group_by = Vec::with_capacity(cfg.row_fields.len() + cfg.column_fields.len());
+    let mut group_by = Vec::new();
+    let _ = group_by.try_reserve_exact(cfg.row_fields.len() + cfg.column_fields.len());
     for field in cfg.row_fields.iter().chain(cfg.column_fields.iter()) {
         let PivotFieldRef::DataModelColumn { table, column } = &field.source_field else {
             return Err(DaxError::Eval(
@@ -63,7 +64,8 @@ pub fn build_data_model_pivot_plan(
         let _ = resolve_column_canonical(model, table, column)?;
     }
 
-    let mut measures = Vec::with_capacity(cfg.value_fields.len());
+    let mut measures = Vec::new();
+    let _ = measures.try_reserve_exact(cfg.value_fields.len());
     for value_field in &cfg.value_fields {
         let expr = match &value_field.source_field {
             PivotFieldRef::DataModelMeasure(measure) => {

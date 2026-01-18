@@ -9,6 +9,7 @@ edition = "2021"
 pivot-model = ["dep:formula-model"]
 
 [dependencies]
+log = "0.4"
 ordered-float = "4.2.0"
 thiserror = "2"
 formula-columnar = { path = "../formula-columnar" }

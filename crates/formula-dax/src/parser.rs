@@ -311,9 +311,17 @@ impl<'a> Lexer<'a> {
                 let mut num_str = self.consume_while(|c| c.is_ascii_digit() || c == '.');
                 // Support exponent notation like `1e3` / `1E-3`.
                 if matches!(self.peek(), Some('e' | 'E')) {
-                    num_str.push(self.bump().expect("peeked above"));
+                    let Some(exp) = self.bump() else {
+                        debug_assert!(false, "lexer peeked exponent marker but bump returned None");
+                        return Err(DaxError::Parse(format!("invalid number {num_str:?}")));
+                    };
+                    num_str.push(exp);
                     if matches!(self.peek(), Some('+' | '-')) {
-                        num_str.push(self.bump().expect("peeked above"));
+                        let Some(sign) = self.bump() else {
+                            debug_assert!(false, "lexer peeked exponent sign but bump returned None");
+                            return Err(DaxError::Parse(format!("invalid number {num_str:?}")));
+                        };
+                        num_str.push(sign);
                     }
                     let exp_digits = self.consume_while(|c| c.is_ascii_digit());
                     if exp_digits.is_empty() {
@@ -582,8 +590,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_ident_like(&mut self) -> DaxResult<Expr> {
-        let Token::Identifier(ident) = self.bump()? else {
-            unreachable!();
+        let ident = match self.bump()? {
+            Token::Identifier(ident) => ident,
+            other => {
+                debug_assert!(false, "parse_ident_like called with lookahead={other:?}");
+                return Err(DaxError::Parse("expected identifier".into()));
+            }
         };
 
         match &self.lookahead {

@@ -241,6 +241,26 @@ impl Table {
                     name: name.clone(),
                     column_type,
                 };
+                let map_append_err = |err| match err {
+                    formula_columnar::ColumnAppendError::LengthMismatch { expected, actual } => {
+                        DaxError::ColumnLengthMismatch {
+                            table: self.name.clone(),
+                            column: name.clone(),
+                            expected,
+                            actual,
+                        }
+                    }
+                    formula_columnar::ColumnAppendError::DuplicateColumn { name: column } => {
+                        DaxError::DuplicateColumn {
+                            table: self.name.clone(),
+                            column,
+                        }
+                    }
+                    other => DaxError::Eval(format!(
+                        "failed to append column {}[{}] to columnar table: {other}",
+                        self.name, name
+                    )),
+                };
                 // The columnar backend is stored behind an `Arc`.
                 //
                 // When the `Arc` is uniquely owned, try to unwrap it to avoid cloning the existing
@@ -255,38 +275,26 @@ impl Table {
                         options,
                     );
                     let table_arc = std::mem::replace(&mut backend.table, Arc::new(placeholder));
-                    let table = Arc::try_unwrap(table_arc)
-                        .expect("Arc::strong_count == 1 but Arc::try_unwrap failed");
+                    let table = match Arc::try_unwrap(table_arc) {
+                        Ok(table) => table,
+                        Err(table) => {
+                            debug_assert!(
+                                false,
+                                "Arc::strong_count == 1 but Arc::try_unwrap failed"
+                            );
+                            table.as_ref().clone()
+                        }
+                    };
                     table
                         .with_appended_column(schema, column_values)
-                        .expect("column append should succeed after pre-validation")
+                        .map_err(map_append_err)?
                 } else {
                     backend
                         .table
                         .as_ref()
                         .clone()
                         .with_appended_column(schema, column_values)
-                        .map_err(|err| match err {
-                            formula_columnar::ColumnAppendError::LengthMismatch {
-                                expected,
-                                actual,
-                            } => DaxError::ColumnLengthMismatch {
-                                table: self.name.clone(),
-                                column: name.clone(),
-                                expected,
-                                actual,
-                            },
-                            formula_columnar::ColumnAppendError::DuplicateColumn {
-                                name: column,
-                            } => DaxError::DuplicateColumn {
-                                table: self.name.clone(),
-                                column,
-                            },
-                            other => DaxError::Eval(format!(
-                                "failed to append column {}[{}] to columnar table: {other}",
-                                self.name, name
-                            )),
-                        })?
+                        .map_err(map_append_err)?
                 };
 
                 backend.table = Arc::new(updated);
@@ -576,7 +584,8 @@ impl RowSet {
     pub(crate) fn push(&mut self, row: usize) {
         match self {
             RowSet::One(existing) => {
-                let mut rows = Vec::with_capacity(2);
+                let mut rows = Vec::new();
+                let _ = rows.try_reserve_exact(2);
                 rows.push(*existing);
                 rows.push(row);
                 *self = RowSet::Many(rows);
@@ -991,7 +1000,8 @@ impl DataModel {
                     .map(|c| normalize_ident(&c.name))
                     .collect();
                 let mut iter = row.into_iter();
-                let mut expanded = Vec::with_capacity(total_columns);
+                let mut expanded = Vec::new();
+                let _ = expanded.try_reserve_exact(total_columns);
                 for col in table_ref.columns() {
                     if calc_names.contains(&normalize_ident(col)) {
                         expanded.push(Value::Blank);
@@ -1225,10 +1235,10 @@ impl DataModel {
                 continue;
             }
 
-            let rel_info = self
-                .relationships
-                .get_mut(rel_idx)
-                .expect("relationship index from updates");
+            let Some(rel_info) = self.relationships.get_mut(rel_idx) else {
+                debug_assert!(false, "relationship index from updates out of bounds");
+                continue;
+            };
             let Some(unmatched) = rel_info.unmatched_fact_rows.as_mut() else {
                 continue;
             };
@@ -1739,7 +1749,8 @@ impl DataModel {
             // produce mixed value types across rows will currently return a type error.
             match &table_ref.storage {
                 TableStorage::InMemory(_) => {
-                    let mut results = Vec::with_capacity(table_ref.row_count());
+                    let mut results = Vec::new();
+                    let _ = results.try_reserve_exact(table_ref.row_count());
                     let engine = crate::engine::DaxEngine::new();
                     let filter_ctx = FilterContext::default();
                     let mut row_ctx = RowContext::default();
@@ -1788,7 +1799,12 @@ impl DataModel {
                                     Value::Number(_) => ColumnType::Number,
                                     Value::Text(_) => ColumnType::String,
                                     Value::Boolean(_) => ColumnType::Boolean,
-                                    Value::Blank => unreachable!("handled above"),
+                                    Value::Blank => {
+                                        debug_assert!(false, "blank value reached type inference");
+                                        return Err(DaxError::Eval(
+                                            "calculated column type inference failed".into(),
+                                        ));
+                                    }
                                 };
 
                                 let schema = vec![ColumnSchema {
@@ -2305,7 +2321,8 @@ impl DataModel {
 
         let mut state: HashMap<usize, VisitState> = HashMap::new();
         let mut stack: Vec<usize> = Vec::new();
-        let mut out: Vec<usize> = Vec::with_capacity(calc_indices.len());
+        let mut out: Vec<usize> = Vec::new();
+        let _ = out.try_reserve_exact(calc_indices.len());
 
         let visit = |start: usize,
                      state: &mut HashMap<usize, VisitState>,

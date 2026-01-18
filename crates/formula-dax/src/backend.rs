@@ -437,7 +437,8 @@ impl ColumnarTableBackend {
             key_len + pos
         };
 
-        let mut plans: Vec<Plan> = Vec::with_capacity(aggs.len());
+        let mut plans: Vec<Plan> = Vec::new();
+        let _ = plans.try_reserve_exact(aggs.len());
         for spec in aggs {
             let plan = match spec.kind {
                 AggregationKind::CountRows => Plan::Direct {
@@ -592,9 +593,11 @@ impl ColumnarTableBackend {
         let grouped_cols = grouped.to_values();
         let group_count = grouped.row_count();
 
-        let mut out: Vec<Vec<Value>> = Vec::with_capacity(group_count);
+        let mut out: Vec<Vec<Value>> = Vec::new();
+        let _ = out.try_reserve_exact(group_count);
         for row_idx in 0..group_count {
-            let mut row: Vec<Value> = Vec::with_capacity(key_len + plans.len());
+            let mut row: Vec<Value> = Vec::new();
+            let _ = row.try_reserve_exact(key_len + plans.len());
             for (col, &col_idx) in group_by.iter().enumerate().take(key_len) {
                 let ty = schema.get(col_idx)?.column_type;
                 let value = grouped_cols
@@ -830,9 +833,11 @@ impl ColumnarTableBackend {
             .iter()
             .map(|spec| spec.column_idx.and_then(|idx| schema.get(idx).map(|c| c.column_type)))
             .collect();
-        let mut key_buf: Vec<Value> = Vec::with_capacity(key_len);
+        let mut key_buf: Vec<Value> = Vec::new();
+        let _ = key_buf.try_reserve_exact(key_len);
 
-        let mut states_template = Vec::with_capacity(aggs.len());
+        let mut states_template = Vec::new();
+        let _ = states_template.try_reserve_exact(aggs.len());
         for spec in aggs {
             states_template.push(AggState::new(spec)?);
         }
@@ -937,13 +942,17 @@ impl ColumnarTableBackend {
                         );
                     }
 
-                    let range = current_range.as_ref().expect("range set for chunk");
+                    let Some(range) = current_range.as_ref() else {
+                        debug_assert!(false, "current_range missing for chunk_start={chunk_start}");
+                        return None;
+                    };
                     process_row(row - current_chunk_start, range);
                 }
             }
         }
 
-        let mut out = Vec::with_capacity(groups.len());
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(groups.len());
         for (key, states) in groups {
             let mut row = key;
             for state in states {
@@ -1006,7 +1015,8 @@ impl ColumnarTableBackend {
 
                 if let Ok(result) = self.table.group_by(&[idx], &[]) {
                     let values = result.to_values();
-                    let mut out = Vec::with_capacity(result.row_count());
+                    let mut out = Vec::new();
+                    let _ = out.try_reserve_exact(result.row_count());
                     if let Some(col) = values.get(0) {
                         for v in col {
                             out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
@@ -1021,7 +1031,8 @@ impl ColumnarTableBackend {
                 }
                 if let Ok(result) = self.table.group_by_rows(&[idx], &[], rows) {
                     let values = result.to_values();
-                    let mut out = Vec::with_capacity(result.row_count());
+                    let mut out = Vec::new();
+                    let _ = out.try_reserve_exact(result.row_count());
                     if let Some(col) = values.get(0) {
                         for v in col {
                             out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
@@ -1039,7 +1050,8 @@ impl ColumnarTableBackend {
                 }
                 if let Ok(result) = self.table.group_by_mask(&[idx], &[], mask) {
                     let values = result.to_values();
-                    let mut out = Vec::with_capacity(result.row_count());
+                    let mut out = Vec::new();
+                    let _ = out.try_reserve_exact(result.row_count());
                     if let Some(col) = values.get(0) {
                         for v in col {
                             out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
@@ -1382,7 +1394,8 @@ impl TableBackend for ColumnarTableBackend {
                 }
                 formula_columnar::ColumnType::DateTime => {
                     const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
-                    let mut ints = Vec::with_capacity(nums.len());
+                    let mut ints = Vec::new();
+                    let _ = ints.try_reserve_exact(nums.len());
                     for v in &nums {
                         if !v.is_finite() || v.fract() != 0.0 || v.abs() > MAX_SAFE_INT {
                             ints.clear();
@@ -1399,7 +1412,8 @@ impl TableBackend for ColumnarTableBackend {
                 | formula_columnar::ColumnType::Percentage { scale } => {
                     const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
                     let factor = Self::scale_factor(scale);
-                    let mut ints = Vec::with_capacity(nums.len());
+                    let mut ints = Vec::new();
+                    let _ = ints.try_reserve_exact(nums.len());
                     for v in &nums {
                         if !v.is_finite() {
                             ints.clear();
