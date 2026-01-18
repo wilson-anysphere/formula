@@ -448,15 +448,11 @@ fn consume_rgcb_arrays_in_subexpression(
     rgcb_pos: &mut usize,
     rgce_base_offset: usize,
 ) -> Result<(), DecodeRgceError> {
-    fn has_remaining(buf: &[u8], i: usize, needed: usize) -> bool {
-        buf.len().saturating_sub(i) >= needed
-    }
-
     let mut i = 0usize;
     while i < rgce.len() {
         let ptg_offset = rgce_base_offset.saturating_add(i);
         let ptg = rgce[i];
-        i += 1;
+        advance_pos(&mut i, 1, rgce.len(), ptg_offset, ptg)?;
 
         match ptg {
             // PtgExp / PtgTbl: [row: u16][col: u16]
@@ -466,28 +462,16 @@ fn consume_rgcb_arrays_in_subexpression(
             // must skip their payload to keep scanning aligned so we can still find any nested
             // `PtgArray` tokens.
             0x01 | 0x02 => {
-                if !has_remaining(rgce, i, 4) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 4;
+                let needed = 4;
+                let _ = slice_at(rgce, i, needed, ptg_offset, ptg)?;
+                advance_pos(&mut i, needed, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgArray (any class): [unused: 7 bytes] + array constant in rgcb.
             0x20 | 0x40 | 0x60 => {
-                if !has_remaining(rgce, i, 7) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 7,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 7;
+                let needed = 7;
+                let _ = slice_at(rgce, i, needed, ptg_offset, ptg)?;
+                advance_pos(&mut i, needed, rgce.len(), ptg_offset, ptg)?;
                 let _ = decode_array_constant(rgcb, rgcb_pos, ptg_offset, ptg)?;
             }
 
@@ -496,53 +480,25 @@ fn consume_rgcb_arrays_in_subexpression(
 
             // PtgStr: [cch: u16][utf16 chars...]
             0x17 => {
-                if !has_remaining(rgce, i, 2) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
                 let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
                 let cch = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
-                i += 2;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
                 let byte_len = cch.saturating_mul(2);
-                if !has_remaining(rgce, i, byte_len) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: byte_len,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += byte_len;
+                let _ = slice_at(rgce, i, byte_len, ptg_offset, ptg)?;
+                advance_pos(&mut i, byte_len, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgExtend* (structured refs): [etpg: u8][payload...]
             0x18 | 0x38 | 0x58 => {
-                if !has_remaining(rgce, i, 1) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                let etpg = rgce[i];
-                i += 1;
+                let hdr = slice_at(rgce, i, 1, ptg_offset, ptg)?;
+                let etpg = hdr[0];
+                advance_pos(&mut i, 1, rgce.len(), ptg_offset, ptg)?;
                 match etpg {
                     // etpg=0x19 is the structured reference payload (PtgList): fixed 12 bytes.
                     0x19 => {
-                        if !has_remaining(rgce, i, 12) {
-                            return Err(DecodeRgceError::UnexpectedEof {
-                                offset: ptg_offset,
-                                ptg,
-                                needed: 12,
-                                remaining: rgce.len().saturating_sub(i),
-                            });
-                        }
-                        i += 12;
+                        let needed = 12;
+                        let _ = slice_at(rgce, i, needed, ptg_offset, ptg)?;
+                        advance_pos(&mut i, needed, rgce.len(), ptg_offset, ptg)?;
                     }
                     // Unknown extend subtype: stop scanning to avoid desync/false positives.
                     _ => break,
@@ -551,291 +507,131 @@ fn consume_rgcb_arrays_in_subexpression(
 
             // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
             0x19 => {
-                if !has_remaining(rgce, i, 3) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
                 let hdr = slice_at(rgce, i, 3, ptg_offset, ptg)?;
                 let grbit = hdr[0];
                 let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]) as usize;
-                i += 3;
+                advance_pos(&mut i, 3, rgce.len(), ptg_offset, ptg)?;
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
                     let needed = w_attr.saturating_mul(2);
-                    if !has_remaining(rgce, i, needed) {
-                        return Err(DecodeRgceError::UnexpectedEof {
-                            offset: ptg_offset,
-                            ptg,
-                            needed,
-                            remaining: rgce.len().saturating_sub(i),
-                        });
-                    }
-                    i += needed;
+                    let _ = slice_at(rgce, i, needed, ptg_offset, ptg)?;
+                    advance_pos(&mut i, needed, rgce.len(), ptg_offset, ptg)?;
                 }
             }
 
             // PtgErr: [code: u8]
             0x1C => {
-                if !has_remaining(rgce, i, 1) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 1;
+                let _ = slice_at(rgce, i, 1, ptg_offset, ptg)?;
+                advance_pos(&mut i, 1, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgBool: [b: u8]
             0x1D => {
-                if !has_remaining(rgce, i, 1) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 1;
+                let _ = slice_at(rgce, i, 1, ptg_offset, ptg)?;
+                advance_pos(&mut i, 1, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgInt: [n: u16]
             0x1E => {
-                if !has_remaining(rgce, i, 2) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 2;
+                let _ = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgNum: [f64]
             0x1F => {
-                if !has_remaining(rgce, i, 8) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 8;
+                let _ = slice_at(rgce, i, 8, ptg_offset, ptg)?;
+                advance_pos(&mut i, 8, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgFunc: [iftab: u16]
             0x21 | 0x41 | 0x61 => {
-                if !has_remaining(rgce, i, 2) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 2;
+                let _ = slice_at(rgce, i, 2, ptg_offset, ptg)?;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
-                if !has_remaining(rgce, i, 3) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 3;
+                let _ = slice_at(rgce, i, 3, ptg_offset, ptg)?;
+                advance_pos(&mut i, 3, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgName: [nameId: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
-                if !has_remaining(rgce, i, 6) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 6;
+                let _ = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgRef: [row: u32][col: u16]
             0x24 | 0x44 | 0x64 => {
-                if !has_remaining(rgce, i, 6) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 6;
+                let _ = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x25 | 0x45 | 0x65 => {
-                if !has_remaining(rgce, i, 12) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 12;
+                let _ = slice_at(rgce, i, 12, ptg_offset, ptg)?;
+                advance_pos(&mut i, 12, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgMem* tokens: [cce: u16][subexpression...]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                if !has_remaining(rgce, i, 2) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
                 let hdr = slice_at(rgce, i, 2, ptg_offset, ptg)?;
                 let cce = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
-                i += 2;
-                let end = i.checked_add(cce).ok_or(DecodeRgceError::UnexpectedEof {
-                    offset: ptg_offset,
-                    ptg,
-                    needed: cce,
-                    remaining: rgce.len().saturating_sub(i),
-                })?;
-                let subexpr = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
-                    offset: ptg_offset,
-                    ptg,
-                    needed: cce,
-                    remaining: rgce.len().saturating_sub(i),
-                })?;
+                advance_pos(&mut i, 2, rgce.len(), ptg_offset, ptg)?;
+                let subexpr = slice_at(rgce, i, cce, ptg_offset, ptg)?;
                 consume_rgcb_arrays_in_subexpression(
                     subexpr,
                     rgcb,
                     rgcb_pos,
                     rgce_base_offset.saturating_add(i),
                 )?;
-                i = end;
+                advance_pos(&mut i, cce, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
-                if !has_remaining(rgce, i, 6) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 6;
+                let _ = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
-                if !has_remaining(rgce, i, 12) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 12;
+                let _ = slice_at(rgce, i, 12, ptg_offset, ptg)?;
+                advance_pos(&mut i, 12, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                if !has_remaining(rgce, i, 6) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 6;
+                let _ = slice_at(rgce, i, 6, ptg_offset, ptg)?;
+                advance_pos(&mut i, 6, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                if !has_remaining(rgce, i, 12) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 12;
+                let _ = slice_at(rgce, i, 12, ptg_offset, ptg)?;
+                advance_pos(&mut i, 12, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
-                if !has_remaining(rgce, i, 4) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 4;
+                let _ = slice_at(rgce, i, 4, ptg_offset, ptg)?;
+                advance_pos(&mut i, 4, rgce.len(), ptg_offset, ptg)?;
             }
 
             // PtgRef3d: [ixti: u16][row: u32][col: u16]
             0x3A | 0x5A | 0x7A => {
-                if !has_remaining(rgce, i, 8) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 8;
+                let _ = slice_at(rgce, i, 8, ptg_offset, ptg)?;
+                advance_pos(&mut i, 8, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
-                if !has_remaining(rgce, i, 14) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 14;
+                let _ = slice_at(rgce, i, 14, ptg_offset, ptg)?;
+                advance_pos(&mut i, 14, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
             0x3C | 0x5C | 0x7C => {
-                if !has_remaining(rgce, i, 8) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 8;
+                let _ = slice_at(rgce, i, 8, ptg_offset, ptg)?;
+                advance_pos(&mut i, 8, rgce.len(), ptg_offset, ptg)?;
             }
             // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3D | 0x5D | 0x7D => {
-                if !has_remaining(rgce, i, 14) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
-                i += 14;
+                let _ = slice_at(rgce, i, 14, ptg_offset, ptg)?;
+                advance_pos(&mut i, 14, rgce.len(), ptg_offset, ptg)?;
             }
 
             // Unknown ptg: stop scanning to avoid desync/false positives.
