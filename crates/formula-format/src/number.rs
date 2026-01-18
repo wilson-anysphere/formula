@@ -549,7 +549,8 @@ fn group_digits_with_padding(int_part: &str, sep: char, spec: GroupingSpec) -> S
         group_digits(trimmed, sep, spec)
     };
     if pad_len > 0 {
-        let mut out = String::with_capacity(pad_len + grouped.len());
+        let mut out = String::new();
+        let _ = out.try_reserve(pad_len + grouped.len());
         for _ in 0..pad_len {
             out.push(' ');
         }
@@ -579,7 +580,8 @@ fn group_digits(int_part: &str, sep: char, spec: GroupingSpec) -> String {
     }
     groups.reverse();
 
-    let mut out = String::with_capacity(len + groups.len().saturating_sub(1));
+    let mut out = String::new();
+    let _ = out.try_reserve(len + groups.len().saturating_sub(1));
     for (i, group) in groups.iter().enumerate() {
         if i > 0 {
             out.push(sep);
@@ -609,7 +611,8 @@ fn apply_int_placeholders(digits: &str, placeholders: &[PlaceholderKind], is_les
     }
 
     let tail_digits = &digit_chars[extra..];
-    let mut tail_out: Vec<char> = Vec::with_capacity(placeholder_len);
+    let mut tail_out: Vec<char> = Vec::new();
+    let _ = tail_out.try_reserve_exact(placeholder_len);
     let mut digit_idx: i32 = tail_digits.len() as i32 - 1;
 
     for kind in placeholders.iter().rev() {
@@ -678,7 +681,8 @@ fn apply_frac_placeholders(digits: &str, placeholders: &[PlaceholderKind]) -> St
         }
     }
 
-    let mut out = String::with_capacity(placeholders.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(placeholders.len());
     for (idx, kind) in placeholders.iter().enumerate() {
         let digit = digit_chars.get(idx).copied().unwrap_or('0');
         if idx >= cut {

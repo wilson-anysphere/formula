@@ -133,7 +133,7 @@ fn classify_datetime_pattern_as_cell_format_code(pattern: &str) -> Option<String
 
     let mut has_month_name = false;
 
-    for token in &tokens {
+    for (idx, token) in tokens.iter().enumerate() {
         match token {
             DateTimeToken::Year(_) => has_year = true,
             DateTimeToken::Day(count) => {
@@ -161,7 +161,27 @@ fn classify_datetime_pattern_as_cell_format_code(pattern: &str) -> Option<String
             DateTimeToken::ElapsedSeconds(_) => has_second = true,
             DateTimeToken::AmPmLong | DateTimeToken::AmPmShort => has_ampm = true,
             DateTimeToken::DateSep | DateTimeToken::TimeSep | DateTimeToken::Literal(_) => {}
-            DateTimeToken::MonthOrMinute(_) => unreachable!("month/minute disambiguation should run first"),
+            DateTimeToken::MonthOrMinute(count) => {
+                // Best-effort fallback: `disambiguate_month_minute` should have run already, but
+                // avoid panicking if a token stream bypasses it.
+                let count = *count;
+                if count >= 3 {
+                    has_month = true;
+                    has_month_name = true;
+                    continue;
+                }
+
+                let prev = prev_non_literal(&tokens, idx);
+                let next = next_non_literal(&tokens, idx);
+                let is_minute =
+                    matches!(prev, Some(DateTimeToken::Hour(_)) | Some(DateTimeToken::ElapsedHours(_)))
+                        || matches!(next, Some(DateTimeToken::Second(_)) | Some(DateTimeToken::ElapsedSeconds(_)));
+                if is_minute {
+                    has_minute = true;
+                } else {
+                    has_month = true;
+                }
+            }
         }
     }
 

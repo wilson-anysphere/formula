@@ -211,7 +211,8 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
     //
     // This intentionally supports a small set of locales the formatter ships with (plus a
     // best-effort language/region fallback for common variants).
-    let mut key = String::with_capacity(trimmed.len());
+    let mut key = String::new();
+    let _ = key.try_reserve(trimmed.len());
     for ch in trimmed.chars() {
         let ch = match ch {
             '_' => '-',
@@ -418,7 +419,8 @@ fn group_thousands(int_part: &str, sep: char) -> String {
         return int_part.to_string();
     }
 
-    let mut out = String::with_capacity(len + len / 3);
+    let mut out = String::new();
+    let _ = out.try_reserve(len + len / 3);
     let mut first_group = len % 3;
     if first_group == 0 {
         first_group = 3;

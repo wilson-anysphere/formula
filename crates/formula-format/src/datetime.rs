@@ -495,7 +495,7 @@ fn next_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
 fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, options: &FormatOptions) -> RenderedText {
     let mut out = RenderedText::new(String::new());
 
-    for token in tokens {
+    for (idx, token) in tokens.iter().enumerate() {
         match token {
             Token::Literal(s) => out.push_str(s),
             Token::DateSep => out.push(options.locale.date_sep),
@@ -539,7 +539,25 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
                     fill_with: *fill_with,
                 });
             }
-            Token::MonthOrMinute(_) => unreachable!("month/minute disambiguation should run first"),
+            Token::MonthOrMinute(count) => {
+                // Best-effort fallback: callers should run `disambiguate_minutes` during parsing,
+                // but avoid panicking if a token stream bypasses that step.
+                let count = *count;
+                if count >= 3 {
+                    out.push_str(&format_month(parts.month, count));
+                    continue;
+                }
+
+                let prev = prev_non_literal(tokens, idx);
+                let next = next_non_literal(tokens, idx);
+                let is_minute = matches!(prev, Some(Token::Hour(_)) | Some(Token::ElapsedHours(_)))
+                    || matches!(next, Some(Token::Second(_)) | Some(Token::ElapsedSeconds(_)));
+                if is_minute {
+                    out.push_str(&format_two(parts.minute, count));
+                } else {
+                    out.push_str(&format_month(parts.month, count));
+                }
+            }
         }
     }
 
