@@ -1,22 +1,40 @@
-From b0ad41213a23f5605a4d208f35aba6ef3d24fdd8 Mon Sep 17 00:00:00 2001
+From 51d501d5281e6246f154b7a969133f4c3dbc6fd1 Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
-Date: Sun, 18 Jan 2026 12:11:18 -0800
-Subject: [PATCH] fix: keep snapshot guard harnesses green
+Date: Sun, 18 Jan 2026 12:12:11 -0800
+Subject: [PATCH] fix: restore snapshot build + policy guards
 
-- Remove duplicate MaybeTlsStream import so websocket_runtime compile guards pass.
-- Ensure UI navigation URL helpers import fastrender_url::Url for policy tests.
-- Drop legacy prototype selector tests that referenced blocked parser crates.
+- Fix duplicate MaybeTlsStream imports/re-exports that broke websocket compilation.
+
+- Ensure UI url helpers import fastrender_url::Url (policy guard).
+
+- Remove obsolete selector prototype tests that referenced blocked legacy parser crates.
+
+- Fix style_minimal module wiring (duplicate computed module) to restore fastrender builds.
 ---
- src/css/prototype/selector_tests.rs      | 3475 ----------------------
- src/net/websocket/mod.rs                 |    1 -
- src/network_process/websocket_runtime.rs |    1 -
- src/ui/url.rs                            |    2 +
- 4 files changed, 2 insertions(+), 3477 deletions(-)
+ .../tests/network_process_client_compile.rs   |    1 -
+ src/css/prototype/selector_tests.rs           | 3475 -----------------
+ src/net/websocket/mod.rs                      |    1 -
+ src/network_process/websocket_runtime.rs      |    1 -
+ src/style_minimal/mod.rs                      |    2 -
+ src/ui/url.rs                                 |    2 +
+ 6 files changed, 2 insertions(+), 3480 deletions(-)
  delete mode 100644 src/css/prototype/selector_tests.rs
 
+diff --git a/crates/layout_engine/tests/network_process_client_compile.rs b/crates/layout_engine/tests/network_process_client_compile.rs
+index c282a665a30..a78e9ba8576 100644
+--- a/crates/layout_engine/tests/network_process_client_compile.rs
++++ b/crates/layout_engine/tests/network_process_client_compile.rs
+@@ -762,7 +762,6 @@ mod style {
+   pub mod values {
+     pub use super::types::Length;
+     use super::types::CalcSizeExpr;
+-    pub use super::types::Length;
+ 
+     pub fn intern_calc_size_expr(_input: &str) -> CalcSizeExpr {
+       CalcSizeExpr(0)
 diff --git a/src/css/prototype/selector_tests.rs b/src/css/prototype/selector_tests.rs
 deleted file mode 100644
-index d59b0425f..000000000
+index d59b0425fe8..00000000000
 --- a/src/css/prototype/selector_tests.rs
 +++ /dev/null
 @@ -1,3475 +0,0 @@
@@ -3496,19 +3514,19 @@ index d59b0425f..000000000
 -  assert!(!selector.needs_featureless_host_traversal());
 -}
 diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
-index ff56d077c..fe76f1f86 100644
+index 98968ec4e68..3795295297a 100644
 --- a/src/net/websocket/mod.rs
 +++ b/src/net/websocket/mod.rs
-@@ -33,7 +33,6 @@ pub use client::{WebSocketClient, WebSocketEvent, WebSocketIoError, WebSocketLim
- pub use connect::{client_handshake, HandshakeOptions, HandshakeResult};
- pub use frame::{Frame, FrameCodec, FrameDecodeError, FrameEncodeError, FrameLimits, OpCode, Role};
- pub use handshake::cookie_url_for_ws_url;
+@@ -44,7 +44,6 @@ pub use http_headers::{
+   read_http_header_block, read_http_header_block_with_limits, HttpHeaderBlock,
+   HttpHeaderBlockError, HttpHeaderLimits, HttpHeaderLookupError, HttpStartLine, HttpVersion,
+ };
 -pub use maybe_tls_stream::MaybeTlsStream;
- pub use handshake::WebSocketHandshakeError as ClientHandshakeError;
- pub use handshake::{
-   build_client_handshake_request, compute_sec_websocket_accept, generate_sec_websocket_key,
+ pub use message::{
+   decode_close_payload, encode_close_payload, Message, MessageCodec, MessageDecodeError,
+   MessageEncodeError, MessageLimits, MAX_CLOSE_REASON_BYTES,
 diff --git a/src/network_process/websocket_runtime.rs b/src/network_process/websocket_runtime.rs
-index 9e9c1e194..af0747d6e 100644
+index 9e9c1e19476..af0747d6eac 100644
 --- a/src/network_process/websocket_runtime.rs
 +++ b/src/network_process/websocket_runtime.rs
 @@ -36,7 +36,6 @@ use crate::net::websocket::{
@@ -3519,8 +3537,21 @@ index 9e9c1e194..af0747d6e 100644
  use crate::http_types::header::HeaderValue;
  use crate::resource::{
    origin_from_url, DocumentOrigin, FetchCredentialsMode, FetchDestination, FetchRequest,
+diff --git a/src/style_minimal/mod.rs b/src/style_minimal/mod.rs
+index 6ccef6ab379..0eadd31e96e 100644
+--- a/src/style_minimal/mod.rs
++++ b/src/style_minimal/mod.rs
+@@ -9,8 +9,6 @@ pub mod page;
+ pub mod position;
+ pub mod types;
+ pub mod values;
+-#[path = "../style_stub/computed.rs"]
+-pub mod computed;
+ 
+ use crate::style::color::Rgba;
+ use crate::style::display::Display;
 diff --git a/src/ui/url.rs b/src/ui/url.rs
-index 15bb91547..15e71ea6f 100644
+index 15bb915473b..15e71ea6fb4 100644
 --- a/src/ui/url.rs
 +++ b/src/ui/url.rs
 @@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
