@@ -1,9 +1,11 @@
-From 18ce3d0c574291041d02690f0fed7e26ff2a5b4f Mon Sep 17 00:00:00 2001
+From b0ad41213a23f5605a4d208f35aba6ef3d24fdd8 Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
 Date: Sun, 18 Jan 2026 12:11:18 -0800
 Subject: [PATCH] fix: keep snapshot guard harnesses green
 
-- Remove duplicate MaybeTlsStream imports so websocket_runtime compile guards pass.\n- Ensure UI navigation URL helpers import fastrender_url::Url for policy tests.\n- Drop legacy prototype selector tests that referenced blocked parser crates.
+- Remove duplicate MaybeTlsStream import so websocket_runtime compile guards pass.
+- Ensure UI navigation URL helpers import fastrender_url::Url for policy tests.
+- Drop legacy prototype selector tests that referenced blocked parser crates.
 ---
  src/css/prototype/selector_tests.rs      | 3475 ----------------------
  src/net/websocket/mod.rs                 |    1 -
