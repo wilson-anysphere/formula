@@ -1419,7 +1419,8 @@ impl DataModel {
                         out
                     });
 
-                let mut keys = HashSet::<Value>::with_capacity(distinct_values.len());
+                let mut keys = HashSet::<Value>::new();
+                let _ = keys.try_reserve(distinct_values.len());
                 for v in distinct_values {
                     if v.is_blank() {
                         continue;
