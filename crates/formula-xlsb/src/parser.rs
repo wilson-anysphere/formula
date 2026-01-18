@@ -119,6 +119,8 @@ pub enum Error {
     TooManyZipEntries { count: usize, max: usize },
     #[error("office encryption error: {0}")]
     OfficeCrypto(String),
+    #[error("invalid XLSB: unexpected record type 0x{record:08X} while parsing {context}")]
+    UnexpectedRecordType { record: u32, context: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1526,7 +1528,15 @@ fn parse_rich_runs_best_effort(
         if data.len().saturating_sub(off) < *count_size {
             continue;
         }
-        let count = read_count(&data[off..off + count_size]);
+        let Some(count_bytes) = data.get(off..off + count_size) else {
+            debug_assert!(
+                false,
+                "rich run count slice out of bounds (len={}, off={off}, count_size={count_size})",
+                data.len()
+            );
+            continue;
+        };
+        let count = read_count(count_bytes);
         off += count_size;
 
         // Sanity: avoid absurd allocations if the count is garbage.
@@ -1540,7 +1550,7 @@ fn parse_rich_runs_best_effort(
             continue;
         }
 
-        let run_bytes = &data[off..off + needed];
+        let run_bytes = data.get(off..off + needed)?;
         off += needed;
 
         // If there is no phonetic data, we expect to consume the whole record payload.
@@ -1816,13 +1826,11 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         // the simple vs flagged UTF-16 start offsets based on which slice looks
                         // more like UTF-16LE text.
                         let cch = {
-                            let bytes: [u8; 4] = rr
+                            let raw = rr
                                 .data
                                 .get(start_offset..start_offset + 4)
-                                .ok_or(Error::UnexpectedEof)?
-                                .try_into()
-                                .unwrap();
-                            u32::from_le_bytes(bytes) as usize
+                                .ok_or(Error::UnexpectedEof)?;
+                            u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize
                         };
                         let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
                         let simple_utf16_start =
@@ -1902,15 +1910,24 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                 // a flags byte for simple-layout strings that include trailing
                                 // bytes (seen in the wild), which can shift the decode by 1 byte
                                 // and corrupt the decoded text (especially for non-ASCII strings).
-                                if rr.data[simple_utf16_start] & !0x83 != 0 {
+                                let flag_byte = rr
+                                    .data
+                                    .get(simple_utf16_start)
+                                    .copied()
+                                    .ok_or(Error::UnexpectedEof)?;
+                                if flag_byte & !0x83 != 0 {
                                     false
                                 } else {
-                                    let simple_score = score_utf16_candidate(
-                                        &rr.data[simple_utf16_start..simple_utf16_end],
-                                    );
-                                    let flagged_score = score_utf16_candidate(
-                                        &rr.data[flagged_utf16_start..flagged_utf16_end],
-                                    );
+                                    let simple_slice = rr
+                                        .data
+                                        .get(simple_utf16_start..simple_utf16_end)
+                                        .ok_or(Error::UnexpectedEof)?;
+                                    let flagged_slice = rr
+                                        .data
+                                        .get(flagged_utf16_start..flagged_utf16_end)
+                                        .ok_or(Error::UnexpectedEof)?;
+                                    let simple_score = score_utf16_candidate(simple_slice);
+                                    let flagged_score = score_utf16_candidate(flagged_slice);
                                     // Tie-break in favor of the flagged layout (more common in the
                                     // wild and required for rich/phonetic preservation).
                                     flagged_score >= simple_score
@@ -2006,16 +2023,19 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                                 .unwrap_or(run.start as u32);
                                             runs_bytes.extend_from_slice(&ich.to_le_bytes());
 
-                                            let fmt = s.run_formats.get(i).map(|v| v.as_slice());
-                                            match fmt.map(|v| v.len()).unwrap_or(0) {
+                                            let fmt = s
+                                                .run_formats
+                                                .get(i)
+                                                .map(|v| v.as_slice())
+                                                .unwrap_or(&[]);
+                                            match fmt.len() {
                                                 0 => runs_bytes.extend_from_slice(&[0u8; 4]),
                                                 2 => {
-                                                    runs_bytes.extend_from_slice(fmt.unwrap());
+                                                    runs_bytes.extend_from_slice(fmt);
                                                     runs_bytes.extend_from_slice(&[0u8; 2]);
                                                 }
-                                                4 => runs_bytes.extend_from_slice(fmt.unwrap()),
+                                                4 => runs_bytes.extend_from_slice(fmt),
                                                 n => {
-                                                    let fmt = fmt.unwrap();
                                                     let take = n.min(4);
                                                     runs_bytes.extend_from_slice(&fmt[..take]);
                                                     if take < 4 {
@@ -2094,7 +2114,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         };
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
-                        let extra = rr.data[rr.offset..].to_vec();
+                        let extra = rr.data.get(rr.offset..).ok_or(Error::UnexpectedEof)?.to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
@@ -2129,7 +2149,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
-                        let extra = rr.data[rr.offset..].to_vec();
+                        let extra = rr.data.get(rr.offset..).ok_or(Error::UnexpectedEof)?.to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
@@ -2163,7 +2183,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
-                        let extra = rr.data[rr.offset..].to_vec();
+                        let extra = rr.data.get(rr.offset..).ok_or(Error::UnexpectedEof)?.to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
@@ -2197,7 +2217,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
-                        let extra = rr.data[rr.offset..].to_vec();
+                        let extra = rr.data.get(rr.offset..).ok_or(Error::UnexpectedEof)?.to_vec();
                         let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas, ctx)
@@ -2225,7 +2245,16 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             None,
                         )
                     }
-                    _ => unreachable!(),
+                    other => {
+                        debug_assert!(
+                            false,
+                            "unexpected XLSB cell record type 0x{other:08X} at row={row} col={col}"
+                        );
+                        return Err(Error::UnexpectedRecordType {
+                            record: other,
+                            context: "cell value",
+                        });
+                    }
                 };
 
                 let cell = Cell {
@@ -2275,7 +2304,7 @@ impl SharedFormulaDef {
             return None;
         }
 
-        let tail = &data[16..];
+        let tail = data.get(16..)?;
         let (rgce, rgce_end) = parse_rgce_tail(tail)?;
         let rgcb = tail.get(rgce_end..)?.to_vec();
 
@@ -2437,17 +2466,15 @@ fn materialize_rgce(
             0x03..=0x16 | 0x2F => out.push(ptg),
             0x17 => {
                 // PtgStr: [cch: u16][utf16 chars...]
-                if i + 2 > base.len() {
-                    return None;
-                }
-                let cch = u16::from_le_bytes([base[i], base[i + 1]]) as usize;
+                let len_end = i.checked_add(2)?;
+                let len_bytes = base.get(i..len_end)?;
+                let cch = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
                 let bytes = cch.checked_mul(2)?;
-                if i + 2 + bytes > base.len() {
-                    return None;
-                }
+                let end = len_end.checked_add(bytes)?;
+                let payload = base.get(i..end)?;
                 out.push(ptg);
-                out.extend_from_slice(&base[i..i + 2 + bytes]);
-                i += 2 + bytes;
+                out.extend_from_slice(payload);
+                i = end;
             }
             0x18 | 0x38 | 0x58 => {
                 // PtgExtend / PtgExtendV / PtgExtendA.
@@ -2482,50 +2509,55 @@ fn materialize_rgce(
             0x1E => {
                 // PtgInt: 2 bytes.
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 2)?);
-                i += 2;
+                let end = i.checked_add(2)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x1F => {
                 // PtgNum: 8 bytes.
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
-                i += 8;
+                let end = i.checked_add(8)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x20 | 0x40 | 0x60 => {
                 // PtgArray: [unused: 7 bytes] + array data stored in the trailing rgcb stream.
                 //
                 // Arrays don't embed relative references in the token stream, so we can copy the
                 // token verbatim while leaving rgcb unchanged.
-                if i + 7 > base.len() {
-                    return None;
-                }
+                let end = i.checked_add(7)?;
+                let payload = base.get(i..end)?;
                 out.push(ptg);
-                out.extend_from_slice(&base[i..i + 7]);
-                i += 7;
+                out.extend_from_slice(payload);
+                i = end;
             }
             0x21 | 0x41 | 0x61 => {
                 // PtgFunc: [iftab: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 2)?);
-                i += 2;
+                let end = i.checked_add(2)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x22 | 0x42 | 0x62 => {
                 // PtgFuncVar: [argc: u8][iftab: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 3)?);
-                i += 3;
+                let end = i.checked_add(3)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x23 | 0x43 | 0x63 => {
                 // PtgName: [nameId: u32][reserved: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x39 | 0x59 | 0x79 => {
                 // PtgNameX: [ixti: u16][nameIndex: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 4)?);
-                i += 4;
+                let end = i.checked_add(4)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x3A | 0x5A | 0x7A => {
                 // PtgRef3d: [ixti: u16][row: u32][col+flags: u16]
@@ -2533,9 +2565,11 @@ fn materialize_rgce(
                 // Like `PtgRef`, the row/col fields are absolute coordinates with relative flags
                 // in the high bits. Shared formulas can contain 3D references, so we need to
                 // shift relative refs when materializing across the shared range.
-                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let row_raw = u32::from_le_bytes(base.get(i + 2..i + 6)?.try_into().ok()?) as i64;
-                let col_raw_u16 = u16::from_le_bytes(base.get(i + 6..i + 8)?.try_into().ok()?);
+                let end = i.checked_add(8)?;
+                let raw = base.get(i..end)?;
+                let ixti = u16::from_le_bytes([raw[0], raw[1]]);
+                let row_raw = u32::from_le_bytes([raw[2], raw[3], raw[4], raw[5]]) as i64;
+                let col_raw_u16 = u16::from_le_bytes([raw[6], raw[7]]);
                 let col_raw = (col_raw_u16 & 0x3FFF) as i64;
                 let row_rel = (col_raw_u16 & 0x4000) != 0;
                 let col_rel = (col_raw_u16 & 0x8000) != 0;
@@ -2553,8 +2587,8 @@ fn materialize_rgce(
 
                 if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
                     out.push(ptg.saturating_add(0x02)); // PtgRef3d* -> PtgRefErr3d*
-                    out.extend_from_slice(base.get(i..i + 8)?);
-                    i += 8;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
 
@@ -2563,18 +2597,20 @@ fn materialize_rgce(
                 out.extend_from_slice(&(new_row as u32).to_le_bytes());
                 let new_col_u16 = pack_col_flags(new_col as u32, row_rel, col_rel)?;
                 out.extend_from_slice(&new_col_u16.to_le_bytes());
-                i += 8;
+                i = end;
             }
             0x3B | 0x5B | 0x7B => {
                 // PtgArea3d: [ixti: u16][r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
                 //
                 // Like `PtgArea`, area endpoints have independent relative flags. Materialize by
                 // shifting any relative endpoints by the shared-formula delta.
-                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let r1_raw = u32::from_le_bytes(base.get(i + 2..i + 6)?.try_into().ok()?) as i64;
-                let r2_raw = u32::from_le_bytes(base.get(i + 6..i + 10)?.try_into().ok()?) as i64;
-                let c1_u16 = u16::from_le_bytes(base.get(i + 10..i + 12)?.try_into().ok()?);
-                let c2_u16 = u16::from_le_bytes(base.get(i + 12..i + 14)?.try_into().ok()?);
+                let end = i.checked_add(14)?;
+                let raw = base.get(i..end)?;
+                let ixti = u16::from_le_bytes([raw[0], raw[1]]);
+                let r1_raw = u32::from_le_bytes([raw[2], raw[3], raw[4], raw[5]]) as i64;
+                let r2_raw = u32::from_le_bytes([raw[6], raw[7], raw[8], raw[9]]) as i64;
+                let c1_u16 = u16::from_le_bytes([raw[10], raw[11]]);
+                let c2_u16 = u16::from_le_bytes([raw[12], raw[13]]);
 
                 let c1_raw = (c1_u16 & 0x3FFF) as i64;
                 let c2_raw = (c2_u16 & 0x3FFF) as i64;
@@ -2598,8 +2634,8 @@ fn materialize_rgce(
                     || new_c2 > MAX_COL
                 {
                     out.push(ptg.saturating_add(0x02)); // PtgArea3d* -> PtgAreaErr3d*
-                    out.extend_from_slice(base.get(i..i + 14)?);
-                    i += 14;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
 
@@ -2611,7 +2647,7 @@ fn materialize_rgce(
                 let new_c2_u16 = pack_col_flags(new_c2 as u32, r2_rel, c2_rel)?;
                 out.extend_from_slice(&new_c1_u16.to_le_bytes());
                 out.extend_from_slice(&new_c2_u16.to_le_bytes());
-                i += 14;
+                i = end;
             }
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
@@ -2621,25 +2657,22 @@ fn materialize_rgce(
                 // nested rgce subexpression. These tokens are usually ignored for printing, but
                 // the nested bytes still need to be materialized (shift relative refs) so the
                 // dependency graph stays consistent for shared formulas.
-                if i + 2 > base.len() {
-                    return None;
-                }
-                let cce = u16::from_le_bytes([base[i], base[i + 1]]) as usize;
+                let cce_end = i.checked_add(2)?;
+                let cce_bytes = base.get(i..cce_end)?;
+                let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
                 out.push(ptg);
-                out.extend_from_slice(&base[i..i + 2]);
-                i += 2;
+                out.extend_from_slice(cce_bytes);
+                i = cce_end;
 
-                if i + cce > base.len() {
-                    return None;
-                }
-                let nested = base.get(i..i + cce)?;
+                let end = i.checked_add(cce)?;
+                let nested = base.get(i..end)?;
                 let nested_out = materialize_rgce(nested, base_row, base_col, row, col, ctx)?;
                 // Materialization should preserve encoded size; bail out defensively otherwise.
                 if nested_out.len() != cce {
                     return None;
                 }
                 out.extend_from_slice(&nested_out);
-                i += cce;
+                i = end;
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
@@ -2647,29 +2680,28 @@ fn materialize_rgce(
                 // When materializing shared formulas we generally keep `PtgAttr` tokens as-is,
                 // but we still need to copy the payload (and any attribute-specific tail bytes)
                 // so the output rgce stays aligned.
-                if i + 3 > base.len() {
-                    return None;
-                }
+                let hdr_end = i.checked_add(3)?;
+                let hdr = base.get(i..hdr_end)?;
                 out.push(ptg);
-                let grbit = base[i];
-                let w_attr = u16::from_le_bytes([base[i + 1], base[i + 2]]);
-                out.extend_from_slice(&base[i..i + 3]);
-                i += 3;
+                let grbit = hdr[0];
+                let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]);
+                out.extend_from_slice(hdr);
+                i = hdr_end;
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
                     let needed = (w_attr as usize).checked_mul(2)?;
-                    if i + needed > base.len() {
-                        return None;
-                    }
-                    out.extend_from_slice(&base[i..i + needed]);
-                    i += needed;
+                    let end = i.checked_add(needed)?;
+                    out.extend_from_slice(base.get(i..end)?);
+                    i = end;
                 }
             }
             0x24 | 0x44 | 0x64 => {
                 // PtgRef: [row: u32][col+flags: u16]
-                let row_raw = u32::from_le_bytes(base.get(i..i + 4)?.try_into().ok()?) as i64;
-                let col_raw_u16 = u16::from_le_bytes(base.get(i + 4..i + 6)?.try_into().ok()?);
+                let end = i.checked_add(6)?;
+                let raw = base.get(i..end)?;
+                let row_raw = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
+                let col_raw_u16 = u16::from_le_bytes([raw[4], raw[5]]);
                 let col_raw = (col_raw_u16 & 0x3FFF) as i64;
                 let row_rel = (col_raw_u16 & 0x4000) != 0;
                 let col_rel = (col_raw_u16 & 0x8000) != 0;
@@ -2691,8 +2723,8 @@ fn materialize_rgce(
                     // overflow the valid row/col bounds. Materialize those as `#REF!` tokens
                     // instead of aborting materialization entirely.
                     out.push(ptg.saturating_add(0x06)); // PtgRef* -> PtgRefErr* (class-preserving)
-                    out.extend_from_slice(base.get(i..i + 6)?);
-                    i += 6;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
 
@@ -2700,14 +2732,16 @@ fn materialize_rgce(
                 out.extend_from_slice(&(new_row as u32).to_le_bytes());
                 let new_col_u16 = pack_col_flags(new_col as u32, row_rel, col_rel)?;
                 out.extend_from_slice(&new_col_u16.to_le_bytes());
-                i += 6;
+                i = end;
             }
             0x25 | 0x45 | 0x65 => {
                 // PtgArea: [r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
-                let r1_raw = u32::from_le_bytes(base.get(i..i + 4)?.try_into().ok()?) as i64;
-                let r2_raw = u32::from_le_bytes(base.get(i + 4..i + 8)?.try_into().ok()?) as i64;
-                let c1_u16 = u16::from_le_bytes(base.get(i + 8..i + 10)?.try_into().ok()?);
-                let c2_u16 = u16::from_le_bytes(base.get(i + 10..i + 12)?.try_into().ok()?);
+                let end = i.checked_add(12)?;
+                let raw = base.get(i..end)?;
+                let r1_raw = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
+                let r2_raw = u32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]) as i64;
+                let c1_u16 = u16::from_le_bytes([raw[8], raw[9]]);
+                let c2_u16 = u16::from_le_bytes([raw[10], raw[11]]);
 
                 let c1_raw = (c1_u16 & 0x3FFF) as i64;
                 let c2_raw = (c2_u16 & 0x3FFF) as i64;
@@ -2732,8 +2766,8 @@ fn materialize_rgce(
                 {
                     // Emit an error-range token when the adjusted area exceeds sheet bounds.
                     out.push(ptg.saturating_add(0x06)); // PtgArea* -> PtgAreaErr* (class-preserving)
-                    out.extend_from_slice(base.get(i..i + 12)?);
-                    i += 12;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
 
@@ -2744,20 +2778,22 @@ fn materialize_rgce(
                 let new_c2_u16 = pack_col_flags(new_c2 as u32, r2_rel, c2_rel)?;
                 out.extend_from_slice(&new_c1_u16.to_le_bytes());
                 out.extend_from_slice(&new_c2_u16.to_le_bytes());
-                i += 12;
+                i = end;
             }
             0x2C | 0x4C | 0x6C => {
                 // PtgRefN: relative row/col offsets (commonly used in shared formulas).
                 // Layout is best-effort:
                 // - [row_off: i32][col_off: i16]
-                let row_off = i32::from_le_bytes(base.get(i..i + 4)?.try_into().ok()?) as i64;
-                let col_off = i16::from_le_bytes(base.get(i + 4..i + 6)?.try_into().ok()?) as i64;
+                let end = i.checked_add(6)?;
+                let raw = base.get(i..end)?;
+                let row_off = i32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
+                let col_off = i16::from_le_bytes([raw[4], raw[5]]) as i64;
                 let abs_row = row as i64 + row_off;
                 let abs_col = col as i64 + col_off;
                 if abs_row < 0 || abs_row > MAX_ROW || abs_col < 0 || abs_col > MAX_COL {
                     out.push(ptg.saturating_sub(0x02)); // PtgRefN* -> PtgRefErr* (class-preserving)
-                    out.extend_from_slice(base.get(i..i + 6)?);
-                    i += 6;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
                 // Convert to a normal PtgRef token.
@@ -2765,16 +2801,18 @@ fn materialize_rgce(
                 out.extend_from_slice(&(abs_row as u32).to_le_bytes());
                 let col_u16 = pack_col_flags(abs_col as u32, true, true)?;
                 out.extend_from_slice(&col_u16.to_le_bytes());
-                i += 6;
+                i = end;
             }
             0x2D | 0x4D | 0x6D => {
                 // PtgAreaN: relative row/col offsets (commonly used in shared formulas).
                 // Layout is best-effort:
                 // - [r1_off: i32][r2_off: i32][c1_off: i16][c2_off: i16]
-                let r1_off = i32::from_le_bytes(base.get(i..i + 4)?.try_into().ok()?) as i64;
-                let r2_off = i32::from_le_bytes(base.get(i + 4..i + 8)?.try_into().ok()?) as i64;
-                let c1_off = i16::from_le_bytes(base.get(i + 8..i + 10)?.try_into().ok()?) as i64;
-                let c2_off = i16::from_le_bytes(base.get(i + 10..i + 12)?.try_into().ok()?) as i64;
+                let end = i.checked_add(12)?;
+                let raw = base.get(i..end)?;
+                let r1_off = i32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
+                let r2_off = i32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]) as i64;
+                let c1_off = i16::from_le_bytes([raw[8], raw[9]]) as i64;
+                let c2_off = i16::from_le_bytes([raw[10], raw[11]]) as i64;
 
                 let abs_r1 = row as i64 + r1_off;
                 let abs_r2 = row as i64 + r2_off;
@@ -2791,8 +2829,8 @@ fn materialize_rgce(
                     || abs_c2 > MAX_COL
                 {
                     out.push(ptg.saturating_sub(0x02)); // PtgAreaN* -> PtgAreaErr* (class-preserving)
-                    out.extend_from_slice(base.get(i..i + 12)?);
-                    i += 12;
+                    out.extend_from_slice(raw);
+                    i = end;
                     continue;
                 }
 
@@ -2803,31 +2841,35 @@ fn materialize_rgce(
                 let c2_u16 = pack_col_flags(abs_c2 as u32, true, true)?;
                 out.extend_from_slice(&c1_u16.to_le_bytes());
                 out.extend_from_slice(&c2_u16.to_le_bytes());
-                i += 12;
+                i = end;
             }
             0x2A | 0x4A | 0x6A => {
                 // PtgRefErr: [row: u32][col+flags: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x2B | 0x4B | 0x6B => {
                 // PtgAreaErr: [r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 12)?);
-                i += 12;
+                let end = i.checked_add(12)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x3C | 0x5C | 0x7C => {
                 // PtgRefErr3d: [ixti: u16][row: u32][col+flags: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
-                i += 8;
+                let end = i.checked_add(8)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x3D | 0x5D | 0x7D => {
                 // PtgAreaErr3d: [ixti: u16][r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 14)?);
-                i += 14;
+                let end = i.checked_add(14)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             _ => return None,
         }
@@ -3033,14 +3075,16 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
     // BIFF8 layout: u16 cxti + cxti * (u16, u16, u16)
     if data.len() >= 2 {
         let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
-        if data.len() == 2 + cxti * 6 {
+        let expected_len = 2usize.checked_add(cxti.checked_mul(6)?)?;
+        if data.len() == expected_len {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
             let mut offset = 2;
             for _ in 0..cxti {
-                let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                let first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as u32;
-                let last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]) as u32;
+                let chunk = data.get(offset..offset + 6)?;
+                let supbook = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let first = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
+                let last = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
                 out.push(ExternSheet {
                     supbook_index: supbook,
                     sheet_first: first,
@@ -3055,14 +3099,16 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
     // BIFF12-like layout: u32 cxti + entries (either 6 or 12 bytes each).
     if data.len() >= 4 {
         let cxti = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-        if data.len() == 4 + cxti * 6 {
+        let expected_len_6 = 4usize.checked_add(cxti.checked_mul(6)?)?;
+        if data.len() == expected_len_6 {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
             let mut offset = 4;
             for _ in 0..cxti {
-                let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                let first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as u32;
-                let last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]) as u32;
+                let chunk = data.get(offset..offset + 6)?;
+                let supbook = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let first = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
+                let last = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
                 out.push(ExternSheet {
                     supbook_index: supbook,
                     sheet_first: first,
@@ -3073,29 +3119,17 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
             return Some(out);
         }
 
-        if data.len() == 4 + cxti * 12 {
+        let expected_len_12 = 4usize.checked_add(cxti.checked_mul(12)?)?;
+        if data.len() == expected_len_12 {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
             let mut offset = 4;
             for _ in 0..cxti {
-                let supbook = u32::from_le_bytes([
-                    data[offset],
-                    data[offset + 1],
-                    data[offset + 2],
-                    data[offset + 3],
-                ]) as u16;
-                let first = u32::from_le_bytes([
-                    data[offset + 4],
-                    data[offset + 5],
-                    data[offset + 6],
-                    data[offset + 7],
-                ]);
-                let last = u32::from_le_bytes([
-                    data[offset + 8],
-                    data[offset + 9],
-                    data[offset + 10],
-                    data[offset + 11],
-                ]);
+                let chunk = data.get(offset..offset + 12)?;
+                let supbook =
+                    u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as u16;
+                let first = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+                let last = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
                 out.push(ExternSheet {
                     supbook_index: supbook,
                     sheet_first: first,
@@ -3176,7 +3210,7 @@ fn parse_defined_name_record(data: &[u8]) -> Option<DefinedName> {
         let name = rr.read_utf16_string().ok()?;
         let rgce_len = rr.read_u32().ok()? as usize;
         let rgce = rr.read_slice(rgce_len).ok()?.to_vec();
-        let extra = rr.data[rr.offset..].to_vec();
+        let extra = rr.data.get(rr.offset..)?.to_vec();
 
         Some(DefinedName {
             index: 0, // patched by caller

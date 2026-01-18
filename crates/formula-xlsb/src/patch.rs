@@ -1648,11 +1648,20 @@ fn reject_formula_payload_edit(edit: &CellEdit, row: u32, col: u32) -> Result<()
         return Ok(());
     }
 
-    let kind = match (edit.new_formula.is_some(), edit.new_rgcb.is_some()) {
-        (true, true) => "formula (rgce + rgcb)",
-        (true, false) => "formula",
-        (false, true) => "formula rgcb",
-        (false, false) => unreachable!(),
+    let kind = if edit.new_formula.is_some() {
+        if edit.new_rgcb.is_some() {
+            "formula (rgce + rgcb)"
+        } else {
+            "formula"
+        }
+    } else if edit.new_rgcb.is_some() {
+        "formula rgcb"
+    } else {
+        debug_assert!(
+            false,
+            "reject_formula_payload_edit called with no formula fields at ({row}, {col})"
+        );
+        return Ok(());
     };
 
     Err(Error::Io(io::Error::new(
@@ -3086,7 +3095,10 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
 
     while let Some((buf, mut i, strict)) = stack.pop() {
         while i < buf.len() {
-            let ptg = buf[i];
+            let Some(&ptg) = buf.get(i) else {
+                debug_assert!(false, "rgce scanner cursor out of bounds (i={i}, len={})", buf.len());
+                return false;
+            };
             i += 1;
             match ptg {
                 // PtgArray (any class)
@@ -3100,8 +3112,15 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     if !has_remaining(buf, i, 2) {
                         return false;
                     }
-                    let cch = u16::from_le_bytes([buf[i], buf[i + 1]]) as usize;
-                    i += 2;
+                    let end = match i.checked_add(2) {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    let Some(bytes) = buf.get(i..end) else {
+                        return false;
+                    };
+                    let cch = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+                    i = end;
                     let byte_len = match cch.checked_mul(2) {
                         Some(v) => v,
                         None => return false,
@@ -3117,15 +3136,19 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     if !has_remaining(buf, i, 1) {
                         return false;
                     }
-                    let etpg = buf[i];
+                    let Some(&etpg) = buf.get(i) else {
+                        return false;
+                    };
                     i += 1;
                     match etpg {
                         // etpg=0x19 is the structured reference payload (PtgList).
                         0x19 => {
-                            let Some(payload_len) = crate::rgce::ptg_list_payload_len_best_effort(
-                                &buf[i..],
-                                Some(&default_ctx),
-                            ) else {
+                            let Some(tail) = buf.get(i..) else {
+                                return false;
+                            };
+                            let Some(payload_len) =
+                                crate::rgce::ptg_list_payload_len_best_effort(tail, Some(&default_ctx))
+                            else {
                                 return false;
                             };
                             if !has_remaining(buf, i, payload_len) {
@@ -3148,9 +3171,16 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     if !has_remaining(buf, i, 3) {
                         return false;
                     }
-                    let grbit = buf[i];
-                    let w_attr = u16::from_le_bytes([buf[i + 1], buf[i + 2]]) as usize;
-                    i += 3;
+                    let end = match i.checked_add(3) {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    let Some(hdr) = buf.get(i..end) else {
+                        return false;
+                    };
+                    let grbit = hdr[0];
+                    let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]) as usize;
+                    i = end;
 
                     const T_ATTR_CHOOSE: u8 = 0x04;
                     if grbit & T_ATTR_CHOOSE != 0 {
@@ -3238,13 +3268,26 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     if !has_remaining(buf, i, 2) {
                         return false;
                     }
-                    let cce = u16::from_le_bytes([buf[i], buf[i + 1]]) as usize;
-                    i += 2;
+                    let cce_end = match i.checked_add(2) {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    let Some(cce_bytes) = buf.get(i..cce_end) else {
+                        return false;
+                    };
+                    let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
+                    i = cce_end;
                     if !has_remaining(buf, i, cce) {
                         return false;
                     }
-                    let subexpr = &buf[i..i + cce];
-                    i += cce;
+                    let subexpr_end = match i.checked_add(cce) {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    let Some(subexpr) = buf.get(i..subexpr_end) else {
+                        return false;
+                    };
+                    i = subexpr_end;
 
                     // Scan nested stream first, then resume after it.
                     stack.push((buf, i, strict));
@@ -3334,7 +3377,8 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
-    let raw = data.get(offset..offset + 2).ok_or(Error::UnexpectedEof)?;
+    let end = offset.checked_add(2).ok_or(Error::UnexpectedEof)?;
+    let raw = data.get(offset..end).ok_or(Error::UnexpectedEof)?;
     Ok(u16::from_le_bytes([raw[0], raw[1]]))
 }
 
@@ -3343,12 +3387,14 @@ fn read_u8(data: &[u8], offset: usize) -> Result<u8, Error> {
 }
 
 fn read_u32(data: &[u8], offset: usize) -> Result<u32, Error> {
-    let raw = data.get(offset..offset + 4).ok_or(Error::UnexpectedEof)?;
+    let end = offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let raw = data.get(offset..end).ok_or(Error::UnexpectedEof)?;
     Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 
 fn read_f64(data: &[u8], offset: usize) -> Result<f64, Error> {
-    let raw = data.get(offset..offset + 8).ok_or(Error::UnexpectedEof)?;
+    let end = offset.checked_add(8).ok_or(Error::UnexpectedEof)?;
+    let raw = data.get(offset..end).ok_or(Error::UnexpectedEof)?;
     Ok(f64::from_le_bytes([
         raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
     ]))

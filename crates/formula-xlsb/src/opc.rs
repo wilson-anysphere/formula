@@ -1152,13 +1152,8 @@ impl XlsbWorkbook {
                     // Preserve existing `BrtCellIsst` cells as shared-string references. When the
                     // edit is a no-op (text matches the existing shared string) keep the original
                     // `isst` so rich-text / phonetic shared strings stay byte-identical.
-                    if record.payload.len() >= 12 {
-                        let isst = u32::from_le_bytes([
-                            record.payload[8],
-                            record.payload[9],
-                            record.payload[10],
-                            record.payload[11],
-                        ]);
+                    if let Some(raw) = record.payload.get(8..12) {
+                        let isst = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                         if self
                             .shared_strings
                             .get(isst as usize)
@@ -1366,13 +1361,8 @@ impl XlsbWorkbook {
                 if let Some(record) = record {
                     // No-op shared-string edit: keep the existing `isst` to avoid inserting a new
                     // (plain) `BrtSI` record when the original string has rich-text/phonetic data.
-                    if record.payload.len() >= 12 {
-                        let isst = u32::from_le_bytes([
-                            record.payload[8],
-                            record.payload[9],
-                            record.payload[10],
-                            record.payload[11],
-                        ]);
+                    if let Some(raw) = record.payload.get(8..12) {
+                        let isst = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                         if self
                             .shared_strings
                             .get(isst as usize)
@@ -1645,14 +1635,8 @@ impl XlsbWorkbook {
                     if let Some(record) = record {
                         // No-op shared-string edit: keep the existing `isst` to avoid inserting a
                         // new plain `BrtSI` when the original string has rich-text/phonetic data.
-                        if record.payload.len() >= 12 {
-                            let isst =
-                                u32::from_le_bytes([
-                                    record.payload[8],
-                                    record.payload[9],
-                                    record.payload[10],
-                                    record.payload[11],
-                                ]);
+                        if let Some(raw) = record.payload.get(8..12) {
+                            let isst = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                             if self
                                 .shared_strings
                                 .get(isst as usize)
@@ -2361,15 +2345,23 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
     let mut eocd_pos: Option<usize> = None;
     let max_start = tail.len().saturating_sub(22);
     for i in (0..=max_start).rev() {
-        if tail.get(i..i + 4) != Some(&EOCD_SIG) {
+        let Some(sig_end) = i.checked_add(4) else {
+            continue;
+        };
+        if tail.get(i..sig_end) != Some(&EOCD_SIG) {
             continue;
         }
+        let comment_len_start = i.checked_add(20).ok_or(ParseError::UnexpectedEof)?;
+        let comment_len_end = comment_len_start.checked_add(2).ok_or(ParseError::UnexpectedEof)?;
         let comment_len_bytes = tail
-            .get(i + 20..i + 22)
+            .get(comment_len_start..comment_len_end)
             .ok_or(ParseError::UnexpectedEof)?;
         let comment_len =
             u16::from_le_bytes([comment_len_bytes[0], comment_len_bytes[1]]) as usize;
-        if i + 22 + comment_len == tail.len() {
+        let expected_end = i
+            .checked_add(22)
+            .and_then(|v| v.checked_add(comment_len));
+        if expected_end == Some(tail.len()) {
             eocd_pos = Some(i);
             break;
         }
@@ -2381,8 +2373,10 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
     };
 
     // EOCD total entry count is a u16 at offset 10.
+    let total_entries_start = eocd_pos.checked_add(10).ok_or(ParseError::UnexpectedEof)?;
+    let total_entries_end = total_entries_start.checked_add(2).ok_or(ParseError::UnexpectedEof)?;
     let total_entries_bytes = tail
-        .get(eocd_pos + 10..eocd_pos + 12)
+        .get(total_entries_start..total_entries_end)
         .ok_or(ParseError::UnexpectedEof)?;
     let total_entries_u16 =
         u16::from_le_bytes([total_entries_bytes[0], total_entries_bytes[1]]);
@@ -2401,13 +2395,16 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
         }
         let locator_pos = eocd_pos - (ZIP64_LOCATOR_LEN as usize);
         const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4B, 0x06, 0x07]; // PK\06\07
-        if tail.get(locator_pos..locator_pos + 4) != Some(&ZIP64_LOCATOR_SIG) {
+        let locator_sig_end = locator_pos.checked_add(4).ok_or(ParseError::UnexpectedEof)?;
+        if tail.get(locator_pos..locator_sig_end) != Some(&ZIP64_LOCATOR_SIG) {
             // Some ZIPs may legitimately have exactly 65535 entries without zip64. In that case,
             // treat 0xFFFF as the literal count.
             0xFFFFu64
         } else {
+            let zip64_offset_start = locator_pos.checked_add(8).ok_or(ParseError::UnexpectedEof)?;
+            let zip64_offset_end = zip64_offset_start.checked_add(8).ok_or(ParseError::UnexpectedEof)?;
             let zip64_offset_bytes = tail
-                .get(locator_pos + 8..locator_pos + 16)
+                .get(zip64_offset_start..zip64_offset_end)
                 .ok_or(ParseError::UnexpectedEof)?;
             let zip64_eocd_offset = u64::from_le_bytes([
                 zip64_offset_bytes[0],
@@ -4204,13 +4201,13 @@ fn sheet_cell_records(
             biff12::SHEETDATA => in_sheet_data = true,
             biff12::SHEETDATA_END => in_sheet_data = false,
             biff12::ROW if in_sheet_data => {
-                if payload.len() >= 4 {
-                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                if let Some(raw) = payload.get(0..4) {
+                    current_row = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                 }
             }
             _ if in_sheet_data => {
-                if payload.len() >= 4 {
-                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                if let Some(raw) = payload.get(0..4) {
+                    let col = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                     let coord = (current_row, col);
                     if targets.contains(&coord) {
                         found.insert(
@@ -4401,10 +4398,17 @@ fn patch_workbook_bin_full_calc_on_load(
         if id == biff12::CALC_PROP && payload.len() >= 6 {
             let mut patched = payload.to_vec();
             let flags_off = 4usize;
-            let flags = u16::from_le_bytes([patched[flags_off], patched[flags_off + 1]]);
+            let flags_end = flags_off.checked_add(2).ok_or(ParseError::UnexpectedEof)?;
+            let flags_bytes = patched
+                .get(flags_off..flags_end)
+                .ok_or(ParseError::UnexpectedEof)?;
+            let flags = u16::from_le_bytes([flags_bytes[0], flags_bytes[1]]);
             let new_flags = flags | 0x0004;
             if new_flags != flags {
-                patched[flags_off..flags_off + 2].copy_from_slice(&new_flags.to_le_bytes());
+                let dst = patched
+                    .get_mut(flags_off..flags_end)
+                    .ok_or(ParseError::UnexpectedEof)?;
+                dst.copy_from_slice(&new_flags.to_le_bytes());
                 changed = true;
             }
             out.extend_from_slice(&patched);
