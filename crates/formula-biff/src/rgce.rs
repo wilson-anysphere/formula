@@ -223,8 +223,9 @@ fn decode_array_constant(
                     let mut bytes = [0u8; 8];
                     bytes.copy_from_slice(&rgcb[i..i + 8]);
                     i += 8;
-                    write!(&mut out, "{}", f64::from_le_bytes(bytes))
-                        .expect("infallible write to String");
+                    if write!(&mut out, "{}", f64::from_le_bytes(bytes)).is_err() {
+                        debug_assert!(false, "write! to String should be infallible");
+                    }
                 }
                 0x02 => {
                     if rgcb.len().saturating_sub(i) < 2 {
@@ -824,7 +825,8 @@ fn decode_rgce_impl(
                 let left_s = maybe_parenthesize(left, prec);
                 let right_s = maybe_parenthesize(right, prec);
 
-                let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
+                let mut text = String::new();
+                let _ = text.try_reserve_exact(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
                 text.push_str(op);
                 text.push_str(&right_s);
@@ -846,7 +848,8 @@ fn decode_rgce_impl(
                 })?;
                 let contains_union = expr.contains_union;
                 let inner = maybe_parenthesize(expr, prec);
-                let mut text = String::with_capacity(op.len() + inner.len());
+                let mut text = String::new();
+                let _ = text.try_reserve_exact(op.len() + inner.len());
                 text.push_str(op);
                 text.push_str(&inner);
                 stack.push(ExprFragment {
@@ -934,7 +937,8 @@ fn decode_rgce_impl(
                 // BIFF strings are UTF-16LE, but real-world files can contain malformed UTF-16.
                 // Stay best-effort (matching `formula-xlsb`) by decoding lossily instead of
                 // aborting the entire formula decode.
-                let mut lit = String::with_capacity(cch.saturating_add(2));
+                let mut lit = String::new();
+                let _ = lit.try_reserve_exact(cch.saturating_add(2));
                 lit.push('"');
                 let iter = raw
                     .chunks_exact(2)
@@ -1019,7 +1023,8 @@ fn decode_rgce_impl(
                         let mut precedence = 100;
                         let is_value_class = ptg == 0x38;
                         let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
-                        let mut text = String::with_capacity(
+                        let mut text = String::new();
+                        let _ = text.try_reserve_exact(
                             estimated_structured_ref_len(display_table_name, item, &columns)
                                 .saturating_add(needs_at as usize),
                         );
@@ -1216,7 +1221,8 @@ fn decode_rgce_impl(
                 }
 
                 let argc = spec.min_args as usize;
-                let mut args = Vec::with_capacity(argc);
+                let mut args = Vec::new();
+                let _ = args.try_reserve_exact(argc);
                 for _ in 0..argc {
                     args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
                         offset: ptg_offset,
@@ -1281,7 +1287,8 @@ fn decode_rgce_impl(
                     // (`ExternName_IXTI<ixti>_N<idx>`) that remains parseable by Excel formula
                     // parsers (avoid `:` / `{}`).
                     let func_name_text = func_name.text;
-                    let mut args = Vec::with_capacity(argc.saturating_sub(1));
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
                         args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
                             offset: ptg_offset,
@@ -1321,7 +1328,8 @@ fn decode_rgce_impl(
                         func_id,
                     })?;
 
-                let mut args = Vec::with_capacity(argc);
+                let mut args = Vec::new();
+                let _ = args.try_reserve_exact(argc);
                 for _ in 0..argc {
                     args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
                         offset: ptg_offset,
@@ -1787,7 +1795,15 @@ fn decode_rgce_impl(
     }
 
     if stack.len() == 1 {
-        Ok(stack.pop().expect("len checked").text)
+        let Some(expr) = stack.pop() else {
+            debug_assert!(false, "stack.len() == 1 but pop() returned None");
+            return Err(DecodeRgceError::StackNotSingular {
+                offset: last_ptg_offset,
+                ptg: last_ptg,
+                stack_len: 0,
+            });
+        };
+        Ok(expr.text)
     } else {
         Err(DecodeRgceError::StackNotSingular {
             offset: last_ptg_offset,

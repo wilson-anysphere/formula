@@ -549,7 +549,14 @@ pub(crate) fn function_spec_from_name(name: &str) -> Option<FunctionSpec> {
         for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
             *dst = src.to_ascii_uppercase();
         }
-        std::str::from_utf8(&buf[..name.len()]).expect("ASCII uppercasing preserves UTF-8")
+        match std::str::from_utf8(&buf[..name.len()]) {
+            Ok(s) => s,
+            Err(_) => {
+                // `name` is valid UTF-8 and ASCII uppercasing preserves all non-ASCII bytes.
+                debug_assert!(false, "ASCII uppercasing should preserve UTF-8 for {name:?}");
+                return None;
+            }
+        }
     } else {
         upper_owned = name.to_ascii_uppercase();
         &upper_owned

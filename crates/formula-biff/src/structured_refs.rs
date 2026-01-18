@@ -92,7 +92,8 @@ pub fn format_structured_ref(
     item: Option<StructuredRefItem>,
     columns: &StructuredColumns,
 ) -> String {
-    let mut out = String::with_capacity(estimate_structured_ref_len(table_name, item, columns));
+    let mut out = String::new();
+    let _ = out.try_reserve_exact(estimate_structured_ref_len(table_name, item, columns));
     push_structured_ref(table_name, item, columns, &mut out);
     out
 }

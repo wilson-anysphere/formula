@@ -529,7 +529,8 @@ static NAME_TO_ID: OnceLock<HashMap<&'static str, u16>> = OnceLock::new();
 
 fn name_to_id() -> &'static HashMap<&'static str, u16> {
     NAME_TO_ID.get_or_init(|| {
-        let mut map = HashMap::with_capacity(FTAB.len());
+        let mut map = HashMap::new();
+        let _ = map.try_reserve(FTAB.len());
         for (id, name) in FTAB.iter().enumerate() {
             if name.is_empty() {
                 continue;
@@ -572,7 +573,14 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
         for (dst, src) in buf[..name.len()].iter_mut().zip(name.as_bytes()) {
             *dst = src.to_ascii_uppercase();
         }
-        let upper = std::str::from_utf8(&buf[..name.len()]).expect("ASCII uppercasing preserves UTF-8");
+        let upper = match std::str::from_utf8(&buf[..name.len()]) {
+            Ok(s) => s,
+            Err(_) => {
+                // `name` is valid UTF-8 and ASCII uppercasing preserves all non-ASCII bytes.
+                debug_assert!(false, "ASCII uppercasing should preserve UTF-8 for {name:?}");
+                return None;
+            }
+        };
         return function_id_from_uppercase_name(upper);
     }
 
@@ -802,7 +810,8 @@ mod tests {
     #[test]
     fn future_udf_functions_are_sorted_and_unique() {
         let mut prev: Option<&str> = None;
-        let mut seen = HashSet::with_capacity(FUTURE_UDF_FUNCTIONS.len());
+        let mut seen = HashSet::new();
+        let _ = seen.try_reserve(FUTURE_UDF_FUNCTIONS.len());
         for &name in FUTURE_UDF_FUNCTIONS {
             if let Some(prev) = prev {
                 assert!(
