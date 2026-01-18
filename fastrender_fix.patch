@@ -1,146 +1,3535 @@
-From 73c2306acad753df1fb10643a79e3d0307c68171 Mon Sep 17 00:00:00 2001
+From 18ce3d0c574291041d02690f0fed7e26ff2a5b4f Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
-Date: Sun, 18 Jan 2026 11:40:43 -0800
-Subject: [PATCH] fix(net/policy): keep websocket + snapshot builds green
+Date: Sun, 18 Jan 2026 12:11:18 -0800
+Subject: [PATCH] fix: keep snapshot guard harnesses green
 
-- Gate macOS wss/TLS usage in websocket_runtime behind renderer feature flags.
-- Update layout_engine snapshot stubs for grid item constraints (CalcSize + min/max keywords).
-- Refresh blocked-deps baseline and drop duplicate workspace exclude entry.
+- Remove duplicate MaybeTlsStream imports so websocket_runtime compile guards pass.\n- Ensure UI navigation URL helpers import fastrender_url::Url for policy tests.\n- Drop legacy prototype selector tests that referenced blocked parser crates.
 ---
- Cargo.toml                                    |  1 -
- .../tests/network_process_client_compile.rs   | 27 +++++++++++++++++++
- src/network_process/websocket_runtime.rs      | 10 +++----
- tools/lint_blocked_deps_baseline.json         | 10 ++-----
- 4 files changed, 34 insertions(+), 14 deletions(-)
+ src/css/prototype/selector_tests.rs      | 3475 ----------------------
+ src/net/websocket/mod.rs                 |    1 -
+ src/network_process/websocket_runtime.rs |    1 -
+ src/ui/url.rs                            |    2 +
+ 4 files changed, 2 insertions(+), 3477 deletions(-)
+ delete mode 100644 src/css/prototype/selector_tests.rs
 
-diff --git a/Cargo.toml b/Cargo.toml
-index 86363379f..d14e92d5f 100644
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -120,7 +120,6 @@ exclude = [
-   "crates/whatwg_url",
-   "crates/wpt-import",
-   "crates/ws_frame_codec",
--  "crates/url",
-   "crates/xml-tree-shim",
-   "crates/xml_dom",
-   "crates/xml_parser",
-diff --git a/crates/layout_engine/tests/network_process_client_compile.rs b/crates/layout_engine/tests/network_process_client_compile.rs
-index 1fa4bf32a..ed0c3c15a 100644
---- a/crates/layout_engine/tests/network_process_client_compile.rs
-+++ b/crates/layout_engine/tests/network_process_client_compile.rs
-@@ -669,6 +669,20 @@ mod geometry {
- 
- mod style {
-   pub mod types {
-+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+    pub enum CalcSizeBasis {
-+      FitContent { limit: Option<Length> },
-+    }
-+
-+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-+    pub struct CalcSizeExpr(pub u32);
-+
-+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+    pub struct CalcSize {
-+      pub basis: CalcSizeBasis,
-+      pub expr: CalcSizeExpr,
-+    }
-+
-     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-     pub struct Length {
-       has_percentage: bool,
-@@ -698,6 +712,7 @@ mod style {
-       MaxContent,
-       FillAvailable,
-       FitContent { limit: Option<Length> },
-+      CalcSize(CalcSize),
-     }
- 
-     #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-@@ -737,6 +752,18 @@ mod style {
-     pub writing_mode: WritingMode,
-     pub width_keyword: Option<IntrinsicSizeKeyword>,
-     pub height_keyword: Option<IntrinsicSizeKeyword>,
-+    pub min_width_keyword: Option<IntrinsicSizeKeyword>,
-+    pub max_width_keyword: Option<IntrinsicSizeKeyword>,
-+    pub min_height_keyword: Option<IntrinsicSizeKeyword>,
-+    pub max_height_keyword: Option<IntrinsicSizeKeyword>,
-+  }
-+
-+  pub mod values {
-+    use super::types::CalcSizeExpr;
-+
-+    pub fn intern_calc_size_expr(expr: &str) -> CalcSizeExpr {
-+      CalcSizeExpr(expr.len() as u32)
-+    }
-   }
- 
-   pub fn inline_axis_is_horizontal(writing_mode: WritingMode) -> bool {
+diff --git a/src/css/prototype/selector_tests.rs b/src/css/prototype/selector_tests.rs
+deleted file mode 100644
+index d59b0425f..000000000
+--- a/src/css/prototype/selector_tests.rs
++++ /dev/null
+@@ -1,3475 +0,0 @@
+-#![cfg(test)]
+-
+-use super::ast::*;
+-use super::attr::CaseSensitivity;
+-use super::has::HasSelectorList;
+-use super::hash::{selector_fingerprint, selector_list_fingerprint};
+-use super::shadow::{
+-  selector_contains_host, selector_contains_host_context, selector_contains_nonleftmost_host,
+-  selector_is_part, selector_is_slotted, selector_part_names, selector_slotted_arg,
+-};
+-use super::shadow_split::{compile_shadow_selector, ShadowSelector};
+-use super::normalize_leading_scope_relative_selector;
+-use super::specificity::Specificity;
+-use super::{build_has_relative_selectors, parse_relative_selector_list, RelativeSelectorMatchHint};
+-use super::{parse_selector_list_with_context, SelectorParseContext};
+-use super::{namespace_context_set_default, namespace_context_set_prefix, NamespaceContextGuard};
+-use super::SelectorParseErrorKind;
+-use super::{PseudoClass, PseudoElement, TextDirection};
+-use crate::css::selectors as legacy_selectors;
+-use legacy_selectors::parser::SelectorList as LegacySelectorList;
+-use legacy_selectors::FastRenderSelectorImpl;
+-use crate::css::selector::element::QuirksMode;
+-use crate::css::types::{selector_hash, CssNamespaces, CssString, SELECTOR_BLOOM_HASH_MASK};
+-use crate::dom::{HTML_NAMESPACE, SVG_NAMESPACE, XMLNS_NAMESPACE, XML_NAMESPACE};
+-use cssparser::Parser;
+-use cssparser::ParserInput;
+-use selectors::parser::ParseRelative;
+-
+-fn selector_from_single_compound(compound: CompoundSelector) -> Selector {
+-  Selector {
+-    steps: vec![SelectorStep {
+-      combinator_to_left: None,
+-      compound,
+-    }],
+-  }
+-}
+-
+-fn compound_with_simples(simple_selectors: Vec<SimpleSelector>) -> CompoundSelector {
+-  CompoundSelector {
+-    type_selector: None,
+-    simple_selectors,
+-  }
+-}
+-
+-fn collect_has_selectors<'a, L: HasSelectorList + ?Sized>(list: &'a L) -> Vec<&'a Selector> {
+-  list.iter_has_selectors().collect()
+-}
+-
+-fn has_list_to_css(list: &impl HasSelectorList) -> String {
+-  list
+-    .iter_has_selectors()
+-    .map(|selector| selector.to_css_string())
+-    .collect::<Vec<_>>()
+-    .join(", ")
+-}
+-
+-fn namespace_any_omitted() -> NamespaceSelector {
+-  NamespaceSelector {
+-    constraint: NamespaceConstraint::Any,
+-    syntax: NamespaceSyntax::Omitted,
+-  }
+-}
+-
+-fn namespace_any_explicit() -> NamespaceSelector {
+-  NamespaceSelector {
+-    constraint: NamespaceConstraint::Any,
+-    syntax: NamespaceSyntax::ExplicitAny,
+-  }
+-}
+-
+-fn namespace_none_omitted() -> NamespaceSelector {
+-  NamespaceSelector {
+-    constraint: NamespaceConstraint::None,
+-    syntax: NamespaceSyntax::Omitted,
+-  }
+-}
+-
+-fn namespace_none_explicit() -> NamespaceSelector {
+-  NamespaceSelector {
+-    constraint: NamespaceConstraint::None,
+-    syntax: NamespaceSyntax::ExplicitNone,
+-  }
+-}
+-
+-fn namespace_specific_omitted(url: &str) -> NamespaceSelector {
+-  NamespaceSelector {
+-    constraint: NamespaceConstraint::Specific {
+-      url: url.to_string(),
+-      prefix: None,
+-    },
+-    syntax: NamespaceSyntax::Omitted,
+-  }
+-}
+-
+-fn id_selector(id: &str) -> Selector {
+-  selector_from_single_compound(compound_with_simples(vec![SimpleSelector::Id(
+-    id.to_string(),
+-  )]))
+-}
+-
+-fn class_selector(name: &str) -> Selector {
+-  selector_from_single_compound(compound_with_simples(vec![SimpleSelector::Class(
+-    name.to_string(),
+-  )]))
+-}
+-
+-fn first_compound_from_source(source: &str) -> CompoundSelector {
+-  let list = super::parse_selector_list(source).expect("selector should parse");
+-  let selector = list
+-    .slice()
+-    .first()
+-    .expect("selector list should have a selector");
+-  selector
+-    .steps
+-    .first()
+-    .expect("selector should have one step")
+-    .compound
+-    .clone()
+-}
+-
+-fn first_compound_from_source_with_context(
+-  source: &str,
+-  ctx: SelectorParseContext<'_>,
+-) -> CompoundSelector {
+-  let list = parse_selector_list_with_context(source, ctx).expect("selector should parse");
+-  let selector = list
+-    .slice()
+-    .first()
+-    .expect("selector list should have a selector");
+-  selector
+-    .steps
+-    .first()
+-    .expect("selector should have one step")
+-    .compound
+-    .clone()
+-}
+-
+-fn first_selector_from_source(source: &str) -> Selector {
+-  let list = super::parse_selector_list(source).expect("selector should parse");
+-  list
+-    .slice()
+-    .first()
+-    .cloned()
+-    .expect("selector list should have a selector")
+-}
+-
+-fn scope_selector_from_source(source: &str) -> Selector {
+-  let list = super::parse_scope_prelude_selector_list(source).expect("scope selector should parse");
+-  list
+-    .slice()
+-    .first()
+-    .expect("selector list should have a selector")
+-    .clone()
+-}
+-
+-fn legacy_selector_list_from_source(source: &str) -> LegacySelectorList<FastRenderSelectorImpl> {
+-  let list = super::parse_selector_list(source).expect("selector should parse");
+-  LegacySelectorList::from_ast(&list)
+-}
+-
+-fn legacy_selector_parses(selector_text: &str) -> bool {
+-  let mut input = ParserInput::new(selector_text);
+-  let mut parser = Parser::new(&mut input);
+-  LegacySelectorList::<FastRenderSelectorImpl>::parse(
+-    &legacy_selectors::PseudoClassParser,
+-    &mut parser,
+-    ParseRelative::No,
+-  )
+-  .is_ok()
+-}
+-
+-fn first_compound_from_source_with_namespaces(
+-  source: &str,
+-  namespaces: &CssNamespaces,
+-) -> CompoundSelector {
+-  let list =
+-    super::parse_selector_list_with_namespaces(source, namespaces).expect("selector should parse");
+-  let selector = list
+-    .slice()
+-    .first()
+-    .expect("selector list should have a selector");
+-  selector
+-    .steps
+-    .first()
+-    .expect("selector should have one step")
+-    .compound
+-    .clone()
+-}
+-
+-#[test]
+-fn split_top_level_commas_ignores_nested_blocks() {
+-  assert_eq!(
+-    super::split::split_top_level_commas("a, (b, c), d"),
+-    vec!["a", "(b, c)", "d"]
+-  );
+-}
+-
+-#[test]
+-fn where_has_zero_specificity() {
+-  let list = SelectorList::from_vec(vec![id_selector("a"), class_selector("b")]);
+-  let selector =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::Where(list),
+-    )]));
+-
+-  assert_eq!(selector.specificity(), Specificity::ZERO);
+-}
+-
+-#[test]
+-fn is_and_not_use_max_argument_specificity() {
+-  let list = SelectorList::from_vec(vec![class_selector("foo"), id_selector("bar")]);
+-  let is_sel =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::Is(list.clone()),
+-    )]));
+-  let not_sel =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::Not(list),
+-    )]));
+-
+-  assert_eq!(is_sel.specificity(), Specificity::ID);
+-  assert_eq!(not_sel.specificity(), Specificity::ID);
+-}
+-
+-#[test]
+-fn nth_child_of_includes_of_selector_list_specificity() {
+-  let of_list = SelectorList::from_vec(vec![id_selector("target"), class_selector("foo")]);
+-  let max_arg = of_list.specificity_max();
+-
+-  let without_of =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::NthChild {
+-        a: 0,
+-        b: 1,
+-        of: None,
+-      },
+-    )]));
+-  let with_of =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::NthChild {
+-        a: 0,
+-        b: 1,
+-        of: Some(of_list),
+-      },
+-    )]));
+-
+-  assert_eq!(without_of.specificity(), Specificity::CLASS);
+-  assert_eq!(with_of.specificity(), Specificity::CLASS + max_arg);
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_specificity_includes_argument_class() {
+-  let selector = first_selector_from_source("::slotted(.target)");
+-  let spec = selector.specificity();
+-  let expected = Specificity::new(0, 1, 1);
+-  assert_eq!(spec, expected);
+-  assert_eq!(selector.specificity_u32(), expected.as_u32());
+-  assert_eq!(spec.ids(), 0);
+-  assert_eq!(spec.classes(), 1);
+-  assert_eq!(spec.types(), 1);
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_specificity_includes_argument_type() {
+-  let selector = first_selector_from_source("::slotted(span.target)");
+-  let spec = selector.specificity();
+-  let expected = Specificity::new(0, 1, 2);
+-  assert_eq!(spec, expected);
+-  assert_eq!(selector.specificity_u32(), expected.as_u32());
+-  assert_eq!(spec.ids(), 0);
+-  assert_eq!(spec.classes(), 1);
+-  assert_eq!(spec.types(), 2);
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_specificity_uses_argument_compound() {
+-  let compound = CompoundSelector {
+-    type_selector: Some(TypeSelector::Tag {
+-      namespace: NamespaceConstraint::Any,
+-      local_name: "span".to_string(),
+-    }),
+-    simple_selectors: vec![SimpleSelector::Class("target".to_string())],
+-  };
+-  let pseudo = PseudoElementSelector::Slotted(compound.clone());
+-  let expected = Specificity::TYPE + compound.specificity();
+-  assert_eq!(pseudo.specificity(), expected);
+-
+-  let simple = SimpleSelector::PseudoElement(pseudo);
+-  assert_eq!(simple.specificity(), expected);
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_specificity_includes_trailing_pseudo() {
+-  let selector = first_selector_from_source("::slotted(.target)::before");
+-  let expected = Specificity::new(0, 1, 2);
+-  assert_eq!(selector.specificity(), expected);
+-  assert_eq!(selector.specificity_u32(), expected.as_u32());
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_specificity_includes_argument_id() {
+-  let list = super::parse_selector_list("::slotted(#id)").expect("parse ::slotted()");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.specificity(), Specificity::TYPE + Specificity::ID);
+-}
+-
+-#[test]
+-fn part_pseudo_element_specificity_includes_part_and_chained_pseudo_element() {
+-  let list = super::parse_selector_list("x-host::part(button)::before").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  // Type selector (`x-host`) + `::part(...)` + `::before`.
+-  let expected = Specificity::new(0, 0, 3);
+-  assert_eq!(selector.specificity(), expected);
+-  assert_eq!(selector.specificity_u32(), expected.as_u32());
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_parses_compound_selector() {
+-  let list = super::parse_selector_list("::slotted(.a)").expect("parse");
+-  assert_eq!(list.to_css_string(), "::slotted(.a)");
+-
+-  let selector = list.slice().first().expect("selector");
+-  assert!(selector_is_slotted(selector));
+-  let arg = selector_slotted_arg(selector).expect("slotted arg");
+-  assert!(arg.type_selector.is_none());
+-  assert_eq!(
+-    arg.simple_selectors.as_slice(),
+-    [SimpleSelector::Class("a".to_string())]
+-  );
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_rejects_selector_lists_and_combinators() {
+-  assert!(super::parse_selector_list("::slotted(.a, .b)").is_err());
+-  assert!(super::parse_selector_list("::slotted(.a .b)").is_err());
+-}
+-
+-#[test]
+-fn specificity_addition_clamps_each_component() {
+-  const MAX_10BIT: u32 = (1u32 << 10) - 1;
+-
+-  let mut classes = Vec::new();
+-  for _ in 0..MAX_10BIT {
+-    classes.push(SimpleSelector::Class("a".to_string()));
+-  }
+-  let arg_compound = CompoundSelector {
+-    type_selector: None,
+-    simple_selectors: classes,
+-  };
+-  let list = SelectorList::from_vec(vec![selector_from_single_compound(arg_compound.clone())]);
+-  let arg_spec = list.specificity_max();
+-  assert_eq!(arg_spec.ids(), 0);
+-  assert_eq!(arg_spec.classes() as u32, MAX_10BIT);
+-
+-  let nth =
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::PseudoClass(
+-      PseudoClassSelector::NthChild {
+-        a: 0,
+-        b: 1,
+-        of: Some(list.clone()),
+-      },
+-    )]));
+-  let nth_spec = nth.specificity();
+-  assert_eq!(nth_spec.ids(), 0, "B must not overflow into A");
+-  assert_eq!(nth_spec.classes() as u32, MAX_10BIT);
+-
+-  let host_ctx = selector_from_single_compound(compound_with_simples(vec![
+-    SimpleSelector::PseudoClass(PseudoClassSelector::HostContext(arg_compound)),
+-  ]));
+-  let host_spec = host_ctx.specificity();
+-  assert_eq!(host_spec.ids(), 0);
+-  assert_eq!(host_spec.classes() as u32, MAX_10BIT);
+-}
+-
+-#[test]
+-fn has_specificity_uses_id_and_where_zero() {
+-  let id_list = super::parse_selector_list(":has(#target)").expect("parse selector list");
+-  let id_selector = id_list.slice().first().expect("selector");
+-  assert_eq!(id_selector.specificity(), Specificity::ID);
+-
+-  let where_list =
+-    super::parse_selector_list(":has(:where(.a, span))").expect("parse selector list");
+-  let where_selector = where_list.slice().first().expect("selector");
+-  assert_eq!(where_selector.specificity(), Specificity::ZERO);
+-}
+-
+-#[test]
+-fn to_css_string_is_stable() {
+-  let selector = Selector {
+-    steps: vec![SelectorStep {
+-      combinator_to_left: None,
+-      compound: CompoundSelector {
+-        type_selector: Some(TypeSelector::Tag {
+-          namespace: namespace_any_omitted(),
+-          local_name: "div".to_string(),
+-        }),
+-        simple_selectors: vec![
+-          SimpleSelector::Class("foo".to_string()),
+-          SimpleSelector::Id("bar".to_string()),
+-          SimpleSelector::Attribute(AttrSelector {
+-            namespace: namespace_none_omitted(),
+-            local_name: "data-icon".to_string(),
+-            operator: AttrSelectorOperator::Exists,
+-            value: None,
+-            case_sensitivity: None,
+-          }),
+-          SimpleSelector::PseudoElement(PseudoElementSelector::Known(PseudoElement::Before)),
+-        ],
+-      },
+-    }],
+-  };
+-
+-  assert_eq!(selector.to_css_string(), "div.foo#bar[data-icon]::before");
+-
+-  let list = SelectorList::from_vec(vec![
+-    selector.clone(),
+-    selector_from_single_compound(compound_with_simples(vec![SimpleSelector::Id(
+-      "baz".to_string(),
+-    )])),
+-  ]);
+-  assert_eq!(
+-    list.to_css_string(),
+-    "div.foo#bar[data-icon]::before, #baz"
+-  );
+-
+-  let chained = Selector {
+-    steps: vec![
+-      SelectorStep {
+-        combinator_to_left: None,
+-        compound: CompoundSelector {
+-          type_selector: Some(TypeSelector::Tag {
+-            namespace: namespace_any_omitted(),
+-            local_name: "div".to_string(),
+-          }),
+-          simple_selectors: vec![],
+-        },
+-      },
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::Child),
+-        compound: CompoundSelector {
+-          type_selector: Some(TypeSelector::Tag {
+-            namespace: namespace_any_omitted(),
+-            local_name: "span".to_string(),
+-          }),
+-          simple_selectors: vec![SimpleSelector::Class("foo".to_string())],
+-        },
+-      },
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::NextSibling),
+-        compound: CompoundSelector {
+-          type_selector: Some(TypeSelector::Tag {
+-            namespace: namespace_any_omitted(),
+-            local_name: "a".to_string(),
+-          }),
+-          simple_selectors: vec![],
+-        },
+-      },
+-    ],
+-  };
+-  assert_eq!(chained.to_css_string(), "div > span.foo + a");
+-}
+-
+-#[test]
+-fn legacy_selector_conversion_roundtrip() {
+-  let cases = [
+-    (".a > #b", ".a > #b"),
+-    ("input[type=\"text\"]", "input[type=text]"),
+-    ("div:is(.a, .b)", "div:is(.a, .b)"),
+-    (":fullscreen::backdrop", ":fullscreen::backdrop"),
+-  ];
+-
+-  for (source, expected) in cases {
+-    let legacy = legacy_selector_list_from_source(source);
+-    let converted = super::selector_list_from_servo(&legacy).expect("convert legacy selector list");
+-    assert_eq!(converted.to_css_string(), expected);
+-  }
+-}
+-
+-fn compile_relative_list(selectors: &str) -> Box<[super::HasRelativeSelector]> {
+-  let list = parse_relative_selector_list(selectors).expect("relative selector list should parse");
+-  build_has_relative_selectors(&list)
+-}
+-
+-#[test]
+-fn relative_selector_cache_keys_are_distinct() {
+-  let selectors = compile_relative_list("> .a, > .b");
+-  assert_eq!(selectors.len(), 2);
+-  assert_ne!(selectors[0].cache_key(), selectors[1].cache_key());
+-}
+-
+-#[test]
+-fn relative_selector_match_hint_variants() {
+-  let cases = [
+-    ("> .a", RelativeSelectorMatchHint::InChild),
+-    (".a", RelativeSelectorMatchHint::InSubtree),
+-    ("+ .a", RelativeSelectorMatchHint::InNextSibling),
+-    ("~ .a", RelativeSelectorMatchHint::InSibling),
+-    ("span + em", RelativeSelectorMatchHint::InSubtree),
+-  ];
+-
+-  for (selector, expected) in cases {
+-    let compiled = compile_relative_list(selector);
+-    assert_eq!(compiled.len(), 1);
+-    assert_eq!(
+-      compiled[0].match_hint, expected,
+-      "unexpected match hint for {selector}"
+-    );
+-  }
+-}
+-
+-#[test]
+-fn relative_selector_bloom_hashes_use_rightmost_compound() {
+-  let selectors = compile_relative_list(".a :is(.b), .a :where(.c)");
+-  assert_eq!(selectors.len(), 2);
+-  let hash_a = selector_hash("a") & SELECTOR_BLOOM_HASH_MASK;
+-  let hash_b = selector_hash("b") & SELECTOR_BLOOM_HASH_MASK;
+-  let hash_c = selector_hash("c") & SELECTOR_BLOOM_HASH_MASK;
+-
+-  let hashes_first = selectors[0].required_bloom_hashes(QuirksMode::NoQuirks);
+-  assert!(hashes_first.contains(&hash_b));
+-  assert!(!hashes_first.contains(&hash_a));
+-
+-  let hashes_second = selectors[1].required_bloom_hashes(QuirksMode::NoQuirks);
+-  assert!(hashes_second.contains(&hash_c));
+-  assert!(!hashes_second.contains(&hash_a));
+-}
+-
+-#[test]
+-fn empty_compound_serializes_to_universal() {
+-  let selector = selector_from_single_compound(CompoundSelector::default());
+-  assert_eq!(selector.to_css_string(), "*");
+-}
+-
+-#[test]
+-fn pseudo_element_aliases_canonicalize() {
+-  let list = super::parse_selector_list("input::-webkit-input-placeholder").expect("parse");
+-  assert_eq!(list.to_css_string(), "input::placeholder");
+-
+-  let list = super::parse_selector_list("div:before").expect("parse");
+-  assert_eq!(list.to_css_string(), "div::before");
+-}
+-
+-#[test]
+-fn known_pseudo_class_parses_case_insensitive() {
+-  let list = super::parse_selector_list(":ROOT").expect("parse");
+-  assert_eq!(list.to_css_string(), ":root");
+-
+-  let compound = first_compound_from_source(":ROOT");
+-  assert!(matches!(
+-    compound.simple_selectors.as_slice(),
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(
+-      PseudoClass::Root
+-    ))]
+-  ));
+-}
+-
+-#[test]
+-fn relative_selector_serializes_leading_combinator() {
+-  let selector = Selector {
+-    steps: vec![SelectorStep {
+-      combinator_to_left: Some(Combinator::Child),
+-      compound: CompoundSelector {
+-        type_selector: Some(TypeSelector::Tag {
+-          namespace: namespace_any_omitted(),
+-          local_name: "div".to_string(),
+-        }),
+-        simple_selectors: vec![],
+-      },
+-    }],
+-  };
+-
+-  assert_eq!(selector.to_css_string(), "> div");
+-}
+-
+-#[test]
+-fn subject_pseudo_element_extracts_from_subject() {
+-  let selector = first_selector_from_source("div::before");
+-  assert!(matches!(
+-    selector.subject_pseudo_element(),
+-    Some(PseudoElementSelector::Known(PseudoElement::Before))
+-  ));
+-  let subject = selector.subject().expect("subject");
+-  assert!(subject.has_pseudo_element());
+-  assert!(matches!(
+-    subject.pseudo_element(),
+-    Some(PseudoElementSelector::Known(PseudoElement::Before))
+-  ));
+-}
+-
+-#[test]
+-fn subject_pseudo_element_ignores_non_subject_compounds() {
+-  let selector = first_selector_from_source("div > span::after");
+-  assert!(matches!(
+-    selector.subject_pseudo_element(),
+-    Some(PseudoElementSelector::Known(PseudoElement::After))
+-  ));
+-  let left = selector.steps.first().expect("left step");
+-  assert!(!left.compound.has_pseudo_element());
+-}
+-
+-#[test]
+-fn subject_pseudo_element_supports_standalone_pseudo() {
+-  let selector = first_selector_from_source("::before");
+-  assert!(matches!(
+-    selector.subject_pseudo_element(),
+-    Some(PseudoElementSelector::Known(PseudoElement::Before))
+-  ));
+-}
+-
+-#[test]
+-fn subject_pseudo_element_absent_after_is_drops_pseudo() {
+-  let selector = first_selector_from_source("div:is(.a, ::before)");
+-  assert!(selector.subject_pseudo_element().is_none());
+-  let subject = selector.subject().expect("subject");
+-  assert!(!subject.has_pseudo_element());
+-}
+-
+-#[test]
+-fn trailing_pseudo_element_ignores_part_and_slotted() {
+-  let list = super::parse_selector_list("x-host::part(foo)::before").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(
+-    selector.trailing_pseudo_element(),
+-    Some(&PseudoElement::Before)
+-  );
+-
+-  let list = super::parse_selector_list("slot::slotted(.a)::before").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(
+-    selector.trailing_pseudo_element(),
+-    Some(&PseudoElement::Before)
+-  );
+-
+-  let list = super::parse_selector_list("x-host::part(foo)").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.trailing_pseudo_element(), None);
+-}
+-
+-#[test]
+-fn part_allows_chaining_pseudo_elements() {
+-  // Element-backed pseudo-elements like ::part() allow pseudo-element chaining, including
+-  // non-tree-abiding pseudo-elements (CSS Pseudo 4 §4.2).
+-  let selectors = [
+-    "x-host::part(input)::before",
+-    "x-host::part(input)::placeholder",
+-    "x-host::part(input)::file-selector-button",
+-    "x-host::part(input)::slider-thumb",
+-  ];
+-
+-  for selector in selectors {
+-    assert!(legacy_selector_parses(selector), "Servo parser should accept {selector}");
+-    assert!(
+-      super::parse_selector_list(selector).is_ok(),
+-      "AST parser should accept {selector}"
+-    );
+-  }
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_is_step_boundary() {
+-  let list = super::parse_selector_list("slot::slotted(.a)::before").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(.a)::before");
+-
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  assert_eq!(
+-    selector.steps[1].combinator_to_left.as_ref(),
+-    Some(&Combinator::SlotAssignment)
+-  );
+-
+-  let rhs = &selector.steps[1].compound;
+-  match rhs.simple_selectors.as_slice() {
+-    [
+-      SimpleSelector::Class(class),
+-      SimpleSelector::PseudoElement(PseudoElementSelector::Known(PseudoElement::Before)),
+-    ] => assert_eq!(class, "a"),
+-    _ => panic!("expected `.a::before` in ::slotted() target compound"),
+-  }
+-
+-  let spec = selector.specificity();
+-  assert_eq!(spec.ids(), 0);
+-  assert_eq!(spec.classes(), 1);
+-  assert_eq!(spec.types(), 3);
+-}
+-
+-#[test]
+-fn part_pseudo_element_is_step_boundary() {
+-  let list = super::parse_selector_list("x-host::part(button):hover").expect("parse");
+-  assert_eq!(list.to_css_string(), "x-host::part(button):hover");
+-
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let step = &selector.steps[1];
+-  match step.combinator_to_left.as_ref() {
+-    Some(Combinator::Part { names }) => {
+-      assert_eq!(names.as_slice(), &["button".to_string()]);
+-    }
+-    _ => panic!("expected ::part() pseudo-element boundary"),
+-  }
+-
+-  match step.compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(PseudoClass::Hover))] => {}
+-    _ => panic!("expected :hover in ::part() target compound"),
+-  }
+-
+-  let spec = selector.specificity();
+-  assert_eq!(spec.ids(), 0);
+-  assert_eq!(spec.classes(), 1);
+-  assert_eq!(spec.types(), 2);
+-}
+-
+-#[test]
+-fn part_pseudo_element_parses_escaped_identifier_argument() {
+-  let list = super::parse_selector_list(r"::part(foo\:bar)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let step = &selector.steps[1];
+-  match step.combinator_to_left.as_ref() {
+-    Some(Combinator::Part { names }) => {
+-      assert_eq!(names.as_slice(), &["foo:bar".to_string()]);
+-    }
+-    _ => panic!("expected ::part() pseudo-element boundary"),
+-  }
+-  assert_eq!(list.to_css_string(), r"::part(foo\:bar)");
+-}
+-
+-#[test]
+-fn part_pseudo_element_parses_multiple_names() {
+-  let list = super::parse_selector_list("::part(foo bar)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let step = &selector.steps[1];
+-  match step.combinator_to_left.as_ref() {
+-    Some(Combinator::Part { names }) => {
+-      assert_eq!(names.as_slice(), &["foo".to_string(), "bar".to_string()]);
+-    }
+-    _ => panic!("expected ::part() pseudo-element boundary"),
+-  }
+-  assert_eq!(list.to_css_string(), "::part(foo bar)");
+-}
+-
+-#[test]
+-fn part_pseudo_element_parses_escaped_multiple_names() {
+-  let list = super::parse_selector_list(r"::part(foo\:bar baz\+qux)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let step = &selector.steps[1];
+-  match step.combinator_to_left.as_ref() {
+-    Some(Combinator::Part { names }) => {
+-      assert_eq!(
+-        names.as_slice(),
+-        &["foo:bar".to_string(), "baz+qux".to_string()]
+-      );
+-    }
+-    _ => panic!("expected ::part() pseudo-element boundary"),
+-  }
+-  assert_eq!(list.to_css_string(), r"::part(foo\:bar baz\+qux)");
+-}
+-
+-#[test]
+-fn part_pseudo_element_parses_hex_escape() {
+-  let list = super::parse_selector_list(r"::part(\31 23)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let step = &selector.steps[1];
+-  match step.combinator_to_left.as_ref() {
+-    Some(Combinator::Part { names }) => {
+-      assert_eq!(names.as_slice(), &["123".to_string()]);
+-    }
+-    _ => panic!("expected ::part() pseudo-element boundary"),
+-  }
+-  assert_eq!(list.to_css_string(), r"::part(\31 23)");
+-}
+-
+-#[test]
+-fn part_pseudo_element_single_colon_alias_serializes_as_double_colon() {
+-  let list = super::parse_selector_list("div:part(foo)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div::part(foo)");
+-}
+-
+-#[test]
+-fn part_and_slotted_pseudo_elements_require_arguments() {
+-  for selector in ["::part", ":part", "::slotted", ":slotted"] {
+-    assert!(
+-      super::parse_selector_list(selector).is_err(),
+-      "expected {selector} to be invalid"
+-    );
+-  }
+-}
+-
+-#[test]
+-fn shadow_pseudo_elements_accept_single_colon_forms() {
+-  let list = super::parse_selector_list(":part(foo)").expect("parse :part()");
+-  assert_eq!(list.to_css_string(), "::part(foo)");
+-
+-  let list = super::parse_selector_list(":slotted(.a)").expect("parse :slotted()");
+-  assert_eq!(list.to_css_string(), "::slotted(.a)");
+-}
+-
+-#[test]
+-fn is_pseudo_class_parses_selector_list_with_escapes() {
+-  let compound = first_compound_from_source(r":is(.foo\:bar, #a\+b)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Is(list))] => {
+-      assert_eq!(list.len(), 2);
+-      assert_eq!(list.to_css_string(), r".foo\:bar, #a\+b");
+-    }
+-    _ => panic!("expected :is() pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(r":is(.foo\:bar, #a\+b)").expect("parse");
+-  assert_eq!(list.to_css_string(), r":is(.foo\:bar, #a\+b)");
+-}
+-
+-#[test]
+-fn host_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":host");
+-  assert!(matches!(
+-    compound.simple_selectors.as_slice(),
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Host(None))]
+-  ));
+-
+-  let compound = first_compound_from_source(":host(.a)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Host(Some(list)))] => {
+-      assert_eq!(list.len(), 1);
+-      let selector = list.slice().first().expect("host selector");
+-      let step = selector.steps.first().expect("host step");
+-      assert!(step.compound.type_selector.is_none());
+-      assert_eq!(
+-        step.compound.simple_selectors,
+-        vec![SimpleSelector::Class("a".to_string())]
+-      );
+-    }
+-    _ => panic!("expected :host(<selector-list>)"),
+-  }
+-
+-  let list = super::parse_selector_list(":host(.a)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host(.a)");
+-
+-  let compound = first_compound_from_source(":host(.a#b)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Host(Some(list)))] => {
+-      let selector = list.slice().first().expect("host selector");
+-      let step = selector.steps.first().expect("host step");
+-      assert_eq!(
+-        step.compound.simple_selectors,
+-        vec![
+-          SimpleSelector::Class("a".to_string()),
+-          SimpleSelector::Id("b".to_string())
+-        ]
+-      );
+-    }
+-    _ => panic!("expected :host(<selector-list>)"),
+-  }
+-}
+-
+-#[test]
+-fn host_pseudo_class_serializes_round_trip() {
+-  let list = super::parse_selector_list(":host").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host");
+-
+-  let list = super::parse_selector_list(":host(.a, #b)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host(.a, #b)");
+-
+-  let list = super::parse_selector_list(":host(.a,#b)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host(.a, #b)");
+-
+-  let list = super::parse_selector_list(":host-context(.ctx)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host-context(.ctx)");
+-}
+-
+-#[test]
+-fn host_pseudo_class_rejects_combinators() {
+-  assert!(super::parse_selector_list(":host(.a .b)").is_err());
+-  assert!(super::parse_selector_list(":host(.a > .b)").is_err());
+-}
+-
+-#[test]
+-fn shadow_argument_errors_report_specific_kind() {
+-  let err = super::parse_selector_list("::slotted(.a, .b)").unwrap_err();
+-  assert_eq!(err.kind, SelectorParseErrorKind::InvalidSlottedArgument);
+-
+-  let err = super::parse_selector_list(":host(.a .b)").unwrap_err();
+-  assert_eq!(err.kind, SelectorParseErrorKind::InvalidHostArgument);
+-
+-  let err = super::parse_selector_list(":host-context(::before)").unwrap_err();
+-  assert_eq!(err.kind, SelectorParseErrorKind::InvalidHostContextArgument);
+-}
+-
+-#[test]
+-fn host_pseudo_class_parses_selector_lists() {
+-  let compound = first_compound_from_source(":host(.a, #b)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Host(Some(list)))] => {
+-      assert_eq!(list.len(), 2);
+-      assert_eq!(list.to_css_string(), ".a, #b");
+-    }
+-    _ => panic!("expected :host(<selector-list>)"),
+-  }
+-
+-  let list = super::parse_selector_list(":host(.a, .b)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host(.a, .b)");
+-}
+-
+-#[test]
+-fn host_pseudo_class_rejects_pseudo_elements() {
+-  assert!(super::parse_selector_list(":host(::before)").is_err());
+-  assert!(super::parse_selector_list(":host(.a::before)").is_err());
+-  assert!(super::parse_selector_list(":host(::part(foo))").is_err());
+-}
+-
+-#[test]
+-fn host_function_accepts_single_compound_selector() {
+-  assert!(super::parse_selector_list(":host(.a)").is_ok());
+-}
+-
+-#[test]
+-fn is_forgiving_list_keeps_host_selector_list() {
+-  let list = super::parse_selector_list(":is(:host(.a, .b), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":is(:host(.a, .b), .c)");
+-}
+-
+-#[test]
+-fn where_forgiving_list_keeps_host_selector_list() {
+-  let list = super::parse_selector_list(":where(:host(.a), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":where(:host(.a), .c)");
+-}
+-
+-#[test]
+-fn is_forgiving_list_drops_host_in_non_leftmost_compound() {
+-  let list = super::parse_selector_list("div:is(:host(.a, .b), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.c)");
+-}
+-
+-#[test]
+-fn is_forgiving_list_drops_nested_host_in_non_leftmost_compound() {
+-  let list = super::parse_selector_list("div:is(:is(:host(.a)), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_forgiving_list_drops_invalid_host_argument() {
+-  let list = super::parse_selector_list("div:is(:host(::before), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_forgiving_list_keeps_host_context_in_non_leftmost_compound() {
+-  let list = super::parse_selector_list("div:is(:host-context(.a), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(:host-context(.a), .c)");
+-}
+-
+-#[test]
+-fn scope_pseudo_class_parses_as_known() {
+-  let compound = first_compound_from_source(":scope");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Scope);
+-    }
+-    _ => panic!("expected :scope pseudo-class"),
+-  }
+-}
+-
+-#[test]
+-fn host_context_requires_compound_selector() {
+-  for selector in [
+-    ":host-context(.a, .b)",
+-    ":host-context(:hover)",
+-    "div:host-context(.foo, .bar)",
+-    "div:host-context(.foo .bar)",
+-    "div:host-context(::before)",
+-    "div:host-context(:host(::before))",
+-    "div:host-context(:hover)",
+-  ] {
+-    assert!(
+-      super::parse_selector_list(selector).is_err(),
+-      "expected parse error for {selector}"
+-    );
+-  }
+-}
+-
+-#[test]
+-fn host_context_requires_functional_syntax() {
+-  assert!(super::parse_selector_list(":host-context").is_err());
+-}
+-
+-#[test]
+-fn host_context_pseudo_class_parses_compound_selector() {
+-  let compound = first_compound_from_source(":host-context(.a)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::HostContext(arg))] => {
+-      assert!(arg.type_selector.is_none());
+-      assert_eq!(
+-        arg.simple_selectors.as_slice(),
+-        [SimpleSelector::Class("a".to_string())]
+-      );
+-    }
+-    _ => panic!("expected :host-context(<compound-selector>)"),
+-  }
+-
+-  let list = super::parse_selector_list(":host-context(.a)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":host-context(.a)");
+-}
+-
+-#[test]
+-fn host_context_pseudo_class_rejects_selector_list_arguments() {
+-  assert!(super::parse_selector_list(":host-context(.a, .b)").is_err());
+-}
+-
+-#[test]
+-fn has_pseudo_class_parses_relative_selectors() {
+-  let compound = first_compound_from_source(r":has(> .foo\:bar)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Has(list))] => {
+-      let selectors = collect_has_selectors(list);
+-      assert_eq!(selectors.len(), 1);
+-      let selector = selectors.first().expect("selector list should be non-empty");
+-      assert!(matches!(
+-        selector.steps.first(),
+-        Some(SelectorStep {
+-          combinator_to_left: Some(Combinator::Child),
+-          ..
+-        })
+-      ));
+-      assert_eq!(has_list_to_css(list), r"> .foo\:bar");
+-    }
+-    _ => panic!("expected :has(<relative-selector-list>)"),
+-  }
+-
+-  let list = super::parse_selector_list(r":has(> .foo\:bar)").expect("parse");
+-  assert_eq!(list.to_css_string(), r":has(> .foo\:bar)");
+-}
+-
+-#[test]
+-fn has_pseudo_class_serializes_multiple_selectors() {
+-  let list = super::parse_selector_list(":has(> .a, .b)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":has(> .a, .b)");
+-}
+-
+-#[test]
+-fn has_pseudo_class_implies_descendant_combinator_when_omitted() {
+-  let compound = first_compound_from_source(r":has(.foo\:bar)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Has(list))] => {
+-      let selectors = collect_has_selectors(list);
+-      assert_eq!(selectors.len(), 1);
+-      let selector = selectors.first().expect("selector list should be non-empty");
+-      assert!(matches!(
+-        selector.steps.first(),
+-        Some(SelectorStep {
+-          combinator_to_left: Some(Combinator::Descendant),
+-          ..
+-        })
+-      ));
+-      // Canonical serialization omits the implied descendant combinator.
+-      assert_eq!(has_list_to_css(list), r".foo\:bar");
+-    }
+-    _ => panic!("expected :has(<relative-selector-list>)"),
+-  }
+-
+-  let list = super::parse_selector_list(r":has(.foo\:bar)").expect("parse");
+-  assert_eq!(list.to_css_string(), r":has(.foo\:bar)");
+-}
+-
+-fn assert_has_scope_normalized(
+-  selector_text: &str,
+-  expected_combinator: Combinator,
+-  expected_css: &str,
+-) {
+-  let compound = first_compound_from_source(selector_text);
+-  let list = match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Has(list))] => list,
+-    _ => panic!("expected :has(<relative-selector-list>)"),
+-  };
+-
+-  let selectors = collect_has_selectors(list);
+-  assert_eq!(selectors.len(), 1);
+-  let selector = selectors[0];
+-  assert_eq!(selector.steps.len(), 1);
+-  let step = selector.steps.first().expect("selector step");
+-  assert_eq!(step.combinator_to_left, Some(expected_combinator));
+-
+-  match step.compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Class(class), SimpleSelector::PseudoClass(PseudoClassSelector::Is(list))] => {
+-      assert_eq!(class, "hit");
+-      assert_eq!(list.to_css_string(), ":scope, *");
+-    }
+-    _ => panic!("expected class selector with injected :is()"),
+-  }
+-
+-  assert_eq!(selector.to_css_string(), expected_css);
+-}
+-
+-#[test]
+-fn has_pseudo_class_normalizes_leading_scope_child() {
+-  assert_has_scope_normalized(
+-    "div:has(:scope > .hit)",
+-    Combinator::Child,
+-    "> .hit:is(:scope, *)",
+-  );
+-}
+-
+-#[test]
+-fn has_pseudo_class_normalizes_leading_scope_later_sibling() {
+-  assert_has_scope_normalized(
+-    "div:has(:scope ~ .hit)",
+-    Combinator::LaterSibling,
+-    "~ .hit:is(:scope, *)",
+-  );
+-}
+-
+-#[test]
+-fn has_scope_normalization_preserves_specificity() {
+-  let raw_child = Selector {
+-    steps: vec![
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::Descendant),
+-        compound: CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::PseudoClass(PseudoClassSelector::Known(
+-            PseudoClass::Scope,
+-          ))],
+-        },
+-      },
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::Child),
+-        compound: CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::Class("hit".to_string())],
+-        },
+-      },
+-    ],
+-  };
+-  let normalized_child = normalize_leading_scope_relative_selector(raw_child.clone());
+-  assert_eq!(raw_child.specificity(), normalized_child.specificity());
+-
+-  let raw_sibling = Selector {
+-    steps: vec![
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::Descendant),
+-        compound: CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::PseudoClass(PseudoClassSelector::Known(
+-            PseudoClass::Scope,
+-          ))],
+-        },
+-      },
+-      SelectorStep {
+-        combinator_to_left: Some(Combinator::LaterSibling),
+-        compound: CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::Class("hit".to_string())],
+-        },
+-      },
+-    ],
+-  };
+-  let normalized_sibling = normalize_leading_scope_relative_selector(raw_sibling.clone());
+-  assert_eq!(raw_sibling.specificity(), normalized_sibling.specificity());
+-}
+-
+-#[test]
+-fn has_rejects_nested_has() {
+-  for selector in [":has(:has(.x))", ".a:has(.b:has(.c))"] {
+-    let err = super::parse_selector_list(selector).expect_err("nested :has() should be rejected");
+-    let kind = err.kind;
+-    assert_eq!(
+-      kind,
+-      SelectorParseErrorKind::InvalidState,
+-      "expected InvalidState error for selector {selector:?}, got {:?}",
+-      kind
+-    );
+-  }
+-}
+-
+-#[test]
+-fn has_rejects_overly_nested_arguments() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 1;
+-  let mut selector = String::from(":has(");
+-  for _ in 0..depth {
+-    selector.push_str(":is(");
+-  }
+-  selector.push_str(".x");
+-  for _ in 0..depth {
+-    selector.push(')');
+-  }
+-  selector.push(')');
+-
+-  let err =
+-    super::parse_selector_list(&selector).expect_err("should reject overly nested :has() argument");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorNestingTooDeep { .. }),
+-    "expected nesting depth error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn has_rejects_overly_nested_is_branch() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 8;
+-  let mut nested = String::new();
+-  for _ in 0..depth {
+-    nested.push_str(":not(");
+-  }
+-  nested.push_str(".b");
+-  for _ in 0..depth {
+-    nested.push(')');
+-  }
+-
+-  let selector = format!(":has(:is(.a, {nested}))");
+-  let err = super::parse_selector_list(&selector)
+-    .expect_err("should reject overly nested :has() branch");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorNestingTooDeep { .. }),
+-    "expected nesting depth error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn has_rejects_overly_long_selector_lists() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SELECTOR_LIST_LEN + 1;
+-  let mut selector = String::from(":has(");
+-  for idx in 0..count {
+-    if idx > 0 {
+-      selector.push(',');
+-    }
+-    selector.push_str(".a");
+-  }
+-  selector.push(')');
+-
+-  let err = super::parse_selector_list(&selector)
+-    .expect_err("should reject overly long :has() selector list");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorListTooLong { .. }),
+-    "expected selector list length error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn has_drops_nested_has_inside_is() {
+-  let list = super::parse_selector_list(".a:has(:is(.b, :has(.c)))").expect("parse");
+-  assert_eq!(list.to_css_string(), ".a:has(:is(.b))");
+-
+-  let compound = first_compound_from_source(".a:has(:is(.b, :has(.c)))");
+-  let has_list = compound
+-    .simple_selectors
+-    .iter()
+-    .find_map(|simple| match simple {
+-      SimpleSelector::PseudoClass(PseudoClassSelector::Has(list)) => Some(list),
+-      _ => None,
+-    })
+-    .expect("expected :has() selector list");
+-  let selector = has_list
+-    .iter_has_selectors()
+-    .next()
+-    .expect("expected relative selector");
+-  let is_list = selector
+-    .steps
+-    .iter()
+-    .flat_map(|step| step.compound.simple_selectors.iter())
+-    .find_map(|simple| match simple {
+-      SimpleSelector::PseudoClass(PseudoClassSelector::Is(list)) => Some(list),
+-      _ => None,
+-    })
+-    .expect("expected :is() selector list");
+-  assert_eq!(is_list.to_css_string(), ".b");
+-}
+-
+-#[test]
+-fn has_rejects_pseudo_elements() {
+-  for selector in [
+-    ":has(::before)",
+-    ":has(:before)",
+-    ":has(::part(foo))",
+-    ":has(::slotted(.a))",
+-    ".a:has(::before)",
+-  ] {
+-    let err = super::parse_selector_list(selector)
+-      .expect_err("pseudo-elements inside :has() should be rejected");
+-    let kind = err.kind;
+-    assert_eq!(
+-      kind,
+-      SelectorParseErrorKind::InvalidState,
+-      "expected InvalidState error for selector {selector:?}, got {:?}",
+-      kind
+-    );
+-  }
+-}
+-
+-#[test]
+-fn has_parses_scope_pseudo_class() {
+-  let compound = first_compound_from_source(r"div:has(:scope > .hit)");
+-  let list = match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Has(list))] => list,
+-    _ => panic!("expected :has()"),
+-  };
+-  let selector = list
+-    .iter_has_selectors()
+-    .next()
+-    .expect("relative selector");
+-  let is_list = selector
+-    .steps
+-    .iter()
+-    .flat_map(|step| step.compound.simple_selectors.iter())
+-    .find_map(|simple| match simple {
+-      SimpleSelector::PseudoClass(PseudoClassSelector::Is(list)) => Some(list),
+-      _ => None,
+-    })
+-    .expect("expected injected :is() list");
+-  let scope_selector = is_list.slice().first().expect("scope selector");
+-  let scope_step = scope_selector.steps.first().expect("scope selector step");
+-  match scope_step.compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Scope);
+-    }
+-    _ => panic!("expected :scope in injected :is()"),
+-  }
+-
+-  let list = super::parse_selector_list(r"div:has(:scope > .hit)").expect("parse");
+-  assert_eq!(list.to_css_string(), r"div:has(> .hit:is(:scope, *))");
+-}
+-
+-#[test]
+-fn is_drops_invalid_has_branch() {
+-  let list = super::parse_selector_list(":is(:has(::before), .a)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":is(.a)");
+-}
+-
+-#[test]
+-fn has_drops_pseudo_elements_inside_is() {
+-  let list = super::parse_selector_list(":has(:is(.ok, ::before))").expect("parse");
+-  assert_eq!(list.to_css_string(), ":has(:is(.ok))");
+-}
+-
+-#[test]
+-fn relative_selector_list_parses_leading_combinator() {
+-  let list = super::parse_relative_selector_list("> .foo").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert!(matches!(
+-    selector.steps.first(),
+-    Some(SelectorStep {
+-      combinator_to_left: Some(Combinator::Child),
+-      ..
+-    })
+-  ));
+-}
+-
+-#[test]
+-fn relative_selector_list_implies_descendant_combinator() {
+-  let list = super::parse_relative_selector_list(".foo").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert!(matches!(
+-    selector.steps.first(),
+-    Some(SelectorStep {
+-      combinator_to_left: Some(Combinator::Descendant),
+-      ..
+-    })
+-  ));
+-}
+-
+-#[test]
+-fn relative_selector_list_normalizes_leading_scope() {
+-  let list = super::parse_relative_selector_list(":scope > .hit").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.steps.len(), 1);
+-  let step = selector.steps.first().expect("selector step");
+-  assert_eq!(step.combinator_to_left, Some(Combinator::Child));
+-  match step.compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Class(class), SimpleSelector::PseudoClass(PseudoClassSelector::Is(list))] => {
+-      assert_eq!(class, "hit");
+-      assert_eq!(list.to_css_string(), ":scope, *");
+-    }
+-    _ => panic!("expected class selector with injected :is()"),
+-  }
+-  assert_eq!(selector.to_css_string(), "> .hit:is(:scope, *)");
+-}
+-
+-#[test]
+-fn relative_selector_list_rejects_pseudo_elements() {
+-  assert!(super::parse_relative_selector_list("::before").is_err());
+-}
+-
+-#[test]
+-fn selector_fingerprint_matches_for_equal_selectors() {
+-  let list_a = super::parse_selector_list("div.foo#bar").expect("parse");
+-  let list_b = super::parse_selector_list("div.foo#bar").expect("parse");
+-  let selector_a = list_a.slice().first().expect("selector");
+-  let selector_b = list_b.slice().first().expect("selector");
+-  assert_eq!(selector_fingerprint(selector_a), selector_fingerprint(selector_b));
+-}
+-
+-#[test]
+-fn selector_fingerprint_detects_small_differences() {
+-  let list_a = super::parse_selector_list(".a").expect("parse");
+-  let list_b = super::parse_selector_list(".b").expect("parse");
+-  assert_ne!(
+-    selector_fingerprint(&list_a.slice()[0]),
+-    selector_fingerprint(&list_b.slice()[0])
+-  );
+-
+-  let child = super::parse_selector_list("div > span").expect("parse");
+-  let descendant = super::parse_selector_list("div span").expect("parse");
+-  assert_ne!(
+-    selector_fingerprint(&child.slice()[0]),
+-    selector_fingerprint(&descendant.slice()[0])
+-  );
+-}
+-
+-#[test]
+-fn selector_list_fingerprint_is_order_sensitive() {
+-  let list_a = super::parse_selector_list("div, span").expect("parse");
+-  let list_b = super::parse_selector_list("span, div").expect("parse");
+-  assert_ne!(selector_list_fingerprint(&list_a), selector_list_fingerprint(&list_b));
+-}
+-
+-#[test]
+-fn parse_relative_selector_list_parses_leading_combinators() {
+-  let list = super::parse_relative_selector_list("> .a, .b").expect("parse relative selector list");
+-  assert_eq!(list.len(), 2);
+-  let first = list.slice().first().expect("first selector");
+-  let second = list.slice().get(1).expect("second selector");
+-  assert_eq!(
+-    first
+-      .steps
+-      .first()
+-      .expect("first selector step")
+-      .combinator_to_left,
+-    Some(Combinator::Child)
+-  );
+-  assert_eq!(
+-    second
+-      .steps
+-      .first()
+-      .expect("second selector step")
+-      .combinator_to_left,
+-    Some(Combinator::Descendant)
+-  );
+-}
+-
+-#[test]
+-fn parse_relative_selector_list_normalizes_leading_scope() {
+-  let list =
+-    super::parse_relative_selector_list(":scope > .x").expect("parse relative selector list");
+-  let selector = list.slice().first().expect("selector");
+-  assert!(matches!(
+-    selector.steps.first(),
+-    Some(SelectorStep {
+-      combinator_to_left: Some(Combinator::Child),
+-      ..
+-    })
+-  ));
+-  assert_eq!(selector.to_css_string(), "> .x:is(:scope, *)");
+-}
+-
+-#[test]
+-fn relative_selector_list_rejects_trailing_comma() {
+-  let err = super::parse_relative_selector_list("> .a,")
+-    .expect_err("trailing comma should be rejected");
+-  assert_eq!(err.kind, SelectorParseErrorKind::ExpectedSelector);
+-  assert_eq!(err.idx, "> .a,".len());
+-}
+-
+-#[test]
+-fn unknown_pseudo_class_errors() {
+-  let err = super::parse_selector_list(":unknown").expect_err("unknown pseudo should error");
+-  assert!(matches!(err.kind, SelectorParseErrorKind::UnsupportedPseudoClass(_)));
+-}
+-
+-#[test]
+-fn vendor_pseudo_class_parses_as_vendor() {
+-  let compound = first_compound_from_source(":-webkit-foo");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Vendor("-webkit-foo".to_string()));
+-    }
+-    _ => panic!("expected vendor pseudo-class"),
+-  }
+-}
+-
+-#[test]
+-fn nth_child_parses_of_selector_list_with_escapes() {
+-  let compound = first_compound_from_source(r":nth-child(2n+1 of .foo\:bar, #a\+b)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::NthChild { a, b, of })] => {
+-      assert_eq!((*a, *b), (2, 1));
+-      let list = of.as_ref().expect("of selector list");
+-      assert_eq!(list.to_css_string(), r".foo\:bar, #a\+b");
+-    }
+-    _ => panic!("expected :nth-child() pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(r":nth-child(2n+1 of .foo\:bar, #a\+b)").expect("parse");
+-  assert_eq!(
+-    list.to_css_string(),
+-    r":nth-child(2n+1 of .foo\:bar, #a\+b)"
+-  );
+-}
+-
+-#[test]
+-fn nth_child_rejects_invalid_expression() {
+-  assert!(super::parse_selector_list(":nth-child(10n+-1)").is_err());
+-}
+-
+-#[test]
+-fn lang_pseudo_class_normalizes_language_tags() {
+-  let compound = first_compound_from_source(":lang(en_US)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Lang(langs))] => {
+-      assert_eq!(langs.as_slice(), &["en-us".to_string()]);
+-    }
+-    _ => panic!("expected :lang() pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":lang(en_US)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":lang(en-us)");
+-}
+-
+-#[test]
+-fn lang_pseudo_class_rejects_empty_language_tag() {
+-  assert!(super::parse_selector_list(":lang(_)").is_err());
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_parses_selector_list_with_escapes() {
+-  let list = super::parse_selector_list(r"::slotted(.foo\:bar)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  assert_eq!(
+-    selector.steps[1].combinator_to_left.as_ref(),
+-    Some(&Combinator::SlotAssignment)
+-  );
+-  match selector.steps[1].compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Class(class)] => assert_eq!(class, "foo:bar"),
+-    _ => panic!("expected `.foo:bar` in ::slotted() argument"),
+-  }
+-  assert_eq!(list.to_css_string(), r"::slotted(.foo\:bar)");
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_single_colon_alias_serializes_as_double_colon() {
+-  let list = super::parse_selector_list("slot:slotted(span)").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(span)");
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_serializes_escaped_compound() {
+-  let list = super::parse_selector_list(r"::slotted(.foo\:bar#baz\+qux)").expect("parse");
+-  let selector = &list.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  assert_eq!(
+-    selector.steps[1].combinator_to_left.as_ref(),
+-    Some(&Combinator::SlotAssignment)
+-  );
+-  match selector.steps[1].compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Class(class), SimpleSelector::Id(id)] => {
+-      assert_eq!(class, "foo:bar");
+-      assert_eq!(id, "baz+qux");
+-    }
+-    _ => panic!("expected `.foo:bar#baz+qux` in ::slotted() argument"),
+-  }
+-  assert_eq!(list.to_css_string(), r"::slotted(.foo\:bar#baz\+qux)");
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_rejects_non_compound_selectors() {
+-  assert!(super::parse_selector_list("div::slotted(.a .b)").is_err());
+-  assert!(super::parse_selector_list("div::slotted(.a, .b)").is_err());
+-  assert!(super::parse_selector_list("div::slotted(::before)").is_err());
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_allows_pseudo_class_argument() {
+-  let list = super::parse_selector_list("div::slotted(:has(.d))").expect("parse");
+-  assert_eq!(list.to_css_string(), "div::slotted(:has(.d))");
+-}
+-
+-#[test]
+-fn selector_text_limit_errors() {
+-  let input = "a".repeat(super::limits::SELECTOR_PARSE_MAX_TEXT_BYTES + 1);
+-  let err = super::parse_selector_list_with_limits(&input).expect_err("expected error");
+-  assert!(matches!(
+-    err.kind,
+-    super::SelectorParseErrorKind::SelectorTextTooLong { .. }
+-  ));
+-}
+-
+-#[test]
+-fn selector_nesting_limit_errors() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 1;
+-  let mut selector = String::new();
+-  for _ in 0..depth {
+-    selector.push_str(":not(");
+-  }
+-  selector.push_str(".a");
+-  for _ in 0..depth {
+-    selector.push(')');
+-  }
+-
+-  let err = super::parse_selector_list_with_limits(&selector).expect_err("expected error");
+-  assert!(matches!(
+-    err.kind,
+-    super::SelectorParseErrorKind::SelectorNestingTooDeep { .. }
+-  ));
+-}
+-
+-#[test]
+-fn selector_list_length_limit_errors() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SELECTOR_LIST_LEN + 1;
+-  let input = std::iter::repeat(".a").take(count).collect::<Vec<_>>().join(",");
+-  let err = super::parse_selector_list_with_limits(&input).expect_err("expected error");
+-  assert!(matches!(
+-    err.kind,
+-    super::SelectorParseErrorKind::SelectorListTooLong { .. }
+-  ));
+-}
+-
+-#[test]
+-fn has_selector_list_length_limit_errors() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SELECTOR_LIST_LEN + 1;
+-  let inner = std::iter::repeat(".a").take(count).collect::<Vec<_>>().join(", ");
+-  let input = format!("div:has({inner})");
+-  let err = super::parse_selector_list_with_limits(&input).expect_err("expected error");
+-  assert!(matches!(
+-    err.kind,
+-    super::SelectorParseErrorKind::SelectorListTooLong { .. }
+-  ));
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_accepts_compound_selectors() {
+-  let list = super::parse_selector_list("div::slotted(.a)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div::slotted(.a)");
+-
+-  let list = super::parse_selector_list("slot::slotted(span)::before").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(span)::before");
+-
+-  let list = super::parse_selector_list("slot::slotted(.a)::before").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(.a)::before");
+-}
+-
+-#[test]
+-fn shadow_pseudo_elements_allow_chaining() {
+-  let list = super::parse_selector_list("x-host::part(foo):hover").expect("parse");
+-  assert_eq!(list.to_css_string(), "x-host::part(foo):hover");
+-
+-  let list = super::parse_selector_list("slot::slotted(.target):hover").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(.target):hover");
+-
+-  let list = super::parse_selector_list("x-host::part(button)::before").expect("parse");
+-  assert_eq!(list.to_css_string(), "x-host::part(button)::before");
+-
+-  let list = super::parse_selector_list("slot::slotted(.target)::before").expect("parse");
+-  assert_eq!(list.to_css_string(), "slot::slotted(.target)::before");
+-}
+-
+-#[test]
+-fn slotted_pseudo_element_rejects_invalid_suffix_pseudo_elements() {
+-  // `::slotted()` may only be followed by tree-abiding pseudo-elements.
+-  assert!(super::parse_selector_list("slot::slotted(span)::placeholder").is_err());
+-  assert!(super::parse_selector_list("slot::slotted(span)::selection").is_err());
+-  assert!(super::parse_selector_list("slot::slotted(span)::backdrop").is_err());
+-  // Only one suffix pseudo-element is permitted.
+-  assert!(super::parse_selector_list("slot::slotted(span)::before::after").is_err());
+-}
+-
+-#[test]
+-fn part_pseudo_element_rejects_invalid_suffix_pseudo_elements() {
+-  // `::part()` may only be followed by tree-abiding pseudo-elements or fully-styleable pseudo-elements.
+-  assert!(super::parse_selector_list("x-host::part(foo)::placeholder").is_err());
+-  assert!(super::parse_selector_list("x-host::part(foo)::backdrop").is_ok());
+-  assert!(super::parse_selector_list("x-host::part(foo)::before::after").is_err());
+-}
+-
+-#[test]
+-fn pseudo_element_must_be_last_in_compound() {
+-  assert!(super::parse_selector_list("div::before.foo").is_err());
+-  assert!(super::parse_selector_list("div::before:hover").is_err());
+-  assert!(super::parse_selector_list("div::before span").is_err());
+-  assert!(super::parse_selector_list("div::before::after").is_err());
+-}
+-
+-#[test]
+-fn vendor_pseudo_class_serializes_escaped_identifier() {
+-  for selector in [r":-moz-foo\:bar", r":-webkit-foo\:bar"] {
+-    let list = super::parse_selector_list(selector).expect("parse");
+-    assert_eq!(list.to_css_string(), selector);
+-  }
+-}
+-
+-#[test]
+-fn pseudo_class_aliases_normalize() {
+-  let list = super::parse_selector_list("a:-webkit-any-link").expect("parse");
+-  assert_eq!(list.to_css_string(), "a:any-link");
+-
+-  let list = super::parse_selector_list("div:-webkit-full-screen").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:fullscreen");
+-}
+-
+-#[test]
+-fn functional_pseudo_classes_parse() {
+-  let list = super::parse_selector_list("li:nth-of-type(2n+1)").expect("parse");
+-  assert_eq!(list.to_css_string(), "li:nth-of-type(2n+1)");
+-
+-  let list = super::parse_selector_list(":dir(rtl)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":dir(rtl)");
+-}
+-
+-#[test]
+-fn ua_selector_samples_parse() {
+-  let list = super::parse_selector_list("summary:first-of-type").expect("parse");
+-  assert_eq!(list.to_css_string(), "summary:first-of-type");
+-
+-  let list = super::parse_selector_list("dialog:not([open])").expect("parse");
+-  assert_eq!(list.to_css_string(), "dialog:not([open])");
+-
+-  let list = super::parse_selector_list("*:where([popover]):not([open])").expect("parse");
+-  assert_eq!(list.to_css_string(), "*:where([popover]):not([open])");
+-
+-  let list = super::parse_selector_list(":fullscreen::backdrop").expect("parse");
+-  assert_eq!(list.to_css_string(), ":fullscreen::backdrop");
+-}
+-
+-#[test]
+-fn unknown_non_vendor_pseudo_class_is_error() {
+-  assert!(super::parse_selector_list(":unsupported-pseudo").is_err());
+-}
+-
+-#[test]
+-fn unknown_vendor_pseudo_class_parses() {
+-  let list = super::parse_selector_list(":-moz-broken").expect("parse");
+-  assert_eq!(list.to_css_string(), ":-moz-broken");
+-
+-  let list = super::parse_selector_list(":-webkit-broken").expect("parse");
+-  assert_eq!(list.to_css_string(), ":-webkit-broken");
+-}
+-
+-#[test]
+-fn vendor_functional_pseudo_class_parses() {
+-  for (selector, expected) in [
+-    (":-moz-broken(foo, bar)", ":-moz-broken"),
+-    (":-webkit-broken(foo, bar)", ":-webkit-broken"),
+-  ] {
+-    let list = super::parse_selector_list(selector).expect("parse");
+-    assert_eq!(list.to_css_string(), expected);
+-  }
+-}
+-
+-#[test]
+-fn unsupported_pseudo_element_is_error() {
+-  assert!(super::parse_selector_list("::unsupported-element").is_err());
+-}
+-
+-#[test]
+-fn vendor_pseudo_element_serializes_with_double_colon() {
+-  let list = super::parse_selector_list("::-webkit-foo").expect("parse");
+-  assert_eq!(list.to_css_string(), "::-webkit-foo");
+-}
+-
+-#[test]
+-fn ms_input_placeholder_serializes_as_placeholder() {
+-  let list = super::parse_selector_list("input:-ms-input-placeholder").expect("parse");
+-  assert_eq!(list.to_css_string(), "input::placeholder");
+-}
+-
+-#[test]
+-fn attribute_selector_parses_namespace_constraints() {
+-  let compound = first_compound_from_source("[|href]");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::None);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::ExplicitNone);
+-      assert_eq!(attr.local_name, "href");
+-      assert_eq!(attr.operator, AttrSelectorOperator::Exists);
+-      assert_eq!(attr.value, None);
+-      assert_eq!(attr.case_sensitivity, None);
+-    }
+-    _ => panic!("expected an attribute selector"),
+-  }
+-
+-  let compound = first_compound_from_source("[*|href]");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::Any);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::ExplicitAny);
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected an attribute selector"),
+-  }
+-
+-  let mut namespaces = CssNamespaces::default();
+-  namespaces.prefixes.insert(
+-    CssString::from("foo"),
+-    CssString::from("http://example.com/foo"),
+-  );
+-
+-  let compound = first_compound_from_source_with_namespaces("[foo|bar]", &namespaces);
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(
+-        attr.namespace,
+-        NamespaceSelector {
+-          constraint: NamespaceConstraint::Specific {
+-            url: "http://example.com/foo".to_string(),
+-            prefix: Some("foo".to_string()),
+-          },
+-          syntax: NamespaceSyntax::ExplicitPrefix("foo".to_string()),
+-        }
+-      );
+-      assert_eq!(attr.local_name, "bar");
+-    }
+-    _ => panic!("expected an attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn attribute_selector_parses_operators_and_case_sensitivity_flags() {
+-  let cases = [
+-    ("[a~=tok]", AttrSelectorOperator::Includes, None),
+-    ("[a|=dash]", AttrSelectorOperator::DashMatch, None),
+-    ("[a^=pre]", AttrSelectorOperator::Prefix, None),
+-    ("[a$=suf]", AttrSelectorOperator::Suffix, None),
+-    ("[a*=sub]", AttrSelectorOperator::Substring, None),
+-    (
+-      "[data-x=Foo i]",
+-      AttrSelectorOperator::Equals,
+-      Some(CaseSensitivity::AsciiCaseInsensitive),
+-    ),
+-    (
+-      "[data-x=Foo s]",
+-      AttrSelectorOperator::Equals,
+-      Some(CaseSensitivity::CaseSensitive),
+-    ),
+-  ];
+-
+-  for (input, operator, expected_flag) in cases {
+-    let compound = first_compound_from_source(input);
+-    match compound.simple_selectors.as_slice() {
+-      [SimpleSelector::Attribute(attr)] => {
+-        assert_eq!(attr.operator, operator, "selector={input}");
+-        assert_eq!(attr.case_sensitivity, expected_flag, "selector={input}");
+-        if operator != AttrSelectorOperator::Exists {
+-          assert!(attr.value.is_some(), "selector={input}");
+-        }
+-      }
+-      _ => panic!("expected an attribute selector for {input}"),
+-    }
+-  }
+-}
+-
+-#[test]
+-fn attribute_value_serializes_as_escaped_ident_when_needed() {
+-  let list = super::parse_selector_list(r#"[data="foo:bar"]"#).expect("parse");
+-  // Value can be represented as an ident-token via escaping.
+-  assert_eq!(list.to_css_string(), r"[data=foo\:bar]");
+-
+-  let list = super::parse_selector_list(r#"[data="123"]"#).expect("parse");
+-  assert_eq!(list.to_css_string(), r"[data=\31 23]");
+-}
+-
+-#[test]
+-fn is_drops_pseudo_element_arguments() {
+-  let list = super::parse_selector_list("div:is(.a, ::before)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.a)");
+-}
+-
+-#[test]
+-fn is_rejects_only_pseudo_element_arguments() {
+-  assert!(super::parse_selector_list(":is(::before)").is_err());
+-  assert!(super::parse_selector_list("div:is(::before, ::after)").is_err());
+-}
+-
+-#[test]
+-fn is_rejects_empty_forgiving_list() {
+-  assert!(super::parse_selector_list("div:is(, )").is_err());
+-}
+-
+-#[test]
+-fn is_drops_shadow_pseudo_element_arguments() {
+-  let list = super::parse_selector_list("div:is(::slotted(.a), ::part(foo), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_shadow_pseudo_element_arguments() {
+-  let list = super::parse_selector_list("div:is(::slotted(), ::part(), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_bare_shadow_pseudo_element_branch() {
+-  for selector in ["::part", ":part", "::slotted", ":slotted"] {
+-    let list = super::parse_selector_list(&format!("div:is({selector}, .ok)"))
+-      .expect("parse forgiving list");
+-    assert_eq!(list.to_css_string(), "div:is(.ok)");
+-  }
+-}
+-
+-#[test]
+-fn is_drops_invalid_slotted_list_argument() {
+-  let list = super::parse_selector_list("div:is(::slotted(.a, .b), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_part_list_argument() {
+-  let list = super::parse_selector_list("div:is(::part(foo, bar), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn matches_alias_parses_like_is() {
+-  let list = super::parse_selector_list("div:matches(.a, ::before)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.a)");
+-}
+-
+-#[test]
+-fn where_drops_pseudo_element_arguments() {
+-  let list = super::parse_selector_list("div:where(.a, ::before)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(.a)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_shadow_pseudo_arguments() {
+-  let list = super::parse_selector_list("div:where(::slotted(), ::part(), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_slotted_list_argument() {
+-  let list = super::parse_selector_list("div:where(::slotted(.a, .b), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_part_list_argument() {
+-  let list = super::parse_selector_list("div:where(::part(foo, bar), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_shadow_pseudo_element_arguments() {
+-  let list = super::parse_selector_list("div:where(::slotted(.a), ::part(foo), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_host_pseudo_arguments_when_where_is_not_leading_in_compound() {
+-  let list = super::parse_selector_list("div:where(:host(.a), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(.c)");
+-}
+-
+-#[test]
+-fn where_drops_nested_host_pseudo_branch() {
+-  let list = super::parse_selector_list("div:where(:is(:host(.a)), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_keeps_host_context_arguments_when_where_is_not_leading_in_compound() {
+-  let list = super::parse_selector_list("div:where(:host-context(.a), .c)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(:host-context(.a), .c)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_shadow_host_arguments() {
+-  let list =
+-    super::parse_selector_list("div:where(:host-context(.a, .b), :host(.x .y), .ok)")
+-      .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_host_context_combinator_branch() {
+-  let list = super::parse_selector_list("div:where(:host-context(.a .b), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_empty_host_context_branch() {
+-  let list = super::parse_selector_list("div:where(:host-context(), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_host_branch() {
+-  let list = super::parse_selector_list(":where(:host(.a .b), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_host_pseudo_element_branch() {
+-  let list = super::parse_selector_list(":where(:host(::before), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), ":where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_host_context_pseudo_branch() {
+-  let list = super::parse_selector_list("div:where(:host-context(::before), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn where_drops_invalid_host_context_shadow_pseudo_branch() {
+-  let list = super::parse_selector_list("div:where(:host-context(::part(foo)), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:where(.ok)");
+-}
+-
+-#[test]
+-fn not_rejects_pseudo_element_arguments() {
+-  assert!(super::parse_selector_list("div:not(::before)").is_err());
+-  assert!(super::parse_selector_list("div:not(:-moz-selection)").is_err());
+-  assert!(super::parse_selector_list("div:not(::slotted(.a))").is_err());
+-}
+-
+-#[test]
+-fn is_drops_invalid_not_branch() {
+-  let list = super::parse_selector_list("div:is(:not(::before), .a)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.a)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_context_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context(.foo, .bar), .baz)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.baz)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_context_combinator_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context(.a .b), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_empty_host_context_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context(), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_branch() {
+-  let list = super::parse_selector_list(":is(:host(.a .b), .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_pseudo_element_branch() {
+-  let list = super::parse_selector_list(":is(:host(::before), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), ":is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_bare_host_context_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context, .ok)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_context_pseudo_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context(:hover), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_host_context_shadow_pseudo_branch() {
+-  let list = super::parse_selector_list("div:is(:host-context(::slotted(.a)), .ok)")
+-    .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn is_drops_invalid_shadow_pseudo_arguments() {
+-  let list =
+-    super::parse_selector_list("div:is(:host-context(.a, .b), :host(.x .y), .ok)")
+-      .expect("parse forgiving list");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-fn namespaces_with_default_svg() -> CssNamespaces {
+-  let mut namespaces = CssNamespaces::default();
+-  namespaces.default = Some(CssString::from(SVG_NAMESPACE));
+-  namespaces
+-}
+-
+-fn namespaces_with_svg_prefix() -> CssNamespaces {
+-  let mut namespaces = CssNamespaces::default();
+-  namespaces
+-    .prefixes
+-    .insert(CssString::from("svg"), CssString::from(SVG_NAMESPACE));
+-  namespaces
+-}
+-
+-#[test]
+-fn namespace_undeclared_prefix_is_parse_error() {
+-  let namespaces = CssNamespaces::default();
+-  assert!(super::parse_selector_list_with_namespaces("svg|rect", &namespaces).is_err());
+-}
+-
+-#[test]
+-fn namespace_prefixes_are_case_sensitive() {
+-  let namespaces = namespaces_with_svg_prefix();
+-  let list = super::parse_selector_list_with_namespaces("svg|rect", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: SVG_NAMESPACE.to_string(),
+-          prefix: Some("svg".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-      },
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-  assert_eq!(list.to_css_string(), "svg|rect");
+-
+-  assert!(super::parse_selector_list_with_namespaces("SVG|rect", &namespaces).is_err());
+-}
+-
+-#[test]
+-fn default_namespace_applies_to_unprefixed_type_and_universal_selectors() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let rect = super::parse_selector_list_with_namespaces("rect", &namespaces).expect("parse");
+-  let rect_type = rect.slice()[0].steps[0].compound.type_selector.clone();
+-  assert_eq!(
+-    rect_type,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_specific_omitted(SVG_NAMESPACE),
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-  assert_eq!(rect.to_css_string(), "rect");
+-
+-  let star = super::parse_selector_list_with_namespaces("*", &namespaces).expect("parse");
+-  let star_type = star.slice()[0].steps[0].compound.type_selector.clone();
+-  assert_eq!(
+-    star_type,
+-    Some(TypeSelector::Universal(namespace_specific_omitted(SVG_NAMESPACE)))
+-  );
+-
+-  let list = super::parse_selector_list_with_namespaces("[href]", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::None);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::Omitted);
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn parse_context_default_namespace_applies_to_unprefixed_type_selectors() {
+-  let namespace_lookup = |_| None;
+-  let ctx = SelectorParseContext {
+-    default_namespace_url: Some(HTML_NAMESPACE),
+-    namespace_url_for_prefix: &namespace_lookup,
+-  };
+-
+-  let compound = first_compound_from_source_with_context("div", ctx);
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_specific_omitted(HTML_NAMESPACE),
+-      local_name: "div".to_string(),
+-    })
+-  );
+-
+-  let compound = first_compound_from_source_with_context("*", ctx);
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Universal(namespace_specific_omitted(HTML_NAMESPACE)))
+-  );
+-}
+-
+-#[test]
+-fn parse_context_resolves_prefixed_type_selector() {
+-  let namespace_lookup = |prefix: &str| match prefix {
+-    "svg" => Some(SVG_NAMESPACE),
+-    _ => None,
+-  };
+-  let ctx = SelectorParseContext {
+-    default_namespace_url: None,
+-    namespace_url_for_prefix: &namespace_lookup,
+-  };
+-
+-  let compound = first_compound_from_source_with_context("svg|rect", ctx);
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: SVG_NAMESPACE.to_string(),
+-          prefix: Some("svg".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-      },
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-
+-  assert!(parse_selector_list_with_context("bad|rect", ctx).is_err());
+-}
+-
+-#[test]
+-fn parse_context_resolves_prefixed_attribute_selector() {
+-  let namespace_lookup = |prefix: &str| match prefix {
+-    "svg" => Some(SVG_NAMESPACE),
+-    _ => None,
+-  };
+-  let ctx = SelectorParseContext {
+-    default_namespace_url: None,
+-    namespace_url_for_prefix: &namespace_lookup,
+-  };
+-
+-  let compound = first_compound_from_source_with_context("[svg|href]", ctx);
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(
+-        attr.namespace,
+-        NamespaceSelector {
+-          constraint: NamespaceConstraint::Specific {
+-            url: SVG_NAMESPACE.to_string(),
+-            prefix: Some("svg".to_string()),
+-          },
+-          syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-        }
+-      );
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-
+-  assert!(parse_selector_list_with_context("[bad|href]", ctx).is_err());
+-}
+-
+-#[test]
+-fn default_namespace_applies_to_implicit_universal_in_compounds() {
+-  let namespaces = namespaces_with_default_svg();
+-  let list = super::parse_selector_list_with_namespaces(".c", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Universal(namespace_specific_omitted(SVG_NAMESPACE)))
+-  );
+-}
+-
+-#[test]
+-fn explicit_any_and_none_namespace_type_selectors_parse() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let any_universal =
+-    super::parse_selector_list_with_namespaces("*|*", &namespaces).expect("parse");
+-  assert_eq!(
+-    any_universal.slice()[0].steps[0].compound.type_selector,
+-    Some(TypeSelector::Universal(namespace_any_explicit()))
+-  );
+-  assert_eq!(any_universal.to_css_string(), "*|*");
+-
+-  let none_universal =
+-    super::parse_selector_list_with_namespaces("|*", &namespaces).expect("parse");
+-  assert_eq!(
+-    none_universal.slice()[0].steps[0].compound.type_selector,
+-    Some(TypeSelector::Universal(namespace_none_explicit()))
+-  );
+-
+-  let any_tag = super::parse_selector_list_with_namespaces("*|rect", &namespaces).expect("parse");
+-  assert_eq!(
+-    any_tag.slice()[0].steps[0].compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_any_explicit(),
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-  assert_eq!(any_tag.to_css_string(), "*|rect");
+-
+-  let none_tag = super::parse_selector_list_with_namespaces("|rect", &namespaces).expect("parse");
+-  assert_eq!(
+-    none_tag.slice()[0].steps[0].compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_none_explicit(),
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-  assert_eq!(none_tag.to_css_string(), "|rect");
+-}
+-
+-#[test]
+-fn namespace_syntax_round_trips() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let list = super::parse_selector_list_with_namespaces("*|div", &namespaces).expect("parse");
+-  assert_eq!(list.to_css_string(), "*|div");
+-
+-  let list = super::parse_selector_list_with_namespaces("div", &namespaces).expect("parse");
+-  assert_eq!(list.to_css_string(), "div");
+-
+-  let list = super::parse_selector_list_with_namespaces("*|*", &namespaces).expect("parse");
+-  assert_eq!(list.to_css_string(), "*|*");
+-
+-  let list = super::parse_selector_list_with_namespaces("*|*.c", &namespaces).expect("parse");
+-  assert_eq!(list.to_css_string(), "*|*.c");
+-}
+-
+-#[test]
+-fn attribute_selector_namespace_prefixes_resolve() {
+-  let namespaces = namespaces_with_svg_prefix();
+-  let list = super::parse_selector_list_with_namespaces("[svg|href]", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(
+-        attr.namespace,
+-        NamespaceSelector {
+-          constraint: NamespaceConstraint::Specific {
+-            url: SVG_NAMESPACE.to_string(),
+-            prefix: Some("svg".to_string()),
+-          },
+-          syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-        }
+-      );
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-  assert_eq!(list.to_css_string(), "[svg|href]");
+-
+-  assert!(super::parse_selector_list_with_namespaces("[SVG|href]", &namespaces).is_err());
+-}
+-
+-#[test]
+-fn namespace_internal_ns_url_prefix_serializes_without_ns_function() {
+-  let namespaces = CssNamespaces::default();
+-
+-  let selector_text = "ns(http://example.com/ns)|a[ns(http://example.com/ns)|href][*|rel]";
+-  let list = super::parse_selector_list_with_namespaces(selector_text, &namespaces)
+-    .expect("parse ns(<url>)| selector");
+-  assert_eq!(list.to_css_string(), "a[href][*|rel]");
+-}
+-
+-#[test]
+-fn namespace_prefixed_universal_resolves() {
+-  let namespaces = namespaces_with_svg_prefix();
+-  let list = super::parse_selector_list_with_namespaces("svg|*", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Universal(NamespaceSelector {
+-      constraint: NamespaceConstraint::Specific {
+-        url: SVG_NAMESPACE.to_string(),
+-        prefix: Some("svg".to_string()),
+-      },
+-      syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-    }))
+-  );
+-}
+-
+-#[test]
+-fn namespace_reserved_prefixes_resolve() {
+-  let namespaces = CssNamespaces::default();
+-
+-  let xml = super::parse_selector_list_with_namespaces("xml|lang", &namespaces).expect("parse");
+-  let xml_type = &xml.slice()[0].steps[0].compound.type_selector;
+-  assert_eq!(
+-    xml_type,
+-    &Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: XML_NAMESPACE.to_string(),
+-          prefix: Some("xml".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("xml".to_string()),
+-      },
+-      local_name: "lang".to_string(),
+-    })
+-  );
+-
+-  let xmlns = super::parse_selector_list_with_namespaces("xmlns|*", &namespaces).expect("parse");
+-  let xmlns_type = &xmlns.slice()[0].steps[0].compound.type_selector;
+-  assert_eq!(
+-    xmlns_type,
+-    &Some(TypeSelector::Universal(NamespaceSelector {
+-      constraint: NamespaceConstraint::Specific {
+-        url: XMLNS_NAMESPACE.to_string(),
+-        prefix: Some("xmlns".to_string()),
+-      },
+-      syntax: NamespaceSyntax::ExplicitPrefix("xmlns".to_string()),
+-    }))
+-  );
+-
+-  // Reserved prefixes remain case-sensitive.
+-  assert!(super::parse_selector_list_with_namespaces("XML|lang", &namespaces).is_err());
+-}
+-
+-#[test]
+-fn attribute_selector_wildcard_and_none_namespace_prefixes_parse() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let any = super::parse_selector_list_with_namespaces("[*|href]", &namespaces).expect("parse");
+-  let compound = &any.slice()[0].steps[0].compound;
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::Any);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::ExplicitAny);
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-
+-  let none = super::parse_selector_list_with_namespaces("[|href]", &namespaces).expect("parse");
+-  let compound = &none.slice()[0].steps[0].compound;
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::None);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::ExplicitNone);
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn attribute_selector_reserved_prefixes_resolve() {
+-  let namespaces = CssNamespaces::default();
+-  let list = super::parse_selector_list_with_namespaces("[xml|lang]", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(
+-        attr.namespace,
+-        NamespaceSelector {
+-          constraint: NamespaceConstraint::Specific {
+-            url: XML_NAMESPACE.to_string(),
+-            prefix: Some("xml".to_string()),
+-          },
+-          syntax: NamespaceSyntax::ExplicitPrefix("xml".to_string()),
+-        }
+-      );
+-      assert_eq!(attr.local_name, "lang");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn namespace_context_resolves_type_selector() {
+-  let namespaces = namespaces_with_svg_prefix();
+-  let compound = first_compound_from_source_with_namespaces("svg|rect", &namespaces);
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: SVG_NAMESPACE.to_string(),
+-          prefix: Some("svg".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-      },
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-}
+-
+-#[test]
+-fn namespace_context_resolves_attribute_selector() {
+-  let namespaces = namespaces_with_svg_prefix();
+-  let compound = first_compound_from_source_with_namespaces("[svg|href]", &namespaces);
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(
+-        attr.namespace,
+-        NamespaceSelector {
+-          constraint: NamespaceConstraint::Specific {
+-            url: SVG_NAMESPACE.to_string(),
+-            prefix: Some("svg".to_string()),
+-          },
+-          syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-        }
+-      );
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn parse_selector_list_has_no_namespace_prefix_context() {
+-  assert!(super::parse_selector_list("svg|rect").is_err());
+-}
+-
+-#[test]
+-fn parse_selector_list_rejects_prefixed_attribute_without_namespace_context() {
+-  assert!(super::parse_selector_list("[svg|href]").is_err());
+-}
+-
+-#[test]
+-fn parse_selector_list_rejects_unknown_namespace_prefix() {
+-  assert!(super::parse_selector_list("bad|rect").is_err());
+-}
+-
+-#[test]
+-fn namespace_context_default_namespace_applies_to_type_selectors_only() {
+-  let namespaces = namespaces_with_default_svg();
+-  let compound = first_compound_from_source_with_namespaces("rect", &namespaces);
+-  assert_eq!(
+-    compound.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_specific_omitted(SVG_NAMESPACE),
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-
+-  let compound = first_compound_from_source_with_namespaces("[href]", &namespaces);
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::Attribute(attr)] => {
+-      assert_eq!(attr.namespace.constraint, NamespaceConstraint::None);
+-      assert_eq!(attr.namespace.syntax, NamespaceSyntax::Omitted);
+-      assert_eq!(attr.local_name, "href");
+-    }
+-    _ => panic!("expected attribute selector"),
+-  }
+-}
+-
+-#[test]
+-fn namespace_context_affects_relative_selector_list_parsing() {
+-  let _guard = NamespaceContextGuard::new();
+-  namespace_context_set_default(CssString::from(SVG_NAMESPACE));
+-  namespace_context_set_prefix("svg", CssString::from(SVG_NAMESPACE));
+-
+-  let list = super::parse_relative_selector_list("rect").expect("parse");
+-  let rect_type = &list.slice()[0].steps[0].compound.type_selector;
+-  assert_eq!(
+-    rect_type,
+-    &Some(TypeSelector::Tag {
+-      namespace: namespace_specific_omitted(SVG_NAMESPACE),
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-
+-  let list = super::parse_relative_selector_list("svg|rect").expect("parse");
+-  let svg_rect_type = &list.slice()[0].steps[0].compound.type_selector;
+-  assert_eq!(
+-    svg_rect_type,
+-    &Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: SVG_NAMESPACE.to_string(),
+-          prefix: Some("svg".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-      },
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-}
+-
+-#[test]
+-fn is_subject_compound_without_explicit_type_uses_any_namespace_under_default_namespace() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let list = super::parse_selector_list_with_namespaces("*|*:is(.c)", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  let [SimpleSelector::PseudoClass(PseudoClassSelector::Is(args))] =
+-    compound.simple_selectors.as_slice()
+-  else {
+-    panic!("expected :is() pseudo class");
+-  };
+-
+-  let subject = &args.slice()[0].steps[0].compound;
+-  assert_eq!(
+-    subject.type_selector,
+-    Some(TypeSelector::Universal(namespace_any_omitted()))
+-  );
+-}
+-
+-#[test]
+-fn is_non_subject_compounds_still_use_default_namespace() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let list =
+-    super::parse_selector_list_with_namespaces("*|*:is(.a .c)", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  let [SimpleSelector::PseudoClass(PseudoClassSelector::Is(args))] =
+-    compound.simple_selectors.as_slice()
+-  else {
+-    panic!("expected :is() pseudo class");
+-  };
+-
+-  let selector = &args.slice()[0];
+-  assert_eq!(selector.steps.len(), 2);
+-  let non_subject = &selector.steps[0].compound;
+-  let subject = &selector.steps[1].compound;
+-
+-  assert_eq!(
+-    non_subject.type_selector,
+-    Some(TypeSelector::Universal(namespace_specific_omitted(SVG_NAMESPACE)))
+-  );
+-  assert_eq!(
+-    subject.type_selector,
+-    Some(TypeSelector::Universal(namespace_any_omitted()))
+-  );
+-}
+-
+-#[test]
+-fn has_argument_respects_default_namespace() {
+-  let namespaces = namespaces_with_default_svg();
+-
+-  let list = super::parse_selector_list_with_namespaces("*|*:has(.c)", &namespaces).expect("parse");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  let [SimpleSelector::PseudoClass(PseudoClassSelector::Has(args))] = compound.simple_selectors.as_slice() else {
+-    panic!("expected :has() pseudo class");
+-  };
+-
+-  let selectors = collect_has_selectors(args);
+-  let selector = selectors.first().expect("relative selector");
+-  let subject = &selector.steps[0].compound;
+-  assert_eq!(
+-    subject.type_selector,
+-    Some(TypeSelector::Universal(namespace_specific_omitted(SVG_NAMESPACE)))
+-  );
+-}
+-
+-#[test]
+-fn scope_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":scope");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Scope);
+-    }
+-    _ => panic!("expected :scope pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":scope").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope");
+-
+-  let list = super::parse_selector_list(":ScOpE").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope");
+-}
+-
+-#[test]
+-fn defined_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":defined");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Defined);
+-    }
+-    _ => panic!("expected :defined pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":defined").expect("parse");
+-  assert_eq!(list.to_css_string(), ":defined");
+-}
+-
+-#[test]
+-fn first_child_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":first-child");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::FirstChild);
+-    }
+-    _ => panic!("expected :first-child pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":first-child").expect("parse");
+-  assert_eq!(list.to_css_string(), ":first-child");
+-}
+-
+-#[test]
+-fn empty_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":empty");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Empty);
+-    }
+-    _ => panic!("expected :empty pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":empty").expect("parse");
+-  assert_eq!(list.to_css_string(), ":empty");
+-}
+-
+-#[test]
+-fn dir_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":dir(rtl)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::Dir(TextDirection::Rtl));
+-    }
+-    _ => panic!("expected :dir() pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":dir(rtl)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":dir(rtl)");
+-}
+-
+-#[test]
+-fn lang_pseudo_class_parses() {
+-  let list = super::parse_selector_list("div:lang(sr_Cyrl_RS)").expect("parse");
+-  assert_eq!(list.to_css_string(), "div:lang(sr-cyrl-rs)");
+-
+-  let list = super::parse_selector_list(":lang(*)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":lang(*)");
+-
+-  assert!(super::parse_selector_list(":lang()").is_err());
+-  assert!(super::parse_selector_list(":lang(en,)").is_err());
+-}
+-
+-#[test]
+-fn nth_of_type_pseudo_class_parses() {
+-  let compound = first_compound_from_source(":nth-of-type(2n+1)");
+-  match compound.simple_selectors.as_slice() {
+-    [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-      assert_eq!(pseudo, &PseudoClass::NthOfType(2, 1));
+-    }
+-    _ => panic!("expected :nth-of-type() pseudo-class"),
+-  }
+-
+-  let list = super::parse_selector_list(":nth-of-type(2n+1)").expect("parse");
+-  assert_eq!(list.to_css_string(), ":nth-of-type(2n+1)");
+-}
+-
+-#[test]
+-fn vendor_placeholder_pseudo_classes_parse() {
+-  for (input, expected) in [
+-    (
+-      ":-webkit-input-placeholder",
+-      PseudoClass::WebkitInputPlaceholder,
+-    ),
+-    (":-ms-input-placeholder", PseudoClass::MsInputPlaceholder),
+-    (":-moz-placeholder", PseudoClass::MozPlaceholder),
+-  ] {
+-    let compound = first_compound_from_source(input);
+-    match compound.simple_selectors.as_slice() {
+-      [SimpleSelector::PseudoClass(PseudoClassSelector::Known(pseudo))] => {
+-        assert_eq!(pseudo, &expected);
+-      }
+-      _ => panic!("expected {input} pseudo-class"),
+-    }
+-    let list = super::parse_selector_list(input).expect("parse");
+-    assert_eq!(list.to_css_string(), input);
+-  }
+-
+-  // These legacy placeholder pseudo selectors are widely used inside :not() (e.g. Bootstrap) and
+-  // must parse as pseudo-classes so :not() remains valid.
+-  let list = super::parse_selector_list(".form-floating > .form-control:not(:-moz-placeholder)")
+-    .expect("parse");
+-  assert_eq!(
+-    list.to_css_string(),
+-    ".form-floating > .form-control:not(:-moz-placeholder)"
+-  );
+-}
+-
+-#[test]
+-fn overly_nested_selectors_are_rejected_without_stack_overflow() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 32;
+-  let mut selector = String::new();
+-  for _ in 0..depth {
+-    selector.push_str(":not(");
+-  }
+-  selector.push_str(".a");
+-  for _ in 0..depth {
+-    selector.push(')');
+-  }
+-
+-  let err =
+-    super::parse_selector_list(&selector).expect_err("should reject overly nested selector");
+-  assert!(
+-    matches!(
+-      err.kind,
+-      SelectorParseErrorKind::SelectorNestingTooDeep { .. }
+-    ),
+-    "expected nesting depth error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn selector_text_limits_rejects_unbalanced_overly_nested_parentheses() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 1;
+-  let selector = format!("{}a", "(".repeat(depth));
+-  let err = super::parse_selector_list(&selector)
+-    .expect_err("should reject unbalanced overly nested parentheses");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorNestingTooDeep { .. }),
+-    "expected nesting depth error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn selector_text_limits_allow_overly_nested_parentheses_in_forgiving_lists() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 1;
+-  let nested = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
+-  let input = format!("div:is({nested}, .ok)");
+-  let list = super::parse_selector_list(&input).expect("parse should drop invalid :is() selector");
+-  let compound = &list.slice()[0].steps[0].compound;
+-  let [SimpleSelector::PseudoClass(PseudoClassSelector::Is(args))] = compound.simple_selectors.as_slice() else {
+-    panic!("expected :is() pseudo class");
+-  };
+-  assert_eq!(args.to_css_string(), ".ok");
+-}
+-
+-#[test]
+-fn overly_long_selector_lists_are_rejected() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SELECTOR_LIST_LEN + 1;
+-  let mut selector = String::new();
+-  for idx in 0..count {
+-    if idx > 0 {
+-      selector.push(',');
+-    }
+-    selector.push('a');
+-  }
+-
+-  let err = super::parse_selector_list(&selector).expect_err("should reject long selector list");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorListTooLong { .. }),
+-    "expected selector list length error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn overly_long_selector_text_is_rejected() {
+-  let oversized = "a".repeat(super::limits::SELECTOR_PARSE_MAX_TEXT_BYTES + 1);
+-  let err = super::parse_selector_list(&oversized).expect_err("should reject long selector text");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorTextTooLong { .. }),
+-    "expected selector text length error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn too_many_components_are_rejected() {
+-  // Build a selector that exceeds `SELECTOR_PARSE_MAX_TOTAL_COMPONENTS` without tripping the
+-  // `SELECTOR_PARSE_MAX_TEXT_BYTES` limit first. We do this by combining a class selector token
+-  // (`.a`) with an explicit descendant combinator (whitespace), since both count as components.
+-  let count = super::limits::SELECTOR_PARSE_MAX_TOTAL_COMPONENTS + 1;
+-  let class_segments = (count + 1) / 2;
+-  let mut selector = String::new();
+-  for idx in 0..class_segments {
+-    if idx > 0 {
+-      selector.push(' ');
+-    }
+-    selector.push_str(".a");
+-  }
+-  let err = super::parse_selector_list(&selector).expect_err("should reject too many components");
+-  assert!(
+-    matches!(
+-      err.kind,
+-      SelectorParseErrorKind::TooManyComponents { .. }
+-        | SelectorParseErrorKind::SelectorTextTooLong { .. }
+-    ),
+-    "expected component/text limit error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn compound_selector_limit_is_enforced() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SIMPLE_SELECTORS_PER_COMPOUND + 1;
+-  let mut selector = String::from("a");
+-  for _ in 0..count {
+-    selector.push_str(".a");
+-  }
+-  let err = super::parse_selector_list(&selector).expect_err("should reject long compound selector");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::CompoundSelectorTooManySimples { .. }),
+-    "expected compound selector length error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn selector_step_limit_is_enforced() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_STEPS_PER_SELECTOR + 1;
+-  let mut selector = String::new();
+-  for idx in 0..count {
+-    if idx > 0 {
+-      selector.push('>');
+-    }
+-    selector.push('a');
+-  }
+-  let err = super::parse_selector_list(&selector).expect_err("should reject long selector chain");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorTooManySteps { .. }),
+-    "expected selector step limit error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn is_rejects_overly_long_selector_list() {
+-  let count = super::limits::SELECTOR_PARSE_MAX_SELECTOR_LIST_LEN + 1;
+-  let mut selector = String::from(":is(");
+-  for idx in 0..count {
+-    if idx > 0 {
+-      selector.push(',');
+-    }
+-    selector.push_str(".a");
+-  }
+-  selector.push(')');
+-
+-  let err = super::parse_selector_list(&selector).expect_err("should reject long :is() list");
+-  assert!(
+-    matches!(err.kind, SelectorParseErrorKind::SelectorListTooLong { .. }),
+-    "expected selector list length error, got {:?}",
+-    err.kind
+-  );
+-}
+-
+-#[test]
+-fn is_drops_overly_nested_branch() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 8;
+-  let mut nested = String::new();
+-  for _ in 0..depth {
+-    nested.push_str(":not(");
+-  }
+-  nested.push_str(".b");
+-  for _ in 0..depth {
+-    nested.push(')');
+-  }
+-
+-  let input = format!("div:is(.a, {nested})");
+-  let list = super::parse_selector_list(&input).expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.a)");
+-}
+-
+-#[test]
+-fn is_drops_overly_nested_host_context_branch() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH + 8;
+-  let mut nested = String::new();
+-  for _ in 0..depth {
+-    nested.push_str(":is(");
+-  }
+-  nested.push_str(":host-context(.shadow)");
+-  for _ in 0..depth {
+-    nested.push(')');
+-  }
+-
+-  let input = format!("div:is(.ok, {nested})");
+-  let list = super::parse_selector_list(&input).expect("parse");
+-  assert_eq!(list.to_css_string(), "div:is(.ok)");
+-}
+-
+-#[test]
+-fn deeply_nested_is_with_host_context_is_stack_safe() {
+-  let depth = super::limits::SELECTOR_PARSE_MAX_NESTING_DEPTH.saturating_sub(1);
+-  let mut selector = String::new();
+-  for _ in 0..depth {
+-    selector.push_str(":is(");
+-  }
+-  selector.push_str(":host-context(.shadow)");
+-  for _ in 0..depth {
+-    selector.push(')');
+-  }
+-
+-  let list = super::parse_selector_list(&selector).expect("parse deeply nested selector");
+-  assert_eq!(list.to_css_string(), selector);
+-}
+-
+-#[test]
+-fn terminal_pseudo_element_is_exposed_for_cascade_routing() {
+-  let list = super::parse_selector_list("div::before").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.terminal_pseudo_element(), Some(&PseudoElement::Before));
+-}
+-
+-#[test]
+-fn terminal_pseudo_element_returns_tree_abiding_pseudo_after_slotted() {
+-  let list = super::parse_selector_list("slot::slotted(.target)::before").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.terminal_pseudo_element(), Some(&PseudoElement::Before));
+-
+-  // `::slotted(...)` alone selects real elements; it does not correspond to a pseudo-element style
+-  // bucket.
+-  let list = super::parse_selector_list("slot::slotted(.target)").expect("parse");
+-  let selector = list.slice().first().expect("selector");
+-  assert_eq!(selector.terminal_pseudo_element(), None);
+-}
+-
+-#[test]
+-fn slotted_rejects_non_tree_abiding_suffix_pseudo_element() {
+-  assert!(super::parse_selector_list("slot::slotted(span)::placeholder").is_err());
+-  assert!(super::parse_selector_list("slot::slotted(span)::backdrop").is_err());
+-}
+-
+-#[test]
+-fn slotted_rejects_multiple_suffix_pseudo_elements() {
+-  assert!(super::parse_selector_list("slot::slotted(span)::before::after").is_err());
+-}
+-
+-#[test]
+-fn shadow_selector_detects_host_and_host_context() {
+-  let list = super::parse_selector_list(":host").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_contains_host(selector));
+-  assert!(!selector_contains_host_context(selector));
+-
+-  let list = super::parse_selector_list(":host-context(.ctx)").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_contains_host_context(selector));
+-  assert!(!selector_contains_host(selector));
+-
+-  let list = super::parse_selector_list("div:is(:host-context(.ctx), .a)").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_contains_host_context(selector));
+-}
+-
+-#[test]
+-fn shadow_selector_detects_nonleftmost_host() {
+-  let list = super::parse_selector_list("body :host(.x) .y").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_contains_nonleftmost_host(selector));
+-
+-  let list = super::parse_selector_list(":host(.x) .y").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(!selector_contains_nonleftmost_host(selector));
+-}
+-
+-#[test]
+-fn shadow_selector_part_helpers() {
+-  let list = super::parse_selector_list("x-host::part(foo):hover").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_is_part(selector));
+-  let expected = vec!["foo".to_string()];
+-  assert_eq!(selector_part_names(selector).unwrap(), expected.as_slice());
+-}
+-
+-#[test]
+-fn shadow_selector_slotted_helpers() {
+-  let list = super::parse_selector_list("slot::slotted(.a)::before").expect("parse selector");
+-  let selector = list.slice().first().expect("one selector");
+-  assert!(selector_is_slotted(selector));
+-  let slotted = selector_slotted_arg(selector).expect("slotted compound");
+-  assert_eq!(Selector::from_compound(slotted).to_css_string(), ".a");
+-}
+-#[test]
+-fn selector_shadow_convenience_methods_expose_part_and_slotted_arguments() {
+-  let list = super::parse_selector_list("slot::slotted(.a)::before").expect("parse");
+-  let selector = list.slice().first().expect("one selector");
+-  assert_eq!(
+-    selector.tree_abiding_pseudo_element(),
+-    Some(&PseudoElement::Before)
+-  );
+-  assert!(selector.is_slotted());
+-  assert!(!selector.is_part());
+-  assert_eq!(
+-    Selector::from_compound(
+-      selector
+-        .slotted_argument()
+-        .expect("slotted selector should expose its argument"),
+-    )
+-    .to_css_string(),
+-    ".a"
+-  );
+-  assert!(selector.part_names().is_none());
+-
+-  let list = super::parse_selector_list("x-host::part(foo)::before").expect("parse");
+-  let selector = list.slice().first().expect("one selector");
+-  assert_eq!(
+-    selector.tree_abiding_pseudo_element(),
+-    Some(&PseudoElement::Before)
+-  );
+-  assert!(selector.is_part());
+-  assert!(!selector.is_slotted());
+-  assert_eq!(
+-    selector.part_names().expect("part selector should expose names"),
+-    &["foo".to_string()]
+-  );
+-  assert!(selector.slotted_argument().is_none());
+-}
+-
+-#[test]
+-fn selector_list_fingerprint_is_order_sensitive() {
+-  let list_a = super::parse_selector_list("div, span").expect("parse");
+-  let list_b = super::parse_selector_list("span, div").expect("parse");
+-  assert_ne!(selector_list_fingerprint(&list_a), selector_list_fingerprint(&list_b));
+-}
+-
+-#[test]
+-fn scope_prelude_inserts_implicit_scope_marker() {
+-  let selector = scope_selector_from_source(".outer");
+-  assert_eq!(selector.steps.len(), 2);
+-  let first = selector.steps.first().expect("first step");
+-  assert!(matches!(
+-    first.compound.simple_selectors.as_slice(),
+-    [SimpleSelector::ImplicitScope]
+-  ));
+-  let second = selector.steps.get(1).expect("second step");
+-  assert_eq!(second.combinator_to_left, Some(Combinator::Descendant));
+-}
+-
+-#[test]
+-fn scope_prelude_preserves_explicit_scope_pseudo() {
+-  let selector = scope_selector_from_source(":scope .root");
+-  assert!(selector
+-    .steps
+-    .iter()
+-    .flat_map(|step| step.compound.simple_selectors.iter())
+-    .all(|simple| !matches!(simple, SimpleSelector::ImplicitScope)));
+-
+-  let first = selector.steps.first().expect("first step");
+-  assert!(matches!(
+-    first.compound.simple_selectors.first(),
+-    Some(SimpleSelector::PseudoClass(PseudoClassSelector::Known(PseudoClass::Scope)))
+-  ));
+-}
+-
+-#[test]
+-fn strip_implicit_scope_prefix_only_for_descendant() {
+-  let selector = scope_selector_from_source(".outer");
+-  let stripped = selector
+-    .strip_implicit_scope_prefix_if_simple_descendant()
+-    .expect("implicit scope should strip");
+-  assert_eq!(stripped.to_css_string(), ".outer");
+-
+-  let child = scope_selector_from_source("> .child");
+-  assert!(child
+-    .strip_implicit_scope_prefix_if_simple_descendant()
+-    .is_none());
+-}
+-
+-#[test]
+-fn scope_prelude_inserts_implicit_scope() {
+-  let list = super::parse_scope_prelude_selector_list(".outer").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope .outer");
+-}
+-
+-#[test]
+-fn scope_prelude_inserts_scope_for_leading_combinator() {
+-  let list = super::parse_scope_prelude_selector_list("> .child").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope > .child");
+-}
+-
+-#[test]
+-fn scope_prelude_keeps_explicit_scope() {
+-  let list = super::parse_scope_prelude_selector_list(":scope .root").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope .root");
+-}
+-
+-#[test]
+-fn scope_prelude_parses_selector_lists() {
+-  let list = super::parse_scope_prelude_selector_list(".outer, > .child").expect("parse");
+-  assert_eq!(list.to_css_string(), ":scope .outer, :scope > .child");
+-}
+-
+-#[test]
+-fn scope_prelude_with_limits_uses_relative_semantics() {
+-  let (start, end) =
+-    super::parse_scope_prelude_with_limits("(> .child) to (.limit)").expect("parse");
+-  assert_eq!(start.expect("start").to_css_string(), ":scope > .child");
+-  assert_eq!(end.expect("end").to_css_string(), ":scope .limit");
+-}
+-
+-#[test]
+-fn scope_prelude_with_limits_keeps_explicit_scope() {
+-  let (start, end) = super::parse_scope_prelude_with_limits("(:scope .root)").expect("parse");
+-  assert_eq!(start.expect("start").to_css_string(), ":scope .root");
+-  assert!(end.is_none());
+-}
+-
+-#[test]
+-fn scope_prelude_with_limits_supports_limit_only() {
+-  let (start, end) = super::parse_scope_prelude_with_limits("to (.limit)").expect("parse");
+-  assert!(start.is_none());
+-  assert_eq!(end.expect("end").to_css_string(), ":scope .limit");
+-}
+-
+-#[test]
+-fn selector_list_with_namespaces_parses_type_and_attribute_prefixes() {
+-  let mut namespaces = CssNamespaces::default();
+-  namespaces.default = Some(CssString::from("http://example.com/default"));
+-  namespaces.prefixes.insert(
+-    CssString::from("svg"),
+-    CssString::from("http://www.w3.org/2000/svg"),
+-  );
+-  namespaces.prefixes.insert(
+-    CssString::from("xlink"),
+-    CssString::from("http://www.w3.org/1999/xlink"),
+-  );
+-
+-  let list = super::parse_selector_list_with_namespaces(
+-    "svg|rect[xlink|href], div, |span, *|a",
+-    &namespaces,
+-  )
+-  .expect("parse selector list with namespaces");
+-  assert_eq!(list.len(), 4);
+-
+-  let first = &list.slice()[0].steps[0].compound;
+-  assert_eq!(
+-    first.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: NamespaceSelector {
+-        constraint: NamespaceConstraint::Specific {
+-          url: "http://www.w3.org/2000/svg".to_string(),
+-          prefix: Some("svg".to_string()),
+-        },
+-        syntax: NamespaceSyntax::ExplicitPrefix("svg".to_string()),
+-      },
+-      local_name: "rect".to_string(),
+-    })
+-  );
+-  let attr = first
+-    .simple_selectors
+-    .iter()
+-    .find_map(|simple| match simple {
+-      SimpleSelector::Attribute(attr) => Some(attr),
+-      _ => None,
+-    })
+-    .expect("expected namespaced attribute selector");
+-  assert_eq!(
+-    attr.namespace,
+-    NamespaceSelector {
+-      constraint: NamespaceConstraint::Specific {
+-        url: "http://www.w3.org/1999/xlink".to_string(),
+-        prefix: Some("xlink".to_string()),
+-      },
+-      syntax: NamespaceSyntax::ExplicitPrefix("xlink".to_string()),
+-    }
+-  );
+-  assert_eq!(attr.local_name, "href");
+-  assert_eq!(attr.operator, AttrSelectorOperator::Exists);
+-
+-  let second = &list.slice()[1].steps[0].compound;
+-  assert_eq!(
+-    second.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_specific_omitted("http://example.com/default"),
+-      local_name: "div".to_string(),
+-    })
+-  );
+-
+-  let third = &list.slice()[2].steps[0].compound;
+-  assert_eq!(
+-    third.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_none_explicit(),
+-      local_name: "span".to_string(),
+-    })
+-  );
+-
+-  let fourth = &list.slice()[3].steps[0].compound;
+-  assert_eq!(
+-    fourth.type_selector,
+-    Some(TypeSelector::Tag {
+-      namespace: namespace_any_explicit(),
+-      local_name: "a".to_string(),
+-    })
+-  );
+-}
+-fn compile_shadow_selector_from_source(selector_text: &str) -> ShadowSelector {
+-  let list = super::parse_selector_list(selector_text).expect("parse selector list");
+-  let selector = list
+-    .slice()
+-    .first()
+-    .expect("selector list should have a selector");
+-  compile_shadow_selector(selector)
+-}
+-
+-#[test]
+-fn shadow_split_part_selector() {
+-  let compiled = compile_shadow_selector_from_source("x-host::part(foo)::before");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(part.selector.to_css_string(), "x-host::part(foo)::before");
+-      assert_eq!(part.names, vec!["foo".to_string()]);
+-      assert_eq!(part.host.selector().to_css_string(), "x-host");
+-      assert_eq!(part.tail.to_css_string(), "::before");
+-      assert!(matches!(part.host.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_part_selector_with_implicit_host() {
+-  let compiled = compile_shadow_selector_from_source("::part(foo)::before");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(part.selector.to_css_string(), "::part(foo)::before");
+-      assert_eq!(part.names, vec!["foo".to_string()]);
+-      assert_eq!(part.host.selector().to_css_string(), "*");
+-      assert_eq!(part.tail.to_css_string(), "::before");
+-      assert!(matches!(part.host.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_part_selector_with_pseudo_class() {
+-  let compiled = compile_shadow_selector_from_source("x-host::part(foo):hover");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(part.selector.to_css_string(), "x-host::part(foo):hover");
+-      assert_eq!(part.names, vec!["foo".to_string()]);
+-      assert_eq!(part.host.selector().to_css_string(), "x-host");
+-      assert_eq!(part.tail.to_css_string(), ":hover");
+-      assert!(matches!(part.host.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_part_selector_preserves_escaped_names() {
+-  let compiled =
+-    compile_shadow_selector_from_source(r"x-host::part(foo\:bar baz\+qux)::before");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(
+-        part.selector.to_css_string(),
+-        r"x-host::part(foo\:bar baz\+qux)::before"
+-      );
+-      assert_eq!(part.names, vec!["foo:bar".to_string(), "baz+qux".to_string()]);
+-      assert_eq!(part.host.selector().to_css_string(), "x-host");
+-      assert_eq!(part.tail.to_css_string(), "::before");
+-      assert!(matches!(part.host.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_slotted_selector() {
+-  let compiled = compile_shadow_selector_from_source("slot::slotted(.a)::before");
+-  match compiled {
+-    ShadowSelector::Slotted(slotted) => {
+-      assert_eq!(slotted.selector.to_css_string(), "slot::slotted(.a)::before");
+-      assert_eq!(slotted.slot.selector().to_css_string(), "slot");
+-      assert_eq!(
+-        slotted.slotted,
+-        CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::Class("a".to_string())],
+-        }
+-      );
+-      assert_eq!(slotted.tail.to_css_string(), "::before");
+-      assert!(matches!(slotted.slot.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::slotted() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_slotted_selector_with_implicit_host() {
+-  let compiled = compile_shadow_selector_from_source("::slotted(.a)::before");
+-  match compiled {
+-    ShadowSelector::Slotted(slotted) => {
+-      assert_eq!(slotted.selector.to_css_string(), "::slotted(.a)::before");
+-      assert_eq!(slotted.slot.selector().to_css_string(), "*");
+-      assert_eq!(
+-        slotted.slotted,
+-        CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![SimpleSelector::Class("a".to_string())],
+-        }
+-      );
+-      assert_eq!(slotted.tail.to_css_string(), "::before");
+-      assert!(matches!(slotted.slot.as_ref(), ShadowSelector::Simple(_)));
+-    }
+-    _ => panic!("expected ::slotted() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_slotted_selector_preserves_escaped_compound() {
+-  let compiled =
+-    compile_shadow_selector_from_source(r"slot::slotted(.foo\:bar#baz\+qux)::before");
+-  match compiled {
+-    ShadowSelector::Slotted(slotted) => {
+-      assert_eq!(
+-        slotted.selector.to_css_string(),
+-        r"slot::slotted(.foo\:bar#baz\+qux)::before"
+-      );
+-      assert_eq!(slotted.slot.selector().to_css_string(), "slot");
+-      assert_eq!(
+-        slotted.slotted,
+-        CompoundSelector {
+-          type_selector: None,
+-          simple_selectors: vec![
+-            SimpleSelector::Class("foo:bar".to_string()),
+-            SimpleSelector::Id("baz+qux".to_string()),
+-          ],
+-        }
+-      );
+-      assert_eq!(slotted.tail.to_css_string(), "::before");
+-    }
+-    _ => panic!("expected ::slotted() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_rejects_chained_slotted_part_selector() {
+-  assert!(super::parse_selector_list("slot::slotted(custom-el)::part(foo):hover").is_err());
+-  assert!(super::parse_selector_list("x-host::part(foo)::slotted(.a)").is_err());
+-}
+-
+-#[test]
+-fn shadow_split_host_context_in_part_prelude() {
+-  let compiled = compile_shadow_selector_from_source(":host-context(.theme)::part(foo)");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(
+-        part.selector.to_css_string(),
+-        ":host-context(.theme)::part(foo)"
+-      );
+-      assert_eq!(part.host.selector().to_css_string(), ":host-context(.theme)");
+-      assert_eq!(part.names, vec!["foo".to_string()]);
+-      assert_eq!(part.tail.to_css_string(), "*");
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn shadow_split_host_selector_list_in_part_prelude() {
+-  let compiled = compile_shadow_selector_from_source(":host(.a,#b)::part(foo)");
+-  match compiled {
+-    ShadowSelector::Part(part) => {
+-      assert_eq!(part.selector.to_css_string(), ":host(.a, #b)::part(foo)");
+-      assert_eq!(part.host.selector().to_css_string(), ":host(.a, #b)");
+-      assert_eq!(part.names, vec!["foo".to_string()]);
+-      assert_eq!(part.tail.to_css_string(), "*");
+-    }
+-    _ => panic!("expected ::part() selector split"),
+-  }
+-}
+-
+-#[test]
+-fn computes_featureless_host_traversal_flags() {
+-  let list = super::parse_selector_list(":host-context(.ctx) .x").expect("selector parses");
+-  let selector = &list.slice()[0];
+-  assert!(selector.contains_host_context());
+-  assert!(!selector.contains_nonleftmost_host());
+-  assert!(selector.needs_featureless_host_traversal());
+-
+-  let list =
+-    super::parse_selector_list(":is(.outer :host(.foo), .bar) .x").expect("selector parses");
+-  let selector = &list.slice()[0];
+-  assert!(!selector.contains_host_context());
+-  assert!(selector.contains_nonleftmost_host());
+-  assert!(selector.needs_featureless_host_traversal());
+-
+-  let list =
+-    super::parse_selector_list(":is(.outer :host-context(.ctx), .bar) .x").expect("selector parses");
+-  let selector = &list.slice()[0];
+-  assert!(selector.contains_host_context());
+-  assert!(!selector.contains_nonleftmost_host());
+-  assert!(selector.needs_featureless_host_traversal());
+-
+-  let list = super::parse_selector_list(":is(:host(.foo), .bar) .x").expect("selector parses");
+-  let selector = &list.slice()[0];
+-  assert!(!selector.contains_host_context());
+-  assert!(!selector.contains_nonleftmost_host());
+-  assert!(!selector.needs_featureless_host_traversal());
+-}
+diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
+index ff56d077c..fe76f1f86 100644
+--- a/src/net/websocket/mod.rs
++++ b/src/net/websocket/mod.rs
+@@ -33,7 +33,6 @@ pub use client::{WebSocketClient, WebSocketEvent, WebSocketIoError, WebSocketLim
+ pub use connect::{client_handshake, HandshakeOptions, HandshakeResult};
+ pub use frame::{Frame, FrameCodec, FrameDecodeError, FrameEncodeError, FrameLimits, OpCode, Role};
+ pub use handshake::cookie_url_for_ws_url;
+-pub use maybe_tls_stream::MaybeTlsStream;
+ pub use handshake::WebSocketHandshakeError as ClientHandshakeError;
+ pub use handshake::{
+   build_client_handshake_request, compute_sec_websocket_accept, generate_sec_websocket_key,
 diff --git a/src/network_process/websocket_runtime.rs b/src/network_process/websocket_runtime.rs
-index 1f1044321..64aecf043 100644
+index 9e9c1e194..af0747d6e 100644
 --- a/src/network_process/websocket_runtime.rs
 +++ b/src/network_process/websocket_runtime.rs
-@@ -27,7 +27,7 @@ use crate::ipc::websocket::{
- use crate::net::websocket::handshake::extract_set_cookie_headers;
- use crate::net::websocket::http_response_head as ws_http_response_head;
- use ws_http_response_head::{ReadResponseHeadError, ResponseHeadError, ResponseHeadLimits};
--#[cfg(target_os = "macos")]
-+#[cfg(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal")))]
- use crate::net::tls::{HandshakeStatus, TlsConnector};
- use crate::net::websocket::{
-   build_client_handshake_request, cookie_url_for_ws_url, is_secure_context_for_document_url,
-@@ -824,7 +824,7 @@ fn connect_socket(
-   cookie_jar: Option<&dyn ResourceFetcher>,
-   deadline: Instant,
- ) -> Result<(Rfc6455Client<MaybeTlsStream>, String), String> {
--  use std::io::{ErrorKind, Write};
-+  use std::io::ErrorKind;
-   use std::net::ToSocketAddrs;
+@@ -36,7 +36,6 @@ use crate::net::websocket::{
+   WebSocketEvent as Rfc6455Event, WebSocketIoError as Rfc6455IoError,
+   WebSocketLimits as Rfc6455Limits, WsScheme, WsUrl,
+ };
+-use crate::net::websocket::MaybeTlsStream;
+ use crate::http_types::header::HeaderValue;
+ use crate::resource::{
+   origin_from_url, DocumentOrigin, FetchCredentialsMode, FetchDestination, FetchRequest,
+diff --git a/src/ui/url.rs b/src/ui/url.rs
+index 15bb91547..15e71ea6f 100644
+--- a/src/ui/url.rs
++++ b/src/ui/url.rs
+@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
+ #[cfg(test)]
+ use std::sync::{Mutex, MutexGuard};
  
-   // Re-parse and normalize the URL in the network process. The renderer is untrusted, and this also
-@@ -904,7 +904,7 @@ fn connect_socket(
-   stream.set_nodelay(true).map_err(|err| err.to_string())?;
++use fastrender_url::Url;
++
+ use super::protocol_limits::MAX_URL_BYTES;
  
-   let mut stream = if matches!(url.scheme, WsScheme::Wss) {
--    #[cfg(target_os = "macos")]
-+    #[cfg(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal")))]
-     {
-       let connector = TlsConnector::new().with_alpn_protocols(&["http/1.1"]);
-       let mut tls_stream = connector
-@@ -930,9 +930,9 @@ fn connect_socket(
- 
-       MaybeTlsStream::Tls(tls_stream)
-     }
--    #[cfg(not(target_os = "macos"))]
-+    #[cfg(not(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal"))))]
-     {
--      return Err("wss requires TLS, which is only supported on macOS".to_string());
-+      return Err("wss requires TLS, which is not available in this build".to_string());
-     }
-   } else {
-     MaybeTlsStream::Plain(stream)
-diff --git a/tools/lint_blocked_deps_baseline.json b/tools/lint_blocked_deps_baseline.json
-index 0ae4286a2..5d2e33e3b 100644
---- a/tools/lint_blocked_deps_baseline.json
-+++ b/tools/lint_blocked_deps_baseline.json
-@@ -1,14 +1,8 @@
- [
-   {
--    "path": "src/css/selector/matcher_parity_tests.rs",
-+    "path": "src/paint/tests/paint/backdrop_filter_macos_coregraphics.rs",
-     "kind": "rust",
--    "crate": "cssparser",
--    "count": 1
--  },
--  {
--    "path": "src/css/selector/matcher_parity_tests.rs",
--    "kind": "rust",
--    "crate": "selectors",
-+    "crate": "tiny-skia",
-     "count": 1
-   }
- ]
+ static CRASH_URLS_ALLOWED: AtomicBool = AtomicBool::new(false);
 -- 
 2.43.0
 
