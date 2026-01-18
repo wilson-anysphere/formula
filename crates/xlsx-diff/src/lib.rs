@@ -821,7 +821,8 @@ fn decode_utf16(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
         return Err(anyhow!("invalid UTF-16 byte length: {}", bytes.len()));
     }
 
-    let mut words = Vec::with_capacity(bytes.len() / 2);
+    let mut words = Vec::new();
+    let _ = words.try_reserve_exact(bytes.len() / 2);
     for chunk in bytes.chunks_exact(2) {
         let word = match endian {
             Utf16Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
