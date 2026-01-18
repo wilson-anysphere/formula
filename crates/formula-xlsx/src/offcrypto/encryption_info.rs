@@ -68,6 +68,12 @@ pub fn extract_encryption_info_xml<'a>(
     encryption_info_stream: &'a [u8],
     opts: &ParseOptions,
 ) -> Result<&'a [u8]> {
+    let Some(xml_after_header) = encryption_info_stream.get(8..) else {
+        return Err(OffCryptoError::EncryptionInfoTooShort {
+            len: encryption_info_stream.len(),
+        });
+    };
+
     // The `EncryptionInfo` stream begins with:
     // - majorVersion (u16 LE)
     // - minorVersion (u16 LE)
@@ -82,7 +88,7 @@ pub fn extract_encryption_info_xml<'a>(
     //
     // Accept both forms by looking for a plausible length prefix and ensuring the resulting slice
     // looks like XML to avoid false positives.
-    let mut xml = encryption_info_stream.get(8..).unwrap_or(&[]);
+    let mut xml = xml_after_header;
     if let Some(len_bytes) = encryption_info_stream.get(8..12) {
         let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]])
             as usize;
