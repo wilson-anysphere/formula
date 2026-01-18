@@ -1159,7 +1159,8 @@ fn decode_dictionary(bytes: Vec<u8>) -> Result<Arc<Vec<Arc<str>>>> {
     if count > max_possible_entries {
         return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
     }
-    let mut out: Vec<Arc<str>> = Vec::with_capacity(count);
+    let mut out: Vec<Arc<str>> = Vec::new();
+    let _ = out.try_reserve_exact(count);
     for _ in 0..count {
         let len = cursor.read_u32()? as usize;
         let raw = cursor.read_bytes(len)?;
@@ -1281,7 +1282,8 @@ fn decode_chunk(kind: DataModelChunkKind, bytes: &[u8]) -> Result<formula_column
             if cursor.remaining() < values_bytes.saturating_add(1) {
                 return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
             }
-            let mut values = Vec::with_capacity(len);
+            let mut values = Vec::new();
+            let _ = values.try_reserve_exact(len);
             for _ in 0..len {
                 values.push(cursor.read_f64()?);
             }
@@ -1361,7 +1363,8 @@ fn decode_validity(cursor: &mut Cursor<'_>) -> Result<Option<formula_columnar::B
             if cursor.remaining() < bytes_needed {
                 return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
             }
-            let mut words = Vec::with_capacity(words_len);
+            let mut words = Vec::new();
+            let _ = words.try_reserve_exact(words_len);
             for _ in 0..words_len {
                 words.push(cursor.read_u64()?);
             }
@@ -1412,11 +1415,13 @@ fn decode_u64_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U64S
             if cursor.remaining() < bytes_needed {
                 return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
             }
-            let mut values = Vec::with_capacity(run_count);
+            let mut values = Vec::new();
+            let _ = values.try_reserve_exact(run_count);
             for _ in 0..run_count {
                 values.push(cursor.read_u64()?);
             }
-            let mut ends = Vec::with_capacity(run_count);
+            let mut ends = Vec::new();
+            let _ = ends.try_reserve_exact(run_count);
             for _ in 0..run_count {
                 ends.push(cursor.read_u32()?);
             }
@@ -1470,11 +1475,13 @@ fn decode_u32_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U32S
             if cursor.remaining() < bytes_needed {
                 return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
             }
-            let mut values = Vec::with_capacity(run_count);
+            let mut values = Vec::new();
+            let _ = values.try_reserve_exact(run_count);
             for _ in 0..run_count {
                 values.push(cursor.read_u32()?);
             }
-            let mut ends = Vec::with_capacity(run_count);
+            let mut ends = Vec::new();
+            let _ = ends.try_reserve_exact(run_count);
             for _ in 0..run_count {
                 ends.push(cursor.read_u32()?);
             }

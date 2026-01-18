@@ -537,7 +537,8 @@ impl Storage {
         }
 
         // Insert worksheets in the order they appear in the model workbook.
-        let mut seen_names: Vec<String> = Vec::with_capacity(workbook.sheets.len());
+        let mut seen_names: Vec<String> = Vec::new();
+        let _ = seen_names.try_reserve_exact(workbook.sheets.len());
         let mut model_sheet_to_storage: HashMap<u32, Uuid> = HashMap::new();
         for (position, sheet) in workbook.sheets.iter().enumerate() {
             validate_sheet_name(&sheet.name).map_err(map_sheet_name_error)?;
@@ -1507,7 +1508,8 @@ impl Storage {
 
         let workbook_sheet_ids: HashSet<Uuid> = sheets.iter().map(|s| s.id).collect();
         let mut seen: HashSet<Uuid> = HashSet::new();
-        let mut desired: Vec<Uuid> = Vec::with_capacity(sheets.len());
+        let mut desired: Vec<Uuid> = Vec::new();
+        let _ = desired.try_reserve_exact(sheets.len());
 
         for id in sheet_ids_in_order {
             if !workbook_sheet_ids.contains(id) {

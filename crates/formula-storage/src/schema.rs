@@ -46,7 +46,10 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             7 => migrate_to_v7(&tx)?,
             8 => migrate_to_v8(&tx)?,
             9 => migrate_to_v9(&tx)?,
-            _ => unreachable!("unknown schema migration target: {next}"),
+            _ => {
+                debug_assert!(false, "unknown schema migration target: {next}");
+                return Err(rusqlite::Error::InvalidQuery);
+            }
         }
         tx.execute(
             "UPDATE schema_version SET version = ?1 WHERE id = 1",

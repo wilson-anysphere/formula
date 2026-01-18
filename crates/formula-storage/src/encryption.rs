@@ -306,7 +306,8 @@ fn encrypt_sqlite_bytes_with_key(
 
     // Layout output as `[header][ciphertext]` so we can encrypt in-place without
     // allocating an intermediate ciphertext buffer (important for large workbooks).
-    let mut out = Vec::with_capacity(HEADER_LEN_FMLENC_V1 + plaintext.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(HEADER_LEN_FMLENC_V1 + plaintext.len());
     out.resize(HEADER_LEN_FMLENC_V1, 0);
     out.extend_from_slice(plaintext);
 
@@ -445,7 +446,8 @@ fn parse_fmlenc_version(magic: &[u8; 8]) -> Option<u8> {
 }
 
 fn aad_for_magic(magic: &[u8; 8], version_byte: Option<u8>, key_version: u32) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(8 + version_byte.map_or(0, |_| 1) + 4);
+    let mut aad = Vec::new();
+    let _ = aad.try_reserve_exact(8 + version_byte.map_or(0, |_| 1) + 4);
     aad.extend_from_slice(magic);
     if let Some(version) = version_byte {
         aad.push(version);
