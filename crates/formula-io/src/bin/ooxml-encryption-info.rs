@@ -540,7 +540,7 @@ fn decode_utf16le_nul_terminated_best_effort(bytes: &[u8]) -> String {
     // - strip trailing NULs if no terminator is present
     // - use lossy UTF-16 decoding for robustness on malformed inputs
     let len = bytes.len() - (bytes.len() % 2);
-    let mut code_units = Vec::with_capacity(len / 2);
+    let mut code_units = Vec::new();
     for chunk in bytes[..len].chunks_exact(2) {
         code_units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }

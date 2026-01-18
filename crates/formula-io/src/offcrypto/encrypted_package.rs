@@ -32,6 +32,8 @@ pub enum InvalidCiphertextLenReason {
 /// `EncryptedPackage` streams without needing to re-run with a debugger.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EncryptedPackageDecryptError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("truncated `EncryptedPackage` size prefix: expected {ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN} bytes, got {len}")]
     TruncatedPrefix { len: usize },
 
@@ -357,7 +359,12 @@ pub fn decrypt_standard_encrypted_package_stream(
         })?;
         // Standard/CryptoAPI AES `EncryptedPackage` uses AES-ECB (no IV).
 
-        let mut out = Vec::with_capacity(orig_size_usize);
+        let mut out = Vec::new();
+        if out.try_reserve_exact(orig_size_usize).is_err() {
+            return Err(EncryptedPackageDecryptError::AllocationFailure(
+                "decrypt_standard_encrypted_package_stream output",
+            ));
+        }
         let mut segment_index: u32 = 0;
         while out.len() < orig_size_usize {
             let seg_offset = (segment_index as usize)
@@ -659,7 +666,7 @@ mod tests {
     ) -> Vec<u8> {
         let orig_size = plaintext.len() as u64;
 
-        let mut out = Vec::with_capacity(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + plaintext.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&orig_size.to_le_bytes());
 
         if plaintext.is_empty() {
@@ -1021,7 +1028,7 @@ mod tests {
                 rc4.apply_keystream(chunk);
             }
 
-            let mut out = Vec::with_capacity(8 + ciphertext.len());
+            let mut out = Vec::new();
             out.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
             out.extend_from_slice(&ciphertext);
             out
@@ -1057,7 +1064,7 @@ mod tests {
                 rc4.apply_keystream(chunk);
             }
 
-            let mut out = Vec::with_capacity(8 + ciphertext.len());
+            let mut out = Vec::new();
             out.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
             out.extend_from_slice(&ciphertext);
             out

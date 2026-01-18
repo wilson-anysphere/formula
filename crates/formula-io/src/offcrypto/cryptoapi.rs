@@ -107,7 +107,8 @@ impl Hasher {
 
 /// Encode a password as UTF-16LE bytes (no BOM, no NUL terminator).
 pub fn password_to_utf16le(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(password.len().saturating_mul(2));
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }

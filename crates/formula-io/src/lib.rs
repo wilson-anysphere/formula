@@ -135,6 +135,8 @@ const TEXT_SNIFF_LEN: usize = 16 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("unsupported extension `{extension}` for workbook `{path}`")]
     UnsupportedExtension { path: PathBuf, extension: String },
     #[error(
@@ -2051,7 +2053,10 @@ fn decode_utf16le_z_lossy(bytes: &[u8]) -> Result<String, formula_offcrypto::Off
         return Err(formula_offcrypto::OffcryptoError::InvalidCspNameUtf16);
     }
 
-    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    let mut units: Vec<u16> = Vec::new();
+    if units.try_reserve_exact(bytes.len() / 2).is_err() {
+        return Err(formula_offcrypto::OffcryptoError::InvalidCspNameUtf16);
+    }
     for chunk in bytes.chunks_exact(2) {
         units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
@@ -2308,14 +2313,28 @@ fn parse_standard_encryption_info_lenient(
     //
     // (32 = 8 DWORD fixed header fields). `sizeExtra` may be odd, so we must compute the CSPName
     // length after subtracting it to avoid incorrectly requiring `header_size - 32` to be even.
-    let size_extra_usize = usize::try_from(size_extra).unwrap_or(usize::MAX);
-    if header_bytes.len() < hpos + size_extra_usize {
+    let size_extra_usize = size_extra as usize;
+    let hpos_plus_extra = hpos.checked_add(size_extra_usize).ok_or(
+        formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.sizeExtra overflow",
+        },
+    )?;
+    if header_bytes.len() < hpos_plus_extra {
         return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
             context: "EncryptionHeader.sizeExtra does not fit into declared header_size",
         });
     }
-    let csp_name_bytes_len = header_bytes.len() - hpos - size_extra_usize;
-    let csp_name_bytes = &header_bytes[hpos..hpos + csp_name_bytes_len];
+    let csp_name_bytes_len = header_bytes
+        .len()
+        .checked_sub(hpos_plus_extra)
+        .ok_or(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.sizeExtra underflow",
+        })?;
+    let csp_name_bytes = header_bytes.get(hpos..hpos + csp_name_bytes_len).ok_or(
+        formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.cspName out of bounds",
+        },
+    )?;
     let csp_name = decode_utf16le_z_lossy(csp_name_bytes)?;
     let _header_extra = &header_bytes[hpos + csp_name_bytes_len..];
 
@@ -2695,15 +2714,13 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                 });
             }
 
-            let mut password_utf16 = Vec::with_capacity(password.len().saturating_mul(2));
-            for ch in password.encode_utf16() {
-                password_utf16.extend_from_slice(&ch.to_le_bytes());
-            }
-
             // h = sha1(salt || password_utf16)
             let mut hasher = Sha1::new();
             hasher.update(&info.verifier.salt);
-            hasher.update(&password_utf16);
+            // Password bytes are UTF-16LE with no BOM and no terminator.
+            for unit in password.encode_utf16() {
+                hasher.update(unit.to_le_bytes());
+            }
             let mut h: [u8; 20] = hasher.finalize().into();
 
             // for i in 0..50_000: h = sha1(u32le(i) || h)
@@ -2807,6 +2824,9 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             match encrypted_ooxml::decrypt_encrypted_package(&encryption_info, &encrypted_package, password) {
                 Ok(bytes) => Ok(bytes),
                 Err(err) => match err {
+                    encrypted_ooxml::DecryptError::AllocationFailure(ctx) => {
+                        Err(Error::AllocationFailure(ctx))
+                    }
                     encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
                         Err(Error::UnsupportedOoxmlEncryption {
                             path: path.to_path_buf(),
@@ -3625,7 +3645,13 @@ fn decrypt_encrypted_ooxml_package(
         //
         // Treat malformed Agile descriptors as unsupported encryption (not a wrong password).
         let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| unsupported())?;
-        let mut normalized_info = Vec::with_capacity(8 + xml.len());
+        let mut normalized_info = Vec::new();
+        if normalized_info
+            .try_reserve_exact(8usize.saturating_add(xml.len()))
+            .is_err()
+        {
+            return Err(Error::AllocationFailure("open_workbook agile normalized EncryptionInfo"));
+        }
         normalized_info.extend_from_slice(encryption_info.get(..8).ok_or_else(unsupported)?);
         normalized_info.extend_from_slice(xml.as_bytes());
 
@@ -3697,9 +3723,27 @@ fn decrypt_encrypted_ooxml_package(
             });
         }
 
-        let alg_id = u32::from_le_bytes(header_bytes[8..12].try_into().unwrap());
-        let alg_id_hash = u32::from_le_bytes(header_bytes[12..16].try_into().unwrap());
-        let key_size_bits = u32::from_le_bytes(header_bytes[16..20].try_into().unwrap());
+        let alg_id = header_bytes
+            .get(8..12)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+        let alg_id_hash = header_bytes
+            .get(12..16)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+        let key_size_bits = header_bytes
+            .get(16..20)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
 
         let mut offset = header_end;
         let salt_size: usize = encryption_info
@@ -3882,7 +3926,13 @@ fn decrypt_encrypted_ooxml_package(
             }
 
             if res.is_err() {
-                let flags_raw = u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
+                let flags_raw = header_bytes
+                    .get(0..4)
+                    .and_then(|b| b.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .ok_or_else(|| Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    })?;
                 let f_cryptoapi = flags_raw & 0x0000_0004 != 0;
                 let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
                 let f_aes = flags_raw & 0x0000_0020 != 0;
@@ -3898,7 +3948,15 @@ fn decrypt_encrypted_ooxml_package(
                         if patched_info.is_none() {
                             patched_info = Some(encryption_info.clone());
                         }
-                        let buf = patched_info.as_mut().unwrap();
+                        let Some(buf) = patched_info.as_mut() else {
+                            debug_assert!(
+                                false,
+                                "patched_info should be Some after initializing it above"
+                            );
+                            return Err(Error::InvalidPassword {
+                                path: path.to_path_buf(),
+                            });
+                        };
                         buf[header_start..header_start + 4]
                             .copy_from_slice(&new_flags.to_le_bytes());
                         enc_info = buf.as_slice();
@@ -4007,19 +4065,59 @@ fn decrypt_encrypted_ooxml_package(
                         };
 
                         // Construct a minimal Standard encryption descriptor for password verification.
-                        let header_flags_raw =
-                            u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
-                        let size_extra = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap());
-                        let provider_type =
-                            u32::from_le_bytes(header_bytes[20..24].try_into().unwrap());
-                        let reserved1 =
-                            u32::from_le_bytes(header_bytes[24..28].try_into().unwrap());
-                        let reserved2 =
-                            u32::from_le_bytes(header_bytes[28..32].try_into().unwrap());
-                        let encrypted_verifier: [u8; 16] = encrypted_verifier
-                            .as_slice()
-                            .try_into()
-                            .expect("slice length checked to be 16 bytes");
+                        let header_flags_raw = header_bytes
+                            .get(0..4)
+                            .and_then(|b| b.try_into().ok())
+                            .map(u32::from_le_bytes)
+                            .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        let size_extra = header_bytes
+                            .get(4..8)
+                            .and_then(|b| b.try_into().ok())
+                            .map(u32::from_le_bytes)
+                            .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        let provider_type = header_bytes
+                            .get(20..24)
+                            .and_then(|b| b.try_into().ok())
+                            .map(u32::from_le_bytes)
+                            .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        let reserved1 = header_bytes
+                            .get(24..28)
+                            .and_then(|b| b.try_into().ok())
+                            .map(u32::from_le_bytes)
+                            .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        let reserved2 = header_bytes
+                            .get(28..32)
+                            .and_then(|b| b.try_into().ok())
+                            .map(u32::from_le_bytes)
+                            .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
+                                path: path.to_path_buf(),
+                                version_major,
+                                version_minor,
+                            })?;
+                        let encrypted_verifier: [u8; 16] =
+                            encrypted_verifier.as_slice().try_into().map_err(|_| {
+                                Error::UnsupportedOoxmlEncryption {
+                                    path: path.to_path_buf(),
+                                    version_major,
+                                    version_minor,
+                                }
+                            })?;
 
                         let info = StandardEncryptionInfo {
                             header: EncryptionHeader {
@@ -4718,11 +4816,6 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
 
     impl<R: std::io::Read + std::io::Seek> std::io::Seek for CiphertextStream<R> {
         fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-            let end_inner = match pos {
-                SeekFrom::End(_) => Some(self.inner.seek(SeekFrom::End(0))?),
-                _ => None,
-            };
-
             let cur_inner = self.inner.seek(SeekFrom::Current(0))?;
             let cur = cur_inner
                 .checked_sub(self.base)
@@ -4732,8 +4825,8 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
                 SeekFrom::Start(n) => n as i128,
                 SeekFrom::Current(off) => cur as i128 + off as i128,
                 SeekFrom::End(off) => {
+                    let end_inner = self.inner.seek(SeekFrom::End(0))?;
                     let end = end_inner
-                        .expect("end_inner computed above")
                         .checked_sub(self.base)
                         .ok_or_else(|| {
                             std::io::Error::new(
@@ -4768,6 +4861,7 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         password,
     )
     .map_err(|err| match err {
+        encrypted_ooxml::DecryptError::AllocationFailure(ctx) => Error::AllocationFailure(ctx),
         encrypted_ooxml::DecryptError::InvalidPassword => Error::InvalidPassword {
             path: path.to_path_buf(),
         },
@@ -4994,11 +5088,24 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
     let sheet_id = workbook
         .add_sheet(sheet_name)
         .or_else(|_| workbook.add_sheet("Sheet1"))
-        .expect("Sheet1 is always a valid sheet name");
+        .map_err(|source| Error::OpenParquet {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })?;
 
-    let sheet = workbook
-        .sheet_mut(sheet_id)
-        .expect("sheet must exist immediately after add_sheet");
+    let Some(sheet) = workbook.sheet_mut(sheet_id) else {
+        debug_assert!(
+            false,
+            "sheet id {sheet_id:?} missing immediately after add_sheet"
+        );
+        return Err(Error::OpenParquet {
+            path: path.to_path_buf(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "internal error: sheet id missing immediately after add_sheet",
+            )),
+        });
+    };
     sheet.set_columnar_table(CellRef::new(0, 0), Arc::new(table));
 
     Ok(workbook)
@@ -5082,7 +5189,16 @@ pub fn save_workbook_with_options(
 
     #[cfg(feature = "encrypted-workbooks")]
     {
-        let password = options.password.as_deref().expect("checked is_some above");
+        let Some(password) = options.password.as_deref() else {
+            debug_assert!(
+                false,
+                "expected password to be Some when options.password.is_some()"
+            );
+            return Err(Error::UnsupportedEncryption {
+                path: path.to_path_buf(),
+                kind: "missing password".to_string(),
+            });
+        };
         let encrypt_opts = encrypt_options_from_save_options(&options);
         save_workbook_office_encrypted_ooxml(workbook, path, password, encrypt_opts, None)
     }
@@ -5096,8 +5212,13 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
     match workbook {
         Workbook::Xlsx(package) => match ext.as_ref() {
             "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
-                    .expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext.as_ref()) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
 
                 let mut out = package.clone();
 
@@ -5148,8 +5269,13 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
         },
         Workbook::Xls(result) => match ext.as_ref() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
-                    .expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext.as_ref()) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(&result.workbook, file, kind)
                 });
@@ -5186,8 +5312,13 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
                 }
             }
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
-                    .expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext.as_ref()) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
@@ -5214,8 +5345,13 @@ fn save_workbook_impl(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
         },
         Workbook::Model(model) => match ext.as_ref() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = xlsx::WorkbookKind::from_extension(ext.as_ref())
-                    .expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext.as_ref()) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(model, file, kind)
                 });
@@ -5291,8 +5427,13 @@ fn workbook_to_ooxml_zip_bytes(
     match workbook {
         Workbook::Xlsx(package) => match ext {
             "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let mut out = package.clone();
 
                 let should_strip_macros = kind.is_macro_free() && out.macro_presence().any();
@@ -5322,8 +5463,13 @@ fn workbook_to_ooxml_zip_bytes(
         },
         Workbook::Xls(result) => match ext {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let mut cursor = Cursor::new(Vec::new());
                 xlsx::write_workbook_to_writer_with_kind(&result.workbook, &mut cursor, kind)
                     .map_err(|source| Error::SaveXlsxExport {
@@ -5348,8 +5494,13 @@ fn workbook_to_ooxml_zip_bytes(
                 Ok(cursor.into_inner())
             }
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
@@ -5370,8 +5521,13 @@ fn workbook_to_ooxml_zip_bytes(
         },
         Workbook::Model(model) => match ext {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind =
-                    xlsx::WorkbookKind::from_extension(ext).expect("handled by match arm above");
+                let Some(kind) = xlsx::WorkbookKind::from_extension(ext) else {
+                    debug_assert!(false, "expected workbook kind for ext {ext:?}");
+                    return Err(Error::UnsupportedExtension {
+                        path: path.to_path_buf(),
+                        extension: ext.to_string(),
+                    });
+                };
                 let mut cursor = Cursor::new(Vec::new());
                 xlsx::write_workbook_to_writer_with_kind(model, &mut cursor, kind).map_err(
                     |source| Error::SaveXlsxExport {
@@ -5443,12 +5599,18 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
     // `formula-xlsb::Styles`). When a built-in `numFmtId` is used, prefer a
     // `__builtin_numFmtId:<id>` placeholder for ids that would otherwise be
     // canonicalized to a *different* built-in id when exporting as XLSX.
-    let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
+    let mut xf_to_style_id: Vec<u32> = Vec::new();
+    let _ = xf_to_style_id.try_reserve(wb.styles().len());
     for xf_idx in 0..wb.styles().len() {
-        let info = wb
-            .styles()
-            .get(xf_idx as u32)
-            .expect("xf index within wb.styles().len()");
+        let Some(info) = wb.styles().get(xf_idx as u32) else {
+            debug_assert!(
+                false,
+                "missing style info for xf index {xf_idx} (len={})",
+                wb.styles().len()
+            );
+            xf_to_style_id.push(0);
+            continue;
+        };
         if info.num_fmt_id == 0 {
             // The default "General" format doesn't need a distinct style id in
             // `formula-model` and would otherwise cause us to store many
@@ -5509,17 +5671,25 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
         xf_to_style_id.push(style_id);
     }
 
-    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
-        Vec::with_capacity(wb.sheet_metas().len());
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
+    let _ = worksheet_ids_by_index.try_reserve(wb.sheet_metas().len());
 
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
         let sheet_id = out
             .add_sheet(meta.name.clone())
             .map_err(|err| xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name)))?;
         worksheet_ids_by_index.push(sheet_id);
-        let sheet = out
-            .sheet_mut(sheet_id)
-            .expect("sheet id should exist immediately after add");
+        let Some(sheet) = out.sheet_mut(sheet_id) else {
+            debug_assert!(
+                false,
+                "sheet id {sheet_id:?} missing immediately after add_sheet({:?})",
+                meta.name
+            );
+            return Err(xlsb::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "internal error: sheet id missing immediately after add_sheet",
+            )));
+        };
         sheet.visibility = match meta.visibility {
             xlsb::SheetVisibility::Visible => SheetVisibility::Visible,
             xlsb::SheetVisibility::Hidden => SheetVisibility::Hidden,

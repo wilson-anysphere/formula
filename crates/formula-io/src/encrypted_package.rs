@@ -303,8 +303,22 @@ impl<R: Read + Seek> Read for StandardAesEncryptedPackageReader<R> {
             })?;
 
             let to_copy = min(available, out.len() - written);
-            out[written..written + to_copy]
-                .copy_from_slice(&self.cached_plaintext[segment_off..segment_off + to_copy]);
+            let dst = out.get_mut(written..written + to_copy).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "output slice bounds are inconsistent with bytes to copy",
+                )
+            })?;
+            let src = self
+                .cached_plaintext
+                .get(segment_off..segment_off + to_copy)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "segment cache does not contain the requested plaintext range",
+                    )
+                })?;
+            dst.copy_from_slice(src);
             self.pos += to_copy as u64;
             written += to_copy;
         }

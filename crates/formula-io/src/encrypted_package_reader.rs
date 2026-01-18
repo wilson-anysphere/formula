@@ -174,8 +174,22 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             }
 
             let take = remaining.min(available);
-            out[written..written + take]
-                .copy_from_slice(&self.cached_segment_plain[segment_offset..segment_offset + take]);
+            let dst = out.get_mut(written..written + take).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "output slice bounds are inconsistent with bytes to copy",
+                )
+            })?;
+            let src = self
+                .cached_segment_plain
+                .get(segment_offset..segment_offset + take)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "segment cache does not contain the requested plaintext range",
+                    )
+                })?;
+            dst.copy_from_slice(src);
 
             self.pos += take as u64;
             written += take;
@@ -353,24 +367,42 @@ fn derive_agile_segment_iv(
     hash_alg: formula_xlsx::offcrypto::HashAlgorithm,
     segment_index: u32,
 ) -> [u8; AES_BLOCK_SIZE] {
-    let mut buf = Vec::with_capacity(salt.len() + 4);
-    buf.extend_from_slice(salt);
-    buf.extend_from_slice(&segment_index.to_le_bytes());
-
-    let digest = hash_bytes(hash_alg, &buf);
-
     let mut iv = [0u8; AES_BLOCK_SIZE];
-    iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
-    iv
-}
-
-fn hash_bytes(alg: formula_xlsx::offcrypto::HashAlgorithm, data: &[u8]) -> Vec<u8> {
-    match alg {
-        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
-        formula_xlsx::offcrypto::HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
-        formula_xlsx::offcrypto::HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
-        formula_xlsx::offcrypto::HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
+    match hash_alg {
+        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => {
+            use sha1::Digest as _;
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(salt);
+            hasher.update(&segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
+        }
+        formula_xlsx::offcrypto::HashAlgorithm::Sha256 => {
+            use sha2::Digest as _;
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(salt);
+            hasher.update(&segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
+        }
+        formula_xlsx::offcrypto::HashAlgorithm::Sha384 => {
+            use sha2::Digest as _;
+            let mut hasher = sha2::Sha384::new();
+            hasher.update(salt);
+            hasher.update(&segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
+        }
+        formula_xlsx::offcrypto::HashAlgorithm::Sha512 => {
+            use sha2::Digest as _;
+            let mut hasher = sha2::Sha512::new();
+            hasher.update(salt);
+            hasher.update(&segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
+        }
     }
+    iv
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -484,7 +516,7 @@ mod tests {
         }
 
         let ciphertext = &encrypted_stream[8..];
-        let mut out = Vec::with_capacity(orig_size);
+        let mut out = Vec::new();
 
         let mut segment_index: u32 = 0;
         let mut offset = 0usize;

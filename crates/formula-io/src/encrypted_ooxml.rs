@@ -24,6 +24,8 @@ use formula_xlsx::offcrypto::{
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DecryptError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error("unsupported EncryptionInfo version {major}.{minor}")]
     UnsupportedVersion { major: u16, minor: u16 },
     #[error("invalid EncryptionInfo: {0}")]
@@ -402,9 +404,9 @@ fn decrypt_standard_aes_with_scheme(
             let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
                 DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
             })?;
-            let iv: [u8; AES_BLOCK] = iv
-                .try_into()
-                .expect("slice length checked to be 16 bytes");
+            let iv: [u8; AES_BLOCK] = iv.try_into().map_err(|_| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt must be 16 bytes".to_string())
+            })?;
 
             let mut buf = ciphertext[..needed_cipher_len].to_vec();
             decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
@@ -433,9 +435,9 @@ fn decrypt_standard_aes_with_scheme(
             let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
                 DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
             })?;
-            let iv: [u8; AES_BLOCK] = iv
-                .try_into()
-                .expect("slice length checked to be 16 bytes");
+            let iv: [u8; AES_BLOCK] = iv.try_into().map_err(|_| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt must be 16 bytes".to_string())
+            })?;
 
             decrypt_segmented_aes_cbc(
                 ciphertext,
@@ -529,9 +531,9 @@ fn decrypt_standard_aes_prefix_is_zip(
             let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
                 DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
             })?;
-            let iv: [u8; AES_BLOCK] = iv
-                .try_into()
-                .expect("slice length checked to be 16 bytes");
+            let iv: [u8; AES_BLOCK] = iv.try_into().map_err(|_| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt must be 16 bytes".to_string())
+            })?;
             decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
                 DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
             })?;
@@ -1780,7 +1782,12 @@ fn parse_base64_attr(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<Vec<u8
     let decoded = if !has_ws {
         BASE64.decode(bytes).or_else(|_| BASE64_NO_PAD.decode(bytes))
     } else {
-        let mut stripped = Vec::with_capacity(stripped_len);
+        let mut stripped = Vec::new();
+        if stripped.try_reserve_exact(stripped_len).is_err() {
+            return Err(DecryptError::AllocationFailure(
+                "parse_base64_attr stripped base64",
+            ));
+        }
         stripped.extend(bytes.iter().copied().filter(|b| !b.is_ascii_whitespace()));
         BASE64
             .decode(&stripped)

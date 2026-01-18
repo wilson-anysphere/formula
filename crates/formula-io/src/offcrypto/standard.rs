@@ -71,6 +71,8 @@ const STANDARD_SPIN_COUNT: u32 = 50_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OffcryptoError {
+    #[error("allocation failure: {0}")]
+    AllocationFailure(&'static str),
     #[error(
         "unsupported EncryptionInfo version {major}.{minor} (expected Standard CryptoAPI versionMinor=2 with major=2/3/4)"
     )]
@@ -221,7 +223,11 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let b = &self.bytes[self.pos..self.pos + 2];
+        let b = self.bytes.get(self.pos..self.pos + 2).ok_or(OffcryptoError::Truncated {
+            context,
+            needed,
+            available: self.remaining(),
+        })?;
         self.pos += 2;
         Ok(u16::from_le_bytes([b[0], b[1]]))
     }
@@ -235,7 +241,11 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let b = &self.bytes[self.pos..self.pos + 4];
+        let b = self.bytes.get(self.pos..self.pos + 4).ok_or(OffcryptoError::Truncated {
+            context,
+            needed,
+            available: self.remaining(),
+        })?;
         self.pos += 4;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
@@ -248,7 +258,11 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let out = &self.bytes[self.pos..self.pos + len];
+        let out = self.bytes.get(self.pos..self.pos + len).ok_or(OffcryptoError::Truncated {
+            context,
+            needed: len,
+            available: self.remaining(),
+        })?;
         self.pos += len;
         Ok(out)
     }
@@ -597,8 +611,16 @@ pub(crate) fn verify_password_standard_with_key(
 ) -> Result<bool, OffcryptoError> {
     // Decrypt the concatenated verifier blob (`encryptedVerifier` || `encryptedVerifierHash`) as a
     // single stream.
-    let mut ciphertext =
-        Zeroizing::new(Vec::with_capacity(16 + info.verifier.encrypted_verifier_hash.len()));
+    let mut ciphertext = Vec::new();
+    if ciphertext
+        .try_reserve_exact(16usize.saturating_add(info.verifier.encrypted_verifier_hash.len()))
+        .is_err()
+    {
+        return Err(OffcryptoError::AllocationFailure(
+            "verify_password_standard_with_key verifier ciphertext",
+        ));
+    }
+    let mut ciphertext = Zeroizing::new(ciphertext);
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier);
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier_hash);
 
@@ -660,7 +682,15 @@ pub(crate) fn verify_password_standard_with_key(
                 OffcryptoError::crypto(msg)
             })?;
 
-            let mut combined = Vec::with_capacity(verifier.len() + verifier_hash.len());
+            let mut combined = Vec::new();
+            if combined
+                .try_reserve_exact(verifier.len().saturating_add(verifier_hash.len()))
+                .is_err()
+            {
+                return Err(OffcryptoError::AllocationFailure(
+                    "verify_password_standard_with_key combined verifier",
+                ));
+            }
             combined.extend_from_slice(&verifier);
             combined.extend_from_slice(&verifier_hash);
             verifier_hash_matches(info, &combined)
@@ -799,7 +829,8 @@ fn derive_standard_aes_iv(
 }
 
 fn utf16le_bytes(s: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(s.len().saturating_mul(2));
     for ch in s.encode_utf16() {
         out.extend_from_slice(&ch.to_le_bytes());
     }

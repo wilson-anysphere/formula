@@ -24,16 +24,13 @@ pub(crate) fn derive_rc4_cryptoapi_key(
         "invalid RC4 CryptoAPI keySize={key_size_bits} (expected 40..=128, multiple of 8)"
     );
 
-    // Password is an array of Unicode characters; Office uses UTF-16LE bytes without a BOM.
-    let mut password_utf16le = Vec::with_capacity(password.len() * 2);
-    for ch in password.encode_utf16() {
-        password_utf16le.extend_from_slice(&ch.to_le_bytes());
-    }
-
     // H0 = SHA1(salt + password)
     let mut h0 = Sha1::new();
     h0.update(salt);
-    h0.update(&password_utf16le);
+    // Password is an array of Unicode characters; Office uses UTF-16LE bytes without a BOM.
+    for unit in password.encode_utf16() {
+        h0.update(unit.to_le_bytes());
+    }
     let h0 = h0.finalize();
 
     // Hfinal = SHA1(H0 + block)
