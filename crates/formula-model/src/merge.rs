@@ -169,7 +169,15 @@ impl MergedRegions {
         }
         let del_end = at_row.saturating_add(count - 1);
 
-        let mut new_regions = Vec::with_capacity(self.regions.len());
+        let mut new_regions: Vec<MergedRegion> = Vec::new();
+        if new_regions.try_reserve_exact(self.regions.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (merged regions delete rows, regions={})",
+                self.regions.len()
+            );
+            return;
+        }
         for region in &self.regions {
             let r = region.range;
             if r.end.row < at_row {
@@ -222,7 +230,15 @@ impl MergedRegions {
         }
         let del_end = at_col.saturating_add(count - 1);
 
-        let mut new_regions = Vec::with_capacity(self.regions.len());
+        let mut new_regions: Vec<MergedRegion> = Vec::new();
+        if new_regions.try_reserve_exact(self.regions.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (merged regions delete cols, regions={})",
+                self.regions.len()
+            );
+            return;
+        }
         for region in &self.regions {
             let r = region.range;
             if r.end.col < at_col {

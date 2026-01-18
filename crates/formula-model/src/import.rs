@@ -169,6 +169,8 @@ impl Default for CsvTimestampTzPolicy {
 pub enum CsvImportError {
     #[error("csv input was empty")]
     EmptyInput,
+    #[error("allocation failed ({0})")]
+    AllocationFailure(&'static str),
     #[error("csv parse error at row {row}, column {column}: {reason}")]
     Parse {
         row: u64,
@@ -309,9 +311,17 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
                 .extend((header_names.len()..column_count).map(|i| format!("Column{}", i + 1)));
         }
     } else {
-        header_names = (0..column_count)
-            .map(|i| format!("Column{}", i + 1))
-            .collect();
+        header_names = Vec::new();
+        if header_names.try_reserve_exact(column_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (csv header names, cols={column_count})"
+            );
+            return Err(CsvImportError::AllocationFailure("csv header names"));
+        }
+        for i in 0..column_count {
+            header_names.push(format!("Column{}", i + 1));
+        }
     }
 
     for row in &mut sample_rows {
@@ -320,12 +330,18 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
         }
     }
 
-    let column_types = infer_column_types(&sample_rows, column_count, &options);
-    let schema: Vec<ColumnSchema> = header_names
-        .into_iter()
-        .zip(column_types.iter().copied())
-        .map(|(name, column_type)| ColumnSchema { name, column_type })
-        .collect();
+    let column_types = infer_column_types(&sample_rows, column_count, &options)?;
+    let mut schema: Vec<ColumnSchema> = Vec::new();
+    if schema.try_reserve_exact(column_count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (csv schema, cols={column_count})"
+        );
+        return Err(CsvImportError::AllocationFailure("csv schema"));
+    }
+    for (name, column_type) in header_names.into_iter().zip(column_types.iter().copied()) {
+        schema.push(ColumnSchema { name, column_type });
+    }
 
     let mut builder = ColumnarTableBuilder::new(
         schema,
@@ -338,7 +354,15 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
     );
 
     let mut string_pool = StringPool::new();
-    let mut row_values: Vec<ColumnarValue> = vec![ColumnarValue::Null; column_count];
+    let mut row_values: Vec<ColumnarValue> = Vec::new();
+    if row_values.try_reserve_exact(column_count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (csv row buffer, cols={column_count})"
+        );
+        return Err(CsvImportError::AllocationFailure("csv row buffer"));
+    }
+    row_values.resize(column_count, ColumnarValue::Null);
 
     for row in &sample_rows {
         parse_row_to_values(
@@ -752,10 +776,14 @@ fn sniff_csv_delimiter_prefix<R: Read>(
     decimal_separator: char,
 ) -> Result<(Vec<u8>, u8), std::io::Error> {
     let mut prefix: Vec<u8> = Vec::new();
-    let mut hists: Vec<HashMap<usize, usize>> = CSV_SNIFF_DELIMITERS
-        .iter()
-        .map(|_| HashMap::new())
-        .collect();
+    let mut hists: Vec<HashMap<usize, usize>> = Vec::new();
+    if hists.try_reserve_exact(CSV_SNIFF_DELIMITERS.len()).is_err() {
+        debug_assert!(false, "allocation failed (csv delimiter histograms)");
+        return Err(std::io::ErrorKind::Other.into());
+    }
+    for _ in CSV_SNIFF_DELIMITERS {
+        hists.push(HashMap::new());
+    }
     let mut delim_counts: [usize; CSV_SNIFF_DELIMITERS.len()] = [0; CSV_SNIFF_DELIMITERS.len()];
 
     let mut in_quotes = false;
@@ -1079,7 +1107,14 @@ fn parse_typed_value(
                 ColumnarType::Percentage { scale } => parse_percentage(v, scale, options)
                     .map(ColumnarValue::Percentage)
                     .unwrap_or(ColumnarValue::Null),
-                ColumnarType::String => unreachable!("handled above"),
+                ColumnarType::String => {
+                    debug_assert!(false, "ColumnarType::String should have been handled above");
+                    if field.is_empty() {
+                        ColumnarValue::Null
+                    } else {
+                        ColumnarValue::String(string_pool.intern(field))
+                    }
+                }
             }
         }
     }
@@ -1270,12 +1305,32 @@ fn infer_column_types(
     sample_rows: &[Vec<String>],
     column_count: usize,
     options: &CsvOptions,
-) -> Vec<ColumnarType> {
+) -> Result<Vec<ColumnarType>, CsvImportError> {
     if sample_rows.is_empty() {
-        return vec![ColumnarType::String; column_count];
+        let mut out: Vec<ColumnarType> = Vec::new();
+        if out.try_reserve_exact(column_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (csv column type inference, cols={column_count})"
+            );
+            return Err(CsvImportError::AllocationFailure(
+                "csv column type inference",
+            ));
+        }
+        out.resize(column_count, ColumnarType::String);
+        return Ok(out);
     }
 
-    let mut out = Vec::with_capacity(column_count);
+    let mut out: Vec<ColumnarType> = Vec::new();
+    if out.try_reserve_exact(column_count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (csv column type inference, cols={column_count})"
+        );
+        return Err(CsvImportError::AllocationFailure(
+            "csv column type inference",
+        ));
+    }
     for col in 0..column_count {
         let mut saw_value = false;
         let mut is_bool = true;
@@ -1333,7 +1388,7 @@ fn infer_column_types(
         };
         out.push(ty);
     }
-    out
+    Ok(out)
 }
 
 fn parse_number_f64(v: &str, options: &CsvOptions) -> Option<f64> {
@@ -1349,7 +1404,15 @@ fn parse_number_f64(v: &str, options: &CsvOptions) -> Option<f64> {
 }
 
 fn normalize_number(s: &str, decimal_separator: char) -> Option<String> {
-    let mut out = String::with_capacity(s.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(s.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (csv normalize number, len={})",
+            s.len()
+        );
+        return None;
+    }
     let mut saw_digit = false;
     let mut saw_decimal = false;
     let mut saw_exp = false;
@@ -1488,22 +1551,25 @@ fn parse_date_prefix(s: &str, date_order: CsvDateOrder) -> Option<(i32, u32, u32
         return Some((year, month, day, rest));
     }
 
-    let parts: Vec<&str> = date_part.split(|c| c == '-' || c == '/').collect();
-    if parts.len() != 3 {
+    let mut parts = date_part.split(|c| c == '-' || c == '/');
+    let p0 = parts.next()?;
+    let p1 = parts.next()?;
+    let p2 = parts.next()?;
+    if parts.next().is_some() {
         return None;
     }
 
-    if parts[0].len() == 4 {
-        let year: i32 = parts[0].parse().ok()?;
-        let month: u32 = parts[1].parse().ok()?;
-        let day: u32 = parts[2].parse().ok()?;
+    if p0.len() == 4 {
+        let year: i32 = p0.parse().ok()?;
+        let month: u32 = p1.parse().ok()?;
+        let day: u32 = p2.parse().ok()?;
         return Some((year, month, day, rest));
     }
 
-    if parts[2].len() == 4 {
-        let year: i32 = parts[2].parse().ok()?;
-        let a: u32 = parts[0].parse().ok()?;
-        let b: u32 = parts[1].parse().ok()?;
+    if p2.len() == 4 {
+        let year: i32 = p2.parse().ok()?;
+        let a: u32 = p0.parse().ok()?;
+        let b: u32 = p1.parse().ok()?;
 
         let (month, day) = if a > 12 && b <= 12 {
             (b, a)
@@ -1553,10 +1619,24 @@ fn decode_record_to_strings(
     encoding: CsvTextEncoding,
 ) -> Result<Vec<String>, CsvImportError> {
     if record.len() == 0 {
-        return Ok(vec![String::new()]);
+        let mut out: Vec<String> = Vec::new();
+        if out.try_reserve_exact(1).is_err() {
+            debug_assert!(false, "allocation failed (csv empty record)");
+            return Err(CsvImportError::AllocationFailure("csv empty record"));
+        }
+        out.push(String::new());
+        return Ok(out);
     }
 
-    let mut out = Vec::with_capacity(record.len());
+    let mut out: Vec<String> = Vec::new();
+    if out.try_reserve_exact(record.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (csv record decode, cols={})",
+            record.len()
+        );
+        return Err(CsvImportError::AllocationFailure("csv record decode"));
+    }
     for (idx, field) in record.iter().enumerate() {
         let s = decode_field(field, row, idx as u64 + 1, encoding)?;
         out.push(s.into_owned());

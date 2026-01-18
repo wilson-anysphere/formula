@@ -58,13 +58,6 @@ impl Color {
     ) -> Option<u32> {
         crate::resolve_color_in_context(self, theme, context)
     }
-
-    fn to_hex(self) -> Option<String> {
-        match self {
-            Color::Argb(argb) => Some(format!("#{:08X}", argb)),
-            _ => None,
-        }
-    }
 }
 
 impl fmt::Display for Color {
@@ -88,27 +81,27 @@ impl Serialize for Color {
     where
         S: Serializer,
     {
-        if let Some(hex) = self.to_hex() {
-            return serializer.serialize_str(&hex);
-        }
-
-        let mut map = serializer.serialize_map(None)?;
         match self {
+            Color::Argb(argb) => serializer.serialize_str(&format!("#{:08X}", argb)),
             Color::Theme { theme, tint } => {
+                let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("theme", theme)?;
                 if let Some(tint) = tint {
                     map.serialize_entry("tint", tint)?;
                 }
+                map.end()
             }
             Color::Indexed(index) => {
+                let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("indexed", index)?;
+                map.end()
             }
             Color::Auto => {
+                let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("auto", &true)?;
+                map.end()
             }
-            Color::Argb(_) => unreachable!("handled above"),
         }
-        map.end()
     }
 }
 

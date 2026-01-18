@@ -1,7 +1,7 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{
     A1ParseError, CellRef, CellValue, Color, ErrorValue, Fill, FillPattern, Font, Range, Style,
@@ -647,9 +647,24 @@ impl ConditionalFormattingEngine {
     }
 
     pub fn invalidate_cells<I: IntoIterator<Item = CellRef>>(&mut self, changed: I) {
-        let changed: HashSet<CellRef> = changed.into_iter().collect();
+        let iter = changed.into_iter();
+        let (lower, upper) = iter.size_hint();
+        let reserve = upper.unwrap_or(lower);
+        let mut changed_cells: Vec<CellRef> = Vec::new();
+        if changed_cells.try_reserve(reserve).is_err() {
+            // Best-effort: if we can't materialize the change set, invalidate everything.
+            debug_assert!(
+                false,
+                "allocation failed (conditional formatting invalidate_cells, hint={reserve})"
+            );
+            self.cache.clear();
+            return;
+        }
+        for cell in iter {
+            changed_cells.push(cell);
+        }
         self.cache.retain(|_, entry| {
-            !changed
+            !changed_cells
                 .iter()
                 .any(|cell| entry.dependencies.iter().any(|r| r.contains(*cell)))
         });
@@ -663,17 +678,22 @@ impl ConditionalFormattingEngine {
         formula_evaluator: Option<&dyn FormulaEvaluator>,
         dxfs: Option<&dyn DifferentialFormatProvider>,
     ) -> &CfEvaluationResult {
-        if !self.cache.contains_key(&visible) {
-            let (deps, result) = evaluate_rules(rules, visible, values, formula_evaluator, dxfs);
-            self.cache.insert(
-                visible,
-                CachedEvaluation {
-                    dependencies: deps,
-                    result,
-                },
-            );
+        use std::collections::hash_map::Entry;
+
+        match self.cache.entry(visible) {
+            Entry::Occupied(entry) => &entry.into_mut().result,
+            Entry::Vacant(entry) => {
+                let visible = *entry.key();
+                let (deps, result) =
+                    evaluate_rules(rules, visible, values, formula_evaluator, dxfs);
+                &entry
+                    .insert(CachedEvaluation {
+                        dependencies: deps,
+                        result,
+                    })
+                    .result
+            }
         }
-        &self.cache.get(&visible).expect("cached").result
     }
 }
 
@@ -686,10 +706,24 @@ fn evaluate_rules(
 ) -> (Vec<Range>, CfEvaluationResult) {
     let mut result = CfEvaluationResult::new(visible);
 
-    let mut applicable: Vec<&CfRule> = rules
-        .iter()
-        .filter(|r| r.applies_to.iter().any(|ap| ranges_intersect(*ap, visible)))
-        .collect();
+    let mut applicable: Vec<&CfRule> = Vec::new();
+    if applicable.try_reserve(rules.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (conditional formatting applicable rules, total={})",
+            rules.len()
+        );
+        return (Vec::new(), result);
+    }
+    for rule in rules {
+        if rule
+            .applies_to
+            .iter()
+            .any(|ap| ranges_intersect(*ap, visible))
+        {
+            applicable.push(rule);
+        }
+    }
     applicable.sort_by_key(|r| r.priority);
 
     let mut deps: Vec<Range> = Vec::new();
@@ -780,7 +814,10 @@ fn apply_cell_is(
         };
 
         if matches {
-            let entry = result.get_mut(cell).expect("visible intersection");
+            let Some(entry) = result.get_mut(cell) else {
+                debug_assert!(false, "expected cell in visible range: {cell:?}");
+                continue;
+            };
             entry.style = merge_style(entry.style.clone(), style.clone());
         }
     }
@@ -802,7 +839,10 @@ fn apply_expression(
     for cell in iter_rule_cells(rule, visible) {
         if let Some(v) = fe.eval(formula, cell) {
             if cell_value_truthy(&v) {
-                let entry = result.get_mut(cell).expect("visible intersection");
+                let Some(entry) = result.get_mut(cell) else {
+                    debug_assert!(false, "expected cell in visible range: {cell:?}");
+                    continue;
+                };
                 entry.style = merge_style(entry.style.clone(), style.clone());
             }
         }
@@ -861,7 +901,10 @@ fn apply_data_bar(
         } else {
             ((v - min) / denom) as f32
         };
-        let entry = result.get_mut(cell).expect("visible intersection");
+        let Some(entry) = result.get_mut(cell) else {
+            debug_assert!(false, "expected cell in visible range: {cell:?}");
+            continue;
+        };
         entry.data_bar = Some(DataBarRender {
             color,
             fill_ratio: ratio.clamp(0.0, 1.0),
@@ -937,7 +980,10 @@ fn apply_color_scale(
         }
 
         let fill = if has_mid && mid.is_some() {
-            let mid = mid.expect("checked");
+            let Some(mid) = mid else {
+                debug_assert!(false, "expected mid threshold when has_mid is set");
+                continue;
+            };
             let mid_color = cs.colors[1];
             let high_color = cs.colors[2];
             if v <= mid {
@@ -967,7 +1013,10 @@ fn apply_color_scale(
             lerp_color(min_color, max_color, t)
         };
 
-        let entry = result.get_mut(cell).expect("visible intersection");
+        let Some(entry) = result.get_mut(cell) else {
+            debug_assert!(false, "expected cell in visible range: {cell:?}");
+            continue;
+        };
         entry.style.fill = Some(fill);
     }
 }
@@ -1003,7 +1052,10 @@ fn apply_icon_set(
         if is.reverse && icon_count > 0 {
             idx = (icon_count - 1).saturating_sub(idx);
         }
-        let entry = result.get_mut(cell).expect("visible intersection");
+        let Some(entry) = result.get_mut(cell) else {
+            debug_assert!(false, "expected cell in visible range: {cell:?}");
+            continue;
+        };
         entry.icon = Some(IconRender {
             set: is.set,
             index: idx,
@@ -1059,7 +1111,10 @@ fn apply_top_bottom(
             TopBottomKind::Bottom => v <= threshold,
         };
         if matches {
-            let entry = result.get_mut(cell).expect("visible intersection");
+            let Some(entry) = result.get_mut(cell) else {
+                debug_assert!(false, "expected cell in visible range: {cell:?}");
+                continue;
+            };
             entry.style = merge_style(entry.style.clone(), style.clone());
         }
     }
@@ -1093,7 +1148,10 @@ fn apply_unique_duplicate(
         let c = *counts.get(&key).unwrap_or(&0);
         let matches = if ud.unique { c == 1 } else { c > 1 };
         if matches {
-            let entry = result.get_mut(cell).expect("visible intersection");
+            let Some(entry) = result.get_mut(cell) else {
+                debug_assert!(false, "expected cell in visible range: {cell:?}");
+                continue;
+            };
             entry.style = merge_style(entry.style.clone(), style.clone());
         }
     }
@@ -1346,7 +1404,15 @@ fn icon_set_thresholds(
     if icon_count < 2 {
         return None;
     }
-    let mut thresholds = Vec::with_capacity(icon_count - 1);
+    let mut thresholds: Vec<f64> = Vec::new();
+    if thresholds.try_reserve_exact(icon_count.saturating_sub(1)).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (icon set thresholds, count={})",
+            icon_count.saturating_sub(1)
+        );
+        return None;
+    }
     for boundary in 1..icon_count {
         let default_percent = 100.0 * (boundary as f64) / (icon_count as f64);
         let threshold = rule
@@ -1448,11 +1514,19 @@ pub fn parse_range_a1(a1: &str) -> Result<Range, A1ParseError> {
 ///
 /// This intentionally does not support structured references or R1C1.
 pub fn extract_a1_references(formula: &str) -> Vec<Range> {
-    static CELL_REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = CELL_REF_RE.get_or_init(|| {
-        Regex::new(r"(?i)(?:^|[^A-Z0-9_])(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)")
-            .expect("valid regex")
-    });
+    static CELL_REF_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
+    let Some(re) = CELL_REF_RE
+        .get_or_init(|| {
+            Regex::new(
+                r"(?i)(?:^|[^A-Z0-9_])(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)",
+            )
+            .ok()
+        })
+        .as_ref()
+    else {
+        debug_assert!(false, "failed to compile A1 reference regex");
+        return Vec::new();
+    };
 
     let mut refs: Vec<Range> = Vec::new();
     for cap in re.captures_iter(formula) {
@@ -1518,7 +1592,11 @@ pub fn format_render_plan(visible: Range, eval: &CfEvaluationResult) -> String {
     for cell in iter_cells(visible) {
         let mut label = String::new();
         crate::push_a1_cell_ref(cell.row, cell.col, false, false, &mut label);
-        let res = eval.get(cell).expect("cell in visible range");
+        let Some(res) = eval.get(cell) else {
+            debug_assert!(false, "expected cell in visible range: {cell:?}");
+            lines.push(format!("{label}: missing"));
+            continue;
+        };
         let mut parts = Vec::new();
 
         if let Some(fill) = res.style.fill {

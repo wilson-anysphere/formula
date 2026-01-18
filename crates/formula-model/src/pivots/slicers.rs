@@ -174,5 +174,15 @@ pub fn distinct_items(table: &DataTable, field: &str) -> Result<Vec<ScalarValue>
         }
     }
 
-    Ok(ordered.into_iter().collect())
+    let mut out: Vec<ScalarValue> = Vec::new();
+    if out.try_reserve_exact(ordered.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (distinct slicer items, count={})",
+            ordered.len()
+        );
+        return Err(String::new());
+    }
+    out.extend(ordered.into_iter());
+    Ok(out)
 }

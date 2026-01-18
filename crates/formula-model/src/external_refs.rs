@@ -203,7 +203,14 @@ pub fn escape_bracketed_identifier_content(raw: &str) -> Cow<'_, str> {
     }
 
     let extra = raw.as_bytes().iter().filter(|&&b| b == b']').count();
-    let mut out = String::with_capacity(raw.len() + extra);
+    let mut out = String::new();
+    if out.try_reserve_exact(raw.len().saturating_add(extra)).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (escape bracketed identifier, len={})",
+            raw.len()
+        );
+    }
     push_escaped_bracketed_identifier_content(raw, &mut out);
     Cow::Owned(out)
 }
@@ -218,7 +225,14 @@ pub fn unescape_bracketed_identifier_content(escaped: &str) -> Cow<'_, str> {
         return Cow::Borrowed(escaped);
     }
 
-    let mut out = String::with_capacity(escaped.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(escaped.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (unescape bracketed identifier, len={})",
+            escaped.len()
+        );
+    }
     let mut chars = escaped.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == ']' && chars.peek() == Some(&']') {
@@ -433,7 +447,18 @@ pub fn parse_path_qualified_external_sheet_key(raw: &str) -> Option<(String, Str
     }
 
     let prefix = &raw[..span.start];
-    let mut workbook = String::with_capacity(prefix.len().saturating_add(book.len()));
+    let mut workbook = String::new();
+    if workbook
+        .try_reserve_exact(prefix.len().saturating_add(book.len()))
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (external sheet key workbook, len={})",
+            raw.len()
+        );
+        return None;
+    }
     workbook.push_str(prefix);
     workbook.push_str(book);
     Some((workbook, sheet_part.to_string()))
@@ -512,7 +537,14 @@ pub fn parse_external_span_key(key: &str) -> Option<(&str, &str, &str)> {
 
 /// Format a workbook-only canonical external key: `"[Book]"`.
 pub fn format_external_workbook_key(workbook: &str) -> String {
-    let mut out = String::with_capacity(workbook.len() + 2);
+    let mut out = String::new();
+    if out.try_reserve_exact(workbook.len().saturating_add(2)).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (format external workbook key, len={})",
+            workbook.len()
+        );
+    }
     out.push('[');
     out.push_str(workbook);
     out.push(']');
@@ -521,7 +553,18 @@ pub fn format_external_workbook_key(workbook: &str) -> String {
 
 /// Format a single-sheet canonical external key: `"[Book]Sheet"`.
 pub fn format_external_key(workbook: &str, sheet: &str) -> String {
-    let mut out = String::with_capacity(workbook.len() + sheet.len() + 2);
+    let mut out = String::new();
+    if out
+        .try_reserve_exact(workbook.len().saturating_add(sheet.len()).saturating_add(2))
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (format external key, workbook_len={}, sheet_len={})",
+            workbook.len(),
+            sheet.len()
+        );
+    }
     out.push('[');
     out.push_str(workbook);
     out.push(']');
@@ -531,7 +574,25 @@ pub fn format_external_key(workbook: &str, sheet: &str) -> String {
 
 /// Format a 3D-span canonical external key: `"[Book]Start:End"`.
 pub fn format_external_span_key(workbook: &str, start: &str, end: &str) -> String {
-    let mut out = String::with_capacity(workbook.len() + start.len() + end.len() + 3);
+    let mut out = String::new();
+    if out
+        .try_reserve_exact(
+            workbook
+                .len()
+                .saturating_add(start.len())
+                .saturating_add(end.len())
+                .saturating_add(3),
+        )
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (format external span key, workbook_len={}, start_len={}, end_len={})",
+            workbook.len(),
+            start.len(),
+            end.len()
+        );
+    }
     out.push('[');
     out.push_str(workbook);
     out.push(']');
@@ -582,12 +643,19 @@ pub fn expand_external_sheet_span_from_order(
         (end_idx, start_idx)
     };
 
-    Some(
-        sheet_names[lo..=hi]
-            .iter()
-            .map(|name| format_external_key(workbook, name))
-            .collect(),
-    )
+    let count = hi - lo + 1;
+    let mut out: Vec<String> = Vec::new();
+    if out.try_reserve_exact(count).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (expand external sheet span, count={count})"
+        );
+        return None;
+    }
+    for name in &sheet_names[lo..=hi] {
+        out.push(format_external_key(workbook, name));
+    }
+    Some(out)
 }
 
 #[cfg(test)]

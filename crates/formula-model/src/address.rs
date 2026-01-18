@@ -752,7 +752,11 @@ mod tests {
     #[test]
     fn range_iterates_row_major() {
         let r = Range::new(CellRef::new(0, 0), CellRef::new(1, 1));
-        let cells: Vec<_> = r.iter().collect();
+        let mut cells: Vec<CellRef> = Vec::new();
+        assert!(cells.try_reserve_exact(4).is_ok());
+        for cell in r.iter() {
+            cells.push(cell);
+        }
         assert_eq!(
             cells,
             vec![

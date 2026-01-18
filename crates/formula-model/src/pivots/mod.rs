@@ -425,7 +425,15 @@ pub struct DataTable {
 
 impl DataTable {
     pub fn new(headers: Vec<String>, rows: Vec<Vec<ScalarValue>>) -> Result<Self, String> {
-        let mut header_index = HashMap::with_capacity(headers.len());
+        let mut header_index: HashMap<String, usize> = HashMap::new();
+        if header_index.try_reserve(headers.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot data table header index, cols={})",
+                headers.len()
+            );
+            return Err(String::new());
+        }
         for (idx, header) in headers.iter().enumerate() {
             if header_index.insert(header.clone(), idx).is_some() {
                 return Err(format!("duplicate column header: {header}"));
@@ -517,7 +525,15 @@ impl PivotTable {
     }
 
     pub fn refresh(&mut self, filters: &[slicers::RowFilter]) -> Result<(), String> {
-        let mut row_indices = Vec::with_capacity(self.row_fields.len());
+        let mut row_indices: Vec<usize> = Vec::new();
+        if row_indices.try_reserve_exact(self.row_fields.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot row field indices, fields={})",
+                self.row_fields.len()
+            );
+            return Err(String::new());
+        }
         for field in &self.row_fields {
             row_indices.push(
                 self.source
@@ -538,7 +554,15 @@ impl PivotTable {
                 }
             }
 
-            let mut key = Vec::with_capacity(row_indices.len());
+            let mut key: Vec<ScalarValue> = Vec::new();
+            if key.try_reserve_exact(row_indices.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (pivot row key, fields={})",
+                    row_indices.len()
+                );
+                return Err(String::new());
+            }
             for idx in &row_indices {
                 key.push(row[*idx].clone());
             }
@@ -548,16 +572,44 @@ impl PivotTable {
             *aggregates.entry(key).or_insert(0.0) += value;
         }
 
-        let mut rows: Vec<(Vec<ScalarValue>, f64)> = aggregates.into_iter().collect();
+        let mut rows: Vec<(Vec<ScalarValue>, f64)> = Vec::new();
+        if rows.try_reserve_exact(aggregates.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot aggregate rows, rows={})",
+                aggregates.len()
+            );
+            return Err(String::new());
+        }
+        for (key, value) in aggregates {
+            rows.push((key, value));
+        }
         rows.sort_by(|(left_key, _), (right_key, _)| left_key.cmp(right_key));
 
-        let headers = self
-            .row_fields
-            .iter()
-            .cloned()
-            .chain(std::iter::once(self.value_field.clone()))
-            .collect::<Vec<_>>();
-        let mut output_rows = Vec::with_capacity(rows.len());
+        let header_count = self.row_fields.len().saturating_add(1);
+        let mut headers: Vec<String> = Vec::new();
+        if headers.try_reserve_exact(header_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot output headers, fields={})",
+                header_count
+            );
+            return Err(String::new());
+        }
+        for field in &self.row_fields {
+            headers.push(field.clone());
+        }
+        headers.push(self.value_field.clone());
+
+        let mut output_rows: Vec<Vec<ScalarValue>> = Vec::new();
+        if output_rows.try_reserve_exact(rows.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (pivot output rows, rows={})",
+                rows.len()
+            );
+            return Err(String::new());
+        }
         for (key, value) in rows {
             let mut row = key;
             row.push(ScalarValue::Number(OrderedFloat(value)));
@@ -618,8 +670,18 @@ impl PivotChart {
         }
 
         let category_width = output.headers.len().saturating_sub(1);
-        let mut categories = Vec::with_capacity(output.rows.len());
-        let mut values = Vec::with_capacity(output.rows.len());
+        let mut categories: Vec<Vec<ScalarValue>> = Vec::new();
+        let mut values: Vec<f64> = Vec::new();
+        if categories.try_reserve_exact(output.rows.len()).is_err()
+            || values.try_reserve_exact(output.rows.len()).is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (pivot chart data, rows={})",
+                output.rows.len()
+            );
+            return Err(String::new());
+        }
         for row in &output.rows {
             if row.len() != output.headers.len() {
                 return Err("pivot output row width mismatch".to_string());
@@ -734,7 +796,17 @@ impl PivotManager {
                 .get_mut(&slicer_id)
                 .ok_or_else(|| "unknown slicer".to_string())?;
             slicer.selection = selection;
-            slicer.connected_pivots.iter().copied().collect::<Vec<_>>()
+            let mut out: Vec<PivotTableId> = Vec::new();
+            if out.try_reserve_exact(slicer.connected_pivots.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (slicer pivot list, pivots={})",
+                    slicer.connected_pivots.len()
+                );
+                return Err(String::new());
+            }
+            out.extend(slicer.connected_pivots.iter().copied());
+            out
         };
 
         for pivot_id in pivot_ids {
@@ -755,11 +827,17 @@ impl PivotManager {
                 .get_mut(&timeline_id)
                 .ok_or_else(|| "unknown timeline".to_string())?;
             timeline.selection = selection;
-            timeline
-                .connected_pivots
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
+            let mut out: Vec<PivotTableId> = Vec::new();
+            if out.try_reserve_exact(timeline.connected_pivots.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (timeline pivot list, pivots={})",
+                    timeline.connected_pivots.len()
+                );
+                return Err(String::new());
+            }
+            out.extend(timeline.connected_pivots.iter().copied());
+            out
         };
 
         for pivot_id in pivot_ids {

@@ -115,14 +115,14 @@ impl ImageStore {
             return ImageId::new(format!("{base}.{ext}"));
         }
 
-        for i in 1.. {
+        let mut i: u64 = 1;
+        loop {
             let candidate = ImageId::new(format!("{base}{i}.{ext}"));
             if !self.images.contains_key(&candidate) {
                 return candidate;
             }
+            i = i.wrapping_add(1);
         }
-
-        unreachable!("infinite loop with monotonic counter")
     }
 }
 

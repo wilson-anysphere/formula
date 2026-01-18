@@ -508,17 +508,25 @@ fn rewrite_sheet_names_in_formula_impl(
     new_name: &str,
     rewrite_external_workbooks: bool,
 ) -> String {
-    let mut out = String::with_capacity(formula.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(formula.len()).is_err() {
+        // Best-effort: proceed with incremental growth to avoid a single large allocation request.
+        debug_assert!(
+            false,
+            "allocation failed (rewrite sheet names out buffer, len={})",
+            formula.len()
+        );
+    }
     let mut i = 0;
     let mut in_string = false;
     let bytes = formula.as_bytes();
 
     while i < bytes.len() {
         if in_string {
-            let ch = formula[i..]
-                .chars()
-                .next()
-                .expect("i always at char boundary");
+            let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+                debug_assert!(false, "expected formula cursor to be at a char boundary");
+                return formula.to_string();
+            };
             out.push(ch);
             if ch == '"' {
                 if bytes.get(i + 1) == Some(&b'"') {
@@ -581,10 +589,10 @@ fn rewrite_sheet_names_in_formula_impl(
             continue;
         }
 
-        let ch = formula[i..]
-            .chars()
-            .next()
-            .expect("i always at char boundary");
+        let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+            debug_assert!(false, "expected formula cursor to be at a char boundary");
+            return formula.to_string();
+        };
         out.push(ch);
         i += ch.len_utf8();
     }
@@ -609,17 +617,25 @@ pub fn rewrite_deleted_sheet_references_in_formula(
     deleted_sheet: &str,
     sheet_order: &[String],
 ) -> String {
-    let mut out = String::with_capacity(formula.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(formula.len()).is_err() {
+        // Best-effort: proceed with incremental growth to avoid a single large allocation request.
+        debug_assert!(
+            false,
+            "allocation failed (rewrite deleted sheet refs out buffer, len={})",
+            formula.len()
+        );
+    }
     let mut i = 0;
     let mut in_string = false;
     let bytes = formula.as_bytes();
 
     while i < bytes.len() {
         if in_string {
-            let ch = formula[i..]
-                .chars()
-                .next()
-                .expect("i always at char boundary");
+            let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+                debug_assert!(false, "expected formula cursor to be at a char boundary");
+                return formula.to_string();
+            };
             out.push(ch);
             if ch == '"' {
                 if bytes.get(i + 1) == Some(&b'"') {
@@ -704,10 +720,10 @@ pub fn rewrite_deleted_sheet_references_in_formula(
             }
         }
 
-        let ch = formula[i..]
-            .chars()
-            .next()
-            .expect("i always at char boundary");
+        let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+            debug_assert!(false, "expected formula cursor to be at a char boundary");
+            return formula.to_string();
+        };
         out.push(ch);
         i += ch.len_utf8();
     }
@@ -789,17 +805,25 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
         crate::external_refs::find_external_workbook_prefix_span_in_sheet_spec(token).is_some()
     }
 
-    let mut out = String::with_capacity(formula.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(formula.len()).is_err() {
+        // Best-effort: proceed with incremental growth to avoid a single large allocation request.
+        debug_assert!(
+            false,
+            "allocation failed (rewrite table names out buffer, len={})",
+            formula.len()
+        );
+    }
     let mut i = 0;
     let mut in_string = false;
     let bytes = formula.as_bytes();
 
     while i < bytes.len() {
         if in_string {
-            let ch = formula[i..]
-                .chars()
-                .next()
-                .expect("i always at char boundary");
+            let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+                debug_assert!(false, "expected formula cursor to be at a char boundary");
+                return formula.to_string();
+            };
             out.push(ch);
             if ch == '"' {
                 if bytes.get(i + 1) == Some(&b'"') {
@@ -873,10 +897,10 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
             }
         }
 
-        let ch = formula[i..]
-            .chars()
-            .next()
-            .expect("i always at char boundary");
+        let Some(ch) = formula.get(i..).and_then(|s| s.chars().next()) else {
+            debug_assert!(false, "expected formula cursor to be at a char boundary");
+            return formula.to_string();
+        };
         out.push(ch);
         i += ch.len_utf8();
     }

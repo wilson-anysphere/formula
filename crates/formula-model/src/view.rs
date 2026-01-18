@@ -240,6 +240,7 @@ pub fn format_sqref(ranges: &[Range]) -> String {
 #[derive(Debug)]
 pub enum SqrefParseError {
     Empty,
+    AllocationFailure,
     Range {
         input: String,
         source: RangeParseError,
@@ -250,6 +251,7 @@ impl fmt::Display for SqrefParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SqrefParseError::Empty => f.write_str("empty sqref"),
+            SqrefParseError::AllocationFailure => f.write_str("allocation failed"),
             SqrefParseError::Range { input, source } => {
                 write!(f, "invalid range in sqref ({input}): {source}")
             }
@@ -261,6 +263,7 @@ impl std::error::Error for SqrefParseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             SqrefParseError::Empty => None,
+            SqrefParseError::AllocationFailure => None,
             SqrefParseError::Range { source, .. } => Some(source),
         }
     }
@@ -272,14 +275,20 @@ pub fn parse_sqref(sqref: &str) -> Result<Vec<Range>, SqrefParseError> {
     if s.is_empty() {
         return Err(SqrefParseError::Empty);
     }
-    s.split_whitespace()
-        .map(|part| {
-            Range::from_a1(part).map_err(|e| SqrefParseError::Range {
-                input: part.to_string(),
-                source: e,
-            })
-        })
-        .collect()
+    let count = s.split_whitespace().count();
+    let mut out: Vec<Range> = Vec::new();
+    if out.try_reserve_exact(count).is_err() {
+        debug_assert!(false, "allocation failed (sqref parse, count={count})");
+        return Err(SqrefParseError::AllocationFailure);
+    }
+    for part in s.split_whitespace() {
+        let range = Range::from_a1(part).map_err(|e| SqrefParseError::Range {
+            input: part.to_string(),
+            source: e,
+        })?;
+        out.push(range);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

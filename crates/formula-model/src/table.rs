@@ -303,20 +303,46 @@ impl Table {
         if new_col_count < current_col_count {
             self.columns.truncate(new_col_count);
         } else if new_col_count > current_col_count {
-            let mut used_default_nums: HashSet<u32> = self
-                .columns
-                .iter()
-                .filter_map(|c| parse_default_column_number(&c.name))
-                .collect();
+            let mut used_default_nums: HashSet<u32> = HashSet::new();
+            let track_used_default_nums =
+                used_default_nums.try_reserve(self.columns.len()).is_ok();
+            if !track_used_default_nums {
+                debug_assert!(
+                    false,
+                    "allocation failed (table default name set, cols={})",
+                    self.columns.len()
+                );
+            }
+            if track_used_default_nums {
+                for col in &self.columns {
+                    if let Some(n) = parse_default_column_number(&col.name) {
+                        used_default_nums.insert(n);
+                    }
+                }
+            }
             let mut next_id = self.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
             let mut next_default_num: u32 = 1;
 
             for _ in current_col_count..new_col_count {
-                let name = loop {
-                    let n = next_default_num;
-                    next_default_num = next_default_num.saturating_add(1);
-                    if used_default_nums.insert(n) {
-                        break format!("Column{n}");
+                let name = if track_used_default_nums {
+                    loop {
+                        let n = next_default_num;
+                        next_default_num = next_default_num.saturating_add(1);
+                        if used_default_nums.insert(n) {
+                            break format!("Column{n}");
+                        }
+                    }
+                } else {
+                    loop {
+                        let n = next_default_num;
+                        next_default_num = next_default_num.saturating_add(1);
+                        if !self
+                            .columns
+                            .iter()
+                            .any(|c| parse_default_column_number(&c.name) == Some(n))
+                        {
+                            break format!("Column{n}");
+                        }
                     }
                 };
                 self.columns.push(TableColumn {

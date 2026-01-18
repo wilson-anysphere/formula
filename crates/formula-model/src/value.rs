@@ -15,13 +15,6 @@ pub(crate) fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.chars().flat_map(|c| c.to_uppercase()))
 }
 
-pub(crate) fn casefold(s: &str) -> String {
-    if s.is_ascii() {
-        return s.to_ascii_uppercase();
-    }
-    s.chars().flat_map(|c| c.to_uppercase()).collect()
-}
-
 fn map_get_case_insensitive<'a, V>(map: &'a BTreeMap<String, V>, key: &str) -> Option<&'a V> {
     if let Some(value) = map.get(key) {
         return Some(value);

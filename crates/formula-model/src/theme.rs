@@ -437,10 +437,18 @@ pub fn parse_number_format_color_token(token: &str) -> Option<Color> {
 /// and returns the color token if present.
 pub fn number_format_color(format_code: &str, value: f64) -> Option<Color> {
     let sections = split_number_format_sections(format_code);
-    let parsed: Vec<NumberFormatSection<'_>> = sections
-        .iter()
-        .map(|s| parse_number_format_section(s))
-        .collect();
+    let mut parsed: Vec<NumberFormatSection<'_>> = Vec::new();
+    if parsed.try_reserve_exact(sections.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (number format sections, count={})",
+            sections.len()
+        );
+        return None;
+    }
+    for s in &sections {
+        parsed.push(parse_number_format_section(s));
+    }
 
     if parsed.is_empty() {
         return None;

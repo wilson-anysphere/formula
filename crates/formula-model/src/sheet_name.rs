@@ -95,7 +95,24 @@ pub fn sheet_name_casefold(name: &str) -> String {
     if name.is_ascii() {
         return name.to_ascii_uppercase();
     }
-    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+    let mut out = String::new();
+    if out.try_reserve_exact(name.len()).is_err() {
+        // Best-effort: proceed with incremental growth rather than requesting a large upfront
+        // buffer.
+        debug_assert!(
+            false,
+            "allocation failed (sheet name casefold reserve, len={})",
+            name.len()
+        );
+    }
+    for ch in name.nfkc() {
+        if ch.is_ascii() {
+            out.push(ch.to_ascii_uppercase());
+        } else {
+            out.extend(ch.to_uppercase());
+        }
+    }
+    out
 }
 
 fn truncate_to_utf16_units(name: &str, max_units: usize) -> String {
@@ -157,7 +174,14 @@ pub fn escape_excel_single_quotes(s: &str) -> Cow<'_, str> {
     if !s.contains('\'') {
         return Cow::Borrowed(s);
     }
-    let mut out = String::with_capacity(s.len().saturating_add(4));
+    let mut out = String::new();
+    if out.try_reserve_exact(s.len().saturating_add(4)).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (escape excel single quotes, len={})",
+            s.len()
+        );
+    }
     push_escaped_excel_single_quotes(&mut out, s);
     Cow::Owned(out)
 }
@@ -174,7 +198,14 @@ pub fn unescape_excel_single_quotes_lenient(inner: &str) -> Cow<'_, str> {
         return Cow::Borrowed(inner);
     }
 
-    let mut out = String::with_capacity(inner.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(inner.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (unescape excel single quotes, len={})",
+            inner.len()
+        );
+    }
     let mut chars = inner.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\'' && chars.peek() == Some(&'\'') {
@@ -475,7 +506,10 @@ where
     let mut value: u32 = 0;
     let mut len = 0usize;
     while matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
-        let ch = chars.next().expect("peeked");
+        let Some(ch) = chars.next() else {
+            debug_assert!(false, "peek indicated a digit but iterator ended");
+            break;
+        };
         len += 1;
         value = match value
             .checked_mul(10)

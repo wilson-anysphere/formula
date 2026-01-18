@@ -30,12 +30,31 @@ pub fn push_excel_double_quoted_string_literal(out: &mut String, value: &str) {
 #[must_use]
 pub fn escape_excel_double_quotes(value: &str) -> String {
     if !value.contains('"') {
-        return value.to_string();
+        let mut out = String::new();
+        if out.try_reserve_exact(value.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (escape excel double quotes, len={})",
+                value.len()
+            );
+        }
+        out.push_str(value);
+        return out;
     }
 
     // Each quote becomes two quotes, so reserve one extra byte per quote.
     let quote_count = value.chars().filter(|&ch| ch == '"').count();
-    let mut out = String::with_capacity(value.len().saturating_add(quote_count));
+    let mut out = String::new();
+    if out
+        .try_reserve_exact(value.len().saturating_add(quote_count))
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (escape excel double quotes, len={})",
+            value.len()
+        );
+    }
     push_escaped_excel_double_quotes(&mut out, value);
     out
 }
@@ -46,10 +65,26 @@ pub fn escape_excel_double_quotes(value: &str) -> String {
 /// quotes (`""`).
 pub fn unescape_excel_double_quotes(inner: &str) -> Option<String> {
     if !inner.contains('"') {
-        return Some(inner.to_string());
+        let mut out = String::new();
+        if out.try_reserve_exact(inner.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (unescape excel double quotes, len={})",
+                inner.len()
+            );
+        }
+        out.push_str(inner);
+        return Some(out);
     }
 
-    let mut out = String::with_capacity(inner.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(inner.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (unescape excel double quotes, len={})",
+            inner.len()
+        );
+    }
     let mut chars = inner.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch != '"' {

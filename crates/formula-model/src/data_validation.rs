@@ -573,11 +573,27 @@ fn parse_list_constant(formula: &str) -> Option<Vec<String>> {
         ','
     };
 
-    let items: Vec<String> = list_str
-        .split(delimiter)
-        .map(|item| item.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let hint = list_str
+        .as_bytes()
+        .iter()
+        .filter(|&&b| b == delimiter as u8)
+        .count()
+        .saturating_add(1);
+    let mut items: Vec<String> = Vec::new();
+    if items.try_reserve_exact(hint).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (data validation list constant, hint={hint})"
+        );
+        return None;
+    }
+    for item in list_str.split(delimiter) {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        items.push(trimmed.to_string());
+    }
     Some(items)
 }
 
@@ -730,10 +746,15 @@ fn time_to_excel_fraction(time: chrono::NaiveTime) -> f64 {
 }
 
 fn date_to_excel_serial(date: chrono::NaiveDate) -> f64 {
-    let base = chrono::NaiveDate::from_ymd_opt(1899, 12, 31).expect("valid base date");
+    let Some(base) = chrono::NaiveDate::from_ymd_opt(1899, 12, 31) else {
+        debug_assert!(false, "failed to construct Excel base date");
+        return 0.0;
+    };
     let days = (date - base).num_days() as f64;
-    let leap_bug_cutover =
-        chrono::NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid leap bug cutover");
+    let Some(leap_bug_cutover) = chrono::NaiveDate::from_ymd_opt(1900, 3, 1) else {
+        debug_assert!(false, "failed to construct Excel leap bug cutover date");
+        return days;
+    };
     if date >= leap_bug_cutover {
         days + 1.0
     } else {

@@ -198,7 +198,10 @@ pub fn validate_defined_name(name: &str) -> Result<(), DefinedNameValidationErro
     }
 
     let mut chars = name.chars();
-    let first = chars.next().expect("non-empty");
+    let Some(first) = chars.next() else {
+        debug_assert!(false, "name was checked non-empty but chars() yielded none");
+        return Err(DefinedNameValidationError::Empty);
+    };
     if !(first.is_alphabetic() || first == '_' || first == '\\') {
         return Err(DefinedNameValidationError::InvalidStartCharacter(first));
     }

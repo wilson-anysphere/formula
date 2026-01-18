@@ -15,7 +15,6 @@ use crate::pivots::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::table::{validate_table_name, TableError, TableIdentifier};
-use crate::value::casefold;
 use crate::value::text_eq_case_insensitive;
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
@@ -174,6 +173,7 @@ impl From<SheetNameError> for RenameSheetError {
 pub enum DeleteSheetError {
     SheetNotFound,
     CannotDeleteLastSheet,
+    AllocationFailure(&'static str),
 }
 
 impl fmt::Display for DeleteSheetError {
@@ -181,6 +181,7 @@ impl fmt::Display for DeleteSheetError {
         match self {
             DeleteSheetError::SheetNotFound => f.write_str("sheet not found"),
             DeleteSheetError::CannotDeleteLastSheet => f.write_str("cannot delete last sheet"),
+            DeleteSheetError::AllocationFailure(ctx) => write!(f, "allocation failed ({ctx})"),
         }
     }
 }
@@ -192,6 +193,7 @@ impl std::error::Error for DeleteSheetError {}
 pub enum DuplicateSheetError {
     SheetNotFound,
     InvalidName(SheetNameError),
+    AllocationFailure(&'static str),
 }
 
 impl fmt::Display for DuplicateSheetError {
@@ -199,6 +201,9 @@ impl fmt::Display for DuplicateSheetError {
         match self {
             DuplicateSheetError::SheetNotFound => f.write_str("sheet not found"),
             DuplicateSheetError::InvalidName(err) => err.fmt(f),
+            DuplicateSheetError::AllocationFailure(ctx) => {
+                write!(f, "allocation failed ({ctx})")
+            }
         }
     }
 }
@@ -496,15 +501,41 @@ impl Workbook {
         }
 
         let mut defined_name_id_renames: Vec<(DefinedNameId, DefinedNameId)> = Vec::new();
-        let scoped_names: Vec<DefinedName> = self
+        let scoped_name_count = self
             .defined_names
             .iter()
             .filter(|n| n.scope == DefinedNameScope::Sheet(source_id))
-            .cloned()
-            .collect();
+            .count();
+        let mut scoped_names: Vec<DefinedName> = Vec::new();
+        if scoped_names.try_reserve_exact(scoped_name_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet scoped names, count={scoped_name_count})"
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet scoped names",
+            ));
+        }
+        for name in self
+            .defined_names
+            .iter()
+            .filter(|n| n.scope == DefinedNameScope::Sheet(source_id))
+        {
+            scoped_names.push(name.clone());
+        }
         if !scoped_names.is_empty() {
             let mut next_id = self.next_defined_name_id;
-            let mut duplicated = Vec::with_capacity(scoped_names.len());
+            let mut duplicated: Vec<DefinedName> = Vec::new();
+            if duplicated.try_reserve_exact(scoped_names.len()).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (duplicate sheet scoped name copies, count={})",
+                    scoped_names.len()
+                );
+                return Err(DuplicateSheetError::AllocationFailure(
+                    "duplicate sheet scoped name copies",
+                ));
+            }
             for mut name in scoped_names {
                 let old_id = name.id;
                 name.id = next_id;
@@ -540,10 +571,10 @@ impl Workbook {
             &table_renames,
             &table_id_renames,
             &defined_name_id_renames,
-        );
-        self.duplicate_pivot_charts_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
-        self.duplicate_slicers_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
-        self.duplicate_timelines_for_sheet(source_id, new_sheet_id, &duplicated_pivots);
+        )?;
+        self.duplicate_pivot_charts_for_sheet(source_id, new_sheet_id, &duplicated_pivots)?;
+        self.duplicate_slicers_for_sheet(source_id, new_sheet_id, &duplicated_pivots)?;
+        self.duplicate_timelines_for_sheet(source_id, new_sheet_id, &duplicated_pivots)?;
 
         // Copy print settings (print area/titles, page setup, manual breaks) if present.
         if let Some(settings) = self
@@ -579,8 +610,9 @@ impl Workbook {
         table_renames: &[(String, String)],
         table_id_renames: &[(u32, u32)],
         defined_name_id_renames: &[(DefinedNameId, DefinedNameId)],
-    ) -> HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId> {
-        let pivots_to_duplicate: Vec<PivotTableModel> = self
+    ) -> Result<HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>, DuplicateSheetError>
+    {
+        let pivot_count = self
             .pivot_tables
             .iter()
             .filter(|pivot| {
@@ -590,24 +622,80 @@ impl Workbook {
                     source_sheet_name,
                 )
             })
-            .cloned()
-            .collect();
+            .count();
+        if pivot_count == 0 {
+            return Ok(HashMap::new());
+        }
 
-        if pivots_to_duplicate.is_empty() {
-            return HashMap::new();
+        let mut pivots_to_duplicate: Vec<PivotTableModel> = Vec::new();
+        if pivots_to_duplicate.try_reserve_exact(pivot_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivots, count={pivot_count})"
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivots",
+            ));
+        }
+        for pivot in self.pivot_tables.iter().filter(|pivot| {
+            pivot_destination_is_on_sheet(&pivot.destination, source_sheet_id, source_sheet_name)
+        }) {
+            pivots_to_duplicate.push(pivot.clone());
         }
 
         let mut id_map: HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId> =
-            HashMap::with_capacity(pivots_to_duplicate.len());
-        let mut used_names = collect_pivot_table_names(&self.pivot_tables);
-        let table_id_map: HashMap<u32, u32> = table_id_renames.iter().copied().collect();
-        let defined_name_id_map: HashMap<DefinedNameId, DefinedNameId> =
-            defined_name_id_renames.iter().copied().collect();
+            HashMap::new();
+        if id_map.try_reserve(pivots_to_duplicate.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivot id map, count={})",
+                pivots_to_duplicate.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivot id map",
+            ));
+        }
+
+        let mut used_names = collect_pivot_table_names(&self.pivot_tables)?;
+
+        let mut table_id_map: HashMap<u32, u32> = HashMap::new();
+        if table_id_map.try_reserve(table_id_renames.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivot table id map, count={})",
+                table_id_renames.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivot table id map",
+            ));
+        }
+        for (old, new) in table_id_renames {
+            table_id_map.insert(*old, *new);
+        }
+
+        let mut defined_name_id_map: HashMap<DefinedNameId, DefinedNameId> = HashMap::new();
+        if defined_name_id_map
+            .try_reserve(defined_name_id_renames.len())
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivot defined name id map, count={})",
+                defined_name_id_renames.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivot defined name id map",
+            ));
+        }
+        for (old, new) in defined_name_id_renames {
+            defined_name_id_map.insert(*old, *new);
+        }
 
         for pivot in pivots_to_duplicate {
             let mut duplicated = pivot.clone();
             duplicated.id = crate::new_uuid();
-            duplicated.name = generate_duplicate_pivot_table_name(&pivot.name, &mut used_names);
+            duplicated.name =
+                generate_duplicate_pivot_table_name(&pivot.name, &mut used_names)?;
             id_map.insert(pivot.id, duplicated.id);
             let pivot_had_cache_id = pivot.cache_id.is_some();
 
@@ -705,7 +793,7 @@ impl Workbook {
             self.pivot_tables.push(duplicated);
         }
 
-        id_map
+        Ok(id_map)
     }
 
     fn duplicate_pivot_charts_for_sheet(
@@ -713,13 +801,44 @@ impl Workbook {
         source_sheet_id: WorksheetId,
         new_sheet_id: WorksheetId,
         duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
-    ) {
-        let charts_to_duplicate: Vec<PivotChartModel> = self
+    ) -> Result<(), DuplicateSheetError> {
+        let chart_count = self
             .pivot_charts
             .iter()
             .filter(|chart| chart.sheet_id == Some(source_sheet_id))
-            .cloned()
-            .collect();
+            .count();
+        if chart_count == 0 {
+            return Ok(());
+        }
+
+        let mut charts_to_duplicate: Vec<PivotChartModel> = Vec::new();
+        if charts_to_duplicate.try_reserve_exact(chart_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivot charts, count={chart_count})"
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivot charts",
+            ));
+        }
+        for chart in self
+            .pivot_charts
+            .iter()
+            .filter(|chart| chart.sheet_id == Some(source_sheet_id))
+        {
+            charts_to_duplicate.push(chart.clone());
+        }
+
+        if self.pivot_charts.try_reserve(charts_to_duplicate.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet pivot charts append, count={})",
+                charts_to_duplicate.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet pivot charts append",
+            ));
+        }
 
         for mut chart in charts_to_duplicate {
             chart.id = crate::new_uuid();
@@ -729,6 +848,7 @@ impl Workbook {
             }
             self.pivot_charts.push(chart);
         }
+        Ok(())
     }
 
     fn duplicate_slicers_for_sheet(
@@ -736,13 +856,44 @@ impl Workbook {
         source_sheet_id: WorksheetId,
         new_sheet_id: WorksheetId,
         duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
-    ) {
-        let slicers_to_duplicate: Vec<SlicerModel> = self
+    ) -> Result<(), DuplicateSheetError> {
+        let slicer_count = self
             .slicers
             .iter()
             .filter(|slicer| slicer.sheet_id == source_sheet_id)
-            .cloned()
-            .collect();
+            .count();
+        if slicer_count == 0 {
+            return Ok(());
+        }
+
+        let mut slicers_to_duplicate: Vec<SlicerModel> = Vec::new();
+        if slicers_to_duplicate.try_reserve_exact(slicer_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet slicers, count={slicer_count})"
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet slicers",
+            ));
+        }
+        for slicer in self
+            .slicers
+            .iter()
+            .filter(|slicer| slicer.sheet_id == source_sheet_id)
+        {
+            slicers_to_duplicate.push(slicer.clone());
+        }
+
+        if self.slicers.try_reserve(slicers_to_duplicate.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet slicers append, count={})",
+                slicers_to_duplicate.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet slicers append",
+            ));
+        }
 
         for mut slicer in slicers_to_duplicate {
             slicer.id = crate::new_uuid();
@@ -754,6 +905,7 @@ impl Workbook {
             }
             self.slicers.push(slicer);
         }
+        Ok(())
     }
 
     fn duplicate_timelines_for_sheet(
@@ -761,13 +913,44 @@ impl Workbook {
         source_sheet_id: WorksheetId,
         new_sheet_id: WorksheetId,
         duplicated_pivots: &HashMap<crate::pivots::PivotTableId, crate::pivots::PivotTableId>,
-    ) {
-        let timelines_to_duplicate: Vec<TimelineModel> = self
+    ) -> Result<(), DuplicateSheetError> {
+        let timeline_count = self
             .timelines
             .iter()
             .filter(|timeline| timeline.sheet_id == source_sheet_id)
-            .cloned()
-            .collect();
+            .count();
+        if timeline_count == 0 {
+            return Ok(());
+        }
+
+        let mut timelines_to_duplicate: Vec<TimelineModel> = Vec::new();
+        if timelines_to_duplicate.try_reserve_exact(timeline_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet timelines, count={timeline_count})"
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet timelines",
+            ));
+        }
+        for timeline in self
+            .timelines
+            .iter()
+            .filter(|timeline| timeline.sheet_id == source_sheet_id)
+        {
+            timelines_to_duplicate.push(timeline.clone());
+        }
+
+        if self.timelines.try_reserve(timelines_to_duplicate.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (duplicate sheet timelines append, count={})",
+                timelines_to_duplicate.len()
+            );
+            return Err(DuplicateSheetError::AllocationFailure(
+                "duplicate sheet timelines append",
+            ));
+        }
 
         for mut timeline in timelines_to_duplicate {
             timeline.id = crate::new_uuid();
@@ -779,28 +962,24 @@ impl Workbook {
             }
             self.timelines.push(timeline);
         }
+        Ok(())
     }
 
     fn delete_pivots_for_sheet(&mut self, sheet_id: WorksheetId, sheet_name: &str) {
-        let removed_pivots: HashSet<crate::pivots::PivotTableId> = self
-            .pivot_tables
-            .iter()
-            .filter(|pivot| pivot_destination_is_on_sheet(&pivot.destination, sheet_id, sheet_name))
-            .map(|pivot| pivot.id)
-            .collect();
-
-        if !removed_pivots.is_empty() {
-            self.pivot_tables
-                .retain(|pivot| !removed_pivots.contains(&pivot.id));
-
-            // Remove pivot charts bound to removed pivot tables.
-            self.pivot_charts
-                .retain(|chart| !removed_pivots.contains(&chart.pivot_table_id));
-        }
+        self.pivot_tables.retain(|pivot| {
+            !pivot_destination_is_on_sheet(&pivot.destination, sheet_id, sheet_name)
+        });
 
         // Remove pivot charts explicitly placed on the deleted sheet.
         self.pivot_charts
             .retain(|chart| chart.sheet_id != Some(sheet_id));
+
+        // Remove pivot charts bound to missing pivot tables.
+        self.pivot_charts.retain(|chart| {
+            self.pivot_tables
+                .iter()
+                .any(|pivot| pivot.id == chart.pivot_table_id)
+        });
 
         // Remove slicers/timelines placed on the deleted sheet or left with no remaining pivot
         // connections after pivot deletion.
@@ -808,9 +987,9 @@ impl Workbook {
             if slicer.sheet_id == sheet_id {
                 return false;
             }
-            slicer
-                .connected_pivots
-                .retain(|pivot_id| !removed_pivots.contains(pivot_id));
+            slicer.connected_pivots.retain(|pivot_id| {
+                self.pivot_tables.iter().any(|pivot| pivot.id == *pivot_id)
+            });
             !slicer.connected_pivots.is_empty()
         });
 
@@ -818,9 +997,9 @@ impl Workbook {
             if timeline.sheet_id == sheet_id {
                 return false;
             }
-            timeline
-                .connected_pivots
-                .retain(|pivot_id| !removed_pivots.contains(pivot_id));
+            timeline.connected_pivots.retain(|pivot_id| {
+                self.pivot_tables.iter().any(|pivot| pivot.id == *pivot_id)
+            });
             !timeline.connected_pivots.is_empty()
         });
 
@@ -828,12 +1007,11 @@ impl Workbook {
     }
 
     fn garbage_collect_pivot_caches(&mut self) {
-        let used: HashSet<PivotCacheId> = self
-            .pivot_tables
-            .iter()
-            .filter_map(|p| p.cache_id)
-            .collect();
-        self.pivot_caches.retain(|cache| used.contains(&cache.id));
+        self.pivot_caches.retain(|cache| {
+            self.pivot_tables
+                .iter()
+                .any(|pivot| pivot.cache_id == Some(cache.id))
+        });
     }
 
     /// Rename a worksheet and rewrite formulas that reference it.
@@ -901,7 +1079,18 @@ impl Workbook {
         }
 
         // Capture the pre-delete sheet order for 3D reference adjustment.
-        let sheet_order: Vec<String> = self.sheets.iter().map(|s| s.name.clone()).collect();
+        let mut sheet_order: Vec<String> = Vec::new();
+        if sheet_order.try_reserve_exact(self.sheets.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (delete sheet order, count={})",
+                self.sheets.len()
+            );
+            return Err(DeleteSheetError::AllocationFailure("delete sheet order"));
+        }
+        for s in &self.sheets {
+            sheet_order.push(s.name.clone());
+        }
         let deleted_name = self.sheets[sheet_index].name.clone();
 
         // If the deleted sheet was active, Excel selects the nearest neighbor tab.
@@ -1294,10 +1483,27 @@ impl Workbook {
 
     /// List defined names, optionally filtered by scope.
     pub fn list_defined_names(&self, scope: Option<DefinedNameScope>) -> Vec<&DefinedName> {
-        self.defined_names
+        let count = self
+            .defined_names
             .iter()
             .filter(|n| scope.map_or(true, |s| n.scope == s))
-            .collect()
+            .count();
+        let mut out: Vec<&DefinedName> = Vec::new();
+        if out.try_reserve_exact(count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (list defined names, count={count})"
+            );
+            return Vec::new();
+        }
+        for name in self
+            .defined_names
+            .iter()
+            .filter(|n| scope.map_or(true, |s| n.scope == s))
+        {
+            out.push(name);
+        }
+        out
     }
 
     /// Get print settings for a sheet, defaulting when no settings are stored.
@@ -1355,10 +1561,19 @@ impl Workbook {
         let print_area = print_area
             .and_then(|ranges| (!ranges.is_empty()).then_some(ranges))
             .map(|ranges| {
-                ranges
-                    .into_iter()
-                    .map(|r| Range::new(r.start, r.end))
-                    .collect::<Vec<_>>()
+                let mut out: Vec<Range> = Vec::new();
+                if out.try_reserve_exact(ranges.len()).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (print area normalize, ranges={})",
+                        ranges.len()
+                    );
+                    return Vec::new();
+                }
+                for r in ranges {
+                    out.push(Range::new(r.start, r.end));
+                }
+                out
             });
 
         self.update_sheet_print_settings(&sheet_name, |settings| settings.print_area = print_area);
@@ -1481,12 +1696,18 @@ impl Workbook {
     fn sort_print_settings_by_sheet_order(&mut self) {
         use std::collections::HashMap;
 
-        let order: HashMap<&str, usize> = self
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(idx, s)| (s.name.as_str(), idx))
-            .collect();
+        let mut order: HashMap<&str, usize> = HashMap::new();
+        if order.try_reserve(self.sheets.len()).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (print settings sheet order map, sheets={})",
+                self.sheets.len()
+            );
+            return;
+        }
+        for (idx, s) in self.sheets.iter().enumerate() {
+            order.insert(s.name.as_str(), idx);
+        }
 
         self.print_settings.sheets.sort_by_key(|s| {
             order
@@ -1503,7 +1724,8 @@ fn normalize_refers_to(refers_to: String) -> String {
 }
 
 fn generate_duplicate_sheet_name(base: &str, sheets: &[Worksheet]) -> String {
-    for i in 2u32.. {
+    let mut i: u64 = 2;
+    loop {
         let suffix = format!(" ({i})");
         let suffix_len = suffix.encode_utf16().count();
         let max_base_len = crate::sheet_name::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
@@ -1524,9 +1746,8 @@ fn generate_duplicate_sheet_name(base: &str, sheets: &[Worksheet]) -> String {
         {
             return candidate;
         }
+        i = i.wrapping_add(1);
     }
-
-    unreachable!("monotonic counter must eventually produce an unused sheet name")
 }
 
 fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
@@ -1545,8 +1766,22 @@ fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
     out
 }
 
-fn collect_pivot_table_names(pivots: &[PivotTableModel]) -> HashSet<String> {
-    pivots.iter().map(|pivot| casefold(&pivot.name)).collect()
+fn collect_pivot_table_names(pivots: &[PivotTableModel]) -> Result<Vec<String>, DuplicateSheetError> {
+    let mut out: Vec<String> = Vec::new();
+    if out.try_reserve_exact(pivots.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (collect pivot table names, count={})",
+            pivots.len()
+        );
+        return Err(DuplicateSheetError::AllocationFailure(
+            "collect pivot table names",
+        ));
+    }
+    for pivot in pivots {
+        out.push(pivot.name.clone());
+    }
+    Ok(out)
 }
 
 fn next_table_id(sheets: &[Worksheet]) -> u32 {
@@ -1570,29 +1805,54 @@ fn generate_duplicate_table_name(base: &str, used_names: &mut HashSet<String>) -
             out.push(b.to_ascii_lowercase() as char);
         }
     }
-    for i in 1u32.. {
-        let mut key = String::with_capacity(base.len() + 1 + 10);
+    let mut i: u64 = 1;
+    loop {
+        let mut key = String::new();
+        if key.try_reserve_exact(base.len().saturating_add(1).saturating_add(20)).is_err() {
+            // Best-effort: proceed with incremental growth.
+            debug_assert!(
+                false,
+                "allocation failed (duplicate table name key buffer, base_len={})",
+                base.len()
+            );
+        }
         push_ascii_lowercase(&mut key, base);
         key.push('_');
         let _ = write!(&mut key, "{i}");
         if used_names.insert(key) {
             return format!("{base}_{i}");
         }
+        i = i.wrapping_add(1);
     }
-
-    unreachable!("monotonic counter must eventually produce an unused table name")
 }
 
-fn generate_duplicate_pivot_table_name(base: &str, used_names: &mut HashSet<String>) -> String {
+fn generate_duplicate_pivot_table_name(
+    base: &str,
+    used_names: &mut Vec<String>,
+) -> Result<String, DuplicateSheetError> {
     // Match Excel-style name collision behavior: `PivotTable1` -> `PivotTable1 (2)`.
-    for i in 2u32.. {
+    let mut i: u64 = 2;
+    loop {
         let candidate = format!("{base} ({i})");
-        if used_names.insert(casefold(&candidate)) {
-            return candidate;
+        if used_names
+            .iter()
+            .all(|name| !text_eq_case_insensitive(name, &candidate))
+        {
+            if used_names.try_reserve(1).is_err() {
+                debug_assert!(
+                    false,
+                    "allocation failed (insert pivot table name, len={})",
+                    used_names.len()
+                );
+                return Err(DuplicateSheetError::AllocationFailure(
+                    "insert pivot table name",
+                ));
+            }
+            used_names.push(candidate.clone());
+            return Ok(candidate);
         }
+        i = i.wrapping_add(1);
     }
-
-    unreachable!("monotonic counter must eventually produce an unused pivot table name")
 }
 
 fn pivot_destination_is_on_sheet(

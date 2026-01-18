@@ -139,11 +139,24 @@ impl OutlineAxis {
         if start > end {
             return;
         }
-        let keys: Vec<u32> = self
+        let key_count = self
             .entries
             .range(start..=end)
-            .filter_map(|(k, v)| v.hidden.filter.then_some(*k))
-            .collect();
+            .filter(|(_, v)| v.hidden.filter)
+            .count();
+        let mut keys: Vec<u32> = Vec::new();
+        if keys.try_reserve_exact(key_count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (outline clear filter hidden range, count={key_count})"
+            );
+            return;
+        }
+        for (k, v) in self.entries.range(start..=end) {
+            if v.hidden.filter {
+                keys.push(*k);
+            }
+        }
         for key in keys {
             self.set_filter_hidden(key, false);
         }
@@ -228,11 +241,23 @@ impl Outline {
         let summary_below = self.pr.summary_below;
         self.rows.clear_outline_hidden();
 
-        let collapsed_summaries: Vec<(u32, u8)> = self
-            .rows
-            .iter()
-            .filter_map(|(index, entry)| entry.collapsed.then_some((index, entry.level)))
-            .collect();
+        let collapsed_count = self.rows.iter().filter(|(_, entry)| entry.collapsed).count();
+        let mut collapsed_summaries: Vec<(u32, u8)> = Vec::new();
+        if collapsed_summaries
+            .try_reserve_exact(collapsed_count)
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (outline collapsed row summaries, count={collapsed_count})"
+            );
+            return;
+        }
+        for (index, entry) in self.rows.iter() {
+            if entry.collapsed {
+                collapsed_summaries.push((index, entry.level));
+            }
+        }
 
         for (summary_index, summary_level) in collapsed_summaries {
             let Some((start, end, _level)) =
@@ -250,11 +275,23 @@ impl Outline {
         let summary_right = self.pr.summary_right;
         self.cols.clear_outline_hidden();
 
-        let collapsed_summaries: Vec<(u32, u8)> = self
-            .cols
-            .iter()
-            .filter_map(|(index, entry)| entry.collapsed.then_some((index, entry.level)))
-            .collect();
+        let collapsed_count = self.cols.iter().filter(|(_, entry)| entry.collapsed).count();
+        let mut collapsed_summaries: Vec<(u32, u8)> = Vec::new();
+        if collapsed_summaries
+            .try_reserve_exact(collapsed_count)
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (outline collapsed col summaries, count={collapsed_count})"
+            );
+            return;
+        }
+        for (index, entry) in self.cols.iter() {
+            if entry.collapsed {
+                collapsed_summaries.push((index, entry.level));
+            }
+        }
 
         for (summary_index, summary_level) in collapsed_summaries {
             let Some((start, end, _level)) =

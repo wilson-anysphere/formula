@@ -46,7 +46,18 @@ impl PivotFieldRef {
                 // If the table name itself contains `[`, emitting an unquoted `Table[Column]` shape
                 // becomes ambiguous (`My[Table][Col]` looks like a nested column ref). In that
                 // case, fall back to a quoted DAX-like identifier for the table name.
-                let mut out = String::with_capacity(table.len() + column.len() + 4);
+                let mut out = String::new();
+                if out
+                    .try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(4))
+                    .is_err()
+                {
+                    debug_assert!(
+                        false,
+                        "allocation failed (pivot field ref canonical name, table_len={}, column_len={})",
+                        table.len(),
+                        column.len()
+                    );
+                }
                 if table.contains('[') {
                     push_dax_single_quoted_identifier(table, &mut out);
                 } else {
@@ -58,7 +69,14 @@ impl PivotFieldRef {
                 Cow::Owned(out)
             }
             PivotFieldRef::DataModelMeasure(measure) => {
-                let mut out = String::with_capacity(measure.len() + 2);
+                let mut out = String::new();
+                if out.try_reserve_exact(measure.len().saturating_add(2)).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (pivot field ref canonical measure, len={})",
+                        measure.len()
+                    );
+                }
                 out.push('[');
                 push_escaped_bracketed_identifier_content(measure, &mut out);
                 out.push(']');
@@ -90,7 +108,18 @@ impl PivotFieldRef {
             // spaces/punctuation (but quote table names containing `[` to avoid ambiguity). This is
             // friendlier for UI labels while still preserving the `{table,column}` structure.
             PivotFieldRef::DataModelColumn { table, column } => {
-                let mut out = String::with_capacity(table.len() + column.len() + 4);
+                let mut out = String::new();
+                if out
+                    .try_reserve_exact(table.len().saturating_add(column.len()).saturating_add(4))
+                    .is_err()
+                {
+                    debug_assert!(
+                        false,
+                        "allocation failed (pivot field ref display name, table_len={}, column_len={})",
+                        table.len(),
+                        column.len()
+                    );
+                }
                 if table.contains('[') {
                     push_dax_single_quoted_identifier(table, &mut out);
                 } else {
@@ -102,7 +131,14 @@ impl PivotFieldRef {
                 out
             }
             PivotFieldRef::DataModelMeasure(name) => {
-                let mut out = String::with_capacity(name.len() + 2);
+                let mut out = String::new();
+                if out.try_reserve_exact(name.len().saturating_add(2)).is_err() {
+                    debug_assert!(
+                        false,
+                        "allocation failed (pivot field ref display measure, len={})",
+                        name.len()
+                    );
+                }
                 out.push('[');
                 push_escaped_bracketed_identifier_content(name, &mut out);
                 out.push(']');
@@ -295,7 +331,17 @@ fn quote_dax_identifier(raw: &str) -> String {
     // DAX uses single quotes for quoting table identifiers. Single quotes inside the identifier
     // are escaped by doubling them (`''`).
     let extra = raw.as_bytes().iter().filter(|&&b| b == b'\'').count();
-    let mut out = String::with_capacity(raw.len() + extra + 2);
+    let mut out = String::new();
+    if out
+        .try_reserve_exact(raw.len().saturating_add(extra).saturating_add(2))
+        .is_err()
+    {
+        debug_assert!(
+            false,
+            "allocation failed (quote dax identifier, len={})",
+            raw.len()
+        );
+    }
     push_dax_single_quoted_identifier(raw, &mut out);
     out
 }
@@ -351,7 +397,14 @@ fn unescape_dax_bracket_identifier(raw: &str) -> String {
         return raw.to_string();
     }
 
-    let mut out = String::with_capacity(raw.len());
+    let mut out = String::new();
+    if out.try_reserve_exact(raw.len()).is_err() {
+        debug_assert!(
+            false,
+            "allocation failed (unescape dax bracket identifier, len={})",
+            raw.len()
+        );
+    }
     let mut chars = raw.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == ']' {

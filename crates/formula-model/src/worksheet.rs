@@ -517,7 +517,8 @@ impl Worksheet {
         let anchor = self.merged_regions.resolve_cell(cell);
         let merged_range = self.merged_regions.containing_range(cell);
 
-        self.data_validations
+        let count = self
+            .data_validations
             .iter()
             .filter(|assignment| {
                 assignment.ranges.iter().any(|range| {
@@ -525,7 +526,23 @@ impl Worksheet {
                         || merged_range.is_some_and(|merged| range.intersects(&merged))
                 })
             })
-            .collect()
+            .count();
+        let mut out: Vec<&DataValidationAssignment> = Vec::new();
+        if out.try_reserve_exact(count).is_err() {
+            debug_assert!(
+                false,
+                "allocation failed (data validations for cell, count={count})"
+            );
+            return Vec::new();
+        }
+        for assignment in self.data_validations.iter().filter(|assignment| {
+            assignment.ranges.iter().any(|range| {
+                range.contains(anchor) || merged_range.is_some_and(|merged| range.intersects(&merged))
+            })
+        }) {
+            out.push(assignment);
+        }
+        out
     }
 
     /// Set the active cell and selection ranges.
@@ -1442,19 +1459,10 @@ impl Worksheet {
     ///
     /// This recomputes the sheet's used range once after removals.
     pub fn clear_range(&mut self, range: Range) {
-        let keys: Vec<CellKey> = self
-            .cells
-            .keys()
-            .filter(|k| range.contains(k.to_ref()))
-            .copied()
-            .collect();
-
-        if keys.is_empty() {
+        let before = self.cells.len();
+        self.cells.retain(|k, _| !range.contains(k.to_ref()));
+        if before == self.cells.len() {
             return;
-        }
-
-        for key in keys {
-            self.cells.remove(&key);
         }
 
         self.used_range = compute_used_range(&self.cells);
@@ -1641,7 +1649,13 @@ impl Worksheet {
             return Err(CommentError::CommentNotFound(comment_id.to_string()));
         };
 
-        let comments = self.comments.get_mut(&key).expect("comment key must exist");
+        let Some(comments) = self.comments.get_mut(&key) else {
+            debug_assert!(
+                false,
+                "comment key disappeared while deleting comment: {key:?}"
+            );
+            return Err(CommentError::CommentNotFound(comment_id.to_string()));
+        };
         let removed = comments.remove(idx);
         if comments.is_empty() {
             self.comments.remove(&key);
@@ -2103,12 +2117,28 @@ impl Worksheet {
         // Also sync in the other direction to support payloads that only store
         // `OutlineEntry.hidden.user` (e.g. XLSX round-trip) without corresponding
         // row/col properties.
-        let user_hidden_rows: Vec<u32> = self
+        let user_hidden_row_count = self
             .outline
             .rows
             .iter()
-            .filter_map(|(row_1based, entry)| entry.hidden.user.then_some(row_1based))
-            .collect();
+            .filter(|(_, entry)| entry.hidden.user)
+            .count();
+        let mut user_hidden_rows: Vec<u32> = Vec::new();
+        if user_hidden_rows
+            .try_reserve_exact(user_hidden_row_count)
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (sync hidden rows, count={user_hidden_row_count})"
+            );
+            return;
+        }
+        for (row_1based, entry) in self.outline.rows.iter() {
+            if entry.hidden.user {
+                user_hidden_rows.push(row_1based);
+            }
+        }
         for row_1based in user_hidden_rows {
             if row_1based == 0 {
                 continue;
@@ -2125,12 +2155,28 @@ impl Worksheet {
                 });
         }
 
-        let user_hidden_cols: Vec<u32> = self
+        let user_hidden_col_count = self
             .outline
             .cols
             .iter()
-            .filter_map(|(col_1based, entry)| entry.hidden.user.then_some(col_1based))
-            .collect();
+            .filter(|(_, entry)| entry.hidden.user)
+            .count();
+        let mut user_hidden_cols: Vec<u32> = Vec::new();
+        if user_hidden_cols
+            .try_reserve_exact(user_hidden_col_count)
+            .is_err()
+        {
+            debug_assert!(
+                false,
+                "allocation failed (sync hidden cols, count={user_hidden_col_count})"
+            );
+            return;
+        }
+        for (col_1based, entry) in self.outline.cols.iter() {
+            if entry.hidden.user {
+                user_hidden_cols.push(col_1based);
+            }
+        }
         for col_1based in user_hidden_cols {
             if col_1based == 0 {
                 continue;
