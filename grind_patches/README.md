@@ -4,10 +4,10 @@ This directory exists to preserve a change for the (currently inaccessible) `wil
 
 ## What this is
 
-- `a1410110_non_macos_layout_fragmentation.patch`
-  - `git format-patch` output for commit `a1410110dbc2c845b8b5aeb472b82b3c2e149bc9`.
+- `436be34_non_macos_layout_fragmentation.patch`
+  - `git format-patch` output for commit `436be34eb995877e7de6db6c8f7a51575412e2fe`.
 
-- `a1410110_non_macos_layout_fragmentation.bundle`
+- `436be34_non_macos_layout_fragmentation.bundle`
   - A `git bundle` containing **only** that single commit.
   - It is relative to `origin/main` commit `ed924cccbbc1b726c1459be227e2498fcdf7235d`.
 
@@ -26,7 +26,7 @@ The change fixes several layout snapshot regressions and non-macOS test failures
 From a clone of `wilson-anysphere/fastrender`:
 
 ```bash
-cp grind_patches/a1410110_non_macos_layout_fragmentation.bundle /tmp/fix.bundle
+cp grind_patches/436be34_non_macos_layout_fragmentation.bundle /tmp/fix.bundle
 
 git fetch /tmp/fix.bundle HEAD
 
@@ -36,7 +36,7 @@ git cherry-pick FETCH_HEAD
 ### Option B: apply the patch
 
 ```bash
-git am < grind_patches/a1410110_non_macos_layout_fragmentation.patch
+git am < grind_patches/436be34_non_macos_layout_fragmentation.patch
 ```
 
 ## Validation

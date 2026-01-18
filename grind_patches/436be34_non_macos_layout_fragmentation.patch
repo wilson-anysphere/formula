@@ -1,4 +1,4 @@
-From a1410110dbc2c845b8b5aeb472b82b3c2e149bc9 Mon Sep 17 00:00:00 2001
+From 436be34eb995877e7de6db6c8f7a51575412e2fe Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
 Date: Sun, 18 Jan 2026 04:14:58 -0800
 Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
@@ -12,11 +12,14 @@ Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
 - Enable and fix grid track range regression tests (no inner-test warnings; keep 0px tracks intact)
 - Ensure flex abspos profiling calls record_out_of_flow_placement_time (keeps layout_engine policy tests passing)
 - Fix xtask guardrails (vendoring policy expectations + remove duplicate workspace excludes)
+- Fix docs/spec links and selector shim wording so doctests + guard integration tests pass
 ---
  Cargo.lock                                    |   8 -
  Cargo.toml                                    |   3 -
  crates/fastrender_url/src/code_points.rs      |   1 -
  crates/ipc_stack/Cargo.toml                   |   3 +
+ docs/html_parser_architecture.md              |  22 +-
+ docs/html_parser_checklist.md                 |   3 +-
  src/css/loader.rs                             |  45 ++++
  src/html/streaming_parser.rs                  |  23 +-
  src/layout/contexts/flex/mod_macos.rs         |   7 +-
@@ -31,12 +34,14 @@ Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
  src/layout_minimal/contexts/grid.rs           |  19 +-
  src/layout_minimal/engine.rs                  | 171 ++++++++++----
  src/layout_minimal/formatting_context.rs      |  42 ++++
+ src/lib_non_macos_impl.rs                     |  20 +-
  src/net/websocket/mod.rs                      |   3 +-
  src/net/websocket/stream.rs                   |   1 +
  src/platform/macos/scroll_end.rs              |   4 +-
+ src/selectors.rs                              |   4 +-
  src/utils/js_escapes.rs                       |  14 ++
  xtask/src/lint_vendoring_policy.rs            |  10 +-
- 23 files changed, 520 insertions(+), 127 deletions(-)
+ 27 files changed, 547 insertions(+), 149 deletions(-)
 
 diff --git a/Cargo.lock b/Cargo.lock
 index 73bb2fbee5..4e1e724411 100644
@@ -97,6 +102,81 @@ index be6acf9e79..38e55c955a 100644
  # Feature gate used by `tests/integration.rs` to opt into the full renderer integration suite.
  renderer_integration_tests = []
  # Compatibility shims for renderer-only cfg flags referenced in shared sources.
+diff --git a/docs/html_parser_architecture.md b/docs/html_parser_architecture.md
+index 14d0e4b15d..78c7eb4800 100644
+--- a/docs/html_parser_architecture.md
++++ b/docs/html_parser_architecture.md
+@@ -25,7 +25,8 @@ loop), see [`docs/html_parser_checklist.md`](html_parser_checklist.md).
+ FastRender pins a checkout of the WHATWG HTML Standard via git submodule at:
+ 
+ * [`specs/whatwg-html/`](../specs/whatwg-html/)
+-* The canonical Bikeshed source file is [`specs/whatwg-html/source`](../specs/whatwg-html/source)
++* The canonical Bikeshed source file is `specs/whatwg-html/source` inside the submodule checkout
++  (mirrored at [`whatwg/html:source`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source)).
+ 
+ The parsing pipeline described here maps directly to **HTML Standard §13.2.3–§13.2.6**:
+ 
+@@ -38,10 +39,14 @@ The parsing pipeline described here maps directly to **HTML Standard §13.2.3–
+ 
+ Direct links into the pinned spec source (useful when implementing step-by-step):
+ 
+-* Parsing model overview + re-entrant parsing note: [`source#L134671`](../specs/whatwg-html/source#L134671)
+-* **Tokenization** heading + token types: [`source#L136853`](../specs/whatwg-html/source#L136853)
+-* “Check the parser pause flag” (the spec’s yield hook): [`source#L136940`](../specs/whatwg-html/source#L136940)
+-* **Tree construction** heading: [`source#L139417`](../specs/whatwg-html/source#L139417)
++* Parsing model overview + re-entrant parsing note:
++  [`source#L134671`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L134671)
++* **Tokenization** heading + token types:
++  [`source#L136853`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L136853)
++* “Check the parser pause flag” (the spec’s yield hook):
++  [`source#L136940`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L136940)
++* **Tree construction** heading:
++  [`source#L139417`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L139417)
+ 
+ ## Pipeline overview (staged, but with feedback loops)
+ 
+@@ -190,7 +195,8 @@ and ensures the behavior is consistent across:
+ ## Incremental parsing + suspension points
+ 
+ The in-tree parser must support *streaming parsing* and “nested parsing” reentrancy (see the spec’s
+-note on reentrancy: [`specs/whatwg-html/source#L134728`](../specs/whatwg-html/source#L134728)).
++note on reentrancy:
++[`source#L134728`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L134728)).
+ 
+ At the driver layer, parsing is modeled as a repeated “pump”:
+ 
+@@ -204,7 +210,7 @@ Planned yield points:
+   2. **Script boundary yield**: the parser has processed a *parser-inserted* `</script>` end tag and
+      must yield control so the host can schedule/execute the script. This maps to the spec’s “parser
+      pause flag” check before each tokenizer step:
+-     [`specs/whatwg-html/source#L136940`](../specs/whatwg-html/source#L136940).
++     [`source#L136940`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L136940).
+   3. **`EOF` / `Finished`**: the host signals EOF, the tokenizer emits the EOF token, and tree
+      construction finalizes the document.
+ 
+@@ -255,7 +261,7 @@ Planned invariants for the in-tree parser:
+ ## Hard resource limits (where they live and what they cover)
+ 
+ The HTML Standard explicitly notes that real implementations may need nesting and size limits
+-([`specs/whatwg-html/source#L139500`](../specs/whatwg-html/source#L139500)). FastRender treats these
++([`source#L139500`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source#L139500)). FastRender treats these
+ limits as part of correctness: a parser that OOMs or spins is wrong.
+ 
+ **Rule:** when a hard limit is hit, return a structured parse error; do not panic.
+diff --git a/docs/html_parser_checklist.md b/docs/html_parser_checklist.md
+index 1e17ad9788..caecc352e6 100644
+--- a/docs/html_parser_checklist.md
++++ b/docs/html_parser_checklist.md
+@@ -17,7 +17,8 @@ For deeper context, see:
+ 
+ Spec references:
+ 
+-- Pinned spec checkout: [`specs/whatwg-html/source`](../specs/whatwg-html/source)
++- Pinned spec checkout: [`specs/whatwg-html/`](../specs/whatwg-html/)
++  (Bikeshed source file: [`source`](https://github.com/whatwg/html/blob/0aa021ab4f21a6550f1591a9cc98449aaea9eefa/source))
+ - Tokenizer states (§13.2.4): https://html.spec.whatwg.org/multipage/parsing.html#tokenizer-states
+ - Tree construction (§13.2.5 / §13.2.6): https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
+ 
 diff --git a/src/css/loader.rs b/src/css/loader.rs
 index 752f7d35fb..7cbeb6d540 100644
 --- a/src/css/loader.rs
@@ -1172,6 +1252,37 @@ index c56bcebf73..6c8647c62b 100644
  }
  
  pub(crate) struct ViewportSizeHintGuard {
+diff --git a/src/lib_non_macos_impl.rs b/src/lib_non_macos_impl.rs
+index 418d6ddb5a..51d3b8b3bb 100644
+--- a/src/lib_non_macos_impl.rs
++++ b/src/lib_non_macos_impl.rs
+@@ -258,17 +258,15 @@ pub mod interaction;
+ // to keep using `crate::ComputedStyle` / `crate::BoxNode` paths while the non-macOS test harness is
+ // bootstrapped.
+ #[cfg(any(test, doctest))]
+-pub use error::{Error, Result};
+-#[cfg(any(test, doctest))]
+-pub use geometry::{EdgeOffsets, Point, Rect, Size};
+-#[cfg(any(test, doctest))]
+-pub use layout::constraints::{AvailableSpace, LayoutConstraints};
+-#[cfg(doctest)]
+-pub use layout::engine::{LayoutConfig, LayoutEngine};
+-#[cfg(any(test, doctest))]
+-pub use layout::formatting_context::{FormattingContext, IntrinsicSizingMode, LayoutError};
+-#[cfg(any(test, doctest, all(not(test), feature = "renderer")))]
+-pub use layout::engine::{LayoutConfig, LayoutEngine};
++  pub use error::{Error, Result};
++  #[cfg(any(test, doctest))]
++  pub use geometry::{EdgeOffsets, Point, Rect, Size};
++  #[cfg(any(test, doctest))]
++  pub use layout::constraints::{AvailableSpace, LayoutConstraints};
++  #[cfg(any(test, doctest))]
++  pub use layout::formatting_context::{FormattingContext, IntrinsicSizingMode, LayoutError};
++  #[cfg(any(test, doctest, all(not(test), feature = "renderer")))]
++  pub use layout::engine::{LayoutConfig, LayoutEngine};
+ #[cfg(any(test, doctest))]
+ pub use style::color::Rgba;
+ #[cfg(any(test, doctest))]
 diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
 index eba98b30e1..bb18e9a5cb 100644
 --- a/src/net/websocket/mod.rs
@@ -1229,6 +1340,21 @@ index 34efe5da6b..6872171cba 100644
  mod tests {
    use super::PendingScrollEnd;
    use crate::geometry::Point;
+diff --git a/src/selectors.rs b/src/selectors.rs
+index 8894e83075..eb36aaab7a 100644
+--- a/src/selectors.rs
++++ b/src/selectors.rs
+@@ -10,8 +10,8 @@
+ pub mod context {
+   /// HTML quirks mode.
+   ///
+-  /// Keep this alias so legacy call sites referencing `selectors::context::QuirksMode` still build,
+-  /// but ensure there is only one canonical quirks-mode enum in the crate.
++  /// Keep this alias so legacy call sites referencing the historical `selectors` quirks-mode type
++  /// still build, but ensure there is only one canonical quirks-mode enum in the crate.
+   pub use crate::QuirksMode;
+ }
+ 
 diff --git a/src/utils/js_escapes.rs b/src/utils/js_escapes.rs
 index cc5dc49753..d2548184e5 100644
 --- a/src/utils/js_escapes.rs
