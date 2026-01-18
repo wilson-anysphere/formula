@@ -397,7 +397,8 @@ fn decode_png_rgba8(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
         ));
     }
 
-    let mut rgba = Vec::with_capacity(rgba_len);
+    let mut rgba: Vec<u8> = Vec::new();
+    let _ = rgba.try_reserve(rgba_len);
 
     match (info.color_type, info.bit_depth) {
         (ColorType::Rgba, BitDepth::Eight) => rgba.extend_from_slice(bytes),
@@ -461,10 +462,22 @@ fn rgba_to_bgra_bottom_up_opaque(
 
     let mut bgra = vec![0u8; rgba.len()];
 
-    for y in 0..height {
-        let src_row = &rgba[y * row_bytes..(y + 1) * row_bytes];
+    let rows = rgba.chunks_exact(row_bytes);
+    if !rows.remainder().is_empty() {
+        return Err("png pixel buffer length does not match dimensions".to_string());
+    }
+
+    for (y, src_row) in rows.enumerate() {
         let dst_y = height - 1 - y;
-        let dst_row = &mut bgra[dst_y * row_bytes..(dst_y + 1) * row_bytes];
+        let dst_start = dst_y
+            .checked_mul(row_bytes)
+            .ok_or_else(|| "image row offset overflows".to_string())?;
+        let dst_end = dst_start
+            .checked_add(row_bytes)
+            .ok_or_else(|| "image row offset overflows".to_string())?;
+        let dst_row = bgra
+            .get_mut(dst_start..dst_end)
+            .ok_or_else(|| "image row out of range".to_string())?;
         for (src_px, dst_px) in src_row
             .chunks_exact(4)
             .zip(dst_row.chunks_exact_mut(4))
@@ -487,7 +500,8 @@ fn bgra_top_down_to_dibv5(width_i32: i32, height_i32: i32, bgra: &[u8]) -> Resul
     let out_capacity = BITMAPV5HEADER_SIZE
         .checked_add(bgra.len())
         .ok_or_else(|| "dib size overflow".to_string())?;
-    let mut out = Vec::with_capacity(out_capacity);
+    let mut out: Vec<u8> = Vec::new();
+    let _ = out.try_reserve(out_capacity);
 
     // BITMAPV5HEADER
     push_u32_le(&mut out, BITMAPV5HEADER_SIZE as u32); // bV5Size
@@ -535,7 +549,8 @@ fn bgra_bottom_up_to_dib(width_i32: i32, height_i32: i32, bgra: &[u8]) -> Result
     let out_capacity = BITMAPINFOHEADER_SIZE
         .checked_add(bgra.len())
         .ok_or_else(|| "dib size overflow".to_string())?;
-    let mut out = Vec::with_capacity(out_capacity);
+    let mut out: Vec<u8> = Vec::new();
+    let _ = out.try_reserve(out_capacity);
 
     // BITMAPINFOHEADER
     push_u32_le(&mut out, BITMAPINFOHEADER_SIZE as u32); // biSize
@@ -825,10 +840,18 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
             return Err("dib does not contain full color table".to_string());
         }
 
-        let mut table = Vec::with_capacity(colors);
+        let mut table: Vec<[u8; 4]> = Vec::new();
+        let _ = table.try_reserve(colors);
         for i in 0..colors {
-            let off = pixel_offset + i * 4;
-            let entry = &dib_bytes[off..off + 4];
+            let off = pixel_offset
+                .checked_add(i.checked_mul(4).ok_or_else(|| "dib palette offset overflow".to_string())?)
+                .ok_or_else(|| "dib palette offset overflow".to_string())?;
+            let end = off
+                .checked_add(4)
+                .ok_or_else(|| "dib palette entry offset overflow".to_string())?;
+            let entry = dib_bytes
+                .get(off..end)
+                .ok_or_else(|| "dib palette entry out of range".to_string())?;
             let b = entry[0];
             let g = entry[1];
             let r = entry[2];
@@ -873,11 +896,12 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 }
                 decode_rle4(data, width_usize, height_usize)?
             }
-            _ => unreachable!(),
+            _ => return Err("unsupported DIB RLE compression".to_string()),
         };
 
         let bottom_up = height > 0;
-        let mut rgba = Vec::with_capacity(rgba_len);
+        let mut rgba: Vec<u8> = Vec::new();
+        let _ = rgba.try_reserve(rgba_len);
         for y in 0..height_usize {
             let src_y = if bottom_up {
                 height_usize - 1 - y
@@ -1073,7 +1097,8 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let bottom_up = height > 0;
 
-    let mut rgba = Vec::with_capacity(rgba_len);
+    let mut rgba: Vec<u8> = Vec::new();
+    let _ = rgba.try_reserve(rgba_len);
     for y in 0..height_usize {
         let src_y = if bottom_up {
             height_usize - 1 - y
@@ -1127,8 +1152,10 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 }
             }
             16 => {
-                let (r_mask, g_mask, b_mask, a_mask, _candidate_a_mask) =
-                    bitfield_decoder.expect("validated above");
+                let Some((r_mask, g_mask, b_mask, a_mask, _candidate_a_mask)) = bitfield_decoder
+                else {
+                    return Err("unsupported 16bpp DIB bitfield masks".to_string());
+                };
                 for px in row.chunks_exact(2) {
                     let value = u16::from_le_bytes([px[0], px[1]]) as u32;
                     let r = extract_masked_u8(value, r_mask);
@@ -1184,7 +1211,7 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                     rgba.extend_from_slice(color);
                 }
             }
-            _ => unreachable!("validated above"),
+            _ => return Err("unsupported DIB bit depth".to_string()),
         }
     }
 
@@ -1216,7 +1243,8 @@ mod tests {
         out.extend_from_slice(kind);
         out.extend_from_slice(data);
 
-        let mut crc_bytes = Vec::with_capacity(kind.len() + data.len());
+        let mut crc_bytes: Vec<u8> = Vec::new();
+        let _ = crc_bytes.try_reserve(kind.len().saturating_add(data.len()));
         crc_bytes.extend_from_slice(kind);
         crc_bytes.extend_from_slice(data);
         out.extend_from_slice(&crc32(&crc_bytes).to_be_bytes());
@@ -1231,7 +1259,8 @@ mod tests {
         let mut png = Vec::new();
         png.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
 
-        let mut ihdr = Vec::with_capacity(13);
+        let mut ihdr: Vec<u8> = Vec::new();
+        let _ = ihdr.try_reserve(13);
         ihdr.extend_from_slice(&width.to_be_bytes());
         ihdr.extend_from_slice(&height.to_be_bytes());
         ihdr.extend_from_slice(&[

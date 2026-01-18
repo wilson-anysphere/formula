@@ -1,3 +1,4 @@
+pub(crate) mod stdio;
 pub(crate) mod atomic_write;
 pub mod asset_protocol_core;
 pub mod asset_protocol_policy;

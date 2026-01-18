@@ -3748,7 +3748,9 @@ fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
     if s.len() < suffix.len() {
         return false;
     }
-    s[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    let start = s.len() - suffix.len();
+    s.get(start..)
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
 }
 
 fn contains_ignore_ascii_case(s: &str, needle: &str) -> bool {
@@ -3760,12 +3762,8 @@ fn contains_ignore_ascii_case(s: &str, needle: &str) -> bool {
     if s.len() < needle.len() {
         return false;
     }
-    for start in 0..=s.len() - needle.len() {
-        if s[start..start + needle.len()].eq_ignore_ascii_case(needle) {
-            return true;
-        }
-    }
-    false
+    s.windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
 fn read_zip_entry<R: Read + Seek>(

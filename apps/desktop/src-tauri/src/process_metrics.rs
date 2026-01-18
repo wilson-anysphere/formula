@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use sysinfo::System;
 
+use crate::stdio::{stderrln, stdoutln};
+
 #[derive(Clone, Debug)]
 pub struct ProcessMetricsSnapshot {
     pub pid: u32,
@@ -38,13 +40,18 @@ pub fn log_process_metrics() {
     match snapshot_self() {
         Ok(snapshot) => {
             let rss_mb = snapshot.rss_bytes / (1024 * 1024);
-            println!("[metrics] rss_mb={rss_mb} pid={}", snapshot.pid);
+            stdoutln(format_args!(
+                "[metrics] rss_mb={rss_mb} pid={}",
+                snapshot.pid
+            ));
         }
         Err(err) => {
             let pid = std::process::id();
-            eprintln!("[metrics] failed to collect process metrics: {err}");
+            stderrln(format_args!(
+                "[metrics] failed to collect process metrics: {err}"
+            ));
             // Keep the stdout format stable for log parsers even on failure.
-            println!("[metrics] rss_mb=0 pid={pid}");
+            stdoutln(format_args!("[metrics] rss_mb=0 pid={pid}"));
         }
     }
 }

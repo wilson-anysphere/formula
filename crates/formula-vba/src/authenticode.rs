@@ -1006,7 +1006,8 @@ fn parse_length(input: &[u8]) -> Result<(Length, usize), VbaSignatureSignedDiges
     }
 
     let mut len: usize = 0;
-    for &b in &input[1..1 + count] {
+    let bytes = input.get(1..1 + count).ok_or_else(|| der_err("unexpected EOF parsing length"))?;
+    for &b in bytes {
         len = len
             .checked_shl(8)
             .ok_or_else(|| der_err("length overflow"))?;

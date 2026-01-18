@@ -36,10 +36,12 @@ pub fn classify_opened_urls(urls: &[Url]) -> OpenedUrlClassification {
     // When the cap is exceeded, we drop the **oldest** entries and keep the most recent ones so
     // the latest user action wins. Caps are aligned with the pending IPC queues for these
     // pipelines.
-    let mut oauth_rev = Vec::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
+    let mut oauth_rev: Vec<String> = Vec::new();
+    let _ = oauth_rev.try_reserve(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
     let mut oauth_bytes = 0usize;
 
-    let mut file_rev = Vec::with_capacity(MAX_OPEN_FILE_PENDING_URLS.min(urls.len()));
+    let mut file_rev: Vec<String> = Vec::new();
+    let _ = file_rev.try_reserve(MAX_OPEN_FILE_PENDING_URLS.min(urls.len()));
     let mut file_bytes = 0usize;
 
     // Walk backwards so we keep the most recent URLs, then reverse at the end to preserve the

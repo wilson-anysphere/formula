@@ -327,24 +327,28 @@ fn xml_root_tag_name(mut xml: &str) -> Option<String> {
             '?' => {
                 // Processing instruction (likely `<?xml ...?>`).
                 let end = xml.find("?>")?;
-                xml = xml.get(end + 2..)?.trim_start();
+                let next = end.checked_add(2)?;
+                xml = xml.get(next..)?.trim_start();
                 continue;
             }
             '!' => {
                 if xml.starts_with("<!--") {
                     let end = xml.find("-->")?;
-                    xml = xml.get(end + 3..)?.trim_start();
+                    let next = end.checked_add(3)?;
+                    xml = xml.get(next..)?.trim_start();
                     continue;
                 }
                 // DOCTYPE or other declaration; skip to the next '>'.
                 let end = xml.find('>')?;
-                xml = xml.get(end + 1..)?.trim_start();
+                let next = end.checked_add(1)?;
+                xml = xml.get(next..)?.trim_start();
                 continue;
             }
             '/' => {
                 // Closing tag; skip.
                 let end = xml.find('>')?;
-                xml = xml.get(end + 1..)?.trim_start();
+                let next = end.checked_add(1)?;
+                xml = xml.get(next..)?.trim_start();
                 continue;
             }
             _ => {
@@ -386,33 +390,56 @@ fn parse_standard_encryption_header_fixed_dwords(
     // EncryptionHeader begins with 8 DWORDs (32 bytes) of fixed fields.
     const FIXED_HEADER_DWORDS_LEN: usize = 8 * 4;
 
-    if encryption_info.len() < 8 + 4 {
-        return Err("truncated_before_header_size");
-    }
-    let header_size = u32::from_le_bytes(
-        encryption_info[8..12]
-            .try_into()
-            .expect("slice length checked"),
-    );
+    let header_size_bytes: [u8; 4] = encryption_info
+        .get(8..12)
+        .ok_or("truncated_before_header_size")?
+        .try_into()
+        .map_err(|_| "truncated_before_header_size")?;
+    let header_size = u32::from_le_bytes(header_size_bytes);
     let header_size_usize = header_size as usize;
     if header_size_usize < FIXED_HEADER_DWORDS_LEN {
         return Err("invalid_header_size");
     }
 
     let header_start = 12usize;
-    let needed_for_fixed = header_start + FIXED_HEADER_DWORDS_LEN;
+    let needed_for_fixed = header_start
+        .checked_add(FIXED_HEADER_DWORDS_LEN)
+        .ok_or("truncated_in_header_fixed_fields")?;
     if encryption_info.len() < needed_for_fixed {
         return Err("truncated_in_header_fixed_fields");
     }
 
     // Parse the fixed DWORDs from the available bytes. Even if the declared header size
     // exceeds the remaining buffer, fixed fields are still readable (and useful for triage).
-    let hdr = &encryption_info[header_start..];
-    let flags_raw = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-    // let size_extra = u32::from_le_bytes(hdr[4..8].try_into().unwrap());
-    let alg_id = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
-    let alg_id_hash = u32::from_le_bytes(hdr[12..16].try_into().unwrap());
-    let key_size = u32::from_le_bytes(hdr[16..20].try_into().unwrap());
+    let hdr = encryption_info
+        .get(header_start..)
+        .ok_or("truncated_in_header_fixed_fields")?;
+
+    let flags_raw = u32::from_le_bytes(
+        hdr.get(0..4)
+            .and_then(|b| b.try_into().ok())
+            .ok_or("truncated_in_header_fixed_fields")?,
+    );
+    // let size_extra = u32::from_le_bytes(
+    //     hdr.get(4..8)
+    //         .and_then(|b| b.try_into().ok())
+    //         .ok_or("truncated_in_header_fixed_fields")?,
+    // );
+    let alg_id = u32::from_le_bytes(
+        hdr.get(8..12)
+            .and_then(|b| b.try_into().ok())
+            .ok_or("truncated_in_header_fixed_fields")?,
+    );
+    let alg_id_hash = u32::from_le_bytes(
+        hdr.get(12..16)
+            .and_then(|b| b.try_into().ok())
+            .ok_or("truncated_in_header_fixed_fields")?,
+    );
+    let key_size = u32::from_le_bytes(
+        hdr.get(16..20)
+            .and_then(|b| b.try_into().ok())
+            .ok_or("truncated_in_header_fixed_fields")?,
+    );
 
     Ok(StandardHeaderFixedDwords {
         flags_raw,
@@ -472,17 +499,58 @@ fn parse_standard_encryption_header_verbose(
     let header_bytes = r.read_bytes(header_size as usize, "EncryptionHeader")?;
     debug_assert!(header_bytes.len() >= ENCRYPTION_HEADER_FIXED_LEN as usize);
 
-    let flags_raw = u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
-    let _size_extra = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap());
-    let alg_id = u32::from_le_bytes(header_bytes[8..12].try_into().unwrap());
-    let alg_id_hash = u32::from_le_bytes(header_bytes[12..16].try_into().unwrap());
-    let key_size = u32::from_le_bytes(header_bytes[16..20].try_into().unwrap());
-    let provider_type = u32::from_le_bytes(header_bytes[20..24].try_into().unwrap());
-    let _reserved1 = u32::from_le_bytes(header_bytes[24..28].try_into().unwrap());
-    let _reserved2 = u32::from_le_bytes(header_bytes[28..32].try_into().unwrap());
+    let flags_raw = u32::from_le_bytes(
+        header_bytes
+            .get(0..4)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.flags".to_string())?,
+    );
+    let _size_extra = u32::from_le_bytes(
+        header_bytes
+            .get(4..8)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.sizeExtra".to_string())?,
+    );
+    let alg_id = u32::from_le_bytes(
+        header_bytes
+            .get(8..12)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.algId".to_string())?,
+    );
+    let alg_id_hash = u32::from_le_bytes(
+        header_bytes
+            .get(12..16)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.algIdHash".to_string())?,
+    );
+    let key_size = u32::from_le_bytes(
+        header_bytes
+            .get(16..20)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.keySize".to_string())?,
+    );
+    let provider_type = u32::from_le_bytes(
+        header_bytes
+            .get(20..24)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.providerType".to_string())?,
+    );
+    let _reserved1 = u32::from_le_bytes(
+        header_bytes
+            .get(24..28)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.reserved1".to_string())?,
+    );
+    let _reserved2 = u32::from_le_bytes(
+        header_bytes
+            .get(28..32)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| "truncated EncryptionHeader.reserved2".to_string())?,
+    );
 
     let flags = StandardEncryptionHeaderFlags::from_raw(flags_raw);
-    let csp_name = decode_utf16le_nul_terminated_best_effort(&header_bytes[32..]);
+    let csp_tail = header_bytes.get(32..).unwrap_or(&[]);
+    let csp_name = decode_utf16le_nul_terminated_best_effort(csp_tail);
 
     Ok(StandardEncryptionHeaderVerbose {
         header_size,
@@ -517,8 +585,18 @@ impl<'a> Reader<'a> {
                 "truncated EncryptionInfo stream while reading {context}: needed {len} bytes, only {available} available"
             ));
         }
-        let out = &self.bytes[self.pos..self.pos + len];
-        self.pos += len;
+        let start = self.pos;
+        let end = start.checked_add(len).ok_or_else(|| {
+            format!(
+                "truncated EncryptionInfo stream while reading {context}: needed {len} bytes, only {available} available"
+            )
+        })?;
+        let out = self.bytes.get(start..end).ok_or_else(|| {
+            format!(
+                "truncated EncryptionInfo stream while reading {context}: needed {len} bytes, only {available} available"
+            )
+        })?;
+        self.pos = end;
         Ok(out)
     }
 

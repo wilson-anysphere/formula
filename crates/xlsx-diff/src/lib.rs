@@ -1368,7 +1368,7 @@ fn rels_base_dir(rels_part: &str) -> String {
     }
 
     if let Some(pos) = rels_part.rfind("/_rels/") {
-        return rels_part[..pos + 1].to_string();
+        return rels_part.get(..=pos).unwrap_or("").to_string();
     }
 
     String::new()

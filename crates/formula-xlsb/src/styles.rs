@@ -265,31 +265,28 @@ impl<'a> RecordReader<'a> {
     }
 
     fn read_u16(&mut self) -> Result<u16, Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + 2)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += 2;
+        let start = self.offset;
+        let end = start.checked_add(2).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(u16::from_le_bytes([raw[0], raw[1]]))
     }
 
     fn read_u32(&mut self) -> Result<u32, Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + 4)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += 4;
+        let start = self.offset;
+        let end = start.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
     }
 
     fn read_utf16_string(&mut self) -> Result<String, Error> {
         let len_chars = self.read_u32()? as usize;
         let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-        let raw = self
-            .data
-            .get(self.offset..self.offset + byte_len)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += byte_len;
+        let start = self.offset;
+        let end = start.checked_add(byte_len).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
 
         // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled string lengths;
         // decode UTF-16LE directly into a `String`.

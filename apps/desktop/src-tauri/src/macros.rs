@@ -406,8 +406,10 @@ struct MacroAuditEvent {
 
 fn emit_audit(event: MacroAuditEvent) {
     match serde_json::to_string(&event) {
-        Ok(json) => eprintln!("[macro_audit] {json}"),
-        Err(err) => eprintln!("[macro_audit] failed to serialize audit event: {err}"),
+        Ok(json) => crate::stdio::stderrln(format_args!("[macro_audit] {json}")),
+        Err(err) => crate::stdio::stderrln(format_args!(
+            "[macro_audit] failed to serialize audit event: {err}"
+        )),
     }
 }
 
@@ -1091,7 +1093,8 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             // Build the truncated string with a bounded capacity so appending the suffix doesn't
             // trigger `String` growth (typically doubling capacity), which would cause us to
             // retain allocations larger than `max_line_bytes`.
-            let mut truncated = String::with_capacity(max_line_bytes);
+            let mut truncated = String::new();
+            let _ = truncated.try_reserve(max_line_bytes);
             truncated.push_str(&message[..end]);
             if truncated.len().saturating_add(suffix_len) <= max_line_bytes {
                 truncated.push_str(MESSAGE_TRUNCATED_SUFFIX);
@@ -1382,7 +1385,8 @@ End Sub
             AppStateSpreadsheet::new(&mut state, MacroRuntimeContext::default()).expect("new sheet");
 
         // Simulate a malicious `Debug.Print` string that was allocated with an extreme capacity.
-        let mut message = String::with_capacity(10 * 1024 * 1024);
+        let mut message = String::new();
+        let _ = message.try_reserve(10 * 1024 * 1024);
         message.push_str("ok");
         sheet.log(message);
 

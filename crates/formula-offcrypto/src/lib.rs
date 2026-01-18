@@ -2697,11 +2697,17 @@ fn looks_like_zip_container(bytes: &[u8]) -> bool {
     let search_end = bytes.len().saturating_sub(4);
 
     for i in (search_start..search_end).rev() {
-        if &bytes[i..i + 4] != b"PK\x05\x06" {
+        let Some(sig_end) = i.checked_add(4) else {
+            continue;
+        };
+        if bytes.get(i..sig_end) != Some(b"PK\x05\x06") {
             continue;
         }
 
-        let eocd = match bytes.get(i..i + EOCD_MIN_LEN) {
+        let Some(eocd_end) = i.checked_add(EOCD_MIN_LEN) else {
+            continue;
+        };
+        let eocd = match bytes.get(i..eocd_end) {
             Some(v) => v,
             None => continue,
         };
@@ -2711,7 +2717,10 @@ fn looks_like_zip_container(bytes: &[u8]) -> bool {
         let comment_len = u16::from_le_bytes([eocd[20], eocd[21]]) as usize;
 
         // Ensure the EOCD record (plus comment) ends at EOF.
-        if i + EOCD_MIN_LEN + comment_len != bytes.len() {
+        let Some(full_end) = eocd_end.checked_add(comment_len) else {
+            continue;
+        };
+        if full_end != bytes.len() {
             continue;
         }
 
@@ -2725,7 +2734,10 @@ fn looks_like_zip_container(bytes: &[u8]) -> bool {
         }
 
         // Ensure the central directory begins with a file header signature.
-        if bytes.get(cd_offset..cd_offset + 4) != Some(b"PK\x01\x02") {
+        let Some(cd_sig_end) = cd_offset.checked_add(4) else {
+            continue;
+        };
+        if bytes.get(cd_offset..cd_sig_end) != Some(b"PK\x01\x02") {
             continue;
         }
 

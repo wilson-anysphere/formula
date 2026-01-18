@@ -4789,10 +4789,15 @@ fn import_biff8_shared_formulas(
                     if cce == 0 {
                         continue;
                     }
-                    if data.len() < 22 + cce {
+                    let Some(rgce_end) = 22usize.checked_add(cce) else {
+                        continue;
+                    };
+                    if data.len() < rgce_end {
                         continue;
                     }
-                    let rgce = &data[22..22 + cce];
+                    let Some(rgce) = data.get(22..rgce_end) else {
+                        continue;
+                    };
                     if rgce.len() >= 5 && rgce[0] == PTG_EXP {
                         let anchor_row = u16::from_le_bytes([rgce[1], rgce[2]]);
                         let anchor_col = u16::from_le_bytes([rgce[3], rgce[4]]);
@@ -5008,10 +5013,15 @@ fn sanitize_biff8_wide_ptgexp_formulas_for_calamine(stream: &[u8]) -> Option<Vec
         if cce <= 5 {
             continue;
         }
-        if data.len() < 22 + cce {
+        let Some(rgce_end) = 22usize.checked_add(cce) else {
+            continue;
+        };
+        if data.len() < rgce_end {
             continue;
         }
-        let rgce = &data[22..22 + cce];
+        let Some(rgce) = data.get(22..rgce_end) else {
+            continue;
+        };
         let Some(&ptg) = rgce.first() else {
             continue;
         };
@@ -5353,17 +5363,38 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
             // Copy the header bytes we have. If the first fragment is truncated (<14 bytes), fill
             // missing header bytes with zeros; this matches common "all lengths are zero" layouts.
             let header_copy_len = original_len.min(14).min(len);
-            payload[..header_copy_len]
-                .copy_from_slice(&out[data_start..data_start.saturating_add(header_copy_len)]);
+            let Some(header_copy_end) = data_start.checked_add(header_copy_len) else {
+                continue;
+            };
+            let Some(src) = out.get(data_start..header_copy_end) else {
+                continue;
+            };
+            payload[..header_copy_len].copy_from_slice(src);
 
             // Copy any bytes present after the fixed header in the first fragment.
             let mut write_cursor = 14usize.min(len);
             if original_len > 14 && write_cursor < len {
-                let src_start = data_start + 14;
-                let src_end = data_start + original_len;
-                let copy_len = src_end.saturating_sub(src_start).min(len - write_cursor);
-                payload[write_cursor..write_cursor + copy_len]
-                    .copy_from_slice(&out[src_start..src_start + copy_len]);
+                let Some(src_start) = data_start.checked_add(14) else {
+                    continue;
+                };
+                let src_end = data_end;
+                if src_start > src_end {
+                    continue;
+                }
+                let copy_len = (src_end - src_start).min(len - write_cursor);
+                let Some(write_end) = write_cursor.checked_add(copy_len) else {
+                    continue;
+                };
+                let Some(src_copy_end) = src_start.checked_add(copy_len) else {
+                    continue;
+                };
+                let Some(dst) = payload.get_mut(write_cursor..write_end) else {
+                    continue;
+                };
+                let Some(src) = out.get(src_start..src_copy_end) else {
+                    continue;
+                };
+                dst.copy_from_slice(src);
                 write_cursor = write_cursor.saturating_add(copy_len);
             }
 
@@ -5386,27 +5417,44 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                     }
                 }
                 skip = skip.min(cont_len);
-                let src_start = cont_start.saturating_add(skip);
-                let src_end = cont_start.saturating_add(cont_len);
+                let Some(src_start) = cont_start.checked_add(skip) else {
+                    break;
+                };
+                let Some(src_end) = cont_start.checked_add(cont_len) else {
+                    break;
+                };
                 if src_end > out.len() || src_start > src_end {
                     break;
                 }
                 let copy_len = (src_end - src_start).min(len - write_cursor);
-                payload[write_cursor..write_cursor + copy_len]
-                    .copy_from_slice(&out[src_start..src_start + copy_len]);
+                let Some(write_end) = write_cursor.checked_add(copy_len) else {
+                    break;
+                };
+                let Some(src_copy_end) = src_start.checked_add(copy_len) else {
+                    break;
+                };
+                let Some(dst) = payload.get_mut(write_cursor..write_end) else {
+                    break;
+                };
+                let Some(src) = out.get(src_start..src_copy_end) else {
+                    break;
+                };
+                dst.copy_from_slice(src);
                 write_cursor = write_cursor.saturating_add(copy_len);
                 is_first_continue = false;
             }
 
-            let payload_end = data_start.saturating_add(len);
-            if payload_end <= out.len() {
-                out[data_start..payload_end].copy_from_slice(&payload);
+            if let Some(payload_end) = data_start.checked_add(len) {
+                if payload_end <= out.len() {
+                    out[data_start..payload_end].copy_from_slice(&payload);
+                }
             }
         }
 
         // If we still don't have any bytes at `payload[14..]`, we can't prevent calamine from
         // panicking while indexing `buf[0]`. Mask the record id so calamine ignores it.
-        if len <= 14 || data_start.saturating_add(len) > out.len() {
+        let payload_end = data_start.checked_add(len).unwrap_or(usize::MAX);
+        if len <= 14 || payload_end > out.len() {
             name_mask_offsets.push(header_offset);
             continue;
         }

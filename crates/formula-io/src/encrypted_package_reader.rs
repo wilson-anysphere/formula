@@ -129,8 +129,12 @@ impl<R: Read + Seek> Read for DecryptedPackageReader<R> {
             return Ok(0);
         }
 
-        let remaining = (self.plaintext_len - self.pos) as usize;
-        let to_read = remaining.min(buf.len());
+        let remaining_u64 = self.plaintext_len - self.pos;
+        let remaining = match usize::try_from(remaining_u64) {
+            Ok(v) => v,
+            Err(_) => usize::MAX,
+        };
+        let to_read = buf.len().min(remaining);
         self.read_segmented(&mut buf[..to_read])
     }
 }
@@ -174,15 +178,27 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             }
 
             let take = remaining.min(available);
-            let dst = out.get_mut(written..written + take).ok_or_else(|| {
+            let dst_end = written.checked_add(take).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "output slice index overflow while copying decrypted bytes",
+                )
+            })?;
+            let dst = out.get_mut(written..dst_end).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "output slice bounds are inconsistent with bytes to copy",
                 )
             })?;
+            let src_end = segment_offset.checked_add(take).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "segment offset overflow while copying cached plaintext",
+                )
+            })?;
             let src = self
                 .cached_segment_plain
-                .get(segment_offset..segment_offset + take)
+                .get(segment_offset..src_end)
                 .ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -192,7 +208,7 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             dst.copy_from_slice(src);
 
             self.pos += take as u64;
-            written += take;
+            written = dst_end;
             remaining -= take;
         }
 

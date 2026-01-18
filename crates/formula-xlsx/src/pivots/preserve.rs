@@ -2792,7 +2792,8 @@ fn add_r_namespace_to_root(
 }
 
 fn element_prefix_at(xml: &str, element_start: usize) -> Option<&str> {
-    let rest = xml.get(element_start + 1..)?;
+    let start = element_start.checked_add(1)?;
+    let rest = xml.get(start..)?;
     let end_rel = rest
         .char_indices()
         .find(|(_, c)| c.is_whitespace() || *c == '>' || *c == '/')

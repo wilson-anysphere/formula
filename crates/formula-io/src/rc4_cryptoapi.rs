@@ -473,7 +473,18 @@ impl<R: Read + Seek> Read for Rc4CryptoApiDecryptReader<R> {
             let block_remaining = RC4_BLOCK_SIZE - in_block_offset;
             let chunk_len = remaining.min(block_remaining);
 
-            let out = &mut buf[written..written + chunk_len];
+            let out_end = written.checked_add(chunk_len).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "output slice overflow while reading EncryptedPackage",
+                )
+            })?;
+            let out = buf.get_mut(written..out_end).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "output slice out of bounds while reading EncryptedPackage",
+                )
+            })?;
             let n = self.inner.read(out)?;
             if n == 0 {
                 if written == 0 {

@@ -333,34 +333,35 @@ impl<'a> RecordReader<'a> {
 
     pub(crate) fn read_u8(&mut self) -> Result<u8, Error> {
         let b = *self.data.get(self.offset).ok_or(Error::UnexpectedEof)?;
-        self.offset += 1;
+        self.offset = self
+            .offset
+            .checked_add(1)
+            .filter(|&o| o <= self.data.len())
+            .ok_or(Error::UnexpectedEof)?;
         Ok(b)
     }
 
     pub(crate) fn read_u16(&mut self) -> Result<u16, Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + 2)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += 2;
+        let start = self.offset;
+        let end = start.checked_add(2).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(u16::from_le_bytes([raw[0], raw[1]]))
     }
 
     pub(crate) fn read_u32(&mut self) -> Result<u32, Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + 4)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += 4;
+        let start = self.offset;
+        let end = start.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
     }
 
     fn read_f64(&mut self) -> Result<f64, Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + 8)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += 8;
+        let start = self.offset;
+        let end = start.checked_add(8).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(f64::from_le_bytes([
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
         ]))
@@ -391,11 +392,10 @@ impl<'a> RecordReader<'a> {
 
     pub(crate) fn read_utf16_chars(&mut self, len_chars: usize) -> Result<String, Error> {
         let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-        let raw = self
-            .data
-            .get(self.offset..self.offset + byte_len)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += byte_len;
+        let start = self.offset;
+        let end = start.checked_add(byte_len).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
 
         // Avoid allocating a full `Vec<u16>` for attacker-controlled string lengths; decode
         // UTF-16LE directly into a `String`. This keeps peak memory closer to the final UTF-8
@@ -1649,7 +1649,11 @@ fn build_rich_text_from_runs(
 
     for i in 0..paired.len() {
         let start = paired[i].0;
-        let end = paired.get(i + 1).map(|(s, _)| *s).unwrap_or(char_len);
+        let end = i
+            .checked_add(1)
+            .and_then(|j| paired.get(j))
+            .map(|(s, _)| *s)
+            .unwrap_or(char_len);
         let seg = slice_by_char_range(text, start, end).to_string();
         segments.push((seg, RichTextRunStyle::default()));
         out_formats.push(paired[i].1.clone());
@@ -1826,10 +1830,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         // the simple vs flagged UTF-16 start offsets based on which slice looks
                         // more like UTF-16LE text.
                         let cch = {
-                            let raw = rr
-                                .data
-                                .get(start_offset..start_offset + 4)
+                            let end = start_offset
+                                .checked_add(4)
                                 .ok_or(Error::UnexpectedEof)?;
+                            let raw = rr.data.get(start_offset..end).ok_or(Error::UnexpectedEof)?;
                             u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize
                         };
                         let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
@@ -2079,10 +2083,12 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             Ok((flags, candidate)) => {
                                 let cce_offset = rr.offset;
                                 let mut accept = false;
-                                if let Some(raw) = rr.data.get(cce_offset..cce_offset + 4) {
+                                let cce_end = cce_offset.checked_add(4);
+                                if let Some(raw) = cce_end.and_then(|end| rr.data.get(cce_offset..end))
+                                {
                                     let cce = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])
                                         as usize;
-                                    let rgce_offset = cce_offset + 4;
+                                    let rgce_offset = cce_end.unwrap_or(rr.data.len());
                                     if let Some(rgce_end) = rgce_offset.checked_add(cce) {
                                         if rgce_end <= rr.data.len() {
                                             accept = true;
@@ -2332,18 +2338,19 @@ fn parse_rgce_tail(tail: &[u8]) -> Option<(Vec<u8>, usize)> {
     // - [flags: u16][cce: u32][rgce...]
     // - [flags: u32][cce: u32][rgce...]
 
-    for &(prefix, cce_offset) in &[(0usize, 0usize), (2, 2), (4, 4)] {
-        if tail.len() < prefix + 4 {
+    for &(_prefix, cce_offset) in &[(0usize, 0usize), (2, 2), (4, 4)] {
+        let cce_end = cce_offset.checked_add(4)?;
+        if tail.len() < cce_end {
             continue;
         }
-        let cce =
-            u32::from_le_bytes(tail.get(cce_offset..cce_offset + 4)?.try_into().ok()?) as usize;
-        let rgce_start = prefix + 4;
-        if tail.len() < rgce_start + cce {
+        let cce = u32::from_le_bytes(tail.get(cce_offset..cce_end)?.try_into().ok()?) as usize;
+        let rgce_start = cce_end;
+        let rgce_end = rgce_start.checked_add(cce)?;
+        if tail.len() < rgce_end {
             continue;
         }
-        let rgce = tail.get(rgce_start..rgce_start + cce)?.to_vec();
-        return Some((rgce, rgce_start + cce));
+        let rgce = tail.get(rgce_start..rgce_end)?.to_vec();
+        return Some((rgce, rgce_end));
     }
 
     None
@@ -3079,9 +3086,10 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
         if data.len() == expected_len {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
-            let mut offset = 2;
+            let mut offset: usize = 2;
             for _ in 0..cxti {
-                let chunk = data.get(offset..offset + 6)?;
+                let end = offset.checked_add(6)?;
+                let chunk = data.get(offset..end)?;
                 let supbook = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let first = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
                 let last = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
@@ -3090,7 +3098,7 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
                     sheet_first: first,
                     sheet_last: last,
                 });
-                offset += 6;
+                offset = end;
             }
             return Some(out);
         }
@@ -3103,9 +3111,10 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
         if data.len() == expected_len_6 {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
-            let mut offset = 4;
+            let mut offset: usize = 4;
             for _ in 0..cxti {
-                let chunk = data.get(offset..offset + 6)?;
+                let end = offset.checked_add(6)?;
+                let chunk = data.get(offset..end)?;
                 let supbook = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let first = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
                 let last = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
@@ -3114,7 +3123,7 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
                     sheet_first: first,
                     sheet_last: last,
                 });
-                offset += 6;
+                offset = end;
             }
             return Some(out);
         }
@@ -3123,9 +3132,10 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
         if data.len() == expected_len_12 {
             let mut out = Vec::new();
             let _ = out.try_reserve_exact(cxti);
-            let mut offset = 4;
+            let mut offset: usize = 4;
             for _ in 0..cxti {
-                let chunk = data.get(offset..offset + 12)?;
+                let end = offset.checked_add(12)?;
+                let chunk = data.get(offset..end)?;
                 let supbook =
                     u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as u16;
                 let first = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
@@ -3135,7 +3145,7 @@ fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
                     sheet_first: first,
                     sheet_last: last,
                 });
-                offset += 12;
+                offset = end;
             }
             return Some(out);
         }

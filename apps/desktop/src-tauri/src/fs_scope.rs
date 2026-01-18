@@ -361,7 +361,9 @@ mod tests {
 
     #[test]
     fn desktop_scope_open_validation_allows_home_file_and_rejects_out_of_scope() {
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let base_dirs = BaseDirs::new().expect("base dirs");
         let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
@@ -384,7 +386,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn desktop_scope_includes_xdg_downloads_dir_outside_home() {
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let config_dir = tempfile::tempdir().expect("config tempdir");
         let downloads_dir = tempfile::tempdir().expect("downloads tempdir");
@@ -421,7 +425,9 @@ mod tests {
 
     #[test]
     fn desktop_scope_save_validation_allows_nonexistent_home_path_and_rejects_out_of_scope() {
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let base_dirs = BaseDirs::new().expect("base dirs");
         let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");

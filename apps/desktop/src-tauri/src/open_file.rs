@@ -45,7 +45,8 @@ pub fn extract_open_file_paths_from_argv(argv: &[String], cwd: Option<&Path>) ->
     // Treat argv as untrusted: a malicious sender can invoke the app with a huge argv list to
     // force unbounded allocations and/or expensive file signature sniffing. Bound the output to
     // the same cap as the pending open-file IPC queue.
-    let mut out_rev = Vec::with_capacity(MAX_OPEN_FILE_PENDING_PATHS.min(argv.len()));
+    let mut out_rev: Vec<PathBuf> = Vec::new();
+    let _ = out_rev.try_reserve(MAX_OPEN_FILE_PENDING_PATHS.min(argv.len()));
     for arg in argv.iter().rev() {
         if out_rev.len() >= MAX_OPEN_FILE_PENDING_PATHS {
             break;
@@ -74,10 +75,10 @@ pub fn extract_open_file_paths_from_argv(argv: &[String], cwd: Option<&Path>) ->
 /// user action wins"). The caps are aligned with the pending open-file IPC queue enforced by
 /// [`crate::open_file_ipc::OpenFileState`].
 pub fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
-    let mut seen = HashSet::<String>::with_capacity(
-        MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()),
-    );
-    let mut out_rev = Vec::with_capacity(MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()));
+    let mut seen = HashSet::<String>::new();
+    let _ = seen.try_reserve(MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()));
+    let mut out_rev: Vec<String> = Vec::new();
+    let _ = out_rev.try_reserve(MAX_OPEN_FILE_PENDING_PATHS.min(paths.len()));
     let mut bytes = 0usize;
 
     // Walk backwards so we keep the most recent file-open requests, then reverse at the end to

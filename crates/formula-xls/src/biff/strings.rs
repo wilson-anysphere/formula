@@ -218,18 +218,24 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
 
     if flags & STR_FLAG_RICH_TEXT != 0 {
         // cRun (optional)
-        if input.len() < offset + 2 {
+        let Some(end) = offset.checked_add(2) else {
+            return Some(String::new());
+        };
+        if input.len() < end {
             return Some(String::new());
         }
-        offset += 2;
+        offset = end;
     }
 
     if flags & STR_FLAG_EXT != 0 {
         // cbExtRst (optional)
-        if input.len() < offset + 4 {
+        let Some(end) = offset.checked_add(4) else {
+            return Some(String::new());
+        };
+        if input.len() < end {
             return Some(String::new());
         }
-        offset += 4;
+        offset = end;
     }
 
     let is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;

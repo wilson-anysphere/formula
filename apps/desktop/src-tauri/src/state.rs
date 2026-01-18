@@ -757,7 +757,8 @@ impl AppState {
             let before_order: Vec<String> = workbook.sheets.iter().map(|s| s.id.clone()).collect();
 
             let mut seen = HashSet::new();
-            let mut ordered_ids: Vec<String> = Vec::with_capacity(before_order.len());
+            let mut ordered_ids: Vec<String> = Vec::new();
+            let _ = ordered_ids.try_reserve(before_order.len());
 
             for raw in &desired {
                 if raw.is_empty() {
@@ -809,7 +810,8 @@ impl AppState {
 
         // Update persistent storage first so we can fail fast without mutating the in-memory workbook.
         if let Some(persistent) = self.persistent.as_ref() {
-            let mut sheet_uuids = Vec::with_capacity(ordered_ids.len());
+            let mut sheet_uuids = Vec::new();
+            let _ = sheet_uuids.try_reserve(ordered_ids.len());
             for sheet_id in &ordered_ids {
                 let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
                     AppStateError::Persistence(format!(
@@ -829,7 +831,8 @@ impl AppState {
             let workbook = self.get_workbook_mut()?;
 
             let mut remaining = std::mem::take(&mut workbook.sheets);
-            let mut next = Vec::with_capacity(remaining.len());
+            let mut next = Vec::new();
+            let _ = next.try_reserve(remaining.len());
             for id in &ordered_ids {
                 if let Some(idx) = remaining.iter().position(|s| s.id == *id) {
                     next.push(remaining.remove(idx));
@@ -841,13 +844,13 @@ impl AppState {
             // Keep preserved pivot cache sheet indices aligned with the reordered sheet list so
             // index-based worksheetSource rewrites remain correct after a reorder+rename sequence.
             if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
-                let mut old_idx_by_sheet_id: HashMap<&str, usize> =
-                    HashMap::with_capacity(before_order.len());
+                let mut old_idx_by_sheet_id: HashMap<&str, usize> = HashMap::new();
+                let _ = old_idx_by_sheet_id.try_reserve(before_order.len());
                 for (idx, sheet_id) in before_order.iter().enumerate() {
                     old_idx_by_sheet_id.insert(sheet_id.as_str(), idx);
                 }
-                let mut new_idx_by_old: HashMap<usize, usize> =
-                    HashMap::with_capacity(before_order.len());
+                let mut new_idx_by_old: HashMap<usize, usize> = HashMap::new();
+                let _ = new_idx_by_old.try_reserve(before_order.len());
                 for (new_idx, sheet_id) in ordered_ids.iter().enumerate() {
                     if let Some(old_idx) = old_idx_by_sheet_id.get(sheet_id.as_str()) {
                         new_idx_by_old.insert(*old_idx, new_idx);
@@ -1712,7 +1715,8 @@ impl AppState {
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
             let sheet_name = sheet.name.clone();
 
-            let mut coords = Vec::with_capacity(row_count.saturating_mul(col_count));
+            let mut coords = Vec::new();
+            let _ = coords.try_reserve(row_count.saturating_mul(col_count));
             for row in start_row..=end_row {
                 for col in start_col..=end_col {
                     let mut cell = sheet
@@ -1919,8 +1923,11 @@ impl AppState {
         self.dirty = false;
         self.undo_stack.clear();
         self.redo_stack.clear();
-        self.workbook_info()
-            .expect("workbook_info should succeed right after load")
+        self.workbook_info().unwrap_or_else(|_| WorkbookInfoData {
+            path: None,
+            origin_path: None,
+            sheets: Vec::new(),
+        })
     }
 
     pub fn load_workbook_persistent(
@@ -2498,11 +2505,11 @@ impl AppState {
                         // Defense-in-depth: avoid retaining arbitrarily large baseline snapshots in
                         // memory after save. Dropping the baseline forces subsequent saves to use the
                         // regeneration-based path (instead of patching from stale bytes).
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
                             bytes.len(),
                             max_origin_xlsx_bytes
-                        );
+                        ));
                         workbook.origin_xlsx_bytes = None;
                     }
                 }
@@ -2510,11 +2517,11 @@ impl AppState {
                 if bytes.len() <= max_origin_xlsx_bytes {
                     workbook.origin_xlsx_bytes = Some(bytes);
                 } else {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
                         bytes.len(),
                         max_origin_xlsx_bytes
-                    );
+                    ));
                     workbook.origin_xlsx_bytes = None;
                 }
             }
@@ -2913,10 +2920,12 @@ impl AppState {
             None
         };
 
-        let mut rows_out = Vec::with_capacity(row_count);
+        let mut rows_out = Vec::new();
+        let _ = rows_out.try_reserve(row_count);
         for (r_off, (value_row, cell_row)) in values.into_iter().zip(cells.into_iter()).enumerate()
         {
-            let mut row_out = Vec::with_capacity(col_count);
+            let mut row_out = Vec::new();
+            let _ = row_out.try_reserve(col_count);
             for (c_off, (engine_value, cell)) in
                 value_row.into_iter().zip(cell_row.into_iter()).enumerate()
             {
@@ -3371,7 +3380,7 @@ impl AppState {
         }
 
         // Validate sheet ids early so we don't register unusable pivots.
-        let workbook = self.workbook.as_ref().expect("checked is_some above");
+        let workbook = self.workbook.as_ref().ok_or(AppStateError::NoWorkbookLoaded)?;
         if workbook.sheet(&source_sheet_id).is_none() {
             return Err(AppStateError::UnknownSheet(source_sheet_id));
         }
@@ -3502,10 +3511,7 @@ impl AppState {
         // "recalculate all formulas" action, so we re-feed existing formulas to mark them
         // dirty before recalculating.
         let formulas = {
-            let workbook = self
-                .workbook
-                .as_ref()
-                .expect("checked workbook is_some above");
+            let workbook = self.workbook.as_ref().ok_or(AppStateError::NoWorkbookLoaded)?;
             workbook
                 .sheets
                 .iter()
@@ -3631,8 +3637,10 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
 
-        let mut cells = Vec::with_capacity(changing_cells.len());
-        let mut values = Vec::with_capacity(changing_cells.len());
+        let mut cells = Vec::new();
+        let _ = cells.try_reserve(changing_cells.len());
+        let mut values = Vec::new();
+        let _ = values.try_reserve(changing_cells.len());
         for cell in changing_cells {
             let (resolved_sheet_id, row, col) =
                 resolve_cell_ref(workbook, sheet_id, &default_sheet.name, &cell)?;
@@ -4775,7 +4783,8 @@ fn format_auditing_cells(
     active_sheet_name: &str,
     cells: Vec<(usize, CellAddr)>,
 ) -> Vec<String> {
-    let mut out = Vec::with_capacity(cells.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve(cells.len());
     for (sheet_idx, addr) in cells {
         let Some(sheet) = workbook.sheets.get(sheet_idx) else {
             continue;
@@ -5195,8 +5204,8 @@ fn refresh_pivot_registration(
         .map_err(|e| AppStateError::Pivot(e.to_string()))?;
 
     let mut updates = Vec::new();
-    let mut style_writes: Vec<(formula_model::CellRef, u32)> =
-        Vec::with_capacity(row_count.saturating_mul(col_count));
+    let mut style_writes: Vec<(formula_model::CellRef, u32)> = Vec::new();
+    let _ = style_writes.try_reserve(row_count.saturating_mul(col_count));
     let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
 
     {
@@ -5448,7 +5457,8 @@ fn coord_to_a1(row: usize, col: usize) -> String {
 }
 
 fn quote_sheet_name(name: &str) -> String {
-    let mut out = String::with_capacity(name.len().saturating_add(2));
+    let mut out = String::new();
+    let _ = out.try_reserve(name.len().saturating_add(2));
     formula_model::push_excel_single_quoted_identifier(&mut out, name);
     out
 }
@@ -8062,7 +8072,8 @@ mod tests {
                 (None, None) => '/',
             };
 
-            let mut out = String::with_capacity(dir.len() + 1);
+            let mut out = String::new();
+            let _ = out.try_reserve(dir.len().saturating_add(1));
             out.push_str(dir);
             out.push(sep);
             out

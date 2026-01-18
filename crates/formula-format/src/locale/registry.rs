@@ -430,7 +430,21 @@ fn group_thousands(int_part: &str, sep: char) -> String {
     let mut idx = first_group;
     while idx < len {
         out.push(sep);
-        out.push_str(&int_part[idx..idx + 3]);
+        let end = match idx.checked_add(3) {
+            Some(v) => v,
+            None => {
+                debug_assert!(false, "thousands group end overflow (idx={idx})");
+                break;
+            }
+        };
+        let Some(group) = int_part.get(idx..end) else {
+            debug_assert!(
+                false,
+                "thousands group out of range (idx={idx}, end={end}, len={len})"
+            );
+            break;
+        };
+        out.push_str(group);
         idx += 3;
     }
 

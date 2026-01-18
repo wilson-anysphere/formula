@@ -384,7 +384,9 @@ async fn download_to_path_with_progress(
     }
     let tmp_path =
         tmp_path.ok_or_else(|| "failed to create a temporary file for Pyodide download".to_string())?;
-    let mut file = file.unwrap();
+    let mut file = file.ok_or_else(|| {
+        "failed to create a temporary file handle for Pyodide download".to_string()
+    })?;
 
     let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
@@ -485,7 +487,10 @@ pub async fn ensure_pyodide_assets_in_dir(
             Ok(false) => missing.push(*spec),
             Err(err) => {
                 // Corrupt/unreadable file: treat as missing and allow re-download.
-                eprintln!("[pyodide] failed to hash cached asset {:?}: {err}", dest);
+                crate::stdio::stderrln(format_args!(
+                    "[pyodide] failed to hash cached asset {:?}: {err}",
+                    dest
+                ));
                 missing.push(*spec);
             }
         }

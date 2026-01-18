@@ -334,29 +334,45 @@ pub(crate) fn looks_like_zip(bytes: &[u8]) -> bool {
     let search_window = EOCD_LEN + 65_535;
     let start = bytes.len().saturating_sub(search_window);
 
-    for i in (start..=bytes.len() - 4).rev() {
-        if bytes[i..i + 4] != EOCD_SIG {
+    let Some(max_i) = bytes.len().checked_sub(4) else {
+        return false;
+    };
+    for i in (start..=max_i).rev() {
+        let Some(sig_end) = i.checked_add(4) else {
+            continue;
+        };
+        let Some(sig) = bytes.get(i..sig_end) else {
+            continue;
+        };
+        if sig != EOCD_SIG.as_slice() {
             continue;
         }
         // Fixed-size EOCD must fit.
-        if i + EOCD_LEN > bytes.len() {
+        let Some(eocd_end) = i.checked_add(EOCD_LEN) else {
+            continue;
+        };
+        if eocd_end > bytes.len() {
             continue;
         }
+        let Some(eocd) = bytes.get(i..eocd_end) else {
+            continue;
+        };
 
-        let disk_no = u16::from_le_bytes([bytes[i + 4], bytes[i + 5]]);
-        let cd_disk_no = u16::from_le_bytes([bytes[i + 6], bytes[i + 7]]);
-        let entries_disk = u16::from_le_bytes([bytes[i + 8], bytes[i + 9]]);
-        let entries_total = u16::from_le_bytes([bytes[i + 10], bytes[i + 11]]);
+        let disk_no = u16::from_le_bytes([eocd[4], eocd[5]]);
+        let cd_disk_no = u16::from_le_bytes([eocd[6], eocd[7]]);
+        let entries_disk = u16::from_le_bytes([eocd[8], eocd[9]]);
+        let entries_total = u16::from_le_bytes([eocd[10], eocd[11]]);
         let cd_size =
-            u32::from_le_bytes([bytes[i + 12], bytes[i + 13], bytes[i + 14], bytes[i + 15]])
-                as usize;
+            u32::from_le_bytes([eocd[12], eocd[13], eocd[14], eocd[15]]) as usize;
         let cd_offset =
-            u32::from_le_bytes([bytes[i + 16], bytes[i + 17], bytes[i + 18], bytes[i + 19]])
-                as usize;
-        let comment_len = u16::from_le_bytes([bytes[i + 20], bytes[i + 21]]) as usize;
+            u32::from_le_bytes([eocd[16], eocd[17], eocd[18], eocd[19]]) as usize;
+        let comment_len = u16::from_le_bytes([eocd[20], eocd[21]]) as usize;
 
         // EOCD record should end at EOF (including comment).
-        if i + EOCD_LEN + comment_len != bytes.len() {
+        let Some(full_end) = eocd_end.checked_add(comment_len) else {
+            continue;
+        };
+        if full_end != bytes.len() {
             continue;
         }
 
@@ -366,14 +382,20 @@ pub(crate) fn looks_like_zip(bytes: &[u8]) -> bool {
         }
 
         // Basic bounds checks.
-        if cd_offset >= bytes.len() || cd_offset.checked_add(cd_size).is_none() {
+        let Some(cd_end) = cd_offset.checked_add(cd_size) else {
+            continue;
+        };
+        if cd_offset >= bytes.len() {
             continue;
         }
-        if cd_offset + cd_size > i {
+        if cd_end > i {
             continue;
         }
         // Central directory file header signature `PK\x01\x02`.
-        if bytes.get(cd_offset..cd_offset + 4) != Some(b"PK\x01\x02") {
+        let Some(cd_sig_end) = cd_offset.checked_add(4) else {
+            continue;
+        };
+        if bytes.get(cd_offset..cd_sig_end) != Some(b"PK\x01\x02") {
             continue;
         }
 

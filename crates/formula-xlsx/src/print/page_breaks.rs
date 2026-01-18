@@ -131,8 +131,9 @@ pub fn calculate_pages(
 fn starts_to_segments(starts: &[u32], end_inclusive: u32) -> Vec<(u32, u32)> {
     let mut segments = Vec::new();
     for (idx, start) in starts.iter().enumerate() {
-        let end = starts
-            .get(idx + 1)
+        let end = idx
+            .checked_add(1)
+            .and_then(|j| starts.get(j))
             .map(|next| next.saturating_sub(1))
             .unwrap_or(end_inclusive);
         if *start <= end {

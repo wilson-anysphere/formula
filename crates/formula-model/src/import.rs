@@ -443,7 +443,16 @@ impl<R: Read> Read for Utf16ToUtf8Reader<R> {
             if self.out_pos < self.out_buf.len() {
                 let available = self.out_buf.len() - self.out_pos;
                 let n = out.len().min(available);
-                out[..n].copy_from_slice(&self.out_buf[self.out_pos..self.out_pos + n]);
+                let src_end = self.out_pos.checked_add(n).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "UTF-16 transcoder offset overflow")
+                })?;
+                let src = self.out_buf.get(self.out_pos..src_end).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "UTF-16 transcoder source out of range")
+                })?;
+                let dst = out.get_mut(..n).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "UTF-16 transcoder destination out of range")
+                })?;
+                dst.copy_from_slice(src);
                 self.out_pos += n;
                 if self.out_pos == self.out_buf.len() {
                     self.out_buf.clear();

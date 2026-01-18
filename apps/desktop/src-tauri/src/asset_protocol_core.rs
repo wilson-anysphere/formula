@@ -116,7 +116,8 @@ fn validate_asset_path(path: &str) -> bool {
 fn detect_mime_type(file: &mut fs::File, path: &str, len: u64) -> io::Result<(String, Option<Vec<u8>>)> {
     // Read a small prefix for magic bytes; this is bounded and safe even for very large files.
     let nbytes = len.min(8192);
-    let mut magic_buf = Vec::with_capacity(nbytes as usize);
+    let mut magic_buf: Vec<u8> = Vec::new();
+    let _ = magic_buf.try_reserve(usize::try_from(nbytes).unwrap_or(usize::MAX));
     let old_pos = file.stream_position()?;
     (&mut *file).take(nbytes).read_to_end(&mut magic_buf)?;
     file.seek(SeekFrom::Start(old_pos))?;
@@ -183,12 +184,14 @@ pub fn handle_asset_request(
 
     let path = request.path;
     if !validate_asset_path(path) {
-        eprintln!("[asset protocol] invalid path \"{path}\"");
+        crate::stdio::stderrln(format_args!("[asset protocol] invalid path \"{path}\""));
         return resp(403);
     }
 
     if !is_allowed_by_scope(path) {
-        eprintln!("[asset protocol] path not allowed by scope: {path}");
+        crate::stdio::stderrln(format_args!(
+            "[asset protocol] path not allowed by scope: {path}"
+        ));
         return resp(403);
     }
 
@@ -230,9 +233,9 @@ pub fn handle_asset_request(
     if let Some(range_value) = range_header {
         let nbytes = range_value.raw.len();
         if nbytes > MAX_RANGE_HEADER_BYTES {
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[asset protocol] refusing overly large Range header: {path} (bytes={nbytes}, limit={MAX_RANGE_HEADER_BYTES})"
-            );
+            ));
             return resp_with_body(413, "text/plain", b"range header is too large".to_vec());
         }
     }
@@ -240,9 +243,9 @@ pub fn handle_asset_request(
     let range_header = range_header.and_then(|r| r.value);
 
     if range_header.is_none() && request.method != AssetMethod::Head && len > MAX_NON_RANGE_ASSET_BYTES {
-        eprintln!(
+        crate::stdio::stderrln(format_args!(
             "[asset protocol] refusing to serve large file without Range: {path} (size={len}, limit={MAX_NON_RANGE_ASSET_BYTES})"
-        );
+        ));
         return resp_with_body(
             413,
             "text/plain",
@@ -292,10 +295,10 @@ pub fn handle_asset_request(
         };
 
         if ranges.len() > MAX_RANGES {
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[asset protocol] too many ranges requested: {path} (count={})",
                 ranges.len()
-            );
+            ));
             return resp(413);
         }
 
@@ -310,7 +313,8 @@ pub fn handle_asset_request(
             end = start + (end - start).min(len - start).min(MAX_RANGE_LEN_BYTES - 1);
             let nbytes = end + 1 - start;
 
-            let mut buf = Vec::with_capacity(nbytes as usize);
+            let mut buf: Vec<u8> = Vec::new();
+            let _ = buf.try_reserve(usize::try_from(nbytes).unwrap_or(usize::MAX));
             if let Err(err) = file.seek(SeekFrom::Start(start)) {
                 return resp_with_body(
                     500,
@@ -361,9 +365,9 @@ pub fn handle_asset_request(
             total_range_bytes = total_range_bytes.saturating_add(end + 1 - start);
         }
         if total_range_bytes > MAX_NON_RANGE_ASSET_BYTES {
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[asset protocol] refusing to serve multi-range response larger than limit: {path} (bytes={total_range_bytes}, limit={MAX_NON_RANGE_ASSET_BYTES})"
-            );
+            ));
             return resp(413);
         }
 
@@ -386,7 +390,8 @@ pub fn handle_asset_request(
 
         // Pre-size to avoid repeated reallocations. The multipart framing overhead is small and is
         // intentionally excluded from the size cap to preserve existing behavior.
-        let mut buf = Vec::with_capacity(total_range_bytes as usize);
+        let mut buf: Vec<u8> = Vec::new();
+        let _ = buf.try_reserve(usize::try_from(total_range_bytes).unwrap_or(usize::MAX));
         for (start, end) in ranges {
             if let Err(err) = buf.write_all(boundary_sep.as_bytes()) {
                 return resp_with_body(
@@ -420,7 +425,8 @@ pub fn handle_asset_request(
             }
 
             let nbytes = end + 1 - start;
-            let mut local_buf = Vec::with_capacity(nbytes as usize);
+            let mut local_buf: Vec<u8> = Vec::new();
+            let _ = local_buf.try_reserve(usize::try_from(nbytes).unwrap_or(usize::MAX));
             if let Err(err) = file.seek(SeekFrom::Start(start)) {
                 return resp_with_body(
                     500,
@@ -463,7 +469,8 @@ pub fn handle_asset_request(
     let buf = if let Some(bytes) = read_bytes {
         bytes
     } else {
-        let mut local_buf = Vec::with_capacity(len as usize);
+        let mut local_buf: Vec<u8> = Vec::new();
+        let _ = local_buf.try_reserve(usize::try_from(len).unwrap_or(usize::MAX));
         if let Err(err) = file.read_to_end(&mut local_buf) {
             return resp_with_body(
                 500,

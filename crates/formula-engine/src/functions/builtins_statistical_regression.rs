@@ -518,7 +518,21 @@ fn predict_for_known_xy(parsed: &ParsedXY, predict_row: impl Fn(&[f64]) -> f64) 
 
     for (row_idx, &obs_idx) in parsed.kept_obs_indices.iter().enumerate() {
         let base = row_idx * parsed.p;
-        let row = &parsed.x[base..base + parsed.p];
+        let end = match base.checked_add(parsed.p) {
+            Some(v) => v,
+            None => {
+                debug_assert!(false, "predict row slice end overflow (base={base}, p={})", parsed.p);
+                return Value::Error(ErrorKind::Num);
+            }
+        };
+        let Some(row) = parsed.x.get(base..end) else {
+            debug_assert!(
+                false,
+                "predict row slice out of range (base={base}, end={end}, x_len={})",
+                parsed.x.len()
+            );
+            return Value::Error(ErrorKind::Num);
+        };
         let yhat = predict_row(row);
         out[obs_idx] = if yhat.is_finite() {
             Value::Number(yhat)

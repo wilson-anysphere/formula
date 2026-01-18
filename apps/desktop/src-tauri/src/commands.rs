@@ -557,7 +557,9 @@ fn sheet_formatting_payload_for_ipc(sheet_id: &str, raw: Option<&JsonValue>) -> 
         MAX_SHEET_FORMATTING_METADATA_BYTES,
         "Sheet formatting metadata",
     ) {
-        eprintln!("[sheet formatting] {err} for sheet {sheet_id}; returning default formatting");
+        crate::stdio::stderrln(format_args!(
+            "[sheet formatting] {err} for sheet {sheet_id}; returning default formatting"
+        ));
         return default_sheet_formatting_payload();
     }
 
@@ -643,7 +645,11 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_RUNS_PER_COL)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_FORMATTING_RUNS_PER_COL));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -711,7 +717,11 @@ impl<'de> Deserialize<'de> for LimitedSheetRowFormatDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_ROW_DELTAS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_FORMATTING_ROW_DELTAS));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -771,7 +781,11 @@ impl<'de> Deserialize<'de> for LimitedSheetColFormatDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_COL_DELTAS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_FORMATTING_COL_DELTAS));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -831,7 +845,11 @@ impl<'de> Deserialize<'de> for LimitedSheetCellFormatDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_CELL_DELTAS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_FORMATTING_CELL_DELTAS));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -891,7 +909,11 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunsByColDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_FORMATTING_RUN_COLS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_FORMATTING_RUN_COLS));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -986,7 +1008,11 @@ impl<'de> Deserialize<'de> for LimitedSheetColWidthDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_VIEW_COL_WIDTH_DELTAS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_VIEW_COL_WIDTH_DELTAS));
+                        out
+                    }
                     None => Vec::new(),
                 };
                 for _ in 0..MAX_SHEET_VIEW_COL_WIDTH_DELTAS {
@@ -1045,7 +1071,11 @@ impl<'de> Deserialize<'de> for LimitedSheetRowHeightDeltas {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS));
+                        out
+                    }
                     None => Vec::new(),
                 };
                 for _ in 0..MAX_SHEET_VIEW_ROW_HEIGHT_DELTAS {
@@ -1769,7 +1799,11 @@ impl<'de> Deserialize<'de> for LimitedF64Vec {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_RANGE_DIM)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_RANGE_DIM));
+                        out
+                    }
                     None => Vec::new(),
                 };
                 for _ in 0..MAX_RANGE_DIM {
@@ -1831,7 +1865,11 @@ where
                 A: de::SeqAccess<'de>,
             {
                 let mut out = match seq.size_hint() {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_LEN)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_LEN));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -2302,6 +2340,22 @@ fn app_error(err: AppStateError) -> String {
     err.to_string()
 }
 
+#[cfg(feature = "desktop")]
+fn lock_app_state(shared: &SharedAppState) -> Result<std::sync::MutexGuard<'_, AppState>, String> {
+    shared
+        .lock()
+        .map_err(|_| "app state lock is poisoned".to_string())
+}
+
+#[cfg(feature = "desktop")]
+fn lock_macro_trust_store(
+    shared: &SharedMacroTrustStore,
+) -> Result<std::sync::MutexGuard<'_, crate::macro_trust::MacroTrustStore>, String> {
+    shared
+        .lock()
+        .map_err(|_| "macro trust store lock is poisoned".to_string())
+}
+
 #[cfg(any(feature = "desktop", test))]
 fn coerce_save_path_to_xlsx(path: &str) -> String {
     let mut buf = PathBuf::from(path);
@@ -2508,7 +2562,8 @@ fn decode_utf16_xml(mut bytes: &[u8]) -> Result<String, String> {
     let big_endian = big_endian.unwrap_or(false);
 
     bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
-    let mut units = Vec::with_capacity(bytes.len() / 2);
+    let mut units: Vec<u16> = Vec::new();
+    let _ = units.try_reserve(bytes.len() / 2);
     for chunk in bytes.chunks_exact(2) {
         units.push(if big_endian {
             u16::from_be_bytes([chunk[0], chunk[1]])
@@ -2761,7 +2816,7 @@ pub async fn open_workbook(
 
     let shared = state.inner().clone();
     let info = tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state
             .load_workbook_persistent(workbook, location)
             .map_err(app_error)
@@ -2797,7 +2852,7 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
         let mut workbook = crate::file_io::Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
 
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state
             .load_workbook_persistent(workbook, location)
             .map_err(app_error)
@@ -2838,7 +2893,7 @@ pub async fn add_sheet(
     let after_sheet_id = after_sheet_id.map(|id| id.into_inner());
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let sheet_id = sheet_id.or(id);
         let sheet = state
             .add_sheet(name, sheet_id, after_sheet_id, index)
@@ -2868,7 +2923,7 @@ pub async fn add_sheet_with_id(
     let after_sheet_id = after_sheet_id.map(|id| id.into_inner());
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state
             .add_sheet_with_id(sheet_id, name, after_sheet_id, index)
             .map_err(app_error)?;
@@ -2894,7 +2949,7 @@ pub async fn reorder_sheets(
         .collect();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state.reorder_sheets(sheet_ids).map_err(app_error)?;
         Ok::<_, String>(())
     })
@@ -2913,7 +2968,7 @@ pub async fn rename_sheet(
     let name = name.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state.rename_sheet(&sheet_id, name).map_err(app_error)?;
         Ok::<_, String>(())
     })
@@ -2935,7 +2990,7 @@ pub async fn set_sheet_visibility(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         set_sheet_visibility_core(&mut state, &sheet_id, visibility).map_err(app_error)?;
         Ok::<_, String>(())
     })
@@ -2978,7 +3033,7 @@ pub async fn set_sheet_tab_color(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let tab_color = match tab_color {
             None => None,
             Some(mut color) => {
@@ -3023,7 +3078,7 @@ pub async fn move_sheet(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state.move_sheet(&sheet_id, to_index).map_err(app_error)?;
         Ok::<_, String>(())
     })
@@ -3040,7 +3095,7 @@ pub async fn delete_sheet(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         state.delete_sheet(&sheet_id).map_err(app_error)?;
         Ok::<_, String>(())
     })
@@ -3059,7 +3114,10 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut buf = Vec::with_capacity(metadata.len() as usize);
+    let mut buf: Vec<u8> = Vec::new();
+    let max = crate::ipc_file_limits::MAX_READ_FULL_BYTES.saturating_add(1);
+    let reserve = metadata.len().min(max);
+    let _ = buf.try_reserve(usize::try_from(reserve).unwrap_or(usize::MAX));
     file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
@@ -3189,7 +3247,10 @@ fn read_binary_file_blocking(path: &std::path::Path) -> Result<Vec<u8>, String> 
     crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut buf = Vec::with_capacity(metadata.len() as usize);
+    let mut buf: Vec<u8> = Vec::new();
+    let max = crate::ipc_file_limits::MAX_READ_FULL_BYTES.saturating_add(1);
+    let reserve = metadata.len().min(max);
+    let _ = buf.try_reserve(usize::try_from(reserve).unwrap_or(usize::MAX));
     file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
@@ -3218,7 +3279,8 @@ fn read_binary_file_range_blocking(
     // Pre-allocate based on the expected read size to avoid wasting memory when callers request
     // ranges past EOF (which should return an empty buffer).
     let cap = metadata.len().saturating_sub(offset).min(len as u64) as usize;
-    let mut buf = Vec::with_capacity(cap);
+    let mut buf: Vec<u8> = Vec::new();
+    let _ = buf.try_reserve(cap);
     file.take(len as u64)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
@@ -3807,7 +3869,7 @@ pub fn power_query_state_get(
     ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "power query state", ipc_origin::Verb::Is)?;
 
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let Ok(workbook) = state.get_workbook() else {
         return Ok(None);
     };
@@ -3838,7 +3900,7 @@ pub fn power_query_state_set(
             .map_err(|e| e.to_string())?;
     }
 
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     let Ok(workbook) = state.get_workbook_mut() else {
         return Ok(());
     };
@@ -3914,7 +3976,7 @@ pub async fn sql_get_schema(
 pub fn get_workbook_theme_palette(
     state: State<'_, SharedAppState>,
 ) -> Result<Option<WorkbookThemePalette>, String> {
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let workbook = state.get_workbook().map_err(app_error)?;
     Ok(workbook_theme_palette(workbook))
 }
@@ -3924,7 +3986,7 @@ pub fn get_workbook_theme_palette(
 pub fn list_defined_names(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<DefinedNameInfo>, String> {
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let workbook = state.get_workbook().map_err(app_error)?;
 
     let names = workbook
@@ -3946,7 +4008,7 @@ pub fn list_defined_names(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, String> {
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let workbook = state.get_workbook().map_err(app_error)?;
 
     let tables = workbook
@@ -4258,7 +4320,7 @@ pub async fn list_imported_sheet_background_images(
     )?;
 
     let (origin_bytes, preserved_payloads) = {
-        let state = state.inner().lock().unwrap();
+        let state = lock_app_state(state.inner())?;
         let Ok(workbook) = state.get_workbook() else {
             return Ok(Vec::new());
         };
@@ -4287,7 +4349,9 @@ pub async fn list_imported_sheet_background_images(
         .map_err(|e| e.to_string())?;
     }
 
-    let origin_bytes = origin_bytes.expect("checked origin_bytes above");
+    let Some(origin_bytes) = origin_bytes else {
+        return Ok(Vec::new());
+    };
 
     tauri::async_runtime::spawn_blocking(move || {
         // Best-effort: background image parsing should never prevent workbook interactions.
@@ -4327,7 +4391,10 @@ pub async fn list_imported_chart_objects(
     )?;
 
     let origin_bytes = {
-        let state = state.inner().lock().unwrap();
+        let state = match lock_app_state(state.inner()) {
+            Ok(state) => state,
+            Err(_) => return Ok(Vec::new()),
+        };
         let Ok(workbook) = state.get_workbook() else {
             return Ok(Vec::new());
         };
@@ -4407,7 +4474,10 @@ pub async fn list_imported_embedded_cell_images(
     )?;
 
     let origin_bytes = {
-        let state = state.inner().lock().unwrap();
+        let state = match lock_app_state(state.inner()) {
+            Ok(state) => state,
+            Err(_) => return Ok(Vec::new()),
+        };
         let Ok(workbook) = state.get_workbook() else {
             return Ok(Vec::new());
         };
@@ -4540,7 +4610,15 @@ pub async fn list_imported_drawing_objects(
     )?;
 
     let origin_bytes = {
-        let state = state.inner().lock().unwrap();
+        let state = match lock_app_state(state.inner()) {
+            Ok(state) => state,
+            Err(_) => {
+                return Ok(ImportedDrawingLayerPayload {
+                    drawings: Vec::new(),
+                    images: Vec::new(),
+                })
+            }
+        };
         let Ok(workbook) = state.get_workbook() else {
             return Ok(ImportedDrawingLayerPayload {
                 drawings: Vec::new(),
@@ -4686,7 +4764,7 @@ pub async fn save_workbook(
     let path = path.map(|p| p.into_inner());
     let password = password.map(|p| p.into_inner());
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
-        let state = state.inner().lock().unwrap();
+        let state = lock_app_state(state.inner())?;
         let workbook = state.get_workbook().map_err(app_error)?.clone();
         let storage = state
             .persistent_storage()
@@ -4801,7 +4879,7 @@ pub async fn save_workbook(
     .map_err(|e| e.to_string())??;
 
     {
-        let mut state = state.inner().lock().unwrap();
+        let mut state = lock_app_state(state.inner())?;
         state
             .mark_saved(
                 Some(validated_save_path),
@@ -4820,7 +4898,7 @@ pub async fn save_workbook(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn mark_saved(state: State<'_, SharedAppState>) -> Result<(), String> {
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     state.mark_saved(None, None).map_err(app_error)?;
     Ok(())
 }
@@ -4834,7 +4912,7 @@ pub fn get_cell(
     state: State<'_, SharedAppState>,
 ) -> Result<CellValue, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     cell_value_from_state(&state, &sheet_id, row, col)
 }
 
@@ -4848,7 +4926,7 @@ pub fn get_precedents(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<String>, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     state
         .get_precedents(&sheet_id, row, col, transitive.unwrap_or(false))
         .map_err(app_error)
@@ -4864,7 +4942,7 @@ pub fn get_dependents(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<String>, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     state
         .get_dependents(&sheet_id, row, col, transitive.unwrap_or(false))
         .map_err(app_error)
@@ -4883,7 +4961,7 @@ pub async fn set_cell(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state
             .set_cell(
                 &sheet_id,
@@ -4910,7 +4988,7 @@ pub fn get_range(
     state: State<'_, SharedAppState>,
 ) -> Result<RangeData, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let cells = state
         .get_range(&sheet_id, start_row, start_col, end_row, end_col)
         .map_err(app_error)?;
@@ -4941,7 +5019,7 @@ pub fn get_sheet_used_range(
     state: State<'_, SharedAppState>,
 ) -> Result<Option<SheetUsedRange>, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let workbook = state.get_workbook().map_err(app_error)?;
     let sheet = workbook
         .sheet(&sheet_id)
@@ -4998,7 +5076,7 @@ pub fn get_sheet_formatting(
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
         return Err(app_error(AppStateError::Persistence(
@@ -5023,7 +5101,7 @@ pub fn get_sheet_view_state(
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
         return Err(app_error(AppStateError::Persistence(
@@ -5051,7 +5129,7 @@ pub fn get_sheet_imported_col_properties(
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
         return Err(app_error(AppStateError::Persistence(
@@ -5599,7 +5677,7 @@ pub fn apply_sheet_view_deltas(
         JsonValue::Object(out)
     }
 
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     let sheet_uuid = state
         .persistent_sheet_uuid(payload.sheet_id.as_ref())
         .map_err(app_error)?;
@@ -5671,7 +5749,7 @@ pub fn apply_sheet_formatting_deltas(
     payload: ApplySheetFormattingDeltasRequest,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     apply_sheet_formatting_deltas_inner(&mut state, payload).map_err(app_error)
 }
 
@@ -5689,7 +5767,7 @@ pub async fn set_range(
     let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let normalized = values
             .0
             .into_iter()
@@ -5723,7 +5801,7 @@ pub async fn create_pivot_table(
 ) -> Result<CreatePivotTableResponse, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let (pivot_id, updates) = state
             .create_pivot_table(
                 request.name.into_inner(),
@@ -5760,7 +5838,7 @@ pub async fn refresh_pivot_table(
 ) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state
             .refresh_pivot_table(&request.pivot_id)
             .map_err(app_error)?;
@@ -5777,7 +5855,7 @@ pub async fn refresh_all_pivots(
 ) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state.refresh_all_pivots().map_err(app_error)?;
         Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
     })
@@ -5790,7 +5868,7 @@ pub async fn refresh_all_pivots(
 pub fn list_pivot_tables(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<PivotTableSummary>, String> {
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     Ok(state
         .list_pivot_tables()
         .into_iter()
@@ -5818,7 +5896,7 @@ pub fn list_pivot_tables(
 pub async fn recalculate(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state.recalculate_all().map_err(app_error)?;
         Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
     })
@@ -5831,7 +5909,7 @@ pub async fn recalculate(state: State<'_, SharedAppState>) -> Result<Vec<CellUpd
 pub async fn undo(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state.undo().map_err(app_error)?;
         Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
     })
@@ -5844,7 +5922,7 @@ pub async fn undo(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, S
 pub async fn redo(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let updates = state.redo().map_err(app_error)?;
         Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
     })
@@ -5973,7 +6051,7 @@ pub fn get_sheet_print_settings(
     state: State<'_, SharedAppState>,
 ) -> Result<SheetPrintSettings, String> {
     let sheet_id = sheet_id.into_inner();
-    let state = state.inner().lock().unwrap();
+    let state = lock_app_state(state.inner())?;
     let settings = state.sheet_print_settings(&sheet_id).map_err(app_error)?;
     Ok(from_core_sheet_print_settings(&settings))
 }
@@ -5986,7 +6064,7 @@ pub fn set_sheet_page_setup(
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let sheet_id = sheet_id.into_inner();
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     state
         .set_sheet_page_setup(&sheet_id, to_core_page_setup(&page_setup))
         .map_err(app_error)?;
@@ -6014,7 +6092,7 @@ pub fn set_sheet_print_area(
             .collect()
     });
 
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     state
         .set_sheet_print_area(&sheet_id, print_area)
         .map_err(app_error)?;
@@ -6034,7 +6112,7 @@ pub fn export_sheet_range_pdf(
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let sheet_id = sheet_id.into_inner();
-    let state_guard = state.inner().lock().unwrap();
+    let state_guard = lock_app_state(state.inner())?;
     let workbook = state_guard.get_workbook().map_err(app_error)?;
     let sheet = workbook
         .sheet(&sheet_id)
@@ -6145,7 +6223,11 @@ impl<'de> Deserialize<'de> for LimitedMacroPermissions {
                 use crate::resource_limits::MAX_MACRO_PERMISSION_ENTRIES;
 
                 let mut out = match seq.size_hint() {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX_MACRO_PERMISSION_ENTRIES)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_MACRO_PERMISSION_ENTRIES));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -6351,7 +6433,9 @@ impl<'de> Deserialize<'de> for LimitedPythonNetworkAllowlist {
 
                 let mut out = match seq.size_hint() {
                     Some(hint) => {
-                        Vec::with_capacity(hint.min(MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES))
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES));
+                        out
                     }
                     None => Vec::new(),
                 };
@@ -6500,10 +6584,9 @@ fn compute_workbook_fingerprint(
         return Some(fp.to_string());
     }
     let id = workbook_identity_for_trust(workbook, workbook_id);
-    let vba = workbook
-        .vba_project_bin
-        .as_deref()
-        .expect("checked is_some above");
+    let Some(vba) = workbook.vba_project_bin.as_deref() else {
+        return None;
+    };
     let fp = compute_macro_fingerprint(&id, vba);
     workbook.macro_fingerprint = Some(fp.clone());
     Some(fp)
@@ -6749,8 +6832,8 @@ pub async fn get_macro_security_status(
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
-        let mut state = shared.lock().unwrap();
-        let mut trust_store = trust_shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
+        let mut trust_store = lock_macro_trust_store(&trust_shared)?;
         trust_store.ensure_loaded();
         let workbook = state.get_workbook_mut().map_err(app_error)?;
         build_macro_security_status(workbook, workbook_id, &trust_store)
@@ -6777,8 +6860,8 @@ pub async fn set_macro_trust(
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
-        let mut state = shared.lock().unwrap();
-        let mut trust_store = trust_shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
+        let mut trust_store = lock_macro_trust_store(&trust_shared)?;
 
         let workbook = state.get_workbook_mut().map_err(app_error)?;
         let Some(fingerprint) = compute_workbook_fingerprint(workbook, workbook_id) else {
@@ -6807,7 +6890,7 @@ pub fn get_vba_project(
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     let Some(project) = state.vba_project().map_err(|e| e.to_string())? else {
         return Ok(None);
     };
@@ -6852,7 +6935,7 @@ pub fn list_macros(
 
     let _ = workbook_id;
 
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     state.list_macros().map_err(|e| e.to_string())
 }
 
@@ -6873,7 +6956,7 @@ pub fn set_macro_ui_context(
     ipc_origin::ensure_stable_origin(&window, "macro execution", ipc_origin::Verb::Is)?;
 
     let _ = workbook_id;
-    let mut state = state.inner().lock().unwrap();
+    let mut state = lock_app_state(state.inner())?;
     let selection = selection.map(|rect| crate::state::CellRect {
         start_row: rect.start_row,
         start_col: rect.start_col,
@@ -6905,9 +6988,9 @@ pub async fn run_macro(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let blocked = {
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
             let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
@@ -6952,7 +7035,7 @@ pub async fn run_python_script(
     let code = code.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         crate::python::run_python_script(
             &mut state,
             &code,
@@ -8005,8 +8088,8 @@ pub async fn validate_vba_migration(
         use std::collections::BTreeSet;
 
         let (vba_blocked_result, workbook, macro_ctx) = {
-            let mut state = shared.lock().unwrap();
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut state = lock_app_state(&shared)?;
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
 
             let blocked = {
@@ -8256,9 +8339,9 @@ pub async fn fire_workbook_open(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let blocked = {
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
             let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
@@ -8298,9 +8381,9 @@ pub async fn fire_workbook_before_close(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let blocked = {
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
             let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
@@ -8345,9 +8428,9 @@ pub async fn fire_worksheet_change(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let blocked = {
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
             let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
@@ -8399,9 +8482,9 @@ pub async fn fire_selection_change(
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = shared.lock().unwrap();
+        let mut state = lock_app_state(&shared)?;
         let blocked = {
-            let mut trust_store = trust_shared.lock().unwrap();
+            let mut trust_store = lock_macro_trust_store(&trust_shared)?;
             trust_store.ensure_loaded();
             let workbook_id = workbook_id.as_ref().map(|id| id.as_ref());
             let workbook = state.get_workbook_mut().map_err(app_error)?;
@@ -10209,7 +10292,8 @@ mod tests {
     fn apply_sheet_formatting_deltas_request_rejects_too_many_runs_per_column() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_RUNS_PER_COL;
 
-        let mut runs = Vec::with_capacity(max + 1);
+        let mut runs = Vec::new();
+        let _ = runs.try_reserve(max + 1);
         for idx in 0..=max {
             runs.push(serde_json::json!({
                 "startRow": idx as i64,

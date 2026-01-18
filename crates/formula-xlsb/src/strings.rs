@@ -129,20 +129,22 @@ fn score_candidate(s: &str) -> Option<i32> {
 }
 
 fn decode_len_prefixed_utf16le_u16(data: &[u8], offset: usize) -> Option<String> {
-    let raw_len: [u8; 2] = data.get(offset..offset + 2)?.try_into().ok()?;
+    let len_end = offset.checked_add(2)?;
+    let raw_len: [u8; 2] = data.get(offset..len_end)?.try_into().ok()?;
     let cch = u16::from_le_bytes(raw_len) as usize;
     if cch == 0 {
         return None;
     }
     let bytes_needed = cch.checked_mul(2)?;
-    let start = offset.checked_add(2)?;
+    let start = len_end;
     let end = start.checked_add(bytes_needed)?;
     let raw = data.get(start..end)?;
     decode_utf16le_lossy(raw)
 }
 
 fn decode_len_prefixed_utf16le_u32(data: &[u8], offset: usize) -> Option<String> {
-    let raw_len: [u8; 4] = data.get(offset..offset + 4)?.try_into().ok()?;
+    let len_end = offset.checked_add(4)?;
+    let raw_len: [u8; 4] = data.get(offset..len_end)?.try_into().ok()?;
     let cch = u32::from_le_bytes(raw_len) as usize;
     // Guard against absurd lengths from random data.
     //
@@ -154,7 +156,7 @@ fn decode_len_prefixed_utf16le_u32(data: &[u8], offset: usize) -> Option<String>
         return None;
     }
     let bytes_needed = cch.checked_mul(2)?;
-    let start = offset.checked_add(4)?;
+    let start = len_end;
     let end = start.checked_add(bytes_needed)?;
     let raw = data.get(start..end)?;
     decode_utf16le_lossy(raw)

@@ -255,7 +255,13 @@ fn decrypt_range_by_offset(
         let mut rc4 = Rc4::new(&key[..]);
         drop(key);
         rc4_discard(&mut rc4, in_block);
-        rc4.apply_keystream(&mut bytes[pos..pos + take]);
+        let Some(end) = pos.checked_add(take) else {
+            return;
+        };
+        let Some(chunk) = bytes.get_mut(pos..end) else {
+            return;
+        };
+        rc4.apply_keystream(chunk);
 
         stream_pos = stream_pos.saturating_add(take);
         pos = pos.saturating_add(take);

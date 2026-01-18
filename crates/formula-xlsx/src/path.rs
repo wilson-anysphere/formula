@@ -104,8 +104,14 @@ fn percent_decode_best_effort(input: &str) -> Cow<'_, str> {
     // Only allocate if there is at least one valid percent escape to decode.
     let mut has_valid_escape = false;
     let mut i = first_pct;
-    while i + 2 < bytes.len() {
-        if bytes[i] == b'%' && is_hex_digit(bytes[i + 1]) && is_hex_digit(bytes[i + 2]) {
+    loop {
+        let Some(end) = i.checked_add(3) else {
+            break;
+        };
+        let Some(window) = bytes.get(i..end) else {
+            break;
+        };
+        if window[0] == b'%' && is_hex_digit(window[1]) && is_hex_digit(window[2]) {
             has_valid_escape = true;
             break;
         }
@@ -122,15 +128,26 @@ fn percent_decode_best_effort(input: &str) -> Cow<'_, str> {
     out.extend_from_slice(&bytes[..first_pct]);
     let mut i = first_pct;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() && is_hex_digit(bytes[i + 1]) && is_hex_digit(bytes[i + 2]) {
-            let hi = hex_value(bytes[i + 1]);
-            let lo = hex_value(bytes[i + 2]);
-            out.push((hi << 4) | lo);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
+        if bytes.get(i) == Some(&b'%') {
+            let Some(end) = i.checked_add(3) else {
+                return Cow::Borrowed(input);
+            };
+            if let Some(window) = bytes.get(i..end) {
+                if is_hex_digit(window[1]) && is_hex_digit(window[2]) {
+                    let hi = hex_value(window[1]);
+                    let lo = hex_value(window[2]);
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
         }
+
+        let Some(&b) = bytes.get(i) else {
+            return Cow::Borrowed(input);
+        };
+        out.push(b);
+        i += 1;
     }
 
     match String::from_utf8(out) {

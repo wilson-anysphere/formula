@@ -3035,7 +3035,17 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                 let cell = CellRef::new(row, col);
 
                 let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
-                let Some(rgce) = data.get(22..22 + cce) else {
+                let Some(rgce_end) = 22usize.checked_add(cce) else {
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "overflow computing FORMULA rgce end at offset {} (cce={cce})",
+                            record.offset
+                        ),
+                    );
+                    continue;
+                };
+                let Some(rgce) = data.get(22..rgce_end) else {
                     push_warning_bounded(
                         &mut out.warnings,
                         format!(

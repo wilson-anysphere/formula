@@ -798,9 +798,9 @@ where
         match formula_xlsx::read_part_from_reader_limited(reader, part_name, max_bytes) {
             Ok(bytes) => bytes,
             Err(formula_xlsx::XlsxError::PartTooLarge { part, size, max }) => {
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "warning: dropped oversized xlsx part `{part}` ({size} bytes, max {max})"
-                );
+                ));
                 None
             }
             Err(_) => None,
@@ -1642,18 +1642,23 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
     // - Common (MS-XLSB): [colFirst: u32][colLast: u32][width: u32 (1/256 chars)][xf: u32][grbit: u16][reserved: u16]
     // - Some writers may use u16 column indices + u16 width (BIFF8-like).
 
+    fn read_at<const N: usize>(bytes: &[u8], off: usize) -> Option<[u8; N]> {
+        let end = off.checked_add(N)?;
+        bytes.get(off..end)?.try_into().ok()
+    }
+
     if payload.len() < 4 {
         return None;
     }
 
     let (col_first, col_last, base_offset) = if payload.len() >= 8 {
-        let c1 = u32::from_le_bytes(payload[0..4].try_into().ok()?);
-        let c2 = u32::from_le_bytes(payload[4..8].try_into().ok()?);
+        let c1 = u32::from_le_bytes(read_at::<4>(payload, 0)?);
+        let c2 = u32::from_le_bytes(read_at::<4>(payload, 4)?);
         if c1 < formula_model::EXCEL_MAX_COLS && c2 < formula_model::EXCEL_MAX_COLS && c1 <= c2 {
             (c1, c2, 8)
         } else {
-            let c1 = u16::from_le_bytes(payload[0..2].try_into().ok()?) as u32;
-            let c2 = u16::from_le_bytes(payload[2..4].try_into().ok()?) as u32;
+            let c1 = u16::from_le_bytes(read_at::<2>(payload, 0)?) as u32;
+            let c2 = u16::from_le_bytes(read_at::<2>(payload, 2)?) as u32;
             if c1 < formula_model::EXCEL_MAX_COLS
                 && c2 < formula_model::EXCEL_MAX_COLS
                 && c1 <= c2
@@ -1664,8 +1669,8 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
             }
         }
     } else {
-        let c1 = u16::from_le_bytes(payload[0..2].try_into().ok()?) as u32;
-        let c2 = u16::from_le_bytes(payload[2..4].try_into().ok()?) as u32;
+        let c1 = u16::from_le_bytes(read_at::<2>(payload, 0)?) as u32;
+        let c2 = u16::from_le_bytes(read_at::<2>(payload, 2)?) as u32;
         if c1 < formula_model::EXCEL_MAX_COLS && c2 < formula_model::EXCEL_MAX_COLS && c1 <= c2 {
             (c1, c2, 4)
         } else {
@@ -1676,7 +1681,7 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
     let hidden = if payload.len() >= 4 {
         // Many BIFF layouts encode the column visibility in a `grbit` field near the end.
         let off = payload.len().saturating_sub(4);
-        let options = u16::from_le_bytes(payload[off..off + 2].try_into().ok()?);
+        let options = u16::from_le_bytes(read_at::<2>(payload, off)?);
         (options & 0x0001) != 0
     } else {
         false
@@ -1685,7 +1690,7 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
     let mut width: Option<f32> = None;
 
     if payload.len() >= base_offset + 4 {
-        let raw = u32::from_le_bytes(payload[base_offset..base_offset + 4].try_into().ok()?);
+        let raw = u32::from_le_bytes(read_at::<4>(payload, base_offset)?);
         let candidate = (raw as f32) / 256.0;
         if candidate.is_finite() && candidate > 0.0 && candidate <= 255.0 {
             width = Some(candidate);
@@ -1693,7 +1698,7 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
     }
 
     if width.is_none() && payload.len() >= base_offset + 2 {
-        let raw = u16::from_le_bytes(payload[base_offset..base_offset + 2].try_into().ok()?);
+        let raw = u16::from_le_bytes(read_at::<2>(payload, base_offset)?);
         let candidate = (raw as f32) / 256.0;
         if candidate.is_finite() && candidate > 0.0 && candidate <= 255.0 {
             width = Some(candidate);
@@ -1702,7 +1707,7 @@ fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_mode
 
     if width.is_none() && payload.len() >= base_offset + 8 {
         // Best-effort fallback for alternative encodings; treat the next 8 bytes as f64 chars.
-        let raw = f64::from_le_bytes(payload[base_offset..base_offset + 8].try_into().ok()?);
+        let raw = f64::from_le_bytes(read_at::<8>(payload, base_offset)?);
         if raw.is_finite() && raw > 0.0 && raw <= 255.0 {
             width = Some(raw as f32);
         }
@@ -2290,9 +2295,12 @@ fn patch_vba_and_date_system_in_package_streaming(
         .context("parse subset package for VBA/date system patching")?;
 
     if needs_inject_vba {
+        let Some(vba_project_bin) = workbook.vba_project_bin.clone() else {
+            anyhow::bail!("expected VBA project bytes when injecting vbaProject.bin");
+        };
         pkg.set_part(
             "xl/vbaProject.bin",
-            workbook.vba_project_bin.clone().expect("checked is_some"),
+            vba_project_bin,
         );
         if let Some(sig) = workbook.vba_project_signature_bin.clone() {
             pkg.set_part("xl/vbaProjectSignature.bin", sig);
@@ -2361,8 +2369,8 @@ fn workbook_xml_sheet_order_override(
         return Ok(None);
     }
 
-    let mut info_by_part: HashMap<String, formula_xlsx::WorkbookSheetInfo> =
-        HashMap::with_capacity(worksheet_parts.len());
+    let mut info_by_part: HashMap<String, formula_xlsx::WorkbookSheetInfo> = HashMap::new();
+    let _ = info_by_part.try_reserve(worksheet_parts.len());
     for part in &worksheet_parts {
         info_by_part.insert(
             part.worksheet_part.clone(),
@@ -2375,9 +2383,10 @@ fn workbook_xml_sheet_order_override(
         );
     }
 
-    let mut reordered_infos: Vec<formula_xlsx::WorkbookSheetInfo> =
-        Vec::with_capacity(workbook.sheets.len());
-    let mut reordered_parts: Vec<String> = Vec::with_capacity(workbook.sheets.len());
+    let mut reordered_infos: Vec<formula_xlsx::WorkbookSheetInfo> = Vec::new();
+    let _ = reordered_infos.try_reserve(workbook.sheets.len());
+    let mut reordered_parts: Vec<String> = Vec::new();
+    let _ = reordered_parts.try_reserve(workbook.sheets.len());
     let mut seen_parts: HashSet<String> = HashSet::new();
 
     for sheet in &workbook.sheets {
@@ -2931,16 +2940,16 @@ fn sheet_metadata_part_overrides(
                 // optional worksheet-level metadata (tabColor/cols) rather than failing the entire
                 // save. The original worksheet part will be preserved byte-for-byte by the
                 // streaming patcher.
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "warning: dropped oversized worksheet part `{part}` while patching sheet metadata ({size} bytes, max {max})"
-                );
+                ));
                 continue;
             }
             Err(err) => {
                 // Best-effort: invalid/unsupported worksheet XML should not fail save.
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "warning: failed to read worksheet part `{part_name}` while patching sheet metadata: {err}"
-                );
+                ));
                 continue;
             }
         };
@@ -2948,9 +2957,9 @@ fn sheet_metadata_part_overrides(
         let sheet_xml = match std::str::from_utf8(&sheet_xml_bytes) {
             Ok(xml) => xml,
             Err(err) => {
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "warning: failed to parse worksheet part `{part_name}` as utf8 while patching sheet metadata: {err}"
-                );
+                ));
                 continue;
             }
         };
@@ -3104,15 +3113,15 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
             Ok(Some(_)) => true,
             Ok(None) => false,
             Err(formula_xlsx::XlsxError::PartTooLarge { part, size, max }) => {
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "[save] skipping patch-based save: xlsx part `{part}` is too large ({size} bytes, max {max})"
-                );
+                ));
                 false
             }
             Err(err) => {
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "[save] skipping patch-based save: failed to read xl/workbook.xml: {err}"
-                );
+                ));
                 false
             }
         }
@@ -3241,8 +3250,8 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
                 return Ok(workbook
                     .origin_xlsx_bytes
                     .as_ref()
-                    .expect("origin_xlsx_bytes should be Some when origin_bytes is Some")
-                    .clone());
+                    .cloned()
+                    .unwrap_or_else(|| Arc::<[u8]>::from(origin_bytes)));
             }
 
             let empty_patches = WorkbookCellPatches::default();
@@ -3369,10 +3378,10 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
                 ) {
                     Ok(updated) => bytes = updated,
                     Err(formula_xlsx::print::PrintError::PartTooLarge { part, size, max }) => {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "warning: skipped print settings patch for sheet `{}` because xlsx part `{part}` is too large ({size} bytes, max {max})",
                             sheet_settings.sheet_name
-                        );
+                        ));
                     }
                     Err(err) => {
                         return Err(anyhow::anyhow!(err.to_string()));
@@ -3423,18 +3432,25 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
             .context("parse generated workbook package")?;
 
         if wants_vba {
+                let Some(vba_project_bin) = workbook.vba_project_bin.clone() else {
+                    anyhow::bail!(
+                        "expected VBA project bytes when writing macro-enabled workbook"
+                    );
+                };
             pkg.set_part(
                 "xl/vbaProject.bin",
-                workbook.vba_project_bin.clone().expect("checked is_some"),
+                    vba_project_bin,
             );
         }
         if wants_vba_signature {
+                let Some(signature_bin) = workbook.vba_project_signature_bin.clone() else {
+                    anyhow::bail!(
+                        "expected VBA signature bytes when writing macro-enabled workbook"
+                    );
+                };
             pkg.set_part(
                 "xl/vbaProjectSignature.bin",
-                workbook
-                    .vba_project_signature_bin
-                    .clone()
-                    .expect("checked is_some"),
+                    signature_bin,
             );
         }
 
@@ -3681,24 +3697,25 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         }
 
         if edits_by_sheet.len() == 1 {
-            let (&sheet_index, edits) = edits_by_sheet.iter().next().expect("non-empty map");
-            let has_text_edits = edits.iter().any(|edit| {
-                matches!(edit.new_value, XlsbCellValue::Text(_))
-                    && edit.new_formula.is_none()
-                    && edit.new_rgcb.is_none()
-            });
-            if has_text_edits {
-                xlsb.save_with_cell_edits_streaming_shared_strings(
-                    &final_out_path,
-                    sheet_index,
-                    edits,
-                )
-                .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
-            } else {
-                xlsb.save_with_cell_edits_streaming(&final_out_path, sheet_index, edits)
+            if let Some((&sheet_index, edits)) = edits_by_sheet.iter().next() {
+                let has_text_edits = edits.iter().any(|edit| {
+                    matches!(edit.new_value, XlsbCellValue::Text(_))
+                        && edit.new_formula.is_none()
+                        && edit.new_rgcb.is_none()
+                });
+                if has_text_edits {
+                    xlsb.save_with_cell_edits_streaming_shared_strings(
+                        &final_out_path,
+                        sheet_index,
+                        edits,
+                    )
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+                } else {
+                    xlsb.save_with_cell_edits_streaming(&final_out_path, sheet_index, edits)
+                        .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         let has_text_edits = edits_by_sheet.values().flatten().any(|edit| {
@@ -3791,9 +3808,9 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
 
     match res {
         Ok(()) => Ok(()),
-        Err(AtomicWriteError::Io(err)) => Err(Err::<(), _>(err)
-            .with_context(|| format!("write xlsb {:?}", path))
-            .unwrap_err()),
+        Err(AtomicWriteError::Io(err)) => {
+            Err(err).with_context(|| format!("write xlsb {:?}", path))
+        }
         Err(AtomicWriteError::Writer(err)) => Err(err),
     }
 }
@@ -4381,7 +4398,8 @@ mod tests {
                     );
                     write_record(&mut patch, END_COL_INFOS_RECORD_ID, &[]);
 
-                    let mut out = Vec::with_capacity(sheet_bin.len() + patch.len());
+                    let mut out: Vec<u8> = Vec::new();
+                    let _ = out.try_reserve(sheet_bin.len().saturating_add(patch.len()));
                     out.extend_from_slice(&sheet_bin[..record_start]);
                     out.extend_from_slice(&patch);
                     out.extend_from_slice(&sheet_bin[record_start..]);
@@ -5109,7 +5127,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
 
         fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
-            let mut out = Vec::with_capacity(4 + payload.len());
+            let mut out: Vec<u8> = Vec::new();
+            let _ = out.try_reserve(4usize.saturating_add(payload.len()));
             out.extend_from_slice(&record_id.to_le_bytes());
             out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
             out.extend_from_slice(payload);

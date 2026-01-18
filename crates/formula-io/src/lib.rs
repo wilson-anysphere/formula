@@ -2208,7 +2208,15 @@ fn decrypt_standard_cryptoapi_rc4_md5_40bit_padded(
     out.try_reserve_exact(output_len)
         .map_err(|_| formula_offcrypto::OffcryptoError::EncryptedPackageAllocationFailed { total_size })?;
     out.resize(output_len, 0);
-    out.copy_from_slice(&encrypted_package_stream[8..8 + output_len]);
+    let end = 8usize.checked_add(output_len).ok_or(
+        formula_offcrypto::OffcryptoError::EncryptedPackageSizeOverflow { total_size },
+    )?;
+    let ciphertext = encrypted_package_stream.get(8..end).ok_or(
+        formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptedPackage ciphertext",
+        },
+    )?;
+    out.copy_from_slice(ciphertext);
 
     // Decrypt in-place, re-keying every 0x200 bytes.
     for (block_index, chunk) in out.chunks_mut(formula_offcrypto::cryptoapi::RC4_BLOCK_LEN).enumerate()
@@ -2330,13 +2338,18 @@ fn parse_standard_encryption_info_lenient(
         .ok_or(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
             context: "EncryptionHeader.sizeExtra underflow",
         })?;
-    let csp_name_bytes = header_bytes.get(hpos..hpos + csp_name_bytes_len).ok_or(
+    let csp_name_end = hpos
+        .checked_add(csp_name_bytes_len)
+        .ok_or(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.cspName overflow",
+        })?;
+    let csp_name_bytes = header_bytes.get(hpos..csp_name_end).ok_or(
         formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
             context: "EncryptionHeader.cspName out of bounds",
         },
     )?;
     let csp_name = decode_utf16le_z_lossy(csp_name_bytes)?;
-    let _header_extra = &header_bytes[hpos + csp_name_bytes_len..];
+    let _header_extra = header_bytes.get(csp_name_end..).unwrap_or_default();
 
     let header = formula_offcrypto::StandardEncryptionHeader {
         flags,
@@ -2351,22 +2364,32 @@ fn parse_standard_encryption_info_lenient(
     };
 
     let salt_size = read_u32_le(encryption_info, &mut pos, "EncryptionVerifier.saltSize")? as usize;
+    let salt_end = pos
+        .checked_add(salt_size)
+        .ok_or(formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptionVerifier.salt",
+        })?;
     let salt = encryption_info
-        .get(pos..pos + salt_size)
+        .get(pos..salt_end)
         .ok_or(formula_offcrypto::OffcryptoError::Truncated {
             context: "EncryptionVerifier.salt",
         })?
         .to_vec();
-    pos += salt_size;
+    pos = salt_end;
 
+    let encrypted_verifier_end = pos
+        .checked_add(16)
+        .ok_or(formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptionVerifier.encryptedVerifier",
+        })?;
     let encrypted_verifier_bytes = encryption_info
-        .get(pos..pos + 16)
+        .get(pos..encrypted_verifier_end)
         .ok_or(formula_offcrypto::OffcryptoError::Truncated {
             context: "EncryptionVerifier.encryptedVerifier",
         })?;
     let mut encrypted_verifier = [0u8; 16];
     encrypted_verifier.copy_from_slice(encrypted_verifier_bytes);
-    pos += 16;
+    pos = encrypted_verifier_end;
 
     let verifier_hash_size =
         read_u32_le(encryption_info, &mut pos, "EncryptionVerifier.verifierHashSize")?;
@@ -3746,38 +3769,50 @@ fn decrypt_encrypted_ooxml_package(
             })?;
 
         let mut offset = header_end;
+        let salt_size_end = offset.checked_add(4).ok_or_else(|| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?;
         let salt_size: usize = encryption_info
-            .get(offset..offset + 4)
+            .get(offset..salt_size_end)
             .and_then(|b| b.try_into().ok())
             .map(u32::from_le_bytes)
             .ok_or_else(|| Error::InvalidPassword {
                 path: path.to_path_buf(),
             })? as usize;
-        offset += 4;
+        offset = salt_size_end;
+        let salt_end = offset.checked_add(salt_size).ok_or_else(|| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?;
         let salt = encryption_info
-            .get(offset..offset + salt_size)
+            .get(offset..salt_end)
             .ok_or_else(|| Error::InvalidPassword {
                 path: path.to_path_buf(),
             })?
             .to_vec();
-        offset += salt_size;
+        offset = salt_end;
 
+        let encrypted_verifier_end = offset.checked_add(16).ok_or_else(|| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?;
         let encrypted_verifier = encryption_info
-            .get(offset..offset + 16)
+            .get(offset..encrypted_verifier_end)
             .ok_or_else(|| Error::InvalidPassword {
                 path: path.to_path_buf(),
             })?
             .to_vec();
-        offset += 16;
+        offset = encrypted_verifier_end;
 
+        let verifier_hash_size_end = offset.checked_add(4).ok_or_else(|| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?;
         let verifier_hash_size = encryption_info
-            .get(offset..offset + 4)
+            .get(offset..verifier_hash_size_end)
             .and_then(|b| b.try_into().ok())
             .map(u32::from_le_bytes)
             .ok_or_else(|| Error::InvalidPassword {
                 path: path.to_path_buf(),
             })?;
-        offset += 4;
+        offset = verifier_hash_size_end;
 
         // `encryptedVerifierHash` is variable-length:
         // - RC4: exactly `verifierHashSize` bytes (no padding).
@@ -3794,10 +3829,15 @@ fn decrypt_encrypted_ooxml_package(
             verifier_hash_len
         } else {
             // AES block padding.
-            (verifier_hash_len + 15) / 16 * 16
+            verifier_hash_len.saturating_add(15) / 16 * 16
         };
+        let encrypted_hash_end = offset.checked_add(encrypted_hash_len).ok_or_else(|| {
+            Error::InvalidPassword {
+                path: path.to_path_buf(),
+            }
+        })?;
         let encrypted_verifier_hash = encryption_info
-            .get(offset..offset + encrypted_hash_len)
+            .get(offset..encrypted_hash_end)
             .ok_or_else(|| Error::InvalidPassword {
                 path: path.to_path_buf(),
             })?
@@ -3938,7 +3978,12 @@ fn decrypt_encrypted_ooxml_package(
                 let f_aes = flags_raw & 0x0000_0020 != 0;
 
                 if !f_cryptoapi || f_aes != alg_is_aes {
-                    if encryption_info.len() >= header_start + 4 {
+                    let Some(flags_end) = header_start.checked_add(4) else {
+                        return Err(Error::InvalidPassword {
+                            path: path.to_path_buf(),
+                        });
+                    };
+                    if encryption_info.len() >= flags_end {
                         let mut new_flags = flags_raw | 0x0000_0004; // fCryptoAPI
                         if alg_is_aes {
                             new_flags |= 0x0000_0020; // fAES
@@ -3957,8 +4002,9 @@ fn decrypt_encrypted_ooxml_package(
                                 path: path.to_path_buf(),
                             });
                         };
-                        buf[header_start..header_start + 4]
-                            .copy_from_slice(&new_flags.to_le_bytes());
+                        if let Some(flags_buf) = buf.get_mut(header_start..flags_end) {
+                            flags_buf.copy_from_slice(&new_flags.to_le_bytes());
+                        }
                         enc_info = buf.as_slice();
                         res = formula_office_crypto::decrypt_standard_encrypted_package(
                             enc_info,
@@ -4844,7 +4890,13 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
                 ));
             }
             let new_pos_u64 = new_pos as u64;
-            self.inner.seek(SeekFrom::Start(self.base + new_pos_u64))?;
+            let abs = self.base.checked_add(new_pos_u64).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "ciphertext offset overflow while seeking",
+                )
+            })?;
+            self.inner.seek(SeekFrom::Start(abs))?;
             Ok(new_pos_u64)
         }
     }

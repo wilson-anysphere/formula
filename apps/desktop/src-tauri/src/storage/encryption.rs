@@ -166,7 +166,9 @@ impl KeychainProvider for InMemoryKeychainProvider {
         service: &str,
         account: &str,
     ) -> Result<Option<Vec<u8>>, DesktopStorageEncryptionError> {
-        let guard = self.inner.lock().expect("keychain mutex poisoned");
+        let guard = self.inner.lock().map_err(|_| {
+            DesktopStorageEncryptionError::Keychain("keychain mutex is poisoned".to_string())
+        })?;
         Ok(guard.get(&(service.to_string(), account.to_string())).cloned())
     }
 
@@ -176,13 +178,17 @@ impl KeychainProvider for InMemoryKeychainProvider {
         account: &str,
         secret: &[u8],
     ) -> Result<(), DesktopStorageEncryptionError> {
-        let mut guard = self.inner.lock().expect("keychain mutex poisoned");
+        let mut guard = self.inner.lock().map_err(|_| {
+            DesktopStorageEncryptionError::Keychain("keychain mutex is poisoned".to_string())
+        })?;
         guard.insert((service.to_string(), account.to_string()), secret.to_vec());
         Ok(())
     }
 
     fn delete_secret(&self, service: &str, account: &str) -> Result<(), DesktopStorageEncryptionError> {
-        let mut guard = self.inner.lock().expect("keychain mutex poisoned");
+        let mut guard = self.inner.lock().map_err(|_| {
+            DesktopStorageEncryptionError::Keychain("keychain mutex is poisoned".to_string())
+        })?;
         guard.remove(&(service.to_string(), account.to_string()));
         Ok(())
     }
@@ -565,12 +571,12 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
             StoreFile::Plaintext(plain) => plain.schema_version,
         };
 
-        eprintln!(
+        crate::stdio::stderrln(format_args!(
             "[storage] WARNING: resetting encrypted store at {:?} because keyring was missing in the OS keychain (service={}, account={}). Existing data was discarded.",
             self.file_path,
             self.keychain_service,
             self.keychain_account
-        );
+        ));
 
         // Create a fresh keyring and re-initialize the store as empty ciphertext.
         //

@@ -170,18 +170,27 @@ fn decode_array_constant(
     ptg: u8,
 ) -> Result<String, DecodeRgceError> {
     let mut i = *pos;
-    if rgcb.len().saturating_sub(i) < 4 {
+    let needed = 4;
+    let Some(end) = i.checked_add(needed) else {
         return Err(DecodeRgceError::UnexpectedEof {
             offset: ptg_offset,
             ptg,
-            needed: 4,
+            needed,
             remaining: rgcb.len().saturating_sub(i),
         });
-    }
+    };
+    let Some(hdr) = rgcb.get(i..end) else {
+        return Err(DecodeRgceError::UnexpectedEof {
+            offset: ptg_offset,
+            ptg,
+            needed,
+            remaining: rgcb.len().saturating_sub(i),
+        });
+    };
 
-    let cols_minus1 = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
-    let rows_minus1 = u16::from_le_bytes([rgcb[i + 2], rgcb[i + 3]]) as usize;
-    i += 4;
+    let cols_minus1 = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
+    let rows_minus1 = u16::from_le_bytes([hdr[2], hdr[3]]) as usize;
+    i = end;
 
     let cols = cols_minus1.saturating_add(1);
     let rows = rows_minus1.saturating_add(1);
@@ -207,37 +216,78 @@ fn decode_array_constant(
                     remaining: rgcb.len().saturating_sub(i),
                 });
             }
-            let ty = rgcb[i];
+            let Some(&ty) = rgcb.get(i) else {
+                return Err(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: 1,
+                    remaining: rgcb.len().saturating_sub(i),
+                });
+            };
             i += 1;
             match ty {
                 0x00 => {}
                 0x01 => {
-                    if rgcb.len().saturating_sub(i) < 8 {
+                    let needed = 8;
+                    if rgcb.len().saturating_sub(i) < needed {
                         return Err(DecodeRgceError::UnexpectedEof {
                             offset: ptg_offset,
                             ptg,
-                            needed: 8,
+                            needed,
                             remaining: rgcb.len().saturating_sub(i),
                         });
                     }
+                    let Some(end) = i.checked_add(needed) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
+                    let Some(chunk) = rgcb.get(i..end) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
                     let mut bytes = [0u8; 8];
-                    bytes.copy_from_slice(&rgcb[i..i + 8]);
-                    i += 8;
+                    bytes.copy_from_slice(chunk);
+                    i = end;
                     if write!(&mut out, "{}", f64::from_le_bytes(bytes)).is_err() {
                         debug_assert!(false, "write! to String should be infallible");
                     }
                 }
                 0x02 => {
-                    if rgcb.len().saturating_sub(i) < 2 {
+                    let needed = 2;
+                    if rgcb.len().saturating_sub(i) < needed {
                         return Err(DecodeRgceError::UnexpectedEof {
                             offset: ptg_offset,
                             ptg,
-                            needed: 2,
+                            needed,
                             remaining: rgcb.len().saturating_sub(i),
                         });
                     }
-                    let cch = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
-                    i += 2;
+                    let Some(end) = i.checked_add(needed) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
+                    let Some(cch_bytes) = rgcb.get(i..end) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
+                    let cch = u16::from_le_bytes([cch_bytes[0], cch_bytes[1]]) as usize;
+                    i = end;
                     let byte_len = cch.saturating_mul(2);
                     if rgcb.len().saturating_sub(i) < byte_len {
                         return Err(DecodeRgceError::UnexpectedEof {
@@ -247,8 +297,23 @@ fn decode_array_constant(
                             remaining: rgcb.len().saturating_sub(i),
                         });
                     }
-                    let raw = &rgcb[i..i + byte_len];
-                    i += byte_len;
+                    let Some(end) = i.checked_add(byte_len) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: byte_len,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
+                    let Some(raw) = rgcb.get(i..end) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: byte_len,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
+                    i = end;
 
                     out.push('"');
                     let iter = raw
@@ -276,7 +341,14 @@ fn decode_array_constant(
                             remaining: rgcb.len().saturating_sub(i),
                         });
                     }
-                    let b = rgcb[i];
+                    let Some(&b) = rgcb.get(i) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: 1,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
                     i += 1;
                     out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
@@ -289,7 +361,14 @@ fn decode_array_constant(
                             remaining: rgcb.len().saturating_sub(i),
                         });
                     }
-                    let code = rgcb[i];
+                    let Some(&code) = rgcb.get(i) else {
+                        return Err(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: 1,
+                            remaining: rgcb.len().saturating_sub(i),
+                        });
+                    };
                     i += 1;
                     let text = biff_error_literal(code).unwrap_or("#UNKNOWN!");
                     out.push_str(text);
@@ -577,21 +656,25 @@ fn consume_rgcb_arrays_in_subexpression(
                 }
                 let cce = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
                 i += 2;
-                if !has_remaining(rgce, i, cce) {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: cce,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
+                let end = i.checked_add(cce).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: cce,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
+                let subexpr = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: cce,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
                 consume_rgcb_arrays_in_subexpression(
-                    &rgce[i..i + cce],
+                    subexpr,
                     rgcb,
                     rgcb_pos,
                     rgce_base_offset.saturating_add(i),
                 )?;
-                i += cce;
+                i = end;
             }
 
             // PtgRefErr: [row: u32][col: u16]
@@ -931,8 +1014,19 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                let raw = &rgce[i..i + byte_len];
-                i += byte_len;
+                let end = i.checked_add(byte_len).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: byte_len,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
+                let raw = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: byte_len,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
+                i = end;
 
                 // BIFF strings are UTF-16LE, but real-world files can contain malformed UTF-16.
                 // Stay best-effort (matching `formula-xlsb`) by decoding lossily instead of
@@ -996,8 +1090,20 @@ fn decode_rgce_impl(
                         // trying a handful of plausible interpretations and choosing the most
                         // likely one based on simple heuristics.
                         let mut payload = [0u8; 12];
-                        payload.copy_from_slice(&rgce[i..i + 12]);
-                        i += 12;
+                        let end = i.checked_add(12).ok_or(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: 12,
+                            remaining: rgce.len().saturating_sub(i),
+                        })?;
+                        let slice = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed: 12,
+                            remaining: rgce.len().saturating_sub(i),
+                        })?;
+                        payload.copy_from_slice(slice);
+                        i = end;
 
                         let decoded = decode_ptg_list_payload_best_effort(&payload);
 
@@ -1166,8 +1272,20 @@ fn decode_rgce_impl(
                     });
                 }
                 let mut bytes = [0u8; 8];
-                bytes.copy_from_slice(&rgce[i..i + 8]);
-                i += 8;
+                let end = i.checked_add(8).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: 8,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
+                let slice = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: 8,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
+                bytes.copy_from_slice(slice);
+                i = end;
                 stack.push(ExprFragment::new(f64::from_le_bytes(bytes).to_string()));
             }
             // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
@@ -1542,14 +1660,26 @@ fn decode_rgce_impl(
                 // Advance the `rgcb` cursor through any array-constant blocks referenced by the
                 // nested stream so later `PtgArray` tokens stay aligned.
                 if let Some(rgcb) = rgcb {
-                    consume_rgcb_arrays_in_subexpression(
-                        &rgce[i..i + cce],
-                        rgcb,
-                        &mut rgcb_pos,
-                        i,
-                    )?;
+                    let end = i.checked_add(cce).ok_or(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: cce,
+                        remaining: rgce.len().saturating_sub(i),
+                    })?;
+                    let subexpr = rgce.get(i..end).ok_or(DecodeRgceError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: cce,
+                        remaining: rgce.len().saturating_sub(i),
+                    })?;
+                    consume_rgcb_arrays_in_subexpression(subexpr, rgcb, &mut rgcb_pos, i)?;
                 }
-                i += cce;
+                i = i.checked_add(cce).ok_or(DecodeRgceError::UnexpectedEof {
+                    offset: ptg_offset,
+                    ptg,
+                    needed: cce,
+                    remaining: rgce.len().saturating_sub(i),
+                })?;
             }
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
@@ -2031,7 +2161,21 @@ fn push_utf16le_u16_len_with_rollback(
         out.extend_from_slice(&unit.to_le_bytes());
     }
 
-    out[len_pos..len_pos + 2].copy_from_slice(&cch.to_le_bytes());
+    let end = match len_pos.checked_add(2) {
+        Some(v) => v,
+        None => {
+            out.truncate(start_len);
+            return Err(EncodeRgceError::Unsupported(err_msg));
+        }
+    };
+    let dst = match out.get_mut(len_pos..end) {
+        Some(v) => v,
+        None => {
+            out.truncate(start_len);
+            return Err(EncodeRgceError::Unsupported(err_msg));
+        }
+    };
+    dst.copy_from_slice(&cch.to_le_bytes());
     Ok(())
 }
 

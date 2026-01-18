@@ -232,10 +232,13 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
 
 fn has_xlfn_prefix_at(bytes: &[u8], i: usize) -> bool {
     let prefix_len = XL_FN_PREFIX_BYTES.len();
-    if i.saturating_add(prefix_len) > bytes.len() {
+    let Some(end) = i.checked_add(prefix_len) else {
         return false;
-    }
-    bytes[i..i + prefix_len].eq_ignore_ascii_case(XL_FN_PREFIX_BYTES)
+    };
+    let Some(slice) = bytes.get(i..end) else {
+        return false;
+    };
+    slice.eq_ignore_ascii_case(XL_FN_PREFIX_BYTES)
 }
 
 pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {

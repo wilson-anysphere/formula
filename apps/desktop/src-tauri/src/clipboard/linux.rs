@@ -23,7 +23,8 @@ fn normalize_target_name(target: &str) -> String {
 }
 
 fn latin1_encode_if_possible(text: &str) -> Option<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(text.len());
+    let mut bytes: Vec<u8> = Vec::new();
+    let _ = bytes.try_reserve(text.len());
     for ch in text.chars() {
         let codepoint = ch as u32;
         if codepoint > 0xFF {
@@ -56,7 +57,8 @@ fn decode_latin1(bytes: &[u8]) -> Option<String> {
         return None;
     }
 
-    let mut out = String::with_capacity(bytes.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len());
     for &b in bytes {
         out.push(char::from(b));
     }

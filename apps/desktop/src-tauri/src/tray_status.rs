@@ -14,7 +14,10 @@ pub struct TrayStatusState {
 impl TrayStatusState {
     pub fn set_tray(&self, tray: TrayIcon) {
         {
-            let mut guard = self.tray.lock().expect("tray mutex poisoned");
+            let mut guard = self
+                .tray
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *guard = Some(tray);
         }
 
@@ -23,7 +26,7 @@ impl TrayStatusState {
         let status = self
             .status
             .lock()
-            .expect("tray status mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         if let Some(status) = status {
             let _ = self.apply_status(&status);
@@ -46,17 +49,20 @@ impl TrayStatusState {
             "idle" => "Formula — Idle",
             "syncing" => "Formula — Syncing…",
             "error" => "Formula — Error",
-            _ => unreachable!("normalize_status checked above"),
+            other => return Err(format!("invalid tray status '{other}'")),
         };
 
         let icon = match status {
             "idle" => tauri::include_image!("icons/tray.png"),
             "syncing" => tauri::include_image!("icons/tray-syncing.png"),
             "error" => tauri::include_image!("icons/tray-error.png"),
-            _ => unreachable!("normalize_status checked above"),
+            other => return Err(format!("invalid tray status '{other}'")),
         };
 
-        let guard = self.tray.lock().expect("tray mutex poisoned");
+        let guard = self
+            .tray
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(tray) = guard.as_ref() else {
             // Not ready yet; the status is still recorded and will be applied when the tray icon
             // is registered.
@@ -78,7 +84,10 @@ impl TrayStatusState {
         let status = Self::normalize_status(status)?;
 
         let should_apply = {
-            let mut guard = self.status.lock().expect("tray status mutex poisoned");
+            let mut guard = self
+                .status
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if guard.as_deref() == Some(status) {
                 false
             } else {

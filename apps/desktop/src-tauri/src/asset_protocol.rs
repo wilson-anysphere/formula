@@ -32,12 +32,18 @@ pub fn handler<R: Runtime>(
     if !ctx.app_handle().config().app.security.asset_protocol.enable {
         // Match the intent of Tauri's built-in asset protocol: if it's not enabled,
         // deny all requests.
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .header("Access-Control-Allow-Origin", &window_origin)
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(Vec::new())
-            .unwrap();
+        let mut response = crate::http_response::response(StatusCode::FORBIDDEN, Vec::new());
+        crate::http_response::insert_header(
+            &mut response,
+            "Access-Control-Allow-Origin",
+            &window_origin,
+        );
+        crate::http_response::insert_header(
+            &mut response,
+            "Cross-Origin-Resource-Policy",
+            "cross-origin",
+        );
+        return response;
     }
 
     // Security boundary: `asset://` is effectively "read a local file inside the configured scope".
@@ -55,14 +61,25 @@ pub fn handler<R: Runtime>(
             .as_ref()
             .map(|u| u.to_string())
             .unwrap_or_else(|| "<unknown>".to_string());
-        eprintln!("[asset protocol] blocked request from untrusted origin: {url_for_log}");
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .header(CONTENT_TYPE, "text/plain")
-            .header("Access-Control-Allow-Origin", &window_origin)
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(b"asset protocol is only available from trusted app-local origins".to_vec())
-            .unwrap();
+        crate::stdio::stderrln(format_args!(
+            "[asset protocol] blocked request from untrusted origin: {url_for_log}"
+        ));
+        let mut response = crate::http_response::response_with_content_type(
+            StatusCode::FORBIDDEN,
+            "text/plain",
+            b"asset protocol is only available from trusted app-local origins".to_vec(),
+        );
+        crate::http_response::insert_header(
+            &mut response,
+            "Access-Control-Allow-Origin",
+            &window_origin,
+        );
+        crate::http_response::insert_header(
+            &mut response,
+            "Cross-Origin-Resource-Policy",
+            "cross-origin",
+        );
+        return response;
     }
 
     let scope = match Scope::new(
@@ -71,13 +88,22 @@ pub fn handler<R: Runtime>(
     ) {
         Ok(scope) => scope,
         Err(err) => {
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header(CONTENT_TYPE, "text/plain")
-                .header("Access-Control-Allow-Origin", &window_origin)
-                .header("Cross-Origin-Resource-Policy", "cross-origin")
-                .body(format!("failed to initialize asset protocol scope: {err}").into_bytes())
-                .unwrap();
+            let mut response = crate::http_response::response_with_content_type(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "text/plain",
+                format!("failed to initialize asset protocol scope: {err}").into_bytes(),
+            );
+            crate::http_response::insert_header(
+                &mut response,
+                "Access-Control-Allow-Origin",
+                &window_origin,
+            );
+            crate::http_response::insert_header(
+                &mut response,
+                "Cross-Origin-Resource-Policy",
+                "cross-origin",
+            );
+            return response;
         }
     };
 
@@ -147,8 +173,8 @@ fn get_response(
     });
 
     let path = if method == AssetMethod::Get || method == AssetMethod::Head {
-        // skip leading `/`
-        percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..])
+        let raw = request.uri().path().strip_prefix('/').unwrap_or("");
+        percent_encoding::percent_decode(raw.as_bytes())
             .decode_utf8_lossy()
             .to_string()
     } else {
@@ -164,14 +190,18 @@ fn get_response(
         |path| scope.is_allowed(path),
     );
 
-    let mut builder = Response::builder()
-        .status(StatusCode::from_u16(core_resp.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
-        .header("Access-Control-Allow-Origin", window_origin)
-        .header("Cross-Origin-Resource-Policy", "cross-origin");
-
+    let mut response = crate::http_response::response(
+        StatusCode::from_u16(core_resp.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        core_resp.body,
+    );
+    crate::http_response::insert_header(&mut response, "Access-Control-Allow-Origin", window_origin);
+    crate::http_response::insert_header(
+        &mut response,
+        "Cross-Origin-Resource-Policy",
+        "cross-origin",
+    );
     for (k, v) in core_resp.headers {
-        builder = builder.header(k, v);
+        crate::http_response::insert_header(&mut response, &k, &v);
     }
-
-    builder.body(core_resp.body).unwrap()
+    response
 }

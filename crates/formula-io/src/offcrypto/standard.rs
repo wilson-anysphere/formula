@@ -223,12 +223,20 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let b = self.bytes.get(self.pos..self.pos + 2).ok_or(OffcryptoError::Truncated {
+        let start = self.pos;
+        let Some(end) = start.checked_add(needed) else {
+            return Err(OffcryptoError::Truncated {
+                context,
+                needed,
+                available: self.remaining(),
+            });
+        };
+        let b = self.bytes.get(start..end).ok_or(OffcryptoError::Truncated {
             context,
             needed,
             available: self.remaining(),
         })?;
-        self.pos += 2;
+        self.pos = end;
         Ok(u16::from_le_bytes([b[0], b[1]]))
     }
 
@@ -241,12 +249,20 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let b = self.bytes.get(self.pos..self.pos + 4).ok_or(OffcryptoError::Truncated {
+        let start = self.pos;
+        let Some(end) = start.checked_add(needed) else {
+            return Err(OffcryptoError::Truncated {
+                context,
+                needed,
+                available: self.remaining(),
+            });
+        };
+        let b = self.bytes.get(start..end).ok_or(OffcryptoError::Truncated {
             context,
             needed,
             available: self.remaining(),
         })?;
-        self.pos += 4;
+        self.pos = end;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
@@ -258,12 +274,20 @@ impl<'a> Reader<'a> {
                 available: self.remaining(),
             });
         }
-        let out = self.bytes.get(self.pos..self.pos + len).ok_or(OffcryptoError::Truncated {
+        let start = self.pos;
+        let Some(end) = start.checked_add(len) else {
+            return Err(OffcryptoError::Truncated {
+                context,
+                needed: len,
+                available: self.remaining(),
+            });
+        };
+        let out = self.bytes.get(start..end).ok_or(OffcryptoError::Truncated {
             context,
             needed: len,
             available: self.remaining(),
         })?;
-        self.pos += len;
+        self.pos = end;
         Ok(out)
     }
 
@@ -713,24 +737,35 @@ fn verifier_hash_matches(
             verifier_hash_size: info.verifier.verifier_hash_size,
         });
     }
-    if plaintext.len() < 16 + verifier_hash_size {
+    let needed = 16usize.checked_add(verifier_hash_size).ok_or(OffcryptoError::InvalidVerifierHashSize {
+        verifier_hash_size: info.verifier.verifier_hash_size,
+    })?;
+    if plaintext.len() < needed {
         return Err(OffcryptoError::Truncated {
             context: "decrypted verifier blob",
-            needed: 16 + verifier_hash_size,
+            needed,
             available: plaintext.len(),
         });
     }
 
-    let verifier = &plaintext[0..16];
-    let verifier_hash = &plaintext[16..16 + verifier_hash_size];
+    let verifier = plaintext.get(..16).ok_or(OffcryptoError::Truncated {
+        context: "decrypted verifier blob",
+        needed,
+        available: plaintext.len(),
+    })?;
+    let verifier_hash = plaintext.get(16..needed).ok_or(OffcryptoError::Truncated {
+        context: "decrypted verifier blob",
+        needed,
+        available: plaintext.len(),
+    })?;
 
     let expected_full = hash(info.header.alg_id_hash, &[verifier])?;
-    if verifier_hash_size > expected_full.len() {
+    let Some(expected_truncated) = expected_full.get(..verifier_hash_size) else {
         return Err(OffcryptoError::InvalidVerifierHashSize {
             verifier_hash_size: info.verifier.verifier_hash_size,
         });
-    }
-    Ok(ct_eq(&expected_full[0..verifier_hash_size], verifier_hash))
+    };
+    Ok(ct_eq(expected_truncated, verifier_hash))
 }
 
 fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
@@ -799,7 +834,7 @@ pub(crate) fn derive_key_standard_for_block(
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
     }
-    }
+}
 
 pub(crate) fn derive_file_key_standard(
     info: &StandardEncryptionInfo,
@@ -955,8 +990,17 @@ fn crypt_derive_key(
             break;
         }
         let take = core::cmp::min(key_len - written, src.len());
-        out[written..written + take].copy_from_slice(&src[..take]);
-        written += take;
+        let end = written.checked_add(take).ok_or_else(|| {
+            OffcryptoError::crypto("derived key size overflow while assembling key material")
+        })?;
+        let dst = out.get_mut(written..end).ok_or_else(|| {
+            OffcryptoError::crypto("derived key window out of bounds while assembling key material")
+        })?;
+        let src = src.get(..take).ok_or_else(|| {
+            OffcryptoError::crypto("derived key source window out of bounds while assembling key material")
+        })?;
+        dst.copy_from_slice(src);
+        written = end;
     }
 
     Ok(out)

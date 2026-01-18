@@ -476,26 +476,31 @@ fn ascii_contains_case_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }
-    for i in 0..=haystack.len() - needle.len() {
-        if haystack[i..i + needle.len()].eq_ignore_ascii_case(needle) {
-            return true;
-        }
-    }
-    false
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn ascii_starts_with_case_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }
-    haystack[..needle.len()].eq_ignore_ascii_case(needle)
+    haystack
+        .as_bytes()
+        .get(..needle.len())
+        .is_some_and(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn ascii_ends_with_case_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }
-    haystack[haystack.len() - needle.len()..].eq_ignore_ascii_case(needle)
+    let start = haystack.len() - needle.len();
+    haystack
+        .as_bytes()
+        .get(start..)
+        .is_some_and(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn number_cmp(cell: &CellValue, cmp: &NumberComparison, value_locale: ValueLocaleConfig) -> bool {

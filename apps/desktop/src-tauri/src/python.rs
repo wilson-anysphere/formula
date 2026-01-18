@@ -439,7 +439,8 @@ impl<'a> PythonRpcHost<'a> {
 
         // Build an index for existing updates so we can update in-place without allocating an
         // intermediate "all updates" vector (which would temporarily exceed the cap).
-        let mut index_by_key = HashMap::<(String, usize, usize), usize>::with_capacity(self.updates.len());
+        let mut index_by_key = HashMap::<(String, usize, usize), usize>::new();
+        let _ = index_by_key.try_reserve(self.updates.len());
         for (idx, update) in self.updates.iter().enumerate() {
             index_by_key.insert((update.sheet_id.clone(), update.row, update.col), idx);
         }
@@ -635,9 +636,11 @@ impl<'a> PythonRpcHost<'a> {
                     AppStateError::UnknownSheet(range.sheet_id.clone()).to_string()
                 })?;
 
-                let mut out: Vec<Vec<JsonValue>> = Vec::with_capacity(row_count);
+                let mut out: Vec<Vec<JsonValue>> = Vec::new();
+                let _ = out.try_reserve(row_count);
                 for row in range.start_row..=range.end_row {
-                    let mut row_vals = Vec::with_capacity(col_count);
+                    let mut row_vals: Vec<JsonValue> = Vec::new();
+                    let _ = row_vals.try_reserve(col_count);
                     for col in range.start_col..=range.end_col {
                         let cell = sheet.get_cell(row, col);
                         row_vals.push(cell.computed_value.as_json().unwrap_or(JsonValue::Null));

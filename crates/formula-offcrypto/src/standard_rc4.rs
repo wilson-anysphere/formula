@@ -225,8 +225,16 @@ fn decrypt_encrypted_package_with_h_and_padding(
             });
         }
 
-        out[out_offset..out_offset + chunk_len]
-            .copy_from_slice(&encrypted_package_stream[in_offset..end]);
+        let out_end = out_offset
+            .checked_add(chunk_len)
+            .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+        let dst = out
+            .get_mut(out_offset..out_end)
+            .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+        let src = encrypted_package_stream.get(in_offset..end).ok_or(OffcryptoError::Truncated {
+            context: "EncryptedPackage.ciphertext",
+        })?;
+        dst.copy_from_slice(src);
 
         let key = rc4_key_for_block_with_optional_padding(
             h,
@@ -236,10 +244,10 @@ fn decrypt_encrypted_package_with_h_and_padding(
             pad_40_bit_to_128,
         )?;
         let mut rc4 = Rc4::new(key.as_slice());
-        rc4.apply_keystream(&mut out[out_offset..out_offset + chunk_len]);
+        rc4.apply_keystream(dst);
 
         in_offset = end;
-        out_offset += chunk_len;
+        out_offset = out_end;
         remaining -= chunk_len;
         block_index = block_index
             .checked_add(1)

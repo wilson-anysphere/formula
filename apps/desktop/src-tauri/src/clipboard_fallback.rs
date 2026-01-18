@@ -199,7 +199,9 @@ mod tests {
 
     #[test]
     fn should_attempt_primary_selection_from_env_honors_disable_override() {
-        let _lock = env_mutex().lock().unwrap();
+        let _lock = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let _override_var = EnvVarGuard::set(PRIMARY_SELECTION_OVERRIDE_ENV_VAR, "0");
         let _session = EnvVarGuard::set("XDG_SESSION_TYPE", "x11");
@@ -210,7 +212,9 @@ mod tests {
 
     #[test]
     fn should_attempt_primary_selection_from_env_honors_enable_override_even_on_wayland() {
-        let _lock = env_mutex().lock().unwrap();
+        let _lock = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let _override_var = EnvVarGuard::set(PRIMARY_SELECTION_OVERRIDE_ENV_VAR, "yes");
         let _session = EnvVarGuard::set("XDG_SESSION_TYPE", "wayland");
@@ -221,7 +225,9 @@ mod tests {
 
     #[test]
     fn should_attempt_primary_selection_from_env_defaults_to_heuristic_when_unset() {
-        let _lock = env_mutex().lock().unwrap();
+        let _lock = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let _override_var = EnvVarGuard::remove(PRIMARY_SELECTION_OVERRIDE_ENV_VAR);
         let _session_wayland = EnvVarGuard::set("XDG_SESSION_TYPE", "wayland");

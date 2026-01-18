@@ -240,9 +240,10 @@ fn find_next_delim_ascii_case_insensitive(
             continue;
         }
         let mut found = None;
-        for start in from..=haystack.len() - needle.len() {
-            if haystack[start..start + needle.len()].eq_ignore_ascii_case(needle) {
-                found = Some(start);
+        let search = haystack.get(from..)?;
+        for (idx, window) in search.windows(needle.len()).enumerate() {
+            if window.eq_ignore_ascii_case(needle) {
+                found = Some(from + idx);
                 break;
             }
         }

@@ -106,7 +106,7 @@ fn debug_clipboard_log(args: std::fmt::Arguments<'_>) {
     if !debug_clipboard_enabled() {
         return;
     }
-    eprintln!("[clipboard] {}", args);
+    crate::stdio::stderrln(format_args!("[clipboard] {}", args));
 }
 
 fn normalize_base64_str(mut base64: &str) -> &str {

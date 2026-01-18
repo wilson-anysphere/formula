@@ -48,7 +48,11 @@ impl<'de, const MAX: usize> Deserialize<'de> for LimitedByteVec<MAX> {
                 }
 
                 let mut out = match hint {
-                    Some(hint) => Vec::with_capacity(hint.min(MAX)),
+                    Some(hint) => {
+                        let mut out = Vec::new();
+                        let _ = out.try_reserve(hint.min(MAX));
+                        out
+                    }
                     None => Vec::new(),
                 };
 
@@ -611,7 +615,8 @@ mod tests {
 
     fn strip_js_comments(input: &str) -> Result<String, String> {
         let bytes = input.as_bytes();
-        let mut out = String::with_capacity(input.len());
+        let mut out = String::new();
+        let _ = out.try_reserve(input.len());
         let mut i = 0usize;
         while i < bytes.len() {
             if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {

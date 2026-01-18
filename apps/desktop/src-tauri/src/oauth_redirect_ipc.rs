@@ -79,9 +79,9 @@ impl OauthRedirectState {
 
         if dropped_any && !self.overflow_warned {
             self.overflow_warned = true;
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[oauth-redirect-ipc] pending oauth-redirect queue exceeded limit (max_urls={MAX_PENDING_URLS}, max_bytes={MAX_PENDING_BYTES}); dropping oldest entries"
-            );
+            ));
         }
     }
 }

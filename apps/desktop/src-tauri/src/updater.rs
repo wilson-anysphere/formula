@@ -43,7 +43,9 @@ fn updater_download_cache_base_dir(app: &AppHandle) -> std::path::PathBuf {
         Ok(dir) => dir,
         Err(err) => {
             // Best-effort fallback: `app_cache_dir` should be available in normal desktop builds.
-            eprintln!("failed to resolve app cache dir for updater downloads: {err}");
+            crate::stdio::stderrln(format_args!(
+                "failed to resolve app cache dir for updater downloads: {err}"
+            ));
             std::env::temp_dir().join("formula").join("updater-cache")
         }
     }
@@ -127,7 +129,7 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
                         "update-check-error",
                         serde_json::json!({ "source": source, "message": msg }),
                     );
-                    eprintln!("updater check failed: {err}");
+                    crate::stdio::stderrln(format_args!("updater check failed: {err}"));
                 }
             },
             Err(err) => {
@@ -136,7 +138,7 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
                     "update-check-error",
                     serde_json::json!({ "source": source, "message": msg }),
                 );
-                eprintln!("updater check failed: {err}");
+                crate::stdio::stderrln(format_args!("updater check failed: {err}"));
             }
         }
     });
@@ -237,7 +239,9 @@ async fn spawn_update_download(
                             "update-download-error",
                             serde_json::json!({ "source": source, "version": version, "message": msg }),
                         );
-                        eprintln!("updater download cache write failed: {err}");
+                        crate::stdio::stderrln(format_args!(
+                            "updater download cache write failed: {err}"
+                        ));
                         return;
                     }
                 };
@@ -299,7 +303,7 @@ async fn spawn_update_download(
                     "update-download-error",
                     serde_json::json!({ "source": source, "version": version, "message": msg }),
                 );
-                eprintln!("updater download failed: {err}");
+                crate::stdio::stderrln(format_args!("updater download failed: {err}"));
             }
         }
     });

@@ -338,7 +338,10 @@ fn project_properties_normalized_bytes(
         };
 
         let name = trim_ascii_whitespace(&line[..pos]);
-        let mut value = trim_ascii_whitespace(&line[pos + 1..]);
+        let Some(value_bytes) = line.get(pos.saturating_add(1)..) else {
+            continue;
+        };
+        let mut value = trim_ascii_whitespace(value_bytes);
         value = strip_ascii_quotes(value);
 
         if name.is_empty() {
@@ -2026,8 +2029,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     // In the decompressed `VBA/dir` stream we parse using a generic `Id(u16) ||
                     // Size(u32) || Data(Size)` form. For fixed-size records like MODULEREADONLY,
                     // the `Reserved` field is stored in the u32 slot and MUST be 0x00000000.
-                    let reserved = dir_decompressed[record_start + 2..header_end]
-                        .try_into()
+                    let reserved = hdr
+                        .get(2..6)
+                        .and_then(|bytes| bytes.try_into().ok())
                         .unwrap_or([0u8; 4]);
                     m.read_only_record_reserved = Some(reserved);
                     m.seen_non_name_record = true;
@@ -2040,8 +2044,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // when the record is present in the module record.
             0x0028 => {
                 if let Some(m) = current_module.as_mut() {
-                    let reserved = dir_decompressed[record_start + 2..header_end]
-                        .try_into()
+                    let reserved = hdr
+                        .get(2..6)
+                        .and_then(|bytes| bytes.try_into().ok())
                         .unwrap_or([0u8; 4]);
                     m.private_record_reserved = Some(reserved);
                     m.seen_non_name_record = true;

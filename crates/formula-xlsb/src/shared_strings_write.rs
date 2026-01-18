@@ -464,18 +464,20 @@ pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
 
     let mut offset = utf16_end;
     if flags & 0x01 != 0 {
-        let c_run = u32::from_le_bytes(payload.get(offset..offset + 4)?.try_into().ok()?);
+        let end = offset.checked_add(4)?;
+        let c_run = u32::from_le_bytes(payload.get(offset..end)?.try_into().ok()?);
         if c_run != 0 {
             return None;
         }
-        offset = offset.checked_add(4)?;
+        offset = end;
     }
     if flags & 0x02 != 0 {
-        let cb = u32::from_le_bytes(payload.get(offset..offset + 4)?.try_into().ok()?);
+        let end = offset.checked_add(4)?;
+        let cb = u32::from_le_bytes(payload.get(offset..end)?.try_into().ok()?);
         if cb != 0 {
             return None;
         }
-        offset = offset.checked_add(4)?;
+        offset = end;
     }
 
     if offset != payload.len() {

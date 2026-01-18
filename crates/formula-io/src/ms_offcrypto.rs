@@ -76,18 +76,18 @@ pub(crate) enum EncryptionInfoError {
 }
 
 fn read_u16_le(buf: &[u8], offset: &mut usize) -> Result<u16, EncryptionInfoError> {
-    let b = buf
-        .get(*offset..*offset + 2)
-        .ok_or(EncryptionInfoError::Truncated)?;
-    *offset += 2;
+    let start = *offset;
+    let end = start.checked_add(2).ok_or(EncryptionInfoError::Truncated)?;
+    let b = buf.get(start..end).ok_or(EncryptionInfoError::Truncated)?;
+    *offset = end;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
 fn read_u32_le(buf: &[u8], offset: &mut usize) -> Result<u32, EncryptionInfoError> {
-    let b = buf
-        .get(*offset..*offset + 4)
-        .ok_or(EncryptionInfoError::Truncated)?;
-    *offset += 4;
+    let start = *offset;
+    let end = start.checked_add(4).ok_or(EncryptionInfoError::Truncated)?;
+    let b = buf.get(start..end).ok_or(EncryptionInfoError::Truncated)?;
+    *offset = end;
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 

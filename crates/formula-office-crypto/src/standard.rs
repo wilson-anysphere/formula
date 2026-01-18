@@ -1166,7 +1166,12 @@ where
     let mut block = 0u32;
     while offset < ciphertext.len() {
         let seg_len = (ciphertext.len() - offset).min(SEGMENT_LEN);
-        let seg = &ciphertext[offset..offset + seg_len];
+        let end = offset
+            .checked_add(seg_len)
+            .ok_or_else(|| OfficeCryptoError::InvalidFormat("ciphertext segment end overflow".to_string()))?;
+        let seg = ciphertext.get(offset..end).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("ciphertext segment out of range".to_string())
+        })?;
         let (key, iv) = key_iv_for_block(block)?;
         let mut plain = aes_cbc_decrypt(key.as_slice(), &iv, seg)?;
         out.append(&mut plain);

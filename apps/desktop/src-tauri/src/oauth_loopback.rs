@@ -194,7 +194,9 @@ pub fn acquire_oauth_loopback_listener_with_cap(
     redirect_uri: String,
     max_active: usize,
 ) -> Result<AcquireOauthLoopbackListener, String> {
-    let mut guard = state.lock().unwrap();
+    let mut guard = state
+        .lock()
+        .map_err(|_| "oauth loopback state lock is poisoned".to_string())?;
 
     if guard.active_redirect_uris.contains(&redirect_uri) {
         return Ok(AcquireOauthLoopbackListener::AlreadyActive);
@@ -337,10 +339,22 @@ mod tests {
         // Cap reached; a distinct new URI should be rejected.
         let err = acquire_oauth_loopback_listener_with_cap(&state, uri3.clone(), 2).unwrap_err();
         assert_eq!(err, "Too many active OAuth listeners");
-        assert_eq!(state.lock().unwrap().active_count(), 2);
+        assert_eq!(
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .active_count(),
+            2
+        );
 
         drop(guard1);
-        assert_eq!(state.lock().unwrap().active_count(), 1);
+        assert_eq!(
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .active_count(),
+            1
+        );
 
         // After cleanup, we should be able to acquire a new URI again.
         let guard3 = match acquire_oauth_loopback_listener_with_cap(&state, uri3.clone(), 2).unwrap()
@@ -349,10 +363,22 @@ mod tests {
             AcquireOauthLoopbackListener::AlreadyActive => panic!("expected new guard"),
         };
 
-        assert_eq!(state.lock().unwrap().active_count(), 2);
+        assert_eq!(
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .active_count(),
+            2
+        );
         drop(guard2);
         drop(guard3);
-        assert_eq!(state.lock().unwrap().active_count(), 0);
+        assert_eq!(
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .active_count(),
+            0
+        );
     }
 
     #[test]
@@ -365,10 +391,16 @@ mod tests {
             AcquireOauthLoopbackListener::Acquired(guard) => guard,
             AcquireOauthLoopbackListener::AlreadyActive => panic!("expected new guard"),
         };
-        assert!(state.lock().unwrap().is_active(&uri));
+        assert!(state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_active(&uri));
 
         // Simulate an early error (e.g. bind failure) by dropping the guard immediately.
         drop(guard);
-        assert!(!state.lock().unwrap().is_active(&uri));
+        assert!(!state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_active(&uri));
     }
 }

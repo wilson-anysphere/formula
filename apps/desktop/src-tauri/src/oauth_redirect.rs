@@ -16,7 +16,8 @@ use crate::oauth_redirect_ipc::{
 /// wins"). The caps are aligned with the pending oauth-redirect IPC queue enforced by
 /// [`crate::oauth_redirect_ipc::OauthRedirectState`].
 pub fn extract_oauth_redirect_urls_from_argv(argv: &[String]) -> Vec<String> {
-    let mut out_rev = Vec::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(argv.len()));
+    let mut out_rev: Vec<String> = Vec::new();
+    let _ = out_rev.try_reserve(MAX_OAUTH_REDIRECT_PENDING_URLS.min(argv.len()));
     let mut bytes = 0usize;
 
     // Walk backwards so we keep the most recent entries, then reverse at the end to preserve the
@@ -121,9 +122,10 @@ pub fn normalize_oauth_redirect_request_urls_with_schemes(
     schemes: &[String],
 ) -> Vec<String> {
     // Keep this bounded; argv / OS-delivered deep links should be treated as untrusted.
-    let mut seen =
-        HashSet::<String>::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
-    let mut out_rev = Vec::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
+    let mut seen = HashSet::<String>::new();
+    let _ = seen.try_reserve(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
+    let mut out_rev: Vec<String> = Vec::new();
+    let _ = out_rev.try_reserve(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
     let mut bytes = 0usize;
 
     // Walk backwards so we keep the most recent entries, then reverse at the end to preserve the

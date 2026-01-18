@@ -4,7 +4,9 @@
 )]
 
 mod asset_protocol;
+mod http_response;
 mod pyodide_protocol;
+mod stdio;
 mod menu;
 mod shortcuts;
 mod tray;
@@ -254,7 +256,7 @@ impl StartupMetrics {
         if let (Some(window_visible), Some(tti)) = (self.window_visible_ms, self.tti_ms) {
             let webview_loaded = self.webview_loaded_ms;
             let first_render = self.first_render_ms;
-            println!(
+            crate::stdio::stdoutln(format_args!(
                 "[startup] window_visible_ms={window_visible} webview_loaded_ms={} first_render_ms={} tti_ms={tti}",
                 webview_loaded
                     .map(|v| v.to_string())
@@ -262,7 +264,7 @@ impl StartupMetrics {
                 first_render
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "n/a".to_string())
-            );
+            ));
             // `--startup-bench` exits the process shortly after this line is printed. Be explicit
             // about flushing so CI parsers reliably see the metrics line even with piped stdout.
             #[allow(unused_imports)]
@@ -429,21 +431,25 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
     let Some(window) = app.get_webview_window("main") else {
         // Fail closed: if the main window is missing, we can't validate its origin and should not
         // broadcast sensitive local file paths to any other window.
-        eprintln!("[open-file] blocked event delivery because main window is missing");
+        crate::stdio::stderrln(format_args!(
+            "[open-file] blocked event delivery because main window is missing"
+        ));
         return;
     };
 
     let window_url = match window.url() {
         Ok(window_url) => window_url,
         Err(err) => {
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[open-file] blocked event delivery because window URL could not be read: {err}"
-            );
+            ));
             return;
         }
     };
     if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-        eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url}");
+        crate::stdio::stderrln(format_args!(
+            "[open-file] blocked event delivery to untrusted origin: {window_url}"
+        ));
         return;
     }
     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -451,9 +457,9 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
         "open-file event delivery",
         desktop::ipc_origin::Verb::Is,
     ) {
-        eprintln!(
+        crate::stdio::stderrln(format_args!(
             "[open-file] blocked event delivery from unexpected origin: {window_url} ({err})"
-        );
+        ));
         return;
     }
     let _ = window.emit(OPEN_FILE_EVENT, paths);
@@ -471,21 +477,25 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
         // Fail closed: if the main window is missing, we can't validate its origin and should not
         // broadcast sensitive OAuth redirect URLs (which may contain auth codes) to any other
         // window.
-        eprintln!("[oauth-redirect] blocked event delivery because main window is missing");
+        crate::stdio::stderrln(format_args!(
+            "[oauth-redirect] blocked event delivery because main window is missing"
+        ));
         return;
     };
 
     let window_url = match window.url() {
         Ok(window_url) => window_url,
         Err(err) => {
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
-            );
+            ));
             return;
         }
     };
     if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-        eprintln!("[oauth-redirect] blocked event delivery to untrusted origin: {window_url}");
+        crate::stdio::stderrln(format_args!(
+            "[oauth-redirect] blocked event delivery to untrusted origin: {window_url}"
+        ));
         return;
     }
     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -493,9 +503,9 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
         "oauth-redirect event delivery",
         desktop::ipc_origin::Verb::Is,
     ) {
-        eprintln!(
+        crate::stdio::stderrln(format_args!(
             "[oauth-redirect] blocked event delivery from unexpected origin: {window_url} ({err})"
-        );
+        ));
         return;
     }
     let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
@@ -525,7 +535,9 @@ fn handle_open_file_request(app: &tauri::AppHandle, paths: Vec<String>) {
 
     let open_file_state = app.state::<SharedOpenFileState>().inner().clone();
     let maybe_emit = {
-        let mut state = open_file_state.lock().unwrap();
+        let mut state = open_file_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.queue_or_emit(paths)
     };
 
@@ -544,7 +556,9 @@ fn handle_oauth_redirect_request(app: &tauri::AppHandle, urls: Vec<String>) {
 
     let redirect_state = app.state::<SharedOauthRedirectState>().inner().clone();
     let maybe_emit = {
-        let mut state = redirect_state.lock().unwrap();
+        let mut state = redirect_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.queue_or_emit(urls)
     };
 
@@ -1118,7 +1132,7 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     let delay = Duration::from_millis(50);
 
     let token = format!("formula-clipboard-smoke-check-{}", Uuid::new_v4());
-    println!("[formula][clipboard-check] token={token}");
+    crate::stdio::stdoutln(format_args!("[formula][clipboard-check] token={token}"));
 
     let mut functional_failures: Vec<String> = Vec::new();
     let mut internal_errors: Vec<String> = Vec::new();
@@ -1127,10 +1141,10 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     // -----------------------------------------------------------------------
     // Mandatory: text/plain
     let expected_text = format!("Formula clipboard smoke check (text/plain): {token}");
-    println!(
+    crate::stdio::stdoutln(format_args!(
         "[formula][clipboard-check] text/plain: writing {} bytes",
         expected_text.as_bytes().len()
-    );
+    ));
     let text_payload = clipboard::ClipboardWritePayload {
         text: Some(expected_text.clone()),
         html: None,
@@ -1140,7 +1154,9 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     let text_written = match clipboard_smoke_check_write(app, text_payload) {
         Ok(()) => true,
         Err(err) => {
-            eprintln!("[formula][clipboard-check] text/plain: write error: {err}");
+            crate::stdio::stderrln(format_args!(
+                "[formula][clipboard-check] text/plain: write error: {err}"
+            ));
             match err {
                 clipboard::ClipboardError::OperationFailed(_) => {
                     functional_failures.push(format!("text/plain write failed: {err}"));
@@ -1161,12 +1177,14 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
         }) {
             Ok((content, ok)) => {
                 if ok {
-                    println!("[formula][clipboard-check] text/plain: OK");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/plain: OK"
+                    ));
                 } else {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][clipboard-check] text/plain: FAIL (expected exact match, got {})",
                         describe_clipboard_content(&content)
-                    );
+                    ));
                     functional_failures.push(format!(
                         "text/plain mismatch: expected {expected_text:?} got {:?}",
                         content.text
@@ -1174,7 +1192,9 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
                 }
             }
             Err(err) => {
-                eprintln!("[formula][clipboard-check] text/plain: read error: {err}");
+                crate::stdio::stderrln(format_args!(
+                    "[formula][clipboard-check] text/plain: read error: {err}"
+                ));
                 match err {
                     clipboard::ClipboardError::OperationFailed(_) => {
                         functional_failures.push(format!("text/plain read failed: {err}"));
@@ -1193,10 +1213,10 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     // Optional: text/html
     let html_marker = format!("Formula clipboard smoke check (text/html): {token}");
     let html_payload_str = format!("<div><strong>{html_marker}</strong></div>");
-    println!(
+    crate::stdio::stdoutln(format_args!(
         "[formula][clipboard-check] text/html: writing {} bytes",
         html_payload_str.as_bytes().len()
-    );
+    ));
     let html_payload = clipboard::ClipboardWritePayload {
         text: Some(html_marker.clone()),
         html: Some(html_payload_str.clone()),
@@ -1209,15 +1229,21 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
         Err(err) => {
             match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] text/html: SKIP ({err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/html: SKIP ({err})"
+                    ));
                     skipped.push(format!("text/html: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] text/html: INTERNAL ERROR ({err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/html: INTERNAL ERROR ({err})"
+                    ));
                     internal_errors.push(format!("text/html invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] text/html: FAIL (write error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/html: FAIL (write error: {err})"
+                    ));
                     functional_failures.push(format!("text/html write failed: {err}"));
                 }
             }
@@ -1235,12 +1261,14 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
             Ok((content, ok)) => {
                 if ok {
                     let len = content.html.as_ref().map(|s| s.as_bytes().len()).unwrap_or(0);
-                    println!("[formula][clipboard-check] text/html: OK (read {len} bytes)");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/html: OK (read {len} bytes)"
+                    ));
                 } else {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][clipboard-check] text/html: FAIL (missing/invalid HTML; got {})",
                         describe_clipboard_content(&content)
-                    );
+                    ));
                     functional_failures.push(format!(
                         "text/html mismatch: expected marker {html_marker:?} in html={:?}",
                         content.html
@@ -1249,15 +1277,21 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
             }
             Err(err) => match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] text/html: SKIP (read error: {err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/html: SKIP (read error: {err})"
+                    ));
                     skipped.push(format!("text/html read: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] text/html: INTERNAL ERROR (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/html: INTERNAL ERROR (read error: {err})"
+                    ));
                     internal_errors.push(format!("text/html read invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] text/html: FAIL (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/html: FAIL (read error: {err})"
+                    ));
                     functional_failures.push(format!("text/html read failed: {err}"));
                 }
             },
@@ -1270,10 +1304,10 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     let rtf_payload_str = format!(
         "{{\\rtf1\\ansi\\deff0{{\\fonttbl{{\\f0 Arial;}}}}\\f0\\fs20 {rtf_marker}}}"
     );
-    println!(
+    crate::stdio::stdoutln(format_args!(
         "[formula][clipboard-check] text/rtf: writing {} bytes",
         rtf_payload_str.as_bytes().len()
-    );
+    ));
     let rtf_payload = clipboard::ClipboardWritePayload {
         text: Some(rtf_marker.clone()),
         html: None,
@@ -1286,15 +1320,21 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
         Err(err) => {
             match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] text/rtf: SKIP ({err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/rtf: SKIP ({err})"
+                    ));
                     skipped.push(format!("text/rtf: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] text/rtf: INTERNAL ERROR ({err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/rtf: INTERNAL ERROR ({err})"
+                    ));
                     internal_errors.push(format!("text/rtf invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] text/rtf: FAIL (write error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/rtf: FAIL (write error: {err})"
+                    ));
                     functional_failures.push(format!("text/rtf write failed: {err}"));
                 }
             }
@@ -1312,12 +1352,14 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
             Ok((content, ok)) => {
                 if ok {
                     let len = content.rtf.as_ref().map(|s| s.as_bytes().len()).unwrap_or(0);
-                    println!("[formula][clipboard-check] text/rtf: OK (read {len} bytes)");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/rtf: OK (read {len} bytes)"
+                    ));
                 } else {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][clipboard-check] text/rtf: FAIL (missing/invalid RTF; got {})",
                         describe_clipboard_content(&content)
-                    );
+                    ));
                     functional_failures.push(format!(
                         "text/rtf mismatch: expected marker {rtf_marker:?} in rtf={:?}",
                         content.rtf
@@ -1326,15 +1368,21 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
             }
             Err(err) => match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] text/rtf: SKIP (read error: {err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] text/rtf: SKIP (read error: {err})"
+                    ));
                     skipped.push(format!("text/rtf read: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] text/rtf: INTERNAL ERROR (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/rtf: INTERNAL ERROR (read error: {err})"
+                    ));
                     internal_errors.push(format!("text/rtf read invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] text/rtf: FAIL (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] text/rtf: FAIL (read error: {err})"
+                    ));
                     functional_failures.push(format!("text/rtf read failed: {err}"));
                 }
             },
@@ -1343,10 +1391,10 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
 
     // -----------------------------------------------------------------------
     // Optional: image/png (1x1 fixture)
-    println!(
+    crate::stdio::stdoutln(format_args!(
         "[formula][clipboard-check] image/png: writing {} base64 chars",
         PNG_FIXTURE_BASE64.len()
-    );
+    ));
     let png_payload = clipboard::ClipboardWritePayload {
         text: None,
         html: None,
@@ -1359,15 +1407,21 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
         Err(err) => {
             match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] image/png: SKIP ({err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] image/png: SKIP ({err})"
+                    ));
                     skipped.push(format!("image/png: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] image/png: INTERNAL ERROR ({err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] image/png: INTERNAL ERROR ({err})"
+                    ));
                     internal_errors.push(format!("image/png invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] image/png: FAIL (write error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] image/png: FAIL (write error: {err})"
+                    ));
                     functional_failures.push(format!("image/png write failed: {err}"));
                 }
             }
@@ -1385,26 +1439,34 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
             Ok((content, ok)) => {
                 if ok {
                     let len = content.image_png_base64.as_ref().map(|s| s.len()).unwrap_or(0);
-                    println!("[formula][clipboard-check] image/png: OK (read {len} base64 chars)");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] image/png: OK (read {len} base64 chars)"
+                    ));
                 } else {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][clipboard-check] image/png: FAIL (missing/invalid PNG; got {})",
                         describe_clipboard_content(&content)
-                    );
+                    ));
                     functional_failures.push("image/png read did not return a valid PNG payload".to_string());
                 }
             }
             Err(err) => match err {
                 clipboard::ClipboardError::UnsupportedPlatform | clipboard::ClipboardError::Unavailable(_) => {
-                    println!("[formula][clipboard-check] image/png: SKIP (read error: {err})");
+                    crate::stdio::stdoutln(format_args!(
+                        "[formula][clipboard-check] image/png: SKIP (read error: {err})"
+                    ));
                     skipped.push(format!("image/png read: {err}"));
                 }
                 clipboard::ClipboardError::InvalidPayload(_) => {
-                    eprintln!("[formula][clipboard-check] image/png: INTERNAL ERROR (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] image/png: INTERNAL ERROR (read error: {err})"
+                    ));
                     internal_errors.push(format!("image/png read invalid payload: {err}"));
                 }
                 clipboard::ClipboardError::OperationFailed(_) => {
-                    eprintln!("[formula][clipboard-check] image/png: FAIL (read error: {err})");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] image/png: FAIL (read error: {err})"
+                    ));
                     functional_failures.push(format!("image/png read failed: {err}"));
                 }
             },
@@ -1418,27 +1480,39 @@ fn run_clipboard_smoke_check(app: &tauri::AppHandle) -> i32 {
     // - 2: internal error/timeout (e.g. unavailable backend, eval failure)
     if !skipped.is_empty() {
         for item in &skipped {
-            println!("[formula][clipboard-check] skipped: {item}");
+            crate::stdio::stdoutln(format_args!(
+                "[formula][clipboard-check] skipped: {item}"
+            ));
         }
     }
 
     if !internal_errors.is_empty() {
         for err in &internal_errors {
-            eprintln!("[formula][clipboard-check] internal-error: {err}");
+            crate::stdio::stderrln(format_args!(
+                "[formula][clipboard-check] internal-error: {err}"
+            ));
         }
-        eprintln!("[formula][clipboard-check] RESULT=ERROR (exit=2)");
+        crate::stdio::stderrln(format_args!(
+            "[formula][clipboard-check] RESULT=ERROR (exit=2)"
+        ));
         return 2;
     }
 
     if !functional_failures.is_empty() {
         for err in &functional_failures {
-            eprintln!("[formula][clipboard-check] failure: {err}");
+            crate::stdio::stderrln(format_args!(
+                "[formula][clipboard-check] failure: {err}"
+            ));
         }
-        eprintln!("[formula][clipboard-check] RESULT=FAIL (exit=1)");
+        crate::stdio::stderrln(format_args!(
+            "[formula][clipboard-check] RESULT=FAIL (exit=1)"
+        ));
         return 1;
     }
 
-    println!("[formula][clipboard-check] RESULT=OK (exit=0)");
+    crate::stdio::stdoutln(format_args!(
+        "[formula][clipboard-check] RESULT=OK (exit=0)"
+    ));
     0
 }
 
@@ -1482,14 +1556,18 @@ fn main() {
         initial_cwd.as_deref(),
     ));
     if !initial_paths.is_empty() {
-        let mut guard = open_file_state.lock().unwrap();
+        let mut guard = open_file_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard.queue_or_emit(initial_paths);
     }
 
     let initial_oauth_urls =
         normalize_oauth_redirect_request_urls(extract_oauth_redirect_urls(&initial_argv));
     if !initial_oauth_urls.is_empty() {
-        let mut guard = oauth_redirect_state.lock().unwrap();
+        let mut guard = oauth_redirect_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard.queue_or_emit(initial_oauth_urls);
     }
 
@@ -1516,19 +1594,12 @@ fn main() {
             // Lightweight shell-startup benchmark: serve a tiny inline HTML document instead of
             // the real bundled frontend (which may not be present, and is expensive to build).
             if startup_bench && (path == "/" || path == "/index.html") {
-                let builder = Response::builder()
-                    .status(StatusCode::OK)
-                    .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
-
-                let mut response = builder
-                    .body(STARTUP_BENCH_HTML.as_bytes().to_vec())
-                    .unwrap_or_else(|_| {
-                        Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                            .body(b"failed to build tauri startup-bench response".to_vec())
-                            .expect("build error response")
-                    });
+                let mut response = http_response::response_with_content_type_and_csp(
+                    StatusCode::OK,
+                    "text/html; charset=utf-8",
+                    STARTUP_BENCH_HTML.as_bytes().to_vec(),
+                    None,
+                );
                 apply_cross_origin_isolation_headers(&mut response);
                 return response;
             }
@@ -1546,39 +1617,30 @@ fn main() {
 
             // Prefer embedded frontend assets (the Vite `dist/` output).
             if let Some(asset) = _ctx.app_handle().asset_resolver().get(key.clone()) {
-                let mut builder = Response::builder()
-                    .status(StatusCode::OK)
-                    .header(tauri::http::header::CONTENT_TYPE, asset.mime_type);
-
-                if let Some(csp) = asset.csp_header {
-                    builder = builder.header("Content-Security-Policy", csp);
-                }
-
-                let mut response = builder.body(asset.bytes).unwrap_or_else(|_| {
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                        .body(b"failed to build tauri asset response".to_vec())
-                        .expect("build error response")
-                });
-
+                let mut response = http_response::response_with_content_type_and_csp(
+                    StatusCode::OK,
+                    &asset.mime_type,
+                    asset.bytes,
+                    asset.csp_header.as_deref(),
+                );
                 apply_cross_origin_isolation_headers(&mut response);
                 return response;
             }
 
             if startup_bench || should_log_startup_metrics() {
-                eprintln!(
+                crate::stdio::stderrln(format_args!(
                     "[formula][startup-bench] missing tauri asset for path {:?} (normalized {:?})",
                     raw_path,
                     key
-                );
+                ));
             }
 
-            let mut response = Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                .body(b"asset not found".to_vec())
-                .expect("build not-found response");
+            let mut response = http_response::response_with_content_type_and_csp(
+                StatusCode::NOT_FOUND,
+                "text/plain",
+                b"asset not found".to_vec(),
+                None,
+            );
             apply_cross_origin_isolation_headers(&mut response);
             response
         })
@@ -1663,7 +1725,9 @@ fn main() {
                 // it can be discarded when the WebView navigates to the real `tauri://` page,
                 // leaving the benchmark hung until the watchdog fires.
                 let Some(webview_window) = window.app_handle().get_webview_window("main") else {
-                    eprintln!("[formula][startup-bench] missing main window");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][startup-bench] missing main window"
+                    ));
                     std::process::exit(2);
                 };
 
@@ -1836,7 +1900,9 @@ fn main() {
  "#,
                      )
                     .unwrap_or_else(|err| {
-                        eprintln!("[formula][startup-bench] failed to eval script: {err}");
+                        crate::stdio::stderrln(format_args!(
+                            "[formula][startup-bench] failed to eval script: {err}"
+                        ));
                         std::process::exit(2);
                     });
             }
@@ -2054,7 +2120,9 @@ fn main() {
                     .app_handle()
                     .get_webview_window(window.label())
                 else {
-                    eprintln!("[close] blocked close-requested flow (missing webview window)");
+                    crate::stdio::stderrln(format_args!(
+                        "[close] blocked close-requested flow (missing webview window)"
+                    ));
                     // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
                     CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
@@ -2063,9 +2131,9 @@ fn main() {
                 let url = match webview_window.url() {
                     Ok(url) => url,
                     Err(err) => {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[close] blocked close-requested flow: failed to read webview URL ({err})"
-                        );
+                        ));
                         let _ = window.hide();
                         CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                         return;
@@ -2073,7 +2141,9 @@ fn main() {
                 };
 
                 if !desktop::ipc_origin::is_trusted_app_origin(&url) {
-                    eprintln!("[close] blocked close-requested flow from untrusted origin: {url}");
+                    crate::stdio::stderrln(format_args!(
+                        "[close] blocked close-requested flow from untrusted origin: {url}"
+                    ));
                     let _ = window.hide();
                     CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                     return;
@@ -2082,9 +2152,9 @@ fn main() {
                 let url = match webview_window.url() {
                     Ok(url) => url,
                     Err(err) => {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[close] blocked close-requested flow: could not read webview url ({err})"
-                        );
+                        ));
 
                         // Deterministic fallback: hide-to-tray without involving the webview.
                         let _ = window.hide();
@@ -2095,9 +2165,9 @@ fn main() {
                 let url_for_log = url.to_string();
 
                 if !desktop::ipc_origin::is_trusted_app_origin(&url) {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[close] blocked close-requested flow from untrusted origin: {url_for_log}"
-                    );
+                    ));
 
                     // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
@@ -2109,9 +2179,9 @@ fn main() {
                     "close-requested flow",
                     desktop::ipc_origin::Verb::Is,
                 ) {
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[close] blocked close-requested flow from untrusted origin: {url_for_log} ({err})"
-                    );
+                    ));
 
                     // Deterministic fallback: hide-to-tray without involving the webview.
                     let _ = window.hide();
@@ -2211,8 +2281,12 @@ fn main() {
                     let state_for_macro = shared_state.clone();
                     let trust_for_macro = shared_trust.clone();
                     let macro_outcome = tauri::async_runtime::spawn_blocking(move || {
-                        let mut state = state_for_macro.lock().unwrap();
-                        let mut trust_store = trust_for_macro.lock().unwrap();
+                        let mut state = state_for_macro
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let mut trust_store = trust_for_macro
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         trust_store.ensure_loaded();
 
                         let should_run = macros_trusted_for_before_close(&mut state, &trust_store)?;
@@ -2231,22 +2305,22 @@ fn main() {
                         match state.fire_workbook_before_close(options) {
                             Ok(outcome) => {
                                 if outcome.permission_request.is_some() {
-                                    eprintln!(
+                                    crate::stdio::stderrln(format_args!(
                                         "[macro] Workbook_BeforeClose requested additional permissions; refusing to escalate."
-                                    );
+                                    ));
                                 }
                                 if !outcome.ok {
                                     let msg = outcome
                                         .error
                                         .unwrap_or_else(|| "unknown macro error".to_string());
                                     if msg == "Execution timed out" {
-                                        eprintln!(
+                                        crate::stdio::stderrln(format_args!(
                                             "[macro] Workbook_BeforeClose exceeded {timeout_ms}ms and was terminated; continuing close flow."
-                                        );
+                                        ));
                                     } else {
-                                        eprintln!(
+                                        crate::stdio::stderrln(format_args!(
                                             "[macro] Workbook_BeforeClose failed: {msg}; continuing close flow."
-                                        );
+                                        ));
                                     }
                                 }
                                 let updates = outcome
@@ -2257,9 +2331,9 @@ fn main() {
                                 return Ok(updates);
                             }
                             Err(err) => {
-                                eprintln!(
+                                crate::stdio::stderrln(format_args!(
                                     "[macro] Workbook_BeforeClose failed: {err}; continuing close flow."
-                                );
+                                ));
                             }
                         }
 
@@ -2270,15 +2344,15 @@ fn main() {
                     let updates = match macro_outcome {
                         Ok(Ok(updates)) => updates,
                         Ok(Err(err)) => {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[macro] Workbook_BeforeClose task failed: {err}; continuing close flow."
-                            );
+                            ));
                             Vec::new()
                         }
                         Err(err) => {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[macro] Workbook_BeforeClose task panicked: {err}; continuing close flow."
-                            );
+                            ));
                             Vec::new()
                         }
                     };
@@ -2337,22 +2411,24 @@ fn main() {
                         .app_handle()
                         .get_webview_window(window.label())
                     else {
-                        eprintln!("[file-dropped] blocked drop event (missing webview window)");
+                        crate::stdio::stderrln(format_args!(
+                            "[file-dropped] blocked drop event (missing webview window)"
+                        ));
                         return;
                     };
                     let window_url = match webview_window.url() {
                         Ok(url) => url,
                         Err(err) => {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[file-dropped] blocked drop event: failed to read window URL ({err})"
-                            );
+                            ));
                             return;
                         }
                     };
                     if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[file-dropped] blocked drop event for untrusted origin: {window_url}"
-                        );
+                        ));
                         return;
                     }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -2360,16 +2436,16 @@ fn main() {
                         "file-dropped events",
                         desktop::ipc_origin::Verb::Are,
                     ) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[file-dropped] blocked drop event for untrusted origin: {window_url} ({err})"
-                        );
+                        ));
                         return;
                     }
 
                     // Bound the payload size so a large drag/drop selection can't allocate an
                     // unbounded Vec<String>.
-                    let mut payload: Vec<String> =
-                        Vec::with_capacity(paths.len().min(MAX_FILE_DROPPED_PATHS));
+                    let mut payload: Vec<String> = Vec::new();
+                    let _ = payload.try_reserve(paths.len().min(MAX_FILE_DROPPED_PATHS));
                     for path in paths.iter() {
                         if payload.len() >= MAX_FILE_DROPPED_PATHS {
                             break;
@@ -2406,12 +2482,14 @@ fn main() {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
                     if let Some(window) = app_handle_for_timeout.get_webview_window("main") {
                         if let Ok(url) = window.url() {
-                            eprintln!("[formula][startup-bench] debug url={url}");
+                            crate::stdio::stderrln(format_args!(
+                                "[formula][startup-bench] debug url={url}"
+                            ));
                         }
                     }
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][startup-bench] timed out after {TIMEOUT_SECS}s (webview did not report)"
-                    );
+                    ));
                     // `std::process::exit` does not guarantee flushing buffered stderr. Be explicit
                     // so harnesses reliably capture the timeout diagnostic when output is piped.
                     use std::io::Write as _;
@@ -2435,14 +2513,16 @@ fn main() {
                 const TIMEOUT_SECS: u64 = 20;
                 std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][coi-check] timed out after {TIMEOUT_SECS}s (webview did not report)"
-                    );
+                    ));
                     std::process::exit(2);
                 });
 
                 let Some(window) = app.get_webview_window("main") else {
-                    eprintln!("[formula][coi-check] missing main window");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][coi-check] missing main window"
+                    ));
                     std::process::exit(2);
                 };
 
@@ -2456,24 +2536,26 @@ fn main() {
                 window.listen("coi-check-result", |event| {
                     let payload = event.payload();
                     if payload.trim().is_empty() {
-                        eprintln!("[formula][coi-check] missing payload");
+                        crate::stdio::stderrln(format_args!(
+                            "[formula][coi-check] missing payload"
+                        ));
                         std::process::exit(2);
                     }
                     let parsed: CrossOriginIsolationCheckResult =
                         match serde_json::from_str(payload) {
                             Ok(parsed) => parsed,
                             Err(err) => {
-                                eprintln!(
+                                crate::stdio::stderrln(format_args!(
                                     "[formula][coi-check] invalid payload {payload:?}: {err}"
-                                );
+                                ));
                                 std::process::exit(2);
                             }
                         };
 
-                    println!(
+                    crate::stdio::stdoutln(format_args!(
                         "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}, workerOk={}",
                         parsed.cross_origin_isolated, parsed.shared_array_buffer, parsed.worker_ok
-                    );
+                    ));
 
                     let ok = parsed.cross_origin_isolated && parsed.shared_array_buffer && parsed.worker_ok;
                     std::process::exit(if ok { 0 } else { 1 });
@@ -2614,7 +2696,9 @@ fn main() {
 "#,
                     )
                     .unwrap_or_else(|err| {
-                        eprintln!("[formula][coi-check] failed to eval script: {err}");
+                        crate::stdio::stderrln(format_args!(
+                            "[formula][coi-check] failed to eval script: {err}"
+                        ));
                         std::process::exit(2);
                     });
 
@@ -2636,16 +2720,18 @@ fn main() {
                 const TIMEOUT_SECS: u64 = 20;
                 std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
-                    eprintln!(
+                    crate::stdio::stderrln(format_args!(
                         "[formula][clipboard-check] timed out after {TIMEOUT_SECS}s (check did not complete)"
-                    );
+                    ));
                     std::process::exit(2);
                 });
 
                 // Ensure the main window exists so the smoke check matches the packaged app's
                 // runtime environment (and so we fail fast if Tauri fails to initialize).
                 let Some(_window) = app.get_webview_window("main") else {
-                    eprintln!("[formula][clipboard-check] missing main window");
+                    crate::stdio::stderrln(format_args!(
+                        "[formula][clipboard-check] missing main window"
+                    ));
                     std::process::exit(2);
                 };
 
@@ -2668,7 +2754,9 @@ fn main() {
             // installed dynamically at runtime.
             #[cfg(any(target_os = "linux", windows))]
             if let Err(err) = app.handle().deep_link().register_all() {
-                eprintln!("[deep-link] failed to register deep link handlers: {err}");
+                crate::stdio::stderrln(format_args!(
+                    "[deep-link] failed to register deep link handlers: {err}"
+                ));
             }
 
             // Register global shortcuts (handled by the frontend via the Tauri plugin).
@@ -2696,30 +2784,34 @@ fn main() {
                             return;
                         }
 
-                        if let Some(id) = listener_for_listener.lock().unwrap().take() {
+                        if let Some(id) = listener_for_listener
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .take()
+                        {
                             handle_for_listener.unlisten(id);
                         }
 
                          let Some(window) = handle_for_listener.get_webview_window("main") else {
-                             eprintln!(
+                             crate::stdio::stderrln(format_args!(
                                  "[updater] received updater-ui-ready but main window is missing; skipping startup update check"
-                             );
+                             ));
                              return;
                          };
 
                         let window_url = match window.url() {
                             Ok(url) => url,
                             Err(err) => {
-                                eprintln!(
+                                crate::stdio::stderrln(format_args!(
                                     "[updater] ignoring updater-ui-ready because window URL could not be read: {err}"
-                                );
+                                ));
                                 return;
                             }
                         };
                         if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[updater] ignoring updater-ui-ready from untrusted origin: {window_url}"
-                            );
+                            ));
                             return;
                         }
                         if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -2727,9 +2819,9 @@ fn main() {
                             "updater-ui-ready",
                             desktop::ipc_origin::Verb::Is,
                         ) {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[updater] ignoring updater-ui-ready from unexpected origin: {window_url} ({err})"
-                            );
+                            ));
                             return;
                         }
 
@@ -2739,12 +2831,18 @@ fn main() {
                         );
                     });
 
-                    *listener.lock().unwrap() = Some(id);
+                    *listener
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(id);
 
                     // Extremely defensive: if the readiness signal fires before we store `id`, make
                     // sure the listener is still unregistered.
                     if started.load(Ordering::SeqCst) {
-                        if let Some(id) = listener.lock().unwrap().take() {
+                        if let Some(id) = listener
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .take()
+                        {
                             handle.unlisten(id);
                         }
                     }
@@ -2759,16 +2857,16 @@ fn main() {
                     let window_url = match window_for_listener.url() {
                         Ok(url) => url,
                         Err(err) => {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[open-file] ignored ready signal because window URL could not be read: {err}"
-                            );
+                            ));
                             return;
                         }
                     };
                     if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[open-file] ignored ready signal from untrusted origin: {window_url}"
-                        );
+                        ));
                         return;
                     }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -2776,15 +2874,16 @@ fn main() {
                         "open-file-ready",
                         desktop::ipc_origin::Verb::Is,
                     ) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[open-file] ignored ready signal from unexpected origin: {window_url} ({err})"
-                        );
+                        ));
                         return;
                     }
 
                     let state = handle.state::<SharedOpenFileState>().inner().clone();
                     let pending = {
-                        let mut guard = state.lock().unwrap();
+                        let mut guard =
+                            state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                         guard.mark_ready_and_drain()
                     };
                     let pending = normalize_open_file_request_paths(pending);
@@ -2803,16 +2902,16 @@ fn main() {
                     let window_url = match window_for_listener.url() {
                         Ok(url) => url,
                         Err(err) => {
-                            eprintln!(
+                            crate::stdio::stderrln(format_args!(
                                 "[oauth-redirect] ignored ready signal because window URL could not be read: {err}"
-                            );
+                            ));
                             return;
                         }
                     };
                     if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[oauth-redirect] ignored ready signal from untrusted origin: {window_url}"
-                        );
+                        ));
                         return;
                     }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
@@ -2820,9 +2919,9 @@ fn main() {
                         "oauth-redirect-ready",
                         desktop::ipc_origin::Verb::Is,
                     ) {
-                        eprintln!(
+                        crate::stdio::stderrln(format_args!(
                             "[oauth-redirect] ignored ready signal from unexpected origin: {window_url} ({err})"
-                        );
+                        ));
                         return;
                     }
 
@@ -2830,7 +2929,10 @@ fn main() {
                     // is trusted (otherwise cold-start redirects could be emitted before JS
                     // listeners are installed).
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
-                    let pending = state.lock().unwrap().mark_ready_and_drain();
+                    let pending = state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .mark_ready_and_drain();
 
                     let pending = normalize_oauth_redirect_request_urls(pending);
                     for url in pending {
@@ -2841,8 +2943,17 @@ fn main() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(err) => {
+            crate::stdio::stderrln(format_args!(
+                "[formula] failed to build tauri application: {err}"
+            ));
+            std::process::exit(1);
+        }
+    };
 
     app.run(|_app_handle, event| match event {
         // macOS/iOS: when the app is already running and the user opens a file via the OS,

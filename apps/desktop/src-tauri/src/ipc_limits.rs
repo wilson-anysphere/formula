@@ -479,7 +479,8 @@ impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedJsonValueVisitor<'
         consume_json_budget::<A::Error, MAX_BYTES>(&mut *remaining, 2)?;
 
         let cap = seq.size_hint().unwrap_or(0).min(MAX_IPC_JSON_CONTAINER_LEN);
-        let mut out = Vec::with_capacity(cap);
+        let mut out = Vec::new();
+        let _ = out.try_reserve(cap);
 
         let next_depth = self.depth.saturating_add(1);
         for _ in 0..MAX_IPC_JSON_CONTAINER_LEN {

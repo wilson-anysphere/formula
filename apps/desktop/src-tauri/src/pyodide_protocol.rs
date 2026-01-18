@@ -39,26 +39,46 @@ pub fn handler<R: Runtime>(
             .as_ref()
             .map(|u| u.to_string())
             .unwrap_or_else(|| "<unknown>".to_string());
-        eprintln!("[pyodide protocol] blocked request from untrusted origin: {url_for_log}");
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .header(CONTENT_TYPE, "text/plain")
-            .header("Access-Control-Allow-Origin", &window_origin)
-            .header("Cross-Origin-Resource-Policy", "cross-origin")
-            .body(b"pyodide protocol is only available from trusted app-local origins".to_vec())
-            .unwrap();
+        crate::stdio::stderrln(format_args!(
+            "[pyodide protocol] blocked request from untrusted origin: {url_for_log}"
+        ));
+        let mut response = crate::http_response::response_with_content_type(
+            StatusCode::FORBIDDEN,
+            "text/plain",
+            b"pyodide protocol is only available from trusted app-local origins".to_vec(),
+        );
+        crate::http_response::insert_header(
+            &mut response,
+            "Access-Control-Allow-Origin",
+            &window_origin,
+        );
+        crate::http_response::insert_header(
+            &mut response,
+            "Cross-Origin-Resource-Policy",
+            "cross-origin",
+        );
+        return response;
     }
 
     let cache_root = match desktop::pyodide_assets::pyodide_cache_root() {
         Ok(p) => p,
         Err(err) => {
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header(CONTENT_TYPE, "text/plain")
-                .header("Access-Control-Allow-Origin", &window_origin)
-                .header("Cross-Origin-Resource-Policy", "cross-origin")
-                .body(format!("failed to determine pyodide cache directory: {err}").into_bytes())
-                .unwrap();
+            let mut response = crate::http_response::response_with_content_type(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "text/plain",
+                format!("failed to determine pyodide cache directory: {err}").into_bytes(),
+            );
+            crate::http_response::insert_header(
+                &mut response,
+                "Access-Control-Allow-Origin",
+                &window_origin,
+            );
+            crate::http_response::insert_header(
+                &mut response,
+                "Cross-Origin-Resource-Policy",
+                "cross-origin",
+            );
+            return response;
         }
     };
 
@@ -173,13 +193,22 @@ fn get_response(
         match resolve_request_path(cache_root, &request) {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(err) => {
-                return Response::builder()
-                    .status(StatusCode::FORBIDDEN)
-                    .header(CONTENT_TYPE, "text/plain")
-                    .header("Access-Control-Allow-Origin", window_origin)
-                    .header("Cross-Origin-Resource-Policy", "cross-origin")
-                    .body(err.into_bytes())
-                    .unwrap();
+                let mut response = crate::http_response::response_with_content_type(
+                    StatusCode::FORBIDDEN,
+                    "text/plain",
+                    err.into_bytes(),
+                );
+                crate::http_response::insert_header(
+                    &mut response,
+                    "Access-Control-Allow-Origin",
+                    window_origin,
+                );
+                crate::http_response::insert_header(
+                    &mut response,
+                    "Cross-Origin-Resource-Policy",
+                    "cross-origin",
+                );
+                return response;
             }
         }
     } else {
@@ -196,14 +225,18 @@ fn get_response(
         |path| desktop::pyodide_assets::pyodide_cache_path_is_allowed(Path::new(path), &cache_root),
     );
 
-    let mut builder = Response::builder()
-        .status(StatusCode::from_u16(core_resp.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
-        .header("Access-Control-Allow-Origin", window_origin)
-        .header("Cross-Origin-Resource-Policy", "cross-origin");
-
+    let mut response = crate::http_response::response(
+        StatusCode::from_u16(core_resp.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        core_resp.body,
+    );
+    crate::http_response::insert_header(&mut response, "Access-Control-Allow-Origin", window_origin);
+    crate::http_response::insert_header(
+        &mut response,
+        "Cross-Origin-Resource-Policy",
+        "cross-origin",
+    );
     for (k, v) in core_resp.headers {
-        builder = builder.header(k, v);
+        crate::http_response::insert_header(&mut response, &k, &v);
     }
-
-    builder.body(core_resp.body).unwrap()
+    response
 }

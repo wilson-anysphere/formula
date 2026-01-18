@@ -347,7 +347,11 @@ fn patch_sst_start_tag(
     // If the file used `<sst .../>`, convert to an open tag so we can append children.
     if was_self_closing {
         if let Some(idx) = tag.rfind("/>") {
-            tag.replace_range(idx..idx + 2, ">");
+            if let Some(end) = idx.checked_add(2) {
+                if end <= tag.len() {
+                    tag.replace_range(idx..end, ">");
+                }
+            }
         }
     }
 

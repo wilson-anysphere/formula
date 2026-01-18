@@ -5545,11 +5545,20 @@ impl<'a> FormulaParser<'a> {
                 return Err("unterminated external workbook prefix".to_string());
             }
         };
-        if start + 1 >= end {
+        let Some(book_start) = start.checked_add(1) else {
+            return Err("unterminated external workbook prefix".to_string());
+        };
+        let Some(book_end) = end.checked_sub(1) else {
+            return Err("unterminated external workbook prefix".to_string());
+        };
+        if book_start >= book_end {
             return Ok(None);
         }
 
-        let book = &self.input[start + 1..end - 1];
+        let book = self
+            .input
+            .get(book_start..book_end)
+            .ok_or_else(|| "unterminated external workbook prefix".to_string())?;
         self.pos = end;
         self.skip_ws();
 

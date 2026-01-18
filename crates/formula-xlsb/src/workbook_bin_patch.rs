@@ -307,17 +307,14 @@ fn parse_supbook_raw_name(payload: &[u8]) -> Option<String> {
 }
 
 fn read_xl_wide_string(data: &[u8], offset: &mut usize) -> Option<String> {
-    if *offset + 4 > data.len() {
-        return None;
-    }
-    let cch = u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?) as usize;
-    *offset += 4;
+    let header_end = offset.checked_add(4)?;
+    let raw_cch: [u8; 4] = data.get(*offset..header_end)?.try_into().ok()?;
+    let cch = u32::from_le_bytes(raw_cch) as usize;
+    *offset = header_end;
     let byte_len = cch.checked_mul(2)?;
-    if *offset + byte_len > data.len() {
-        return None;
-    }
-    let bytes = &data[*offset..*offset + byte_len];
-    *offset += byte_len;
+    let end = offset.checked_add(byte_len)?;
+    let bytes = data.get(*offset..end)?;
+    *offset = end;
 
     // Strict decode: return `None` on invalid surrogate sequences.
     let mut out = String::new();

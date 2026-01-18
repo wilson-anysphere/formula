@@ -12,11 +12,21 @@ fn main() {
         // If the dist dir is missing, create a tiny placeholder `index.html`. The runtime
         // `--startup-bench` mode overrides `tauri://` responses anyway, but this keeps the
         // build step lightweight and deterministic.
-        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
+            println!("cargo:warning=missing CARGO_MANIFEST_DIR; skipping frontendDist placeholder creation");
+            tauri_build::build();
+            return;
+        };
+        let manifest_dir = std::path::PathBuf::from(manifest_dir);
         let dist_dir = manifest_dir.join("../dist");
         let index_html = dist_dir.join("index.html");
         if !index_html.exists() {
-            let _ = std::fs::create_dir_all(&dist_dir);
+            if let Err(err) = std::fs::create_dir_all(&dist_dir) {
+                println!(
+                    "cargo:warning=failed to create placeholder frontendDist directory ({:?}): {err}",
+                    dist_dir
+                );
+            }
             let placeholder = r#"<!doctype html>
 <meta charset="utf-8" />
 <title>Formula</title>

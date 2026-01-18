@@ -919,7 +919,8 @@ fn parse_excel_serial_best_effort(value: &str) -> Option<i32> {
 fn serial_decimal_places(value: &str) -> Option<usize> {
     let trimmed = value.trim();
     let dot_idx = trimmed.find('.')?;
-    let frac = trimmed.get(dot_idx + 1..)?;
+    let frac_start = dot_idx.checked_add(1)?;
+    let frac = trimmed.get(frac_start..)?;
     if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }

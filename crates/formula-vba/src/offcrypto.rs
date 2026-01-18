@@ -339,7 +339,10 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
                     continue;
                 }
 
-                let sig_slice = &stream[pkcs7_offset..sig_end];
+                let sig_slice = match stream.get(pkcs7_offset..sig_end) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let Some(pkcs7_len) = pkcs7_signed_data_len(sig_slice) else {
                     continue;
                 };
@@ -427,7 +430,8 @@ fn ber_parse_len(bytes: &[u8]) -> Option<(BerLen, usize /* len len */)> {
         return None;
     }
     let mut len: usize = 0;
-    for &b in &bytes[1..1 + n] {
+    let bytes = bytes.get(1..1 + n)?;
+    for &b in bytes {
         len = len.checked_shl(8)?;
         len = len.checked_add(b as usize)?;
     }

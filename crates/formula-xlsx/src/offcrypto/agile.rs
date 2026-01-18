@@ -1185,7 +1185,15 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
                 "decrypt_agile_encrypted_package_stream_with_key segment buffer",
             ));
         }
-        decrypted.extend_from_slice(&ciphertext[offset..offset + seg_len]);
+        let seg_end = offset
+            .checked_add(seg_len)
+            .ok_or(OffCryptoError::InvalidAgileParameter {
+                param: "EncryptedPackage segment end overflow",
+            })?;
+        let seg_cipher = ciphertext.get(offset..seg_end).ok_or(OffCryptoError::InvalidAgileParameter {
+            param: "EncryptedPackage segment range out of bounds",
+        })?;
+        decrypted.extend_from_slice(seg_cipher);
         decrypt_aes_cbc_no_padding_in_place(package_key, &iv, &mut decrypted).map_err(|err| {
             match err {
                 AesCbcDecryptError::UnsupportedKeyLength(key_len) => {

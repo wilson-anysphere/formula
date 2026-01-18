@@ -1193,7 +1193,9 @@ fn part_group(part: &str) -> &'static str {
         if suffix.len() > s.len() {
             return false;
         }
-        s[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        let start = s.len() - suffix.len();
+        s.get(start..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
     }
 
     fn contains_ignore_ascii_case(s: &str, needle: &str) -> bool {
@@ -1205,12 +1207,8 @@ fn part_group(part: &str) -> &'static str {
         if needle.len() > s.len() {
             return false;
         }
-        for start in 0..=s.len() - needle.len() {
-            if s[start..start + needle.len()].eq_ignore_ascii_case(needle) {
-                return true;
-            }
-        }
-        false
+        s.windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
     }
 
     if part.eq_ignore_ascii_case("[content_types].xml") {

@@ -3476,7 +3476,14 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         return false;
     }
     for start in 0..=haystack.len() - needle.len() {
-        if haystack[start..start + needle.len()].eq_ignore_ascii_case(needle) {
+        let end = match start.checked_add(needle.len()) {
+            Some(v) => v,
+            None => return false,
+        };
+        let Some(window) = haystack.get(start..end) else {
+            return false;
+        };
+        if window.eq_ignore_ascii_case(needle) {
             return true;
         }
     }

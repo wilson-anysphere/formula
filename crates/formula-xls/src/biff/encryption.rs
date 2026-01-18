@@ -1520,12 +1520,34 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 filepass_payload.extend_from_slice(&enc_info);
 
                 debug_assert_eq!(filepass_payload.len(), FILEPASS_PAYLOAD_LEN);
-                workbook_stream[payload_start..payload_start + filepass_payload.len()]
-                    .copy_from_slice(&filepass_payload);
+                let filepass_end = payload_start
+                    .checked_add(filepass_payload.len())
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "FILEPASS placeholder offset overflow while writing CryptoAPI payload"
+                                .to_string(),
+                        )
+                    })?;
+                let stream_len = workbook_stream.len();
+                let dst = workbook_stream
+                    .get_mut(payload_start..filepass_end)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(format!(
+                            "FILEPASS placeholder out of bounds while writing CryptoAPI payload (start={payload_start}, end={filepass_end}, len={})",
+                            stream_len
+                        ))
+                    })?;
+                dst.copy_from_slice(&filepass_payload);
+
                 // Zero any remaining bytes in the placeholder so expected streams are stable.
-                for b in workbook_stream[payload_start + filepass_payload.len()..payload_end].iter_mut() {
-                    *b = 0;
-                }
+                let remaining = workbook_stream
+                    .get_mut(filepass_end..payload_end)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(format!(
+                            "FILEPASS payload exceeds placeholder (payload_end={payload_end}, filepass_end={filepass_end})"
+                        ))
+                    })?;
+                remaining.fill(0);
 
                 // Encrypt record payload bytes after FILEPASS using an absolute-position mapping.
                 let (ranges, total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;

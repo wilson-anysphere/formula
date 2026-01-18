@@ -615,21 +615,23 @@ fn build_export_part_overrides_from_subset_package(
         formula_xlsx::XlsxPackage::from_bytes(&subset_bytes).context("parse subset xlsx package")?;
 
     if wants_vba {
+        let Some(vba_project_bin) = workbook_meta.vba_project_bin.clone() else {
+            anyhow::bail!("expected vbaProject.bin bytes when persisting macro-enabled workbook");
+        };
         pkg.set_part(
             "xl/vbaProject.bin",
-            workbook_meta
-                .vba_project_bin
-                .clone()
-                .expect("checked is_some"),
+            vba_project_bin,
         );
     }
     if wants_vba_signature {
+        let Some(signature_bin) = workbook_meta.vba_project_signature_bin.clone() else {
+            anyhow::bail!(
+                "expected vbaProjectSignature.bin bytes when persisting macro-enabled workbook"
+            );
+        };
         pkg.set_part(
             "xl/vbaProjectSignature.bin",
-            workbook_meta
-                .vba_project_signature_bin
-                .clone()
-                .expect("checked is_some"),
+            signature_bin,
         );
     }
 

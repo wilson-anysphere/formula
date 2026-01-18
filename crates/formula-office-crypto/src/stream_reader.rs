@@ -390,26 +390,60 @@ impl<R: Read + Seek + Send + Sync> Read for EncryptedPackageReader<R> {
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
                 let slice = seg.as_slice();
                 // Copy before caching so we can move `seg` into the cache.
-                let to_copy = slice
-                    .len()
-                    .saturating_sub(seg_offset)
-                    .min(buf.len() - total);
-                buf[total..total + to_copy]
-                    .copy_from_slice(&slice[seg_offset..seg_offset + to_copy]);
-                self.pos = self.pos.saturating_add(to_copy as u64);
-                total += to_copy;
+                let Some(available) = slice.len().checked_sub(seg_offset) else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "segment offset out of range",
+                    ));
+                };
+                let to_copy = available.min(buf.len() - total);
+                let dst_end = total.checked_add(to_copy).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "destination end overflow")
+                })?;
+                let src_end = seg_offset.checked_add(to_copy).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "source end overflow")
+                })?;
+                let dst = buf.get_mut(total..dst_end).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "destination out of range")
+                })?;
+                let src = slice.get(seg_offset..src_end).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "source out of range")
+                })?;
+                dst.copy_from_slice(src);
+                self.pos = self
+                    .pos
+                    .checked_add(to_copy as u64)
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "position overflow"))?;
+                total = dst_end;
                 self.cache_insert(seg_index, seg);
                 continue;
             };
 
-            let to_copy = segment
-                .len()
-                .saturating_sub(seg_offset)
-                .min(buf.len() - total);
-            buf[total..total + to_copy]
-                .copy_from_slice(&segment[seg_offset..seg_offset + to_copy]);
-            self.pos = self.pos.saturating_add(to_copy as u64);
-            total += to_copy;
+            let Some(available) = segment.len().checked_sub(seg_offset) else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "segment offset out of range",
+                ));
+            };
+            let to_copy = available.min(buf.len() - total);
+            let dst_end = total.checked_add(to_copy).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "destination end overflow")
+            })?;
+            let src_end = seg_offset.checked_add(to_copy).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "source end overflow")
+            })?;
+            let dst = buf.get_mut(total..dst_end).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "destination out of range")
+            })?;
+            let src = segment.get(seg_offset..src_end).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "source out of range")
+            })?;
+            dst.copy_from_slice(src);
+            self.pos = self
+                .pos
+                .checked_add(to_copy as u64)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "position overflow"))?;
+            total = dst_end;
         }
 
         Ok(total)

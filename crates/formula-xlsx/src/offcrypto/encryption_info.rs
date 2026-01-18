@@ -287,22 +287,27 @@ fn scan_to_encryption_tag_utf16le(payload: &[u8]) -> Option<&[u8]> {
         return None;
     }
 
-    for i in 0..=payload.len() - required {
-        if payload[i] != b'<' || payload[i + 1] != 0 {
+    let max_i = payload.len().checked_sub(required)?;
+    for i in 0..=max_i {
+        if payload.get(i..i.checked_add(2)?)? != [b'<', 0] {
             continue;
         }
 
         let mut ok = true;
         for (j, &c) in NEEDLE.iter().enumerate() {
-            let idx = i + 2 + j * 2;
-            if payload[idx + 1] != 0 || !payload[idx].eq_ignore_ascii_case(&c) {
+            let idx = i
+                .checked_add(2)?
+                .checked_add(j.checked_mul(2)?)?;
+            let byte = *payload.get(idx)?;
+            let nul = *payload.get(idx.checked_add(1)?)?;
+            if nul != 0 || !byte.eq_ignore_ascii_case(&c) {
                 ok = false;
                 break;
             }
         }
 
         if ok {
-            return Some(&payload[i..]);
+            return payload.get(i..);
         }
     }
 

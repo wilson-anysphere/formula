@@ -43,8 +43,9 @@ pub fn sum_count_ignore_nan_f64(values: &[f64]) -> (f64, usize) {
     let mut acc = f64x4::from([0.0; 4]);
     let mut count = 0usize;
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let mut lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
         for lane in &mut lanes {
             if lane.is_nan() {
@@ -75,8 +76,9 @@ pub fn min_ignore_nan_f64(values: &[f64]) -> Option<f64> {
     let mut acc = f64x4::from([f64::INFINITY; 4]);
     let mut saw_value = false;
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let mut lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
         for lane in &mut lanes {
             if lane.is_nan() {
@@ -107,8 +109,9 @@ pub fn max_ignore_nan_f64(values: &[f64]) -> Option<f64> {
     let mut acc = f64x4::from([f64::NEG_INFINITY; 4]);
     let mut saw_value = false;
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let mut lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
         for lane in &mut lanes {
             if lane.is_nan() {
@@ -138,8 +141,9 @@ pub fn max_ignore_nan_f64(values: &[f64]) -> Option<f64> {
 pub fn count_if_f64(values: &[f64], criteria: NumericCriteria) -> usize {
     let mut count = 0usize;
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
         for &v in &lanes {
             if v.is_nan() {
@@ -171,8 +175,9 @@ pub fn count_if_f64(values: &[f64], criteria: NumericCriteria) -> usize {
 pub fn count_if_blank_as_zero_f64(values: &[f64], criteria: NumericCriteria) -> usize {
     let mut count = 0usize;
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
         for &v in &lanes {
             let v = if v.is_nan() { 0.0 } else { v };
@@ -203,8 +208,9 @@ pub fn sum_if_f64(values: &[f64], criteria_values: &[f64], criteria: NumericCrit
 
     let mut acc = f64x4::from([0.0; 4]);
 
+    let len4 = values.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= values.len() {
+    while i < len4 {
         let mut lanes = [0.0f64; 4];
         for lane in 0..4 {
             let mut crit_v = criteria_values[i + lane];
@@ -431,8 +437,9 @@ pub fn sumproduct_ignore_nan_f64(a: &[f64], b: &[f64]) -> f64 {
 
     let mut acc = f64x4::from([0.0; 4]);
 
+    let len4 = a.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= a.len() {
+    while i < len4 {
         let mut la = [a[i], a[i + 1], a[i + 2], a[i + 3]];
         let mut lb = [b[i], b[i + 1], b[i + 2], b[i + 3]];
         for (xa, xb) in la.iter_mut().zip(lb.iter_mut()) {
@@ -463,8 +470,9 @@ pub fn add_f64(out: &mut [f64], a: &[f64], b: &[f64]) {
     debug_assert_eq!(out.len(), a.len());
     debug_assert_eq!(out.len(), b.len());
 
+    let len4 = out.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= out.len() {
+    while i < len4 {
         let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
         let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let vr = va + vb;
@@ -481,8 +489,9 @@ pub fn sub_f64(out: &mut [f64], a: &[f64], b: &[f64]) {
     debug_assert_eq!(out.len(), a.len());
     debug_assert_eq!(out.len(), b.len());
 
+    let len4 = out.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= out.len() {
+    while i < len4 {
         let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
         let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let vr = va - vb;
@@ -499,8 +508,9 @@ pub fn mul_f64(out: &mut [f64], a: &[f64], b: &[f64]) {
     debug_assert_eq!(out.len(), a.len());
     debug_assert_eq!(out.len(), b.len());
 
+    let len4 = out.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= out.len() {
+    while i < len4 {
         let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
         let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let vr = va * vb;
@@ -517,8 +527,9 @@ pub fn div_f64(out: &mut [f64], a: &[f64], b: &[f64]) {
     debug_assert_eq!(out.len(), a.len());
     debug_assert_eq!(out.len(), b.len());
 
+    let len4 = out.len() & !3;
     let mut i = 0usize;
-    while i + 4 <= out.len() {
+    while i < len4 {
         let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
         let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let vr = va / vb;

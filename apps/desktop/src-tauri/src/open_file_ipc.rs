@@ -79,9 +79,9 @@ impl OpenFileState {
 
         if dropped_any && !self.overflow_warned {
             self.overflow_warned = true;
-            eprintln!(
+            crate::stdio::stderrln(format_args!(
                 "[open-file-ipc] pending open-file queue exceeded limit (max_paths={MAX_PENDING_PATHS}, max_bytes={MAX_PENDING_BYTES}); dropping oldest entries"
-            );
+            ));
         }
     }
 }

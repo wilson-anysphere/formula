@@ -140,13 +140,23 @@ where
         decrypt_block(
             block_index,
             ciphertext,
-            &mut plaintext_buf[..ciphertext_len],
+            plaintext_buf.get_mut(..ciphertext_len).ok_or(OffcryptoError::EncryptedPackageSizeOverflow {
+                total_size,
+            })?,
         )?;
 
-        out[out_offset..out_offset + plaintext_len]
-            .copy_from_slice(&plaintext_buf[..plaintext_len]);
+        let out_end = out_offset
+            .checked_add(plaintext_len)
+            .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+        let dst = out
+            .get_mut(out_offset..out_end)
+            .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+        let src = plaintext_buf.get(..plaintext_len).ok_or(OffcryptoError::EncryptedPackageSizeOverflow {
+            total_size,
+        })?;
+        dst.copy_from_slice(src);
 
-        out_offset += plaintext_len;
+        out_offset = out_end;
         remaining -= plaintext_len as u64;
         block_index = block_index
             .checked_add(1)

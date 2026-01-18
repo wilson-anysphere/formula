@@ -36,12 +36,23 @@ pub(crate) enum DecryptError {
     Io(#[from] io::Error),
 }
 
+fn ensure_decrypted_package_len_is_within_limits(plaintext_len: u64) -> Result<(), DecryptError> {
+    let max = crate::rc4_encrypted_package::DEFAULT_MAX_DECRYPTED_PACKAGE_SIZE;
+    if plaintext_len > max {
+        return Err(DecryptError::AllocationFailure(
+            "decrypted package size exceeds maximum allowed limit",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn decrypted_package_reader<R: Read + Seek>(
     ciphertext_reader: R,
     plaintext_len: u64,
     encryption_info: &[u8],
     password: &str,
 ) -> Result<DecryptedPackageReader<R>, DecryptError> {
+    ensure_decrypted_package_len_is_within_limits(plaintext_len)?;
     if encryption_info.len() < 4 {
         return Err(DecryptError::InvalidInfo(
             "EncryptionInfo truncated (missing version header)".to_string(),
@@ -96,6 +107,7 @@ pub(crate) fn decrypt_encrypted_package(
     let plaintext_len = crate::parse_encrypted_package_original_size(encrypted_package).ok_or_else(|| {
         DecryptError::InvalidInfo("EncryptedPackage truncated (missing size prefix)".to_string())
     })?;
+    ensure_decrypted_package_len_is_within_limits(plaintext_len)?;
 
     match (major, minor) {
         (4, 4) => {
@@ -188,6 +200,7 @@ fn decrypt_encrypted_package_standard(
     let plaintext_len = crate::parse_encrypted_package_original_size(encrypted_package).ok_or_else(|| {
         DecryptError::InvalidInfo("EncryptedPackage truncated (missing size prefix)".to_string())
     })?;
+    ensure_decrypted_package_len_is_within_limits(plaintext_len)?;
     let plaintext_len_usize = usize::try_from(plaintext_len).map_err(|_| {
         DecryptError::InvalidInfo(format!(
             "EncryptedPackage orig_size {plaintext_len} does not fit into usize"

@@ -1666,21 +1666,20 @@ fn biff8_short_unicode_string_len(input: &[u8]) -> Option<usize> {
     let mut offset = 2usize;
 
     let rich_runs = if flags & 0x08 != 0 {
-        let runs = u16::from_le_bytes([*input.get(offset)?, *input.get(offset + 1)?]) as usize;
-        offset += 2;
+        let end = offset.checked_add(2)?;
+        let raw: [u8; 2] = input.get(offset..end)?.try_into().ok()?;
+        let runs = u16::from_le_bytes(raw) as usize;
+        offset = end;
         runs
     } else {
         0usize
     };
 
     let ext_size = if flags & 0x04 != 0 {
-        let size = u32::from_le_bytes([
-            *input.get(offset)?,
-            *input.get(offset + 1)?,
-            *input.get(offset + 2)?,
-            *input.get(offset + 3)?,
-        ]) as usize;
-        offset += 4;
+        let end = offset.checked_add(4)?;
+        let raw: [u8; 4] = input.get(offset..end)?.try_into().ok()?;
+        let size = u32::from_le_bytes(raw) as usize;
+        offset = end;
         size
     } else {
         0usize

@@ -803,7 +803,8 @@ async fn query_sqlite(
                 ));
             }
 
-            let mut out = Vec::with_capacity(columns.len());
+            let mut out: Vec<JsonValue> = Vec::new();
+            let _ = out.try_reserve(columns.len());
             for idx in 0..columns.len() {
                 let value = sqlite_cell_to_json(&row, idx, &column_types[idx], max_cell_bytes)?;
                 total_bytes = total_bytes.saturating_add(sql_value_estimated_bytes(&value));
@@ -892,7 +893,8 @@ async fn query_postgres(
                 ));
             }
 
-            let mut out = Vec::with_capacity(columns.len());
+            let mut out: Vec<JsonValue> = Vec::new();
+            let _ = out.try_reserve(columns.len());
             for idx in 0..columns.len() {
                 let type_name = row
                     .columns()
@@ -1359,7 +1361,9 @@ mod tests {
     #[tokio::test]
     async fn sqlite_query_enforces_max_rows() {
         // Prevent concurrent env var overrides (timeout/max-bytes) from affecting this test.
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
         seed_numbers_table(&mut keeper, 400).await;
@@ -1377,7 +1381,9 @@ mod tests {
     #[tokio::test]
     async fn sqlite_query_allows_exact_limit() {
         // Prevent concurrent env var overrides (timeout/max-bytes) from affecting this test.
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
         seed_numbers_table(&mut keeper, 400).await;
@@ -1393,7 +1399,9 @@ mod tests {
     #[tokio::test]
     async fn with_sql_query_timeout_times_out() {
         // Keep env overrides (if any) isolated from other tests in this crate.
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let key = "FORMULA_SQL_QUERY_TIMEOUT_MS";
         let prev = std::env::var(key).ok();
@@ -1421,7 +1429,9 @@ mod tests {
     #[tokio::test]
     async fn sqlite_query_enforces_max_bytes() {
         // Keep env overrides (if any) isolated from other tests in this crate.
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let key = "FORMULA_SQL_QUERY_MAX_BYTES";
         let prev = std::env::var(key).ok();
@@ -1447,7 +1457,9 @@ mod tests {
     #[tokio::test]
     async fn sqlite_query_enforces_max_cell_bytes() {
         // Keep env overrides (if any) isolated from other tests in this crate.
-        let _guard = env_mutex().lock().unwrap();
+        let _guard = env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let key = "FORMULA_SQL_QUERY_MAX_CELL_BYTES";
         let prev = std::env::var(key).ok();
