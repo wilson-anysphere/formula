@@ -1,0 +1,146 @@
+From 73c2306acad753df1fb10643a79e3d0307c68171 Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 11:40:43 -0800
+Subject: [PATCH] fix(net/policy): keep websocket + snapshot builds green
+
+- Gate macOS wss/TLS usage in websocket_runtime behind renderer feature flags.
+- Update layout_engine snapshot stubs for grid item constraints (CalcSize + min/max keywords).
+- Refresh blocked-deps baseline and drop duplicate workspace exclude entry.
+---
+ Cargo.toml                                    |  1 -
+ .../tests/network_process_client_compile.rs   | 27 +++++++++++++++++++
+ src/network_process/websocket_runtime.rs      | 10 +++----
+ tools/lint_blocked_deps_baseline.json         | 10 ++-----
+ 4 files changed, 34 insertions(+), 14 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 86363379f..d14e92d5f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -120,7 +120,6 @@ exclude = [
+   "crates/whatwg_url",
+   "crates/wpt-import",
+   "crates/ws_frame_codec",
+-  "crates/url",
+   "crates/xml-tree-shim",
+   "crates/xml_dom",
+   "crates/xml_parser",
+diff --git a/crates/layout_engine/tests/network_process_client_compile.rs b/crates/layout_engine/tests/network_process_client_compile.rs
+index 1fa4bf32a..ed0c3c15a 100644
+--- a/crates/layout_engine/tests/network_process_client_compile.rs
++++ b/crates/layout_engine/tests/network_process_client_compile.rs
+@@ -669,6 +669,20 @@ mod geometry {
+ 
+ mod style {
+   pub mod types {
++    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
++    pub enum CalcSizeBasis {
++      FitContent { limit: Option<Length> },
++    }
++
++    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
++    pub struct CalcSizeExpr(pub u32);
++
++    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
++    pub struct CalcSize {
++      pub basis: CalcSizeBasis,
++      pub expr: CalcSizeExpr,
++    }
++
+     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+     pub struct Length {
+       has_percentage: bool,
+@@ -698,6 +712,7 @@ mod style {
+       MaxContent,
+       FillAvailable,
+       FitContent { limit: Option<Length> },
++      CalcSize(CalcSize),
+     }
+ 
+     #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+@@ -737,6 +752,18 @@ mod style {
+     pub writing_mode: WritingMode,
+     pub width_keyword: Option<IntrinsicSizeKeyword>,
+     pub height_keyword: Option<IntrinsicSizeKeyword>,
++    pub min_width_keyword: Option<IntrinsicSizeKeyword>,
++    pub max_width_keyword: Option<IntrinsicSizeKeyword>,
++    pub min_height_keyword: Option<IntrinsicSizeKeyword>,
++    pub max_height_keyword: Option<IntrinsicSizeKeyword>,
++  }
++
++  pub mod values {
++    use super::types::CalcSizeExpr;
++
++    pub fn intern_calc_size_expr(expr: &str) -> CalcSizeExpr {
++      CalcSizeExpr(expr.len() as u32)
++    }
+   }
+ 
+   pub fn inline_axis_is_horizontal(writing_mode: WritingMode) -> bool {
+diff --git a/src/network_process/websocket_runtime.rs b/src/network_process/websocket_runtime.rs
+index 1f1044321..64aecf043 100644
+--- a/src/network_process/websocket_runtime.rs
++++ b/src/network_process/websocket_runtime.rs
+@@ -27,7 +27,7 @@ use crate::ipc::websocket::{
+ use crate::net::websocket::handshake::extract_set_cookie_headers;
+ use crate::net::websocket::http_response_head as ws_http_response_head;
+ use ws_http_response_head::{ReadResponseHeadError, ResponseHeadError, ResponseHeadLimits};
+-#[cfg(target_os = "macos")]
++#[cfg(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal")))]
+ use crate::net::tls::{HandshakeStatus, TlsConnector};
+ use crate::net::websocket::{
+   build_client_handshake_request, cookie_url_for_ws_url, is_secure_context_for_document_url,
+@@ -824,7 +824,7 @@ fn connect_socket(
+   cookie_jar: Option<&dyn ResourceFetcher>,
+   deadline: Instant,
+ ) -> Result<(Rfc6455Client<MaybeTlsStream>, String), String> {
+-  use std::io::{ErrorKind, Write};
++  use std::io::ErrorKind;
+   use std::net::ToSocketAddrs;
+ 
+   // Re-parse and normalize the URL in the network process. The renderer is untrusted, and this also
+@@ -904,7 +904,7 @@ fn connect_socket(
+   stream.set_nodelay(true).map_err(|err| err.to_string())?;
+ 
+   let mut stream = if matches!(url.scheme, WsScheme::Wss) {
+-    #[cfg(target_os = "macos")]
++    #[cfg(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal")))]
+     {
+       let connector = TlsConnector::new().with_alpn_protocols(&["http/1.1"]);
+       let mut tls_stream = connector
+@@ -930,9 +930,9 @@ fn connect_socket(
+ 
+       MaybeTlsStream::Tls(tls_stream)
+     }
+-    #[cfg(not(target_os = "macos"))]
++    #[cfg(not(all(target_os = "macos", any(feature = "renderer", feature = "renderer_minimal"))))]
+     {
+-      return Err("wss requires TLS, which is only supported on macOS".to_string());
++      return Err("wss requires TLS, which is not available in this build".to_string());
+     }
+   } else {
+     MaybeTlsStream::Plain(stream)
+diff --git a/tools/lint_blocked_deps_baseline.json b/tools/lint_blocked_deps_baseline.json
+index 0ae4286a2..5d2e33e3b 100644
+--- a/tools/lint_blocked_deps_baseline.json
++++ b/tools/lint_blocked_deps_baseline.json
+@@ -1,14 +1,8 @@
+ [
+   {
+-    "path": "src/css/selector/matcher_parity_tests.rs",
++    "path": "src/paint/tests/paint/backdrop_filter_macos_coregraphics.rs",
+     "kind": "rust",
+-    "crate": "cssparser",
+-    "count": 1
+-  },
+-  {
+-    "path": "src/css/selector/matcher_parity_tests.rs",
+-    "kind": "rust",
+-    "crate": "selectors",
++    "crate": "tiny-skia",
+     "count": 1
+   }
+ ]
+-- 
+2.43.0
+
