@@ -1,4 +1,4 @@
-From 099b35d5489eb72ea8ace9e080118b5093c809ef Mon Sep 17 00:00:00 2001
+From 9ed76bfbe6c07fdb158c7e73f1b1c7870f681fab Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
 Date: Sun, 18 Jan 2026 01:22:14 -0800
 Subject: [PATCH] fix(snapshot): stabilize CI with grid gap + percent-base
@@ -18,25 +18,26 @@ Subject: [PATCH] fix(snapshot): stabilize CI with grid gap + percent-base
   normalization; add HTML tokenizer solidus regression; avoid panicking on poisoned locks; gate
   CoreText shaper tests behind macOS cfg.
 ---
- Cargo.toml                               |   4 +-
- crates/http_stack/Cargo.toml             |  10 +-
- src/css/selector/matcher_parity_tests.rs | 517 -----------------------
- src/css/selector/mod.rs                  |   2 -
- src/html/tokenizer/html_tokenizer.rs     |  75 ++++
- src/layout/fragmentation.rs              | 122 +++++-
- src/layout_minimal/constraints.rs        |  10 +-
- src/layout_minimal/contexts/block.rs     |   6 +-
- src/layout_minimal/contexts/flex.rs      |   6 +-
- src/layout_minimal/contexts/grid.rs      |   6 +-
- src/layout_minimal/engine.rs             | 197 +++++----
- src/layout_minimal/formatting_context.rs |  44 +-
- src/net/websocket/mod.rs                 |   2 -
- src/text/tests/coretext_shaper.rs        |   2 +-
- src/ui/mod.rs                            |   1 +
- src/ui/url.rs                            |   3 -
- xtask/Cargo.lock                         |   4 +-
- xtask/src/lint_no_panics.rs              |  61 ++-
- 18 files changed, 445 insertions(+), 627 deletions(-)
+ Cargo.toml                                    |   4 +-
+ crates/http_stack/Cargo.toml                  |  10 +-
+ src/css/selector/matcher_parity_tests.rs      | 517 ------------------
+ src/css/selector/mod.rs                       |   2 -
+ src/html/tokenizer/html_tokenizer.rs          |  75 +++
+ .../grid/tests/fragmentation_tracks_test.rs   |   4 +-
+ src/layout/fragmentation.rs                   | 122 ++++-
+ src/layout_minimal/constraints.rs             |  10 +-
+ src/layout_minimal/contexts/block.rs          |   6 +-
+ src/layout_minimal/contexts/flex.rs           |   6 +-
+ src/layout_minimal/contexts/grid.rs           |   6 +-
+ src/layout_minimal/engine.rs                  | 262 +++++----
+ src/layout_minimal/formatting_context.rs      |  44 +-
+ src/net/websocket/mod.rs                      |   2 -
+ src/text/tests/coretext_shaper.rs             |   2 +-
+ src/ui/mod.rs                                 |   1 +
+ src/ui/url.rs                                 |   3 -
+ xtask/Cargo.lock                              |   4 +-
+ xtask/src/lint_no_panics.rs                   |  61 ++-
+ 19 files changed, 487 insertions(+), 654 deletions(-)
  delete mode 100644 src/css/selector/matcher_parity_tests.rs
 
 diff --git a/Cargo.toml b/Cargo.toml
@@ -721,6 +722,25 @@ index e78172a287..0832a6fbb1 100644
    #[test]
    fn push_front_injects_before_remaining_input() {
      let mut tokenizer = HtmlTokenizer::new();
+diff --git a/src/layout/contexts/grid/tests/fragmentation_tracks_test.rs b/src/layout/contexts/grid/tests/fragmentation_tracks_test.rs
+index 9b431568c4..449944becc 100644
+--- a/src/layout/contexts/grid/tests/fragmentation_tracks_test.rs
++++ b/src/layout/contexts/grid/tests/fragmentation_tracks_test.rs
+@@ -224,7 +224,8 @@ fn grid_tracks_flow_order_for_sideways_lr_inline_axis() {
+     assert_track_ranges_in_flow_order(ranges, axes.inline_positive(), inline_size, label);
+     let block_size = axes.block_size(&fragment.bounds);
+     assert_track_ranges_in_flow_order(block_ranges, axes.block_positive(), block_size, label);
+-  assert_fragmentation_boundaries(&fragment, axes);
++    assert_fragmentation_boundaries(&fragment, axes);
++  }
+ }
+ 
+ #[test]
+@@ -257,4 +258,3 @@ fn grid_tracks_preserve_zero_length_rows() {
+     "expected first row track to be zero-length, got {first_start}..{first_end}"
+   );
+ }
+-}
 diff --git a/src/layout/fragmentation.rs b/src/layout/fragmentation.rs
 index 98e8746f4e..c698934d54 100644
 --- a/src/layout/fragmentation.rs
@@ -1001,7 +1021,7 @@ index 4a431aca31..170e722c08 100644
      engine.layout_tree(&tree)
    }
 diff --git a/src/layout_minimal/engine.rs b/src/layout_minimal/engine.rs
-index 72b0f4484b..a75a19e3fd 100644
+index 72b0f4484b..6d84c62c6e 100644
 --- a/src/layout_minimal/engine.rs
 +++ b/src/layout_minimal/engine.rs
 @@ -15,7 +15,8 @@ use crate::layout::fragmentation::{
@@ -1205,7 +1225,7 @@ index 72b0f4484b..a75a19e3fd 100644
    let padding_left = style
      .padding_left
      .resolve_px_with_fonts(percentage_base, style.font_size, style.root_font_size)
-@@ -1859,10 +1888,40 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+@@ -1859,13 +1888,46 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
  
    let stretch_block = matches!(style.align_items, AlignItems::Stretch);
  
@@ -1246,9 +1266,99 @@ index 72b0f4484b..a75a19e3fd 100644
 +  let mut block_free = (container_block_size - track_block_sum - total_row_gap).max(0.0);
 +  let mut inline_free = (container_inline_size - track_inline_sum - total_column_gap).max(0.0);
  
-   // `align-content: stretch` distributes any remaining free space across the grid tracks. The
-   // minimal layout harness only needs the simplest behavior: grow each row equally.
-@@ -1931,20 +1990,6 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+-  // `align-content: stretch` distributes any remaining free space across the grid tracks. The
+-  // minimal layout harness only needs the simplest behavior: grow each row equally.
++  // `align-content: stretch` distributes any remaining free space across the grid tracks.
++  //
++  // Per CSS Grid, only `auto` tracks participate in this stretch; fixed-size tracks (including
++  // explicit `0px` tracks) remain fixed. When no `auto` tracks exist, treat `stretch` like
++  // start-alignment.
+   if matches!(style.align_content, AlignContent::Stretch)
+     && container_block_size.is_finite()
+     && track_block_sum.is_finite()
+@@ -1873,34 +1935,34 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     && row_count > 0
+     && block_free > 0.0
+   {
+-    let extra = block_free / row_count as f32;
+-    for size in row_sizes.iter_mut() {
+-      *size += extra;
++    let is_auto_track = |idx: usize| {
++      row_tracks
++        .get(idx)
++        .map_or(true, |track| matches!(track, GridTrack::Auto))
++    };
++    let auto_count = (0..row_count).filter(|idx| is_auto_track(*idx)).count();
++    if auto_count > 0 {
++      let extra = block_free / auto_count as f32;
++      if extra.is_finite() {
++        for (idx, size) in row_sizes.iter_mut().enumerate() {
++          if is_auto_track(idx) {
++            *size = (*size + extra).max(0.0);
++          }
++        }
++        block_free = 0.0;
++      }
+     }
+-    block_free = 0.0;
+   }
+ 
+-  // `justify-content: stretch` distributes free space across columns. Match the minimal
+-  // `align-content` behavior above by growing each column equally.
+-  if matches!(style.justify_content, JustifyContent::Stretch)
+-    && container_inline_size.is_finite()
+-    && track_inline_sum.is_finite()
+-    && inline_free.is_finite()
+-    && column_count > 0
+-    && inline_free > 0.0
+-  {
+-    let extra = inline_free / column_count as f32;
+-    for size in column_sizes.iter_mut() {
+-      *size += extra;
+-    }
+-    inline_free = 0.0;
+-  }
+   let block_offset = match style.align_content {
+     AlignContent::Center => block_free / 2.0,
+     AlignContent::Stretch | AlignContent::Start | AlignContent::FlexStart => 0.0,
+     AlignContent::End | AlignContent::FlexEnd => block_free,
+   };
+   // `justify-content: stretch` (and `normal`) distributes remaining inline space across columns.
++  //
++  // Like the block-axis logic above, only `auto` tracks participate in this stretch. If there are
++  // no `auto` tracks, treat `stretch`/`normal` like start-alignment.
+   if matches!(
+     style.justify_content,
+     JustifyContent::Stretch | JustifyContent::Normal
+@@ -1910,11 +1972,23 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+     && column_count > 0
+     && inline_free > 0.0
+   {
+-    let extra = inline_free / column_count as f32;
+-    for size in column_sizes.iter_mut() {
+-      *size += extra;
++    let is_auto_track = |idx: usize| {
++      column_tracks
++        .get(idx)
++        .map_or(true, |track| matches!(track, GridTrack::Auto))
++    };
++    let auto_count = (0..column_count).filter(|idx| is_auto_track(*idx)).count();
++    if auto_count > 0 {
++      let extra = inline_free / auto_count as f32;
++      if extra.is_finite() {
++        for (idx, size) in column_sizes.iter_mut().enumerate() {
++          if is_auto_track(idx) {
++            *size = (*size + extra).max(0.0);
++          }
++        }
++        inline_free = 0.0;
++      }
+     }
+-    inline_free = 0.0;
+   }
+ 
+   // The minimal layout harness only supports start/center/end offsets; other distribution modes
+@@ -1931,20 +2005,6 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
      | JustifyContent::SpaceEvenly => 0.0,
    };
  
@@ -1269,7 +1379,7 @@ index 72b0f4484b..a75a19e3fd 100644
    fn mirror_ranges(ranges: &mut [(f32, f32)], span_start: f32, span_end: f32) {
      if ranges.is_empty() {
        return;
-@@ -1965,22 +2010,26 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+@@ -1965,22 +2025,26 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
      }
    }
  
@@ -1311,7 +1421,7 @@ index 72b0f4484b..a75a19e3fd 100644
    if !axes.block_positive() {
      mirror_ranges(&mut row_ranges, 0.0, container_block_size.max(0.0));
    }
-@@ -2004,6 +2053,16 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+@@ -2004,6 +2068,16 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
    }
  
    let mut children: Vec<FragmentNode> = Vec::new();
@@ -1328,7 +1438,7 @@ index 72b0f4484b..a75a19e3fd 100644
    for (idx, child) in node.children.iter().enumerate() {
      let placement = placements_by_id.get(&child.id).copied();
      let (row_start, row_end, col_start, col_end) = if let Some(placement) = placement {
-@@ -2027,20 +2086,12 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
+@@ -2027,20 +2101,12 @@ fn layout_grid(node: &BoxNode, available: Size) -> FragmentNode {
        )
      };
  
@@ -1351,7 +1461,7 @@ index 72b0f4484b..a75a19e3fd 100644
      let cell_block = (block_end - block_start).max(0.0);
      let cell_inline = (inline_end - inline_start).max(0.0);
  
-@@ -2232,15 +2283,13 @@ fn layout_flex(node: &BoxNode, available: Size) -> FragmentNode {
+@@ -2232,15 +2298,13 @@ fn layout_flex(node: &BoxNode, available: Size) -> FragmentNode {
    let container_width = resolve_length(
      style.width,
      available.width,
