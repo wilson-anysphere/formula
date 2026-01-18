@@ -724,16 +724,31 @@ fn parse_biff_feat_record_sheet_protection_allow_mask(
         return Err(format!("FEAT record too short (len={})", data.len()));
     }
 
-    let isf = u16::from_le_bytes([data[base], data[base + 1]]);
+    let isf_end = base
+        .checked_add(2)
+        .ok_or_else(|| "FEAT record offset overflow while reading isf".to_string())?;
+    let isf_bytes = data
+        .get(base..isf_end)
+        .ok_or_else(|| "FEAT record truncated while reading isf".to_string())?;
+    let isf = u16::from_le_bytes([isf_bytes[0], isf_bytes[1]]);
     if isf != FEAT_ISF_SHEET_PROTECTION {
         return Ok(None);
     }
 
+    let cb_start = base
+        .checked_add(4)
+        .ok_or_else(|| "FEAT record offset overflow while reading cbFeatData".to_string())?;
+    let cb_end = cb_start
+        .checked_add(4)
+        .ok_or_else(|| "FEAT record offset overflow while reading cbFeatData".to_string())?;
+    let cb_feat_data_bytes = data
+        .get(cb_start..cb_end)
+        .ok_or_else(|| "FEAT record truncated while reading cbFeatData".to_string())?;
     let cb_feat_data = u32::from_le_bytes([
-        data[base + 4],
-        data[base + 5],
-        data[base + 6],
-        data[base + 7],
+        cb_feat_data_bytes[0],
+        cb_feat_data_bytes[1],
+        cb_feat_data_bytes[2],
+        cb_feat_data_bytes[3],
     ]) as usize;
     let data_start = base + 8;
     let data_end = data_start
@@ -745,7 +760,14 @@ fn parse_biff_feat_record_sheet_protection_allow_mask(
             data.len()
         ));
     }
-    let feat_data = &data[data_start..data_end];
+    let feat_data = data.get(data_start..data_end).ok_or_else(|| {
+        debug_assert!(
+            false,
+            "FEAT payload slice out of bounds (len={}, data_start={data_start}, data_end={data_end})",
+            data.len()
+        );
+        "FEAT payload slice out of bounds".to_string()
+    })?;
     let mask = parse_allow_mask_best_effort(feat_data)
         .ok_or_else(|| "FEAT protection payload missing allow-mask".to_string())?;
     Ok(Some(mask))
@@ -771,16 +793,31 @@ fn parse_biff_feat_hdr_sheet_protection_allow_mask(
         return Err(format!("FEATHEADR record too short (len={})", data.len()));
     }
 
-    let isf = u16::from_le_bytes([data[base], data[base + 1]]);
+    let isf_end = base
+        .checked_add(2)
+        .ok_or_else(|| "FEATHEADR record offset overflow while reading isf".to_string())?;
+    let isf_bytes = data
+        .get(base..isf_end)
+        .ok_or_else(|| "FEATHEADR record truncated while reading isf".to_string())?;
+    let isf = u16::from_le_bytes([isf_bytes[0], isf_bytes[1]]);
     if isf != FEAT_ISF_SHEET_PROTECTION {
         return Ok(None);
     }
 
+    let cb_start = base
+        .checked_add(4)
+        .ok_or_else(|| "FEATHEADR record offset overflow while reading cbHdrData".to_string())?;
+    let cb_end = cb_start
+        .checked_add(4)
+        .ok_or_else(|| "FEATHEADR record offset overflow while reading cbHdrData".to_string())?;
+    let cb_hdr_data_bytes = data
+        .get(cb_start..cb_end)
+        .ok_or_else(|| "FEATHEADR record truncated while reading cbHdrData".to_string())?;
     let cb_hdr_data = u32::from_le_bytes([
-        data[base + 4],
-        data[base + 5],
-        data[base + 6],
-        data[base + 7],
+        cb_hdr_data_bytes[0],
+        cb_hdr_data_bytes[1],
+        cb_hdr_data_bytes[2],
+        cb_hdr_data_bytes[3],
     ]) as usize;
     let data_start = base + 8;
     let data_end = data_start
@@ -792,7 +829,14 @@ fn parse_biff_feat_hdr_sheet_protection_allow_mask(
             data.len()
         ));
     }
-    let hdr_data = &data[data_start..data_end];
+    let hdr_data = data.get(data_start..data_end).ok_or_else(|| {
+        debug_assert!(
+            false,
+            "FEATHEADR payload slice out of bounds (len={}, data_start={data_start}, data_end={data_end})",
+            data.len()
+        );
+        "FEATHEADR payload slice out of bounds".to_string()
+    })?;
     let mask = parse_allow_mask_best_effort(hdr_data)
         .ok_or_else(|| "FEATHEADR protection payload missing allow-mask".to_string())?;
     Ok(Some(mask))
@@ -807,8 +851,14 @@ fn parse_allow_mask_best_effort(payload: &[u8]) -> Option<u32> {
     }
 
     let mut best: Option<(u32, usize, u16)> = None;
-    for offset in 0..=payload.len() - 2 {
-        let mask = u16::from_le_bytes([payload[offset], payload[offset + 1]]);
+    for offset in 0..=payload.len().saturating_sub(2) {
+        let Some(end) = offset.checked_add(2) else {
+            break;
+        };
+        let Some(bytes) = payload.get(offset..end) else {
+            break;
+        };
+        let mask = u16::from_le_bytes([bytes[0], bytes[1]]);
         if (mask & !KNOWN_ALLOW_MASK_BITS) != 0 {
             continue;
         }
@@ -829,7 +879,9 @@ fn parse_allow_mask_best_effort(payload: &[u8]) -> Option<u32> {
 
     // Fall back to the first u16 even if it contains unknown bits; this preserves the prior
     // behavior for files we don't fully understand.
-    Some(u16::from_le_bytes([payload[0], payload[1]]) as u32)
+    payload
+        .get(0..2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as u32)
 }
 /// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).
 ///
@@ -1071,7 +1123,16 @@ fn parse_horizontal_page_breaks_record(
 
     for i in 0..iter_entries {
         let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
-        let row = u16::from_le_bytes([data[base], data[base + 1]]);
+        let Some(bytes) = data.get(base..).and_then(|rest| rest.get(..2)) else {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "HorizontalPageBreaks record at offset {record_offset} truncated while reading entry {i}"
+                ),
+            );
+            break;
+        };
+        let row = u16::from_le_bytes([bytes[0], bytes[1]]);
         if row == 0 {
             // `row=0` would represent a break before the first row, which is not representable in
             // `ManualPageBreaks` (it stores indices *after which* a break occurs).
@@ -1120,7 +1181,16 @@ fn parse_vertical_page_breaks_record(
 
     for i in 0..iter_entries {
         let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
-        let col = u16::from_le_bytes([data[base], data[base + 1]]);
+        let Some(bytes) = data.get(base..).and_then(|rest| rest.get(..2)) else {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "VerticalPageBreaks record at offset {record_offset} truncated while reading entry {i}"
+                ),
+            );
+            break;
+        };
+        let col = u16::from_le_bytes([bytes[0], bytes[1]]);
         if col == 0 {
             // `col=0` would represent a break before the first column, which is not representable
             // in `ManualPageBreaks` (it stores indices *after which* a break occurs).
@@ -1307,24 +1377,47 @@ fn parse_selection_record(
     }
     let active_cell = CellRef::new(active_row_u32, active_col_u32);
 
-    let mut ranges = Vec::with_capacity(parsed_refs);
+    let mut ranges = Vec::new();
+    let _ = ranges.try_reserve_exact(parsed_refs);
     let mut off = refs_start;
     for _ in 0..parsed_refs {
         let range = match layout {
             SelectionLayout::PnnU16Ref8 => {
-                let rw_first = u16::from_le_bytes([data[off], data[off + 1]]) as u32;
-                let rw_last = u16::from_le_bytes([data[off + 2], data[off + 3]]) as u32;
-                let col_first = u16::from_le_bytes([data[off + 4], data[off + 5]]) as u32;
-                let col_last = u16::from_le_bytes([data[off + 6], data[off + 7]]) as u32;
-                off += 8;
+                let Some(end) = off.checked_add(8) else {
+                    return Err("SELECTION refs offset overflow while reading Ref8 ranges".to_string());
+                };
+                let Some(chunk) = data.get(off..end) else {
+                    debug_assert!(
+                        false,
+                        "SELECTION refs out of bounds (off={off}, len={})",
+                        data.len()
+                    );
+                    return Err("SELECTION record truncated while reading Ref8 ranges".to_string());
+                };
+                let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]) as u32;
+                let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
+                let col_first = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
+                let col_last = u16::from_le_bytes([chunk[6], chunk[7]]) as u32;
+                off = end;
                 make_range(rw_first, rw_last, col_first, col_last)?
             }
             SelectionLayout::PnnU8NoPadRefU | SelectionLayout::PnnU8PadRefU => {
-                let rw_first = u16::from_le_bytes([data[off], data[off + 1]]) as u32;
-                let rw_last = u16::from_le_bytes([data[off + 2], data[off + 3]]) as u32;
-                let col_first = data[off + 4] as u32;
-                let col_last = data[off + 5] as u32;
-                off += 6;
+                let Some(end) = off.checked_add(6) else {
+                    return Err("SELECTION refs offset overflow while reading RefU ranges".to_string());
+                };
+                let Some(chunk) = data.get(off..end) else {
+                    debug_assert!(
+                        false,
+                        "SELECTION refs out of bounds (off={off}, len={})",
+                        data.len()
+                    );
+                    return Err("SELECTION record truncated while reading RefU ranges".to_string());
+                };
+                let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]) as u32;
+                let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
+                let col_first = chunk[4] as u32;
+                let col_last = chunk[5] as u32;
+                off = end;
                 make_range(rw_first, rw_last, col_first, col_last)?
             }
         };
@@ -2035,7 +2128,9 @@ fn decode_autofilter12_record(
         if fragment_sizes.is_empty() {
             return Ok(vec![payload]);
         }
-        let mut out = Vec::with_capacity(fragment_sizes.len());
+        let mut out = Vec::new();
+        out.try_reserve_exact(fragment_sizes.len())
+            .map_err(|_| "allocation failed (AutoFilter12 fragments)".to_string())?;
         let mut offset = 0usize;
         for &size in fragment_sizes {
             let end = offset
@@ -2148,7 +2243,10 @@ fn decode_autofilter12_record(
         ) -> Result<Vec<u8>, String> {
             // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
             // continuation flags prefix that appears at the start of each continued fragment.
-            let mut out = Vec::with_capacity(n);
+            let total = n;
+            let mut out = Vec::new();
+            out.try_reserve_exact(total)
+                .map_err(|_| "allocation failed (AutoFilter12 string bytes)".to_string())?;
             while n > 0 {
                 if self.remaining_in_fragment() == 0 {
                     self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -2227,7 +2325,9 @@ fn decode_autofilter12_record(
                 let bytes = self.read_exact_from_current(take_bytes)?;
 
                 if is_unicode {
-                    let mut u16s = Vec::with_capacity(take_chars);
+                    let mut u16s = Vec::new();
+                    u16s.try_reserve_exact(take_chars)
+                        .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                     for chunk in bytes.chunks_exact(2) {
                         u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                     }
@@ -2272,7 +2372,10 @@ fn decode_autofilter12_record(
         if payload.len() < vals_off {
             continue;
         }
-        let count_bytes = payload.get(count_off..count_off + 2).ok_or_else(|| {
+        let count_end = count_off
+            .checked_add(2)
+            .ok_or_else(|| "AutoFilter12 count offset overflow".to_string())?;
+        let count_bytes = payload.get(count_off..count_end).ok_or_else(|| {
             format!(
                 "AutoFilter12 payload too short for count at offset {count_off} (len={})",
                 payload.len()
@@ -2291,7 +2394,8 @@ fn decode_autofilter12_record(
             continue;
         };
         let mut cursor = FragmentCursor::new(&fragments, frag_idx, frag_off);
-        let mut values: Vec<String> = Vec::with_capacity(count.min(16));
+        let mut values: Vec<String> = Vec::new();
+        let _ = values.try_reserve_exact(count.min(16));
         while count > 0 {
             let Ok(mut s) = cursor.read_biff8_unicode_string(codepage) else {
                 values.clear();
@@ -2308,7 +2412,8 @@ fn decode_autofilter12_record(
             continue;
         }
 
-        let mut criteria = Vec::with_capacity(values.len());
+        let mut criteria = Vec::new();
+        let _ = criteria.try_reserve_exact(values.len());
         for v in &values {
             if let Ok(n) = v.parse::<f64>() {
                 criteria.push(FilterCriterion::Equals(FilterValue::Number(n)));
@@ -2355,10 +2460,13 @@ pub(crate) fn parse_biff_sheet_merged_cells(
                 let c_areas = u16::from_le_bytes([data[0], data[1]]) as usize;
                 let mut pos = 2usize;
                 for _ in 0..c_areas {
-                    let Some(chunk) = data.get(pos..pos + 8) else {
+                    let Some(end) = pos.checked_add(8) else {
                         break;
                     };
-                    pos = pos.saturating_add(8);
+                    let Some(chunk) = data.get(pos..end) else {
+                        break;
+                    };
+                    pos = end;
 
                     let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]) as u32;
                     let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
@@ -3237,16 +3345,37 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
     // Skip guid (16 bytes).
     let mut pos = 8usize + 16usize;
 
-    let stream_version =
-        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
-    pos += 4;
+    let stream_version_end = pos
+        .checked_add(4)
+        .ok_or_else(|| "HLINK offset overflow while reading streamVersion".to_string())?;
+    let stream_version_bytes = data
+        .get(pos..stream_version_end)
+        .ok_or_else(|| "HLINK record truncated while reading streamVersion".to_string())?;
+    let stream_version = u32::from_le_bytes([
+        stream_version_bytes[0],
+        stream_version_bytes[1],
+        stream_version_bytes[2],
+        stream_version_bytes[3],
+    ]);
+    pos = stream_version_end;
     if stream_version != 2 {
         // Non-fatal; continue parsing.
         // Some producers may write a different version, but the layout is usually identical.
     }
 
-    let link_opts = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
-    pos += 4;
+    let link_opts_end = pos
+        .checked_add(4)
+        .ok_or_else(|| "HLINK offset overflow while reading linkOpts".to_string())?;
+    let link_opts_bytes = data
+        .get(pos..link_opts_end)
+        .ok_or_else(|| "HLINK record truncated while reading linkOpts".to_string())?;
+    let link_opts = u32::from_le_bytes([
+        link_opts_bytes[0],
+        link_opts_bytes[1],
+        link_opts_bytes[2],
+        link_opts_bytes[3],
+    ]);
+    pos = link_opts_end;
 
     let mut display: Option<String> = None;
     let mut tooltip: Option<String> = None;
@@ -3255,7 +3384,10 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
 
     // Optional: display string.
     if (link_opts & HLINK_FLAG_HAS_DISPLAY) != 0 {
-        let (s, consumed) = parse_hyperlink_string(&data[pos..], codepage)?;
+        let tail = data
+            .get(pos..)
+            .ok_or_else(|| "HLINK cursor out of bounds while reading display string".to_string())?;
+        let (s, consumed) = parse_hyperlink_string(tail, codepage)?;
         display = (!s.is_empty()).then_some(s);
         pos = pos
             .checked_add(consumed)
@@ -3264,7 +3396,10 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
 
     // Optional: target frame (ignored for now).
     if (link_opts & HLINK_FLAG_HAS_TARGET_FRAME) != 0 {
-        let (_s, consumed) = parse_hyperlink_string(&data[pos..], codepage)?;
+        let tail = data.get(pos..).ok_or_else(|| {
+            "HLINK cursor out of bounds while reading target frame".to_string()
+        })?;
+        let (_s, consumed) = parse_hyperlink_string(tail, codepage)?;
         pos = pos
             .checked_add(consumed)
             .ok_or_else(|| "HLINK offset overflow".to_string())?;
@@ -3272,7 +3407,10 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
 
     // Optional: moniker (external link target).
     if (link_opts & HLINK_FLAG_HAS_MONIKER) != 0 {
-        let (parsed_uri, consumed) = parse_hyperlink_moniker(&data[pos..], codepage)?;
+        let tail = data
+            .get(pos..)
+            .ok_or_else(|| "HLINK cursor out of bounds while reading moniker".to_string())?;
+        let (parsed_uri, consumed) = parse_hyperlink_moniker(tail, codepage)?;
         uri = parsed_uri;
         pos = pos
             .checked_add(consumed)
@@ -3281,7 +3419,10 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
 
     // Optional: location / text mark (internal target or sub-address).
     if (link_opts & HLINK_FLAG_HAS_LOCATION) != 0 {
-        let (s, consumed) = parse_hyperlink_string(&data[pos..], codepage)?;
+        let tail = data
+            .get(pos..)
+            .ok_or_else(|| "HLINK cursor out of bounds while reading location".to_string())?;
+        let (s, consumed) = parse_hyperlink_string(tail, codepage)?;
         text_mark = (!s.is_empty()).then_some(s);
         pos = pos
             .checked_add(consumed)
@@ -3341,7 +3482,11 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
     if input.len() < 16 {
         return Err("truncated hyperlink moniker".to_string());
     }
-    let clsid: [u8; 16] = input[0..16].try_into().expect("slice length verified");
+    let clsid_bytes = input
+        .get(..16)
+        .ok_or_else(|| "truncated hyperlink moniker".to_string())?;
+    let mut clsid = [0u8; 16];
+    clsid.copy_from_slice(clsid_bytes);
 
     // URL moniker: UTF-16LE URL with a 32-bit length prefix.
     if clsid == CLSID_URL_MONIKER {
@@ -3409,15 +3554,14 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
             return Err("file moniker length overflow".to_string());
         };
         if input.len() >= unicode_header_end {
-            let end_server = u16::from_le_bytes([input[pos], input[pos + 1]]) as usize;
+            let Some(header) = input.get(pos..unicode_header_end) else {
+                return Err("truncated file moniker unicode header".to_string());
+            };
+            let end_server = u16::from_le_bytes([header[0], header[1]]) as usize;
             // reserved/version (ignored)
-            let _reserved = u16::from_le_bytes([input[pos + 2], input[pos + 3]]);
-            let unicode_len = u32::from_le_bytes([
-                input[pos + 4],
-                input[pos + 5],
-                input[pos + 6],
-                input[pos + 7],
-            ]) as usize;
+            let _reserved = u16::from_le_bytes([header[2], header[3]]);
+            let unicode_len =
+                u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
 
             let available = input.len().saturating_sub(unicode_header_end);
             let end_server_plausible = ansi_len == 0 || end_server <= ansi_len;
@@ -3488,7 +3632,8 @@ fn percent_encode_uri_path(path: &str) -> String {
         )
     }
 
-    let mut out = String::with_capacity(path.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(path.len());
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for &b in path.as_bytes() {
         if is_allowed(b) {
@@ -3658,15 +3803,16 @@ fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize)
         }
         if cch <= MAX_HLINK_UTF16_CHARS {
             if let Some(byte_len) = cch.checked_mul(2) {
-                if input.len() >= 4 + byte_len {
-                    let bytes = &input[4..4 + byte_len];
+                if let Some(end) = 4usize.checked_add(byte_len) {
+                    if let Some(bytes) = input.get(4..end) {
                     let s = decode_utf16le(bytes)?;
                     // Hyperlink-related strings in BIFF are frequently NUL terminated, but we've
                     // observed files in the wild that include embedded NULs + trailing garbage
                     // within the declared length. Truncate at the first NUL for best-effort
                     // compatibility (mirrors how file moniker paths are handled).
                     let s = trim_at_first_nul(trim_trailing_nuls(s));
-                    return Ok((s, 4 + byte_len));
+                    return Ok((s, end));
+                    }
                 }
             }
         }
@@ -3681,7 +3827,9 @@ fn decode_utf16le(bytes: &[u8]) -> Result<String, String> {
     if bytes.len() % 2 != 0 {
         return Err("truncated UTF-16 string".to_string());
     }
-    let mut u16s = Vec::with_capacity(bytes.len() / 2);
+    let mut u16s = Vec::new();
+    u16s.try_reserve_exact(bytes.len() / 2)
+        .map_err(|_| "allocation failed (utf16 buffer)".to_string())?;
     for chunk in bytes.chunks_exact(2) {
         u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
@@ -3728,7 +3876,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + data.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);

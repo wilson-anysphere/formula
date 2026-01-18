@@ -117,12 +117,9 @@ pub(crate) fn mask_workbook_globals_filepass_record_id_in_place(
 
     let mut masked = 0usize;
     let mut offset: usize = 0;
-    while offset + 4 <= workbook_stream.len() {
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len = u16::from_le_bytes([
-            workbook_stream[offset + 2],
-            workbook_stream[offset + 3],
-        ]) as usize;
+    while let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) {
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
         let data_start = match offset.checked_add(4) {
             Some(v) => v,
@@ -144,8 +141,14 @@ pub(crate) fn mask_workbook_globals_filepass_record_id_in_place(
         }
 
         if record_id == RECORD_FILEPASS {
-            workbook_stream[offset..offset + 2]
-                .copy_from_slice(&RECORD_MASKED_UNKNOWN.to_le_bytes());
+            let id_end = match offset.checked_add(2) {
+                Some(v) => v,
+                None => break,
+            };
+            let Some(dst) = workbook_stream.get_mut(offset..id_end) else {
+                break;
+            };
+            dst.copy_from_slice(&RECORD_MASKED_UNKNOWN.to_le_bytes());
             masked = masked.saturating_add(1);
         }
 
@@ -211,7 +214,20 @@ impl<'a> Iterator for BiffRecordIter<'a> {
             return Some(Err("truncated BIFF record header".to_string()));
         }
 
-        let header = &self.stream[self.offset..self.offset + 4];
+        let header_end = match self.offset.checked_add(4) {
+            Some(v) => v,
+            None => {
+                self.offset = self.stream.len();
+                return Some(Err("BIFF record offset overflow".to_string()));
+            }
+        };
+        let header = match self.stream.get(self.offset..header_end) {
+            Some(header) => header,
+            None => {
+                self.offset = self.stream.len();
+                return Some(Err("truncated BIFF record header".to_string()));
+            }
+        };
         let record_id = u16::from_le_bytes([header[0], header[1]]);
         let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
@@ -367,8 +383,15 @@ pub(crate) struct LogicalBiffRecordIter<'a> {
 
 impl<'a> LogicalBiffRecordIter<'a> {
     pub(crate) fn new(workbook_stream: &'a [u8], allows_continuation: fn(u16) -> bool) -> Self {
-        Self::from_offset(workbook_stream, 0, allows_continuation)
-            .expect("offset 0 should always be in bounds for BIFF streams")
+        Self {
+            iter: BiffRecordIter {
+                stream: workbook_stream,
+                offset: 0,
+            }
+            .peekable(),
+            allows_continuation,
+            finished: false,
+        }
     }
 
     pub(crate) fn from_offset(
@@ -440,16 +463,13 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
                 break;
             }
 
-            let next = match self
-                .iter
-                .next()
-                .expect("peek verified there is another record")
-            {
-                Ok(record) => record,
-                Err(err) => {
+            let next = match self.iter.next() {
+                Some(Ok(record)) => record,
+                Some(Err(err)) => {
                     self.finished = true;
                     return Some(Err(err));
                 }
+                None => break,
             };
 
             let cap_bytes = MAX_LOGICAL_RECORD_BYTES;
@@ -490,7 +510,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

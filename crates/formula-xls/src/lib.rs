@@ -281,6 +281,8 @@ pub enum ImportError {
     Decrypt(DecryptError),
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
+    #[error("internal error while importing `.xls`: {0}")]
+    Internal(String),
 }
 
 impl From<decrypt::DecryptError> for ImportError {
@@ -734,7 +736,8 @@ fn import_xls_with_biff_reader(
         }
 
         if let Some(sheets) = biff_sheets.as_ref() {
-            let mut props_by_sheet = Vec::with_capacity(sheets.len());
+            let mut props_by_sheet = Vec::new();
+            let _ = props_by_sheet.try_reserve_exact(sheets.len());
             for sheet in sheets {
                 if sheet.offset >= workbook_stream.len() {
                     push_import_warning(
@@ -790,8 +793,10 @@ fn import_xls_with_biff_reader(
                 // Even if the workbook contains no non-General number formats, scan for
                 // out-of-range XF indices so corrupt files still surface a warning.
                 if !mask.is_empty() {
-                    let mut cell_xfs_by_sheet = Vec::with_capacity(sheets.len());
-                    let mut parse_failed_by_sheet = Vec::with_capacity(sheets.len());
+                    let mut cell_xfs_by_sheet = Vec::new();
+                    let mut parse_failed_by_sheet = Vec::new();
+                    let _ = cell_xfs_by_sheet.try_reserve_exact(sheets.len());
+                    let _ = parse_failed_by_sheet.try_reserve_exact(sheets.len());
                     for sheet in sheets {
                         if sheet.offset >= workbook_stream.len() {
                             push_import_warning(
@@ -848,46 +853,58 @@ fn import_xls_with_biff_reader(
             xf_style_ids.as_mut(),
             cell_xf_indices.as_ref(),
         ) {
-            let mut used = vec![false; style_ids.len()];
-            for sheet_xfs in cell_xfs_by_sheet {
-                for &xf_idx in sheet_xfs.values() {
-                    let idx = xf_idx as usize;
-                    if idx < used.len() {
-                        used[idx] = true;
-                    }
-                }
-            }
-
-            // ROW/COLINFO records can reference default formats (ixfe) even when no individual cell
-            // record uses those XF indices. Include them in the "used" set so their styles are
-            // interned and can be applied to `Worksheet.row_properties[*].style_id` /
-            // `Worksheet.col_properties[*].style_id`.
-            if let Some(props_by_sheet) = row_col_props.as_ref() {
-                for props in props_by_sheet {
-                    for row_props in props.rows.values() {
-                        if let Some(xf_idx) = row_props.xf_index {
-                            let idx = xf_idx as usize;
-                            if idx < used.len() {
-                                used[idx] = true;
-                            }
-                        }
-                    }
-                    for col_props in props.cols.values() {
-                        if let Some(xf_idx) = col_props.xf_index {
-                            let idx = xf_idx as usize;
-                            if idx < used.len() {
-                                used[idx] = true;
-                            }
+            let mut used: Vec<bool> = Vec::new();
+            if used.try_reserve_exact(style_ids.len()).is_err() {
+                push_import_warning(
+                    &mut warnings,
+                    format!(
+                        "allocation failed while building `.xls` style usage mask (xf_count={})",
+                        style_ids.len()
+                    ),
+                    &mut warnings_suppressed,
+                );
+            } else {
+                used.resize(style_ids.len(), false);
+                for sheet_xfs in cell_xfs_by_sheet {
+                    for &xf_idx in sheet_xfs.values() {
+                        let idx = xf_idx as usize;
+                        if idx < used.len() {
+                            used[idx] = true;
                         }
                     }
                 }
-            }
 
-            for (xf_idx, style) in globals.resolve_styles_for_used_mask(&used) {
-                if style == Style::default() {
-                    continue;
+                // ROW/COLINFO records can reference default formats (ixfe) even when no individual cell
+                // record uses those XF indices. Include them in the "used" set so their styles are
+                // interned and can be applied to `Worksheet.row_properties[*].style_id` /
+                // `Worksheet.col_properties[*].style_id`.
+                if let Some(props_by_sheet) = row_col_props.as_ref() {
+                    for props in props_by_sheet {
+                        for row_props in props.rows.values() {
+                            if let Some(xf_idx) = row_props.xf_index {
+                                let idx = xf_idx as usize;
+                                if idx < used.len() {
+                                    used[idx] = true;
+                                }
+                            }
+                        }
+                        for col_props in props.cols.values() {
+                            if let Some(xf_idx) = col_props.xf_index {
+                                let idx = xf_idx as usize;
+                                if idx < used.len() {
+                                    used[idx] = true;
+                                }
+                            }
+                        }
+                    }
                 }
-                style_ids[xf_idx] = out.intern_style(style);
+
+                for (xf_idx, style) in globals.resolve_styles_for_used_mask(&used) {
+                    if style == Style::default() {
+                        continue;
+                    }
+                    style_ids[xf_idx] = out.intern_style(style);
+                }
             }
         }
 
@@ -931,10 +948,11 @@ fn import_xls_with_biff_reader(
             None
         };
 
-    let mut final_sheet_names_by_idx: Vec<String> = Vec::with_capacity(sheets.len());
+    let mut final_sheet_names_by_idx: Vec<String> = Vec::new();
+    let _ = final_sheet_names_by_idx.try_reserve_exact(sheets.len());
     // Track worksheet ids so BIFF `itab` scopes can be mapped to the output model.
-    let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> =
-        Vec::with_capacity(sheets.len());
+    let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> = Vec::new();
+    let _ = sheet_ids_by_calamine_idx.try_reserve_exact(sheets.len());
 
     // Best-effort BIFF8 formula decoding context used to override calamine formula strings in a
     // handful of tricky cases (notably shared formulas and 3D areas with relative flags).
@@ -1141,7 +1159,11 @@ fn import_xls_with_biff_reader(
         }
         let sheet = out
             .sheet_mut(sheet_id)
-            .expect("sheet id should exist immediately after add");
+            .ok_or_else(|| {
+                ImportError::Internal(format!(
+                    "sheet id {sheet_id:?} missing immediately after add"
+                ))
+            })?;
 
         let calamine_visibility = sheet_visible_to_visibility(sheet_meta.visible);
         let biff_visibility = biff_idx
@@ -2620,8 +2642,22 @@ fn import_xls_with_biff_reader(
         );
 
         // Resolve BIFF sheet indices to WorksheetIds.
-        let mut sheet_ids_by_biff_idx: Vec<Option<formula_model::WorksheetId>> =
-            vec![None; sheet_names_by_biff_idx.len()];
+        let mut sheet_ids_by_biff_idx: Vec<Option<formula_model::WorksheetId>> = Vec::new();
+        if sheet_ids_by_biff_idx
+            .try_reserve_exact(sheet_names_by_biff_idx.len())
+            .is_err()
+        {
+            push_import_warning(
+                &mut warnings,
+                format!(
+                    "allocation failed while building `.xls` sheet id map (sheet_count={})",
+                    sheet_names_by_biff_idx.len()
+                ),
+                &mut warnings_suppressed,
+            );
+        } else {
+            sheet_ids_by_biff_idx.resize(sheet_names_by_biff_idx.len(), None);
+        }
         for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
             let Some(biff_idx) = *maybe_biff_idx else {
                 continue;
@@ -2656,8 +2692,22 @@ fn import_xls_with_biff_reader(
         // Resolve BIFF sheet indices to XLSX `localSheetId` values (0-based in workbook sheet
         // order). This is preserved in the model for round-trip fidelity when converting
         // `.xls` -> `.xlsx`.
-        let mut local_sheet_ids_by_biff_idx: Vec<Option<u32>> =
-            vec![None; sheet_ids_by_biff_idx.len()];
+        let mut local_sheet_ids_by_biff_idx: Vec<Option<u32>> = Vec::new();
+        if local_sheet_ids_by_biff_idx
+            .try_reserve_exact(sheet_ids_by_biff_idx.len())
+            .is_err()
+        {
+            push_import_warning(
+                &mut warnings,
+                format!(
+                    "allocation failed while building `.xls` localSheetId map (sheet_count={})",
+                    sheet_ids_by_biff_idx.len()
+                ),
+                &mut warnings_suppressed,
+            );
+        } else {
+            local_sheet_ids_by_biff_idx.resize(sheet_ids_by_biff_idx.len(), None);
+        }
         for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
             let Some(biff_idx) = *maybe_biff_idx else {
                 continue;
@@ -3707,7 +3757,8 @@ fn strip_embedded_nuls(value: &str) -> Cow<'_, str> {
         return Cow::Borrowed(value);
     }
 
-    let mut out = String::with_capacity(value.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(value.len());
     let mut start = 0usize;
     for (i, ch) in value.char_indices() {
         if ch != '\0' {
@@ -4174,7 +4225,11 @@ fn split_print_name_areas(formula: &str) -> Result<Vec<&str>, String> {
         match bytes[i] {
             b'\'' => {
                 if in_quotes {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    let next = i
+                        .checked_add(1)
+                        .and_then(|idx| bytes.get(idx))
+                        .copied();
+                    if next == Some(b'\'') {
                         // Escaped quote in a sheet name.
                         i += 1;
                     } else {
@@ -4235,7 +4290,11 @@ fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), Str
 
         while i < bytes.len() {
             if bytes[i] == b'\'' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                let next = i
+                    .checked_add(1)
+                    .and_then(|idx| bytes.get(idx))
+                    .copied();
+                if next == Some(b'\'') {
                     // Escaped quote in a sheet name.
                     sheet.push_str(&input[seg_start..i]);
                     sheet.push('\'');
@@ -4246,11 +4305,20 @@ fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), Str
 
                 // End of quoted sheet name.
                 sheet.push_str(&input[seg_start..i]);
-                if i + 1 >= bytes.len() || bytes[i + 1] != b'!' {
+                let bang = i
+                    .checked_add(1)
+                    .and_then(|idx| bytes.get(idx))
+                    .copied();
+                if bang != Some(b'!') {
                     return Err(format!("expected ! after quoted sheet name in {input:?}"));
                 }
 
-                let rest = &input[(i + 2)..];
+                let Some(rest_start) = i.checked_add(2) else {
+                    return Err(format!("expected range after sheet name in {input:?}"));
+                };
+                let rest = input.get(rest_start..).ok_or_else(|| {
+                    format!("expected range after sheet name in {input:?}")
+                })?;
                 return Ok((Some(sheet), rest));
             }
 
@@ -4355,7 +4423,8 @@ pub fn sanitize_sheet_name(
     let without_nuls = strip_embedded_nuls(original);
     let trimmed = without_nuls.as_ref().trim();
 
-    let mut cleaned = String::with_capacity(trimmed.len());
+    let mut cleaned = String::new();
+    let _ = cleaned.try_reserve(trimmed.len());
     for ch in trimmed.chars() {
         if matches!(ch, ':' | '\\' | '/' | '?' | '*' | '[' | ']') {
             cleaned.push('_');
@@ -4384,7 +4453,8 @@ pub fn sanitize_sheet_name(
         return base;
     }
 
-    for suffix_index in 2usize.. {
+    let mut suffix_index: usize = 2;
+    loop {
         let suffix = format!(" ({suffix_index})");
         let suffix_len = suffix.encode_utf16().count();
         let max_base_len = EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
@@ -4396,9 +4466,9 @@ pub fn sanitize_sheet_name(
         if !sheet_name_taken(&candidate, existing_names) {
             return candidate;
         }
-    }
 
-    unreachable!("suffix loop should always return a unique sheet name");
+        suffix_index = suffix_index.saturating_add(1);
+    }
 }
 
 /// Mask the BIFF `FILEPASS` record id (0x002F) in the workbook globals substream.
@@ -4444,26 +4514,56 @@ fn reconcile_biff_sheet_mapping(
     biff_sheets: Option<&[biff::BoundSheetInfo]>,
 ) -> (Vec<Option<usize>>, Option<String>) {
     let Some(biff_sheets) = biff_sheets else {
-        return (vec![None; calamine_sheets.len()], None);
+        let mut out: Vec<Option<usize>> = Vec::new();
+        if out.try_reserve_exact(calamine_sheets.len()).is_ok() {
+            out.resize(calamine_sheets.len(), None);
+            return (out, None);
+        }
+        return (Vec::new(), Some("allocation failed (sheet mapping)".to_string()));
     };
     if biff_sheets.is_empty() {
-        return (vec![None; calamine_sheets.len()], None);
+        let mut out: Vec<Option<usize>> = Vec::new();
+        if out.try_reserve_exact(calamine_sheets.len()).is_ok() {
+            out.resize(calamine_sheets.len(), None);
+            return (out, None);
+        }
+        return (Vec::new(), Some("allocation failed (sheet mapping)".to_string()));
     }
 
     let calamine_count = calamine_sheets.len();
     let biff_count = biff_sheets.len();
 
     // Primary mapping: BIFF BoundSheet order (workbook order) should align with calamine.
-    let mut index_mapping = vec![None; calamine_count];
-    let mut index_used_biff = vec![false; biff_count];
+    let mut index_mapping: Vec<Option<usize>> = Vec::new();
+    let mut index_used_biff: Vec<bool> = Vec::new();
+    if index_mapping.try_reserve_exact(calamine_count).is_err()
+        || index_used_biff.try_reserve_exact(biff_count).is_err()
+    {
+        return (
+            Vec::new(),
+            Some("allocation failed (sheet mapping prealloc)".to_string()),
+        );
+    }
+    index_mapping.resize(calamine_count, None);
+    index_used_biff.resize(biff_count, false);
     for idx in 0..calamine_count.min(biff_count) {
         index_mapping[idx] = Some(idx);
         index_used_biff[idx] = true;
     }
 
     // Secondary mapping: normalized, case-insensitive name match.
-    let mut name_mapping = vec![None; calamine_count];
-    let mut name_used_biff = vec![false; biff_count];
+    let mut name_mapping: Vec<Option<usize>> = Vec::new();
+    let mut name_used_biff: Vec<bool> = Vec::new();
+    if name_mapping.try_reserve_exact(calamine_count).is_err()
+        || name_used_biff.try_reserve_exact(biff_count).is_err()
+    {
+        return (
+            Vec::new(),
+            Some("allocation failed (sheet mapping prealloc)".to_string()),
+        );
+    }
+    name_mapping.resize(calamine_count, None);
+    name_used_biff.resize(biff_count, false);
 
     let mut biff_by_name: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, sheet) in biff_sheets.iter().enumerate() {
@@ -4920,9 +5020,18 @@ fn sanitize_biff8_wide_ptgexp_formulas_for_calamine(stream: &[u8]) -> Option<Vec
         }
 
         let out = out.get_or_insert_with(|| stream.to_vec());
-        let cce_offset = record.offset + 4 + 20;
-        if cce_offset + 2 <= out.len() {
-            out[cce_offset..cce_offset + 2].copy_from_slice(&5u16.to_le_bytes());
+        let Some(cce_offset) = record
+            .offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(20))
+        else {
+            continue;
+        };
+        let Some(cce_end) = cce_offset.checked_add(2) else {
+            continue;
+        };
+        if let Some(dst) = out.get_mut(cce_offset..cce_end) {
+            dst.copy_from_slice(&5u16.to_le_bytes());
         }
     }
 
@@ -4964,20 +5073,44 @@ fn sanitize_biff8_formula_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>>
         }
 
         let out = out.get_or_insert_with(|| stream.to_vec());
-        let cce_offset = record.offset + 4 + 20;
-        let rgce_offset = record.offset + 4 + 22;
-        if cce_offset + 2 > out.len() {
+        let Some(cce_offset) = record
+            .offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(20))
+        else {
+            continue;
+        };
+        let Some(rgce_offset) = record
+            .offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(22))
+        else {
+            continue;
+        };
+        let Some(cce_end) = cce_offset.checked_add(2) else {
+            continue;
+        };
+        if cce_end > out.len() {
             continue;
         }
 
         // If the record is long enough, patch the rgce bytes; otherwise set cce=0 so calamine
         // skips parsing.
-        if rgce_offset + SAFE_RGCE.len() <= out.len() && data.len() >= 22 + SAFE_RGCE.len() {
-            out[cce_offset..cce_offset + 2]
-                .copy_from_slice(&(SAFE_RGCE.len() as u16).to_le_bytes());
-            out[rgce_offset..rgce_offset + SAFE_RGCE.len()].copy_from_slice(&SAFE_RGCE);
+        let rgce_end = match rgce_offset.checked_add(SAFE_RGCE.len()) {
+            Some(v) => v,
+            None => continue,
+        };
+        if rgce_end <= out.len() && data.len() >= 22 + SAFE_RGCE.len() {
+            if let Some(dst) = out.get_mut(cce_offset..cce_end) {
+                dst.copy_from_slice(&(SAFE_RGCE.len() as u16).to_le_bytes());
+            }
+            if let Some(dst) = out.get_mut(rgce_offset..rgce_end) {
+                dst.copy_from_slice(&SAFE_RGCE);
+            }
         } else {
-            out[cce_offset..cce_offset + 2].copy_from_slice(&0u16.to_le_bytes());
+            if let Some(dst) = out.get_mut(cce_offset..cce_end) {
+                dst.copy_from_slice(&0u16.to_le_bytes());
+            }
         }
     }
 
@@ -5014,25 +5147,25 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
     let mut name_mask_offsets: Vec<usize> = Vec::new();
     let mut offset: usize = 0;
 
-    while offset + 4 <= stream.len() {
-        let record_id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
-        let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
+    while let Some(header) = stream.get(offset..).and_then(|rest| rest.get(..4)) {
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
-        let data_start = match offset.checked_add(4) {
-            Some(v) => v,
-            None => break,
+        let Some(data_start) = offset.checked_add(4) else {
+            break;
         };
-        let next = match data_start.checked_add(len) {
-            Some(v) => v,
-            None => break,
+        let Some(next) = data_start.checked_add(len) else {
+            break;
         };
         if next > stream.len() {
             break;
         }
 
         if record_id == RECORD_NAME {
-            let next_is_continue = next + 4 <= stream.len()
-                && u16::from_le_bytes([stream[next], stream[next + 1]]) == RECORD_CONTINUE;
+            let next_is_continue = next
+                .checked_add(4)
+                .and_then(|end| stream.get(next..end))
+                .is_some_and(|hdr| u16::from_le_bytes([hdr[0], hdr[1]]) == RECORD_CONTINUE);
 
             // Calamine unconditionally slices `&r.data[14..]` for NAME parsing. If the physical
             // record payload is shorter than 14 bytes (or exactly 14 bytes with no following
@@ -5063,16 +5196,18 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
 
             // Best-effort: detect obviously out-of-bounds `cch`/`cce` values that would cause
             // calamine slice panics even without CONTINUE records.
-            if len >= 6 && data_start + 6 <= stream.len() {
-                let grbit = if len >= 2 && data_start + 2 <= stream.len() {
-                    u16::from_le_bytes([stream[data_start], stream[data_start + 1]])
-                } else {
-                    0
-                };
+            let payload = stream.get(data_start..next).unwrap_or(&[]);
+            if len >= 6 {
+                let grbit = payload
+                    .get(..2)
+                    .map(|v| u16::from_le_bytes([v[0], v[1]]))
+                    .unwrap_or(0);
                 let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
-                let cch = stream[data_start + 3] as usize;
-                let cce =
-                    u16::from_le_bytes([stream[data_start + 4], stream[data_start + 5]]) as usize;
+                let cch = payload.get(3).copied().unwrap_or(0) as usize;
+                let cce = payload
+                    .get(4..6)
+                    .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
+                    .unwrap_or(0);
 
                 if len >= 14 {
                     let available = len.saturating_sub(14);
@@ -5093,7 +5228,7 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                         if available == 0 {
                             needs_patch = true;
                         } else {
-                            let flags = stream[data_start + 14];
+                            let flags = payload.get(14).copied().unwrap_or(0);
                             let is_unicode = (flags & 0x01) != 0;
                             let required = 1usize.saturating_add(if is_unicode {
                                 2usize.saturating_mul(cch)
@@ -5128,20 +5263,27 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
 
     let mut out = stream.to_vec();
     for header_offset in name_header_offsets {
-        let original_len =
-            u16::from_le_bytes([out[header_offset + 2], out[header_offset + 3]]) as usize;
-        let data_start = header_offset + 4;
-        if data_start.saturating_add(original_len) > out.len() {
+        let Some(hdr) = out.get(header_offset..).and_then(|rest| rest.get(..4)) else {
+            continue;
+        };
+        let original_len = u16::from_le_bytes([hdr[2], hdr[3]]) as usize;
+        let Some(data_start) = header_offset.checked_add(4) else {
+            continue;
+        };
+        let Some(data_end) = data_start.checked_add(original_len) else {
+            continue;
+        };
+        if data_end > out.len() {
             continue;
         }
 
         // Determine whether this NAME record is built-in (name id bytes) or user-defined
         // (XLUnicodeStringNoCch).
-        let grbit = if original_len >= 2 && data_start + 2 <= out.len() {
-            u16::from_le_bytes([out[data_start], out[data_start + 1]])
-        } else {
-            0
-        };
+        let payload = out.get(data_start..data_end).unwrap_or(&[]);
+        let grbit = payload
+            .get(..2)
+            .map(|v| u16::from_le_bytes([v[0], v[1]]))
+            .unwrap_or(0);
         let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
 
         // Coalesce consecutive CONTINUE record(s) into the NAME record's physical length so
@@ -5152,33 +5294,61 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
         // if it is empty.
         let mut continue_payloads: Vec<(usize, usize)> = Vec::new();
         let mut len = original_len;
-        let mut cursor = data_start.saturating_add(original_len);
-        while cursor + 4 <= out.len() {
-            let id = u16::from_le_bytes([out[cursor], out[cursor + 1]]);
+        let mut cursor = data_end;
+        while let Some(cont_hdr) = out.get(cursor..).and_then(|rest| rest.get(..4)) {
+            let id = u16::from_le_bytes([cont_hdr[0], cont_hdr[1]]);
             if id != RECORD_CONTINUE {
                 break;
             }
-            let cont_len = u16::from_le_bytes([out[cursor + 2], out[cursor + 3]]) as usize;
-            let total = 4usize.saturating_add(cont_len);
-            if cursor.saturating_add(total) > out.len() {
+            let cont_len = u16::from_le_bytes([cont_hdr[2], cont_hdr[3]]) as usize;
+            let Some(payload_start) = cursor.checked_add(4) else {
+                break;
+            };
+            let Some(next_cursor) = payload_start.checked_add(cont_len) else {
+                break;
+            };
+            if next_cursor > out.len() {
                 break;
             }
+            let total = 4usize.saturating_add(cont_len);
             if len.saturating_add(total) > u16::MAX as usize {
                 break;
             }
-            continue_payloads.push((cursor + 4, cont_len));
+            continue_payloads.push((payload_start, cont_len));
             len = len.saturating_add(total);
-            cursor = cursor.saturating_add(total);
+            cursor = next_cursor;
         }
 
         if !continue_payloads.is_empty() {
-            out[header_offset + 2..header_offset + 4].copy_from_slice(&(len as u16).to_le_bytes());
+            let Some(len_field_start) = header_offset.checked_add(2) else {
+                continue;
+            };
+            let Some(len_field_end) = len_field_start.checked_add(2) else {
+                continue;
+            };
+            let Some(dst) = out.get_mut(len_field_start..len_field_end) else {
+                continue;
+            };
+            dst.copy_from_slice(&(len as u16).to_le_bytes());
 
             // Compact the physical fragments into a contiguous logical payload, leaving the NAME
             // header (14 bytes) intact. This removes the embedded CONTINUE record headers and
             // (best-effort) strips the continued-string option flags byte from subsequent fragments
             // so calamine can read the full name string without truncation/panics.
-            let mut payload = vec![0u8; len];
+            let mut payload = Vec::new();
+            if payload.try_reserve_exact(len).is_err() {
+                // If we cannot allocate the compacted payload, fall back to masking the NAME record
+                // so calamine ignores it (avoids panics without shifting the stream).
+                let Some(mask_end) = header_offset.checked_add(2) else {
+                    continue;
+                };
+                let Some(dst) = out.get_mut(header_offset..mask_end) else {
+                    continue;
+                };
+                dst.copy_from_slice(&RECORD_MASKED.to_le_bytes());
+                continue;
+            }
+            payload.resize(len, 0);
 
             // Copy the header bytes we have. If the first fragment is truncated (<14 bytes), fill
             // missing header bytes with zeros; this matches common "all lengths are zero" layouts.
@@ -5242,32 +5412,43 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
         }
 
         // Patch `cce` (u16) at payload offset 4.
-        if len >= 6 && data_start + 6 <= out.len() {
-            out[data_start + 4..data_start + 6].copy_from_slice(&0u16.to_le_bytes());
+        if len >= 6 {
+            let cce_start = data_start.saturating_add(4);
+            let cce_end = cce_start.saturating_add(2);
+            if let Some(dst) = out.get_mut(cce_start..cce_end) {
+                dst.copy_from_slice(&0u16.to_le_bytes());
+            }
         }
 
         // Best-effort: clamp `cch` if the name bytes cannot fit in the physical record payload.
-        if len >= 4 && data_start + 4 <= out.len() {
-            let grbit = if len >= 2 && data_start + 2 <= out.len() {
-                u16::from_le_bytes([out[data_start], out[data_start + 1]])
-            } else {
-                0
-            };
+        let payload_end = data_start.saturating_add(len).min(out.len());
+        let payload = out.get(data_start..payload_end).unwrap_or(&[]);
+        if len >= 4 {
+            let grbit = payload
+                .get(..2)
+                .map(|v| u16::from_le_bytes([v[0], v[1]]))
+                .unwrap_or(0);
             let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
-            let cch = out[data_start + 3] as usize;
+            let cch = payload.get(3).copied().unwrap_or(0) as usize;
             let available = len.saturating_sub(14);
             if is_builtin {
                 // Built-in NAME: `rgchName` is stored as raw bytes (usually a single-byte id), so
                 // we only require `available >= cch`.
                 if available < cch {
-                    out[data_start + 3] = available.min(u8::MAX as usize) as u8;
+                    let cch_byte_off = data_start.saturating_add(3);
+                    if let Some(dst) = out.get_mut(cch_byte_off) {
+                        *dst = available.min(u8::MAX as usize) as u8;
+                    }
                 }
             } else if available == 0 {
-                out[data_start + 3] = 0;
+                let cch_byte_off = data_start.saturating_add(3);
+                if let Some(dst) = out.get_mut(cch_byte_off) {
+                    *dst = 0;
+                }
             } else {
                 // User-defined NAME: `rgchName` is stored as XLUnicodeStringNoCch. It starts with a
                 // flags byte (compressed vs UTF-16LE). Clamp `cch` based on the bytes available.
-                let flags = out[data_start + 14];
+                let flags = payload.get(14).copied().unwrap_or(0);
                 let is_unicode = (flags & 0x01) != 0;
                 let max_cch = if is_unicode {
                     available.saturating_sub(1) / 2
@@ -5275,14 +5456,22 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                     available.saturating_sub(1)
                 };
                 if cch > max_cch {
-                    out[data_start + 3] = max_cch.min(u8::MAX as usize) as u8;
+                    let cch_byte_off = data_start.saturating_add(3);
+                    if let Some(dst) = out.get_mut(cch_byte_off) {
+                        *dst = max_cch.min(u8::MAX as usize) as u8;
+                    }
                 }
             }
         }
     }
 
     for mask_offset in name_mask_offsets {
-        out[mask_offset..mask_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        let Some(end) = mask_offset.checked_add(2) else {
+            continue;
+        };
+        if let Some(dst) = out.get_mut(mask_offset..end) {
+            dst.copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        }
     }
 
     Some(out)

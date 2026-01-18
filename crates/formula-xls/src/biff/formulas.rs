@@ -964,12 +964,12 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
 
             // PtgAttr: [grbit:u8][wAttr:u16] (+ optional jump table for tAttrChoose)
             0x19 => {
-                if i + 3 > rgce_bytes.len() {
+                let Some(attr) = rgce_bytes.get(i..).and_then(|rest| rest.get(..3)) else {
                     return false;
-                }
-                let grbit = rgce_bytes[i];
-                let w_attr = u16::from_le_bytes([rgce_bytes[i + 1], rgce_bytes[i + 2]]) as usize;
-                i += 3;
+                };
+                let grbit = attr[0];
+                let w_attr = u16::from_le_bytes([attr[1], attr[2]]) as usize;
+                i = i.saturating_add(3);
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
@@ -980,12 +980,12 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
 
             // PtgStr: [cch:u8][flags:u8][chars...]
             0x17 => {
-                if i + 2 > rgce_bytes.len() {
+                let Some(header) = rgce_bytes.get(i..).and_then(|rest| rest.get(..2)) else {
                     return false;
-                }
-                let cch = rgce_bytes[i] as usize;
-                let flags = rgce_bytes[i + 1];
-                i += 2;
+                };
+                let cch = header[0] as usize;
+                let flags = header[1];
+                i = i.saturating_add(2);
                 let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
                 i = i.saturating_add(bytes);
             }
@@ -1012,10 +1012,10 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
             // PtgMem* tokens: [cce:u16][rgce:cce bytes]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                if i + 2 > rgce_bytes.len() {
+                let Some(bytes) = rgce_bytes.get(i..).and_then(|rest| rest.get(..2)) else {
                     return false;
-                }
-                let cce = u16::from_le_bytes([rgce_bytes[i], rgce_bytes[i + 1]]) as usize;
+                };
+                let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
                 i = i.saturating_add(2 + cce);
             }
 
@@ -1052,12 +1052,12 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
 
             // PtgAttr: [grbit:u8][wAttr:u16] (+ optional jump table for tAttrChoose)
             0x19 => {
-                if i + 3 > rgce_bytes.len() {
+                let Some(attr) = rgce_bytes.get(i..).and_then(|rest| rest.get(..3)) else {
                     return false;
-                }
-                let grbit = rgce_bytes[i];
-                let w_attr = u16::from_le_bytes([rgce_bytes[i + 1], rgce_bytes[i + 2]]) as usize;
-                i += 3;
+                };
+                let grbit = attr[0];
+                let w_attr = u16::from_le_bytes([attr[1], attr[2]]) as usize;
+                i = i.saturating_add(3);
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
@@ -1068,12 +1068,12 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
 
             // PtgStr: [cch:u8][flags:u8][chars...]
             0x17 => {
-                if i + 2 > rgce_bytes.len() {
+                let Some(header) = rgce_bytes.get(i..).and_then(|rest| rest.get(..2)) else {
                     return false;
-                }
-                let cch = rgce_bytes[i] as usize;
-                let flags = rgce_bytes[i + 1];
-                i += 2;
+                };
+                let cch = header[0] as usize;
+                let flags = header[1];
+                i = i.saturating_add(2);
                 let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
                 i = i.saturating_add(bytes);
                 // Ignore rich/ext segments; this is best-effort and our fixtures emit none.
@@ -1102,10 +1102,10 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
             // PtgMem* tokens: [cce:u16][rgce:cce bytes]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                if i + 2 > rgce_bytes.len() {
+                let Some(bytes) = rgce_bytes.get(i..).and_then(|rest| rest.get(..2)) else {
                     return false;
-                }
-                let cce = u16::from_le_bytes([rgce_bytes[i], rgce_bytes[i + 1]]) as usize;
+                };
+                let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
                 i = i.saturating_add(2 + cce);
             }
 
@@ -1114,13 +1114,11 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
 
             // PtgArea3d: [ixti:u16][row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
             0x3B | 0x5B | 0x7B => {
-                if i + 10 > rgce_bytes.len() {
+                let Some(payload) = rgce_bytes.get(i..).and_then(|rest| rest.get(..10)) else {
                     return false;
-                }
-                let col1_off = i + 6;
-                let col2_off = i + 8;
-                let col1 = u16::from_le_bytes([rgce_bytes[col1_off], rgce_bytes[col1_off + 1]]);
-                let col2 = u16::from_le_bytes([rgce_bytes[col2_off], rgce_bytes[col2_off + 1]]);
+                };
+                let col1 = u16::from_le_bytes([payload[6], payload[7]]);
+                let col2 = u16::from_le_bytes([payload[8], payload[9]]);
                 if (col1 & RELATIVE_MASK) != 0 || (col2 & RELATIVE_MASK) != 0 {
                     return true;
                 }
@@ -1273,7 +1271,8 @@ pub(crate) fn materialize_biff8_rgce(
     let cell_row = row as i64;
     let cell_col = col as i64;
 
-    let mut out = Vec::with_capacity(base.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(base.len());
     let mut i = 0usize;
     while i < base.len() {
         let ptg = *base.get(i)?;
@@ -1290,8 +1289,9 @@ pub(crate) fn materialize_biff8_rgce(
             0x17 => {
                 let len = biff8_short_unicode_string_len(base.get(i..)?)?;
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + len)?);
-                i += len;
+                let end = i.checked_add(len)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgExtend / PtgExtendV / PtgExtendA (ptg=0x18 variants).
@@ -1306,30 +1306,32 @@ pub(crate) fn materialize_biff8_rgce(
                 i += 1;
 
                 if etpg == 0x19 {
-                    out.extend_from_slice(base.get(i..i + 12)?);
-                    i += 12;
+                    let end = i.checked_add(12)?;
+                    out.extend_from_slice(base.get(i..end)?);
+                    i = end;
                 } else {
-                    out.extend_from_slice(base.get(i..i + 4)?);
-                    i += 4;
+                    let end = i.checked_add(4)?;
+                    out.extend_from_slice(base.get(i..end)?);
+                    i = end;
                 }
             }
 
             // PtgAttr: [grbit: u8][wAttr: u16] (+ optional jump table for tAttrChoose)
             0x19 => {
-                if i + 3 > base.len() {
-                    return None;
-                }
+                let end = i.checked_add(3)?;
+                let hdr = base.get(i..end)?;
                 out.push(ptg);
-                let grbit = base[i];
-                let w_attr = u16::from_le_bytes([base[i + 1], base[i + 2]]);
-                out.extend_from_slice(&base[i..i + 3]);
-                i += 3;
+                let grbit = hdr[0];
+                let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]);
+                out.extend_from_slice(hdr);
+                i = end;
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
                     let needed = (w_attr as usize).checked_mul(2)?;
-                    out.extend_from_slice(base.get(i..i + needed)?);
-                    i += needed;
+                    let end = i.checked_add(needed)?;
+                    out.extend_from_slice(base.get(i..end)?);
+                    i = end;
                 }
             }
 
@@ -1343,50 +1345,57 @@ pub(crate) fn materialize_biff8_rgce(
             // PtgInt: 2 bytes.
             0x1E => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 2)?);
-                i += 2;
+                let end = i.checked_add(2)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgNum: 8 bytes.
             0x1F => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
-                i += 8;
+                let end = i.checked_add(8)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgArray: 7 bytes of unused/reserved payload (array data stored elsewhere).
             0x20 | 0x40 | 0x60 => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 7)?);
-                i += 7;
+                let end = i.checked_add(7)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgFunc: [iftab: u16]
             0x21 | 0x41 | 0x61 => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 2)?);
-                i += 2;
+                let end = i.checked_add(2)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 3)?);
-                i += 3;
+                let end = i.checked_add(3)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgName: [name_id: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgRef: [rw: u16][col: u16]
             0x24 | 0x44 | 0x64 => {
-                let row0 = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let col_field = u16::from_le_bytes(base.get(i + 2..i + 4)?.try_into().ok()?);
-                let payload = base.get(i..i + 4)?;
+                let end = i.checked_add(4)?;
+                let payload = base.get(i..end)?;
+                let row0 = u16::from_le_bytes([payload[0], payload[1]]);
+                let col_field = u16::from_le_bytes([payload[2], payload[3]]);
 
                 if let Some((new_row, new_col_field)) =
                     adjust_row_col(row0, col_field, delta_row, delta_col)
@@ -1400,16 +1409,17 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(payload);
                 }
 
-                i += 4;
+                i = end;
             }
 
             // PtgArea: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x25 | 0x45 | 0x65 => {
-                let row1 = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let row2 = u16::from_le_bytes(base.get(i + 2..i + 4)?.try_into().ok()?);
-                let col1 = u16::from_le_bytes(base.get(i + 4..i + 6)?.try_into().ok()?);
-                let col2 = u16::from_le_bytes(base.get(i + 6..i + 8)?.try_into().ok()?);
-                let payload = base.get(i..i + 8)?;
+                let end = i.checked_add(8)?;
+                let payload = base.get(i..end)?;
+                let row1 = u16::from_le_bytes([payload[0], payload[1]]);
+                let row2 = u16::from_le_bytes([payload[2], payload[3]]);
+                let col1 = u16::from_le_bytes([payload[4], payload[5]]);
+                let col2 = u16::from_le_bytes([payload[6], payload[7]]);
 
                 let adjusted1 = adjust_row_col(row1, col1, delta_row, delta_col);
                 let adjusted2 = adjust_row_col(row2, col2, delta_row, delta_col);
@@ -1426,44 +1436,47 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(payload);
                 }
 
-                i += 8;
+                i = end;
             }
 
             // PtgMem* tokens: [cce: u16][rgce: cce bytes]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                if i + 2 > base.len() {
-                    return None;
-                }
-                let cce = u16::from_le_bytes([base[i], base[i + 1]]) as usize;
+                let end = i.checked_add(2)?;
+                let cce_bytes = base.get(i..end)?;
+                let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
                 out.push(ptg);
-                out.extend_from_slice(&base[i..i + 2]);
-                i += 2;
-                out.extend_from_slice(base.get(i..i + cce)?);
-                i += cce;
+                out.extend_from_slice(cce_bytes);
+                i = end;
+                let end = i.checked_add(cce)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgRefErr / PtgRefErrN: [rw: u16][col: u16]
             0x2A | 0x4A | 0x6A => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 4)?);
-                i += 4;
+                let end = i.checked_add(4)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgAreaErr / PtgAreaErrN: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
-                i += 8;
+                let end = i.checked_add(8)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgRefN: offsets are resolved relative to the *current* formula cell at decode time.
             // Keep the token verbatim unless the resulting reference would be out-of-bounds, in
             // which case Excel materializes it as `PtgRefErr*`.
             0x2C | 0x4C | 0x6C => {
-                let payload = base.get(i..i + 4)?;
-                let row_raw = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?);
-                let col_field = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?);
+                let end = i.checked_add(4)?;
+                let payload = base.get(i..end)?;
+                let row_raw = u16::from_le_bytes([payload[0], payload[1]]);
+                let col_field = u16::from_le_bytes([payload[2], payload[3]]);
 
                 let row_rel = (col_field & ROW_RELATIVE_BIT) != 0;
                 let col_rel = (col_field & COL_RELATIVE_BIT) != 0;
@@ -1488,17 +1501,18 @@ pub(crate) fn materialize_biff8_rgce(
                     out.push(ptg.saturating_sub(0x02));
                 }
                 out.extend_from_slice(payload);
-                i += 4;
+                i = end;
             }
 
             // PtgAreaN: like `PtgRefN`, keep verbatim unless out-of-bounds (then materialize as
             // `PtgAreaErr*`).
             0x2D | 0x4D | 0x6D => {
-                let payload = base.get(i..i + 8)?;
-                let row1_raw = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?);
-                let row2_raw = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?);
-                let col1_field = u16::from_le_bytes(payload.get(4..6)?.try_into().ok()?);
-                let col2_field = u16::from_le_bytes(payload.get(6..8)?.try_into().ok()?);
+                let end = i.checked_add(8)?;
+                let payload = base.get(i..end)?;
+                let row1_raw = u16::from_le_bytes([payload[0], payload[1]]);
+                let row2_raw = u16::from_le_bytes([payload[2], payload[3]]);
+                let col1_field = u16::from_le_bytes([payload[4], payload[5]]);
+                let col2_field = u16::from_le_bytes([payload[6], payload[7]]);
 
                 let row1_rel = (col1_field & ROW_RELATIVE_BIT) != 0;
                 let col1_rel = (col1_field & COL_RELATIVE_BIT) != 0;
@@ -1536,22 +1550,24 @@ pub(crate) fn materialize_biff8_rgce(
                     out.push(ptg.saturating_sub(0x02));
                 }
                 out.extend_from_slice(payload);
-                i += 8;
+                i = end;
             }
 
             // PtgNameX: [ixti: u16][iname: u16][reserved: u16]
             0x39 | 0x59 | 0x79 => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgRef3d: [ixti: u16][rw: u16][col: u16]
             0x3A | 0x5A | 0x7A => {
-                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let row0 = u16::from_le_bytes(base.get(i + 2..i + 4)?.try_into().ok()?);
-                let col_field = u16::from_le_bytes(base.get(i + 4..i + 6)?.try_into().ok()?);
-                let payload = base.get(i..i + 6)?;
+                let end = i.checked_add(6)?;
+                let payload = base.get(i..end)?;
+                let ixti = u16::from_le_bytes([payload[0], payload[1]]);
+                let row0 = u16::from_le_bytes([payload[2], payload[3]]);
+                let col_field = u16::from_le_bytes([payload[4], payload[5]]);
 
                 if let Some((new_row, new_col_field)) =
                     adjust_row_col(row0, col_field, delta_row, delta_col)
@@ -1566,17 +1582,18 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(payload);
                 }
 
-                i += 6;
+                i = end;
             }
 
             // PtgArea3d: [ixti: u16][rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
-                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
-                let row1 = u16::from_le_bytes(base.get(i + 2..i + 4)?.try_into().ok()?);
-                let row2 = u16::from_le_bytes(base.get(i + 4..i + 6)?.try_into().ok()?);
-                let col1 = u16::from_le_bytes(base.get(i + 6..i + 8)?.try_into().ok()?);
-                let col2 = u16::from_le_bytes(base.get(i + 8..i + 10)?.try_into().ok()?);
-                let payload = base.get(i..i + 10)?;
+                let end = i.checked_add(10)?;
+                let payload = base.get(i..end)?;
+                let ixti = u16::from_le_bytes([payload[0], payload[1]]);
+                let row1 = u16::from_le_bytes([payload[2], payload[3]]);
+                let row2 = u16::from_le_bytes([payload[4], payload[5]]);
+                let col1 = u16::from_le_bytes([payload[6], payload[7]]);
+                let col2 = u16::from_le_bytes([payload[8], payload[9]]);
 
                 let adjusted1 = adjust_row_col(row1, col1, delta_row, delta_col);
                 let adjusted2 = adjust_row_col(row2, col2, delta_row, delta_col);
@@ -1595,31 +1612,35 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(payload);
                 }
 
-                i += 10;
+                i = end;
             }
 
             // PtgRefErr3d / PtgAreaErr3d: copy verbatim.
             0x3C | 0x5C | 0x7C => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x3D | 0x5D | 0x7D => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 10)?);
-                i += 10;
+                let end = i.checked_add(10)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             // PtgRefN3d / PtgAreaN3d: keep verbatim.
             0x3E | 0x5E | 0x7E => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 6)?);
-                i += 6;
+                let end = i.checked_add(6)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
             0x3F | 0x5F | 0x7F => {
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 10)?);
-                i += 10;
+                let end = i.checked_add(10)?;
+                out.extend_from_slice(base.get(i..end)?);
+                i = end;
             }
 
             _ => return None,
@@ -1681,7 +1702,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

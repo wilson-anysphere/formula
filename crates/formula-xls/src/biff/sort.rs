@@ -451,12 +451,14 @@ fn parse_sort_record_grbit_then_count(data: &[u8]) -> Option<ParsedSortRecord> {
         return None;
     }
 
-    let mut keys = Vec::with_capacity(c_key);
+    let mut keys = Vec::new();
+    let _ = keys.try_reserve_exact(c_key);
     let mut off = 12usize;
     for _ in 0..c_key {
-        let col_raw = u16::from_le_bytes([data[off], data[off + 1]]);
-        let grbit_key = u16::from_le_bytes([data[off + 2], data[off + 3]]);
-        off += 4;
+        let bytes = data.get(off..off.checked_add(4)?)?;
+        let col_raw = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let grbit_key = u16::from_le_bytes([bytes[2], bytes[3]]);
+        off = off.checked_add(4)?;
         keys.push(SortKey {
             col_raw,
             descending: sort_key_is_descending(grbit_key),
@@ -484,12 +486,14 @@ fn parse_sort_record_count_then_grbit(data: &[u8]) -> Option<ParsedSortRecord> {
         return None;
     }
 
-    let mut keys = Vec::with_capacity(c_key);
+    let mut keys = Vec::new();
+    let _ = keys.try_reserve_exact(c_key);
     let mut off = 12usize;
     for _ in 0..c_key {
-        let col_raw = u16::from_le_bytes([data[off], data[off + 1]]);
-        let grbit_key = u16::from_le_bytes([data[off + 2], data[off + 3]]);
-        off += 4;
+        let bytes = data.get(off..off.checked_add(4)?)?;
+        let col_raw = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let grbit_key = u16::from_le_bytes([bytes[2], bytes[3]]);
+        off = off.checked_add(4)?;
         keys.push(SortKey {
             col_raw,
             descending: sort_key_is_descending(grbit_key),
@@ -603,7 +607,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);
@@ -615,7 +619,7 @@ mod tests {
         // - rt (u16)
         // - grbitFrt (u16)
         // - reserved (u32)
-        let mut out = Vec::with_capacity(8 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&rt.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved

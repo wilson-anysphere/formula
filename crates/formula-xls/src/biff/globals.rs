@@ -403,7 +403,11 @@ impl BiffWorkbookGlobals {
 
     #[allow(dead_code)]
     pub(crate) fn resolve_style(&self, xf_index: u32) -> Style {
-        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut cache: Vec<Option<Style>> = Vec::new();
+        if cache.try_reserve_exact(self.xfs.len()).is_err() {
+            return Style::default();
+        }
+        cache.resize_with(self.xfs.len(), || None);
         let mut stack = Vec::new();
         self.resolve_style_inner(xf_index as usize, &mut cache, &mut stack)
             .unwrap_or_default()
@@ -411,7 +415,11 @@ impl BiffWorkbookGlobals {
 
     #[allow(dead_code)]
     pub(crate) fn resolve_all_styles(&self) -> Vec<Style> {
-        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut cache: Vec<Option<Style>> = Vec::new();
+        if cache.try_reserve_exact(self.xfs.len()).is_err() {
+            return Vec::new();
+        }
+        cache.resize_with(self.xfs.len(), || None);
         let mut stack: Vec<usize> = Vec::new();
         for idx in 0..self.xfs.len() {
             let _ = self.resolve_style_inner(idx, &mut cache, &mut stack);
@@ -425,9 +433,14 @@ impl BiffWorkbookGlobals {
     /// This is used to avoid recording per-cell XF indices for cells that only use the default
     /// style (which can be the vast majority of cells in a sheet).
     pub(crate) fn xf_is_interesting_mask(&self) -> Vec<bool> {
-        let mut cache: Vec<Option<BiffResolvedXfDiff>> = vec![None; self.xfs.len()];
+        let mut cache: Vec<Option<BiffResolvedXfDiff>> = Vec::new();
+        if cache.try_reserve_exact(self.xfs.len()).is_err() {
+            return Vec::new();
+        }
+        cache.resize_with(self.xfs.len(), || None);
         let mut stack: Vec<usize> = Vec::new();
-        let mut out = Vec::with_capacity(self.xfs.len());
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(self.xfs.len());
         for idx in 0..self.xfs.len() {
             let diff = self
                 .resolve_xf_diff_inner(idx, &mut cache, &mut stack)
@@ -442,7 +455,11 @@ impl BiffWorkbookGlobals {
     /// Styles are returned as `(xf_index, style)` pairs. Callers can then intern those styles into
     /// their destination workbook.
     pub(crate) fn resolve_styles_for_used_mask(&self, used_mask: &[bool]) -> Vec<(usize, Style)> {
-        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut cache: Vec<Option<Style>> = Vec::new();
+        if cache.try_reserve_exact(self.xfs.len()).is_err() {
+            return Vec::new();
+        }
+        cache.resize_with(self.xfs.len(), || None);
         let mut stack: Vec<usize> = Vec::new();
         let mut out: Vec<(usize, Style)> = Vec::new();
 
@@ -1590,14 +1607,19 @@ fn parse_biff_palette_record(data: &[u8]) -> Option<Vec<u32>> {
     let max_colors = (data.len().saturating_sub(2)) / 4;
     let count = count.min(max_colors);
 
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(count);
     let mut offset = 2usize;
     for _ in 0..count {
-        if data.len() < offset + 4 {
+        let end = match offset.checked_add(4) {
+            Some(v) => v,
+            None => break,
+        };
+        let Some(rgb) = data.get(offset..end) else {
             break;
-        }
-        out.push(long_rgb_to_argb(&data[offset..offset + 4]));
-        offset += 4;
+        };
+        out.push(long_rgb_to_argb(rgb));
+        offset = end;
     }
     Some(out)
 }
@@ -1697,7 +1719,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + data.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);

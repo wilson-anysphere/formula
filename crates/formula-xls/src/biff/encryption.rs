@@ -493,9 +493,13 @@ fn apply_xor_obfuscation_in_place(
             break;
         }
 
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len =
-            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting XOR".to_string(),
+            ));
+        };
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
         let data_start = offset
             .checked_add(4)
@@ -510,7 +514,11 @@ fn apply_xor_obfuscation_in_place(
             )));
         }
 
-        let data = &mut workbook_stream[data_start..data_end];
+        let Some(data) = workbook_stream.get_mut(data_start..data_end) else {
+            return Err(DecryptError::InvalidFilePass(
+                "BIFF record payload out of bounds while decrypting XOR".to_string(),
+            ));
+        };
         for b in data.iter_mut() {
             let ks = xor_array[pos % xor_array.len()] ^ key_bytes[pos % 2];
             *b ^= ks;
@@ -589,7 +597,7 @@ fn xor_password_byte_candidates(password: &str) -> Vec<Zeroizing<Vec<u8>>> {
 
     // 2) MS-OFFCRYPTO 2.3.7.4 "method 2": copy low byte unless zero, else high byte.
     {
-        let mut bytes = Zeroizing::new(Vec::with_capacity(15));
+        let mut bytes = Zeroizing::new(Vec::new());
         for ch in password.encode_utf16() {
             if bytes.len() >= 15 {
                 break;
@@ -633,8 +641,7 @@ fn xor_ror(byte1: u8, byte2: u8) -> u8 {
 
 fn create_password_verifier_method1(password: &[u8]) -> u16 {
     let mut verifier: u16 = 0;
-    let mut password_array =
-        Zeroizing::new(Vec::<u8>::with_capacity(password.len().saturating_add(1)));
+    let mut password_array = Zeroizing::new(Vec::<u8>::new());
     password_array.push(password.len() as u8);
     password_array.extend_from_slice(password);
 
@@ -786,9 +793,13 @@ fn decrypt_payloads_after_filepass_xor_method1(
             break;
         }
 
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len =
-            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting XOR (method 1)".to_string(),
+            ));
+        };
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
         let data_start = offset
             .checked_add(4)
@@ -825,9 +836,18 @@ fn decrypt_payloads_after_filepass_xor_method1(
                 decrypt_from = 4.min(len);
             }
 
-            let payload = &mut workbook_stream[data_start..data_end];
+            let Some(payload) = workbook_stream.get_mut(data_start..data_end) else {
+                return Err(DecryptError::InvalidFilePass(
+                    "BIFF record payload out of bounds while decrypting XOR (method 1)".to_string(),
+                ));
+            };
             for i in decrypt_from..payload.len() {
-                let abs_pos = data_start + i;
+                let abs_pos = data_start.checked_add(i).ok_or_else(|| {
+                    DecryptError::InvalidFilePass(
+                        "BIFF record absolute position overflow while decrypting XOR (method 1)"
+                            .to_string(),
+                    )
+                })?;
                 let mut value = payload[i];
                 value ^= xor_array[abs_pos % 16];
                 value = value.rotate_right(5);
@@ -952,7 +972,7 @@ fn password_to_utf16le(password: &str) -> Zeroizing<Vec<u8>> {
     // Excel 97-2003 passwords are limited to 15 characters for legacy RC4 encryption.
     //
     // Use UTF-16LE and truncate to 15 UTF-16 code units.
-    let mut out = Zeroizing::new(Vec::with_capacity(password.len().min(15) * 2));
+    let mut out = Zeroizing::new(Vec::new());
     for u in password.encode_utf16().take(15) {
         out.extend_from_slice(&u.to_le_bytes());
     }
@@ -1057,9 +1077,13 @@ fn decrypt_biff8_rc4_standard(
             break;
         }
 
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len =
-            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting RC4".to_string(),
+            ));
+        };
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
         let data_start = offset.checked_add(4).ok_or_else(|| {
             DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
@@ -1074,7 +1098,12 @@ fn decrypt_biff8_rc4_standard(
             )));
         }
 
-        rc4_stream.apply(&mut workbook_stream[data_start..data_end]);
+        let Some(payload) = workbook_stream.get_mut(data_start..data_end) else {
+            return Err(DecryptError::InvalidFilePass(
+                "BIFF record payload out of bounds while decrypting RC4".to_string(),
+            ));
+        };
+        rc4_stream.apply(payload);
         offset = data_end;
     }
 
@@ -1100,8 +1129,17 @@ fn collect_payload_ranges_after_offset(
                 "truncated BIFF record header while scanning payload ranges".to_string(),
             ));
         }
-        let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
-        let data_start = offset + 4;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while scanning payload ranges".to_string(),
+            ));
+        };
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+        let data_start = offset.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass(
+                "record offset overflow while scanning payload ranges".to_string(),
+            )
+        })?;
         let data_end = data_start.checked_add(len).ok_or_else(|| {
             DecryptError::InvalidFilePass("record length overflow while scanning payload ranges".to_string())
         })?;
@@ -1123,53 +1161,98 @@ pub(crate) fn encrypt_workbook_stream_for_test(
     password: &str,
 ) -> Result<(), DecryptError> {
     let biff_version = super::detect_biff_version(workbook_stream);
-    let mut iter =
-        records::BiffRecordIter::from_offset(workbook_stream, 0).map_err(DecryptError::InvalidFilePass)?;
-
-    let first = match iter.next() {
-        Some(Ok(record)) => record,
-        Some(Err(err)) => return Err(DecryptError::InvalidFilePass(err)),
-        None => return Err(DecryptError::InvalidFilePass("empty workbook stream".to_string())),
-    };
-    if !records::is_bof_record(first.record_id) {
-        return Err(DecryptError::InvalidFilePass(
-            "workbook stream does not start with BOF".to_string(),
-        ));
+    if workbook_stream.is_empty() {
+        return Err(DecryptError::InvalidFilePass("empty workbook stream".to_string()));
     }
 
-    while let Some(next) = iter.next() {
-        let record = next.map_err(DecryptError::InvalidFilePass)?;
+    // We need to mutate the stream in-place, so avoid iterators that hold an immutable borrow of the
+    // entire slice.
+    let mut offset = 0usize;
+    let mut saw_bof = false;
+    while let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) {
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
-        if record.offset != 0 && records::is_bof_record(record.record_id) {
+        let payload_start = offset.checked_add(4).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
+        })?;
+        let payload_end = payload_start.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record length overflow".to_string())
+        })?;
+        if payload_end > workbook_stream.len() {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record while scanning for FILEPASS".to_string(),
+            ));
+        }
+
+        if offset == 0 {
+            if !records::is_bof_record(record_id) {
+                return Err(DecryptError::InvalidFilePass(
+                    "workbook stream does not start with BOF".to_string(),
+                ));
+            }
+            saw_bof = true;
+        } else if records::is_bof_record(record_id) {
             break;
         }
-        if record.record_id == records::RECORD_EOF {
+
+        if record_id == records::RECORD_EOF {
             break;
         }
-        if record.record_id != records::RECORD_FILEPASS {
+        if record_id != records::RECORD_FILEPASS {
+            offset = payload_end;
             continue;
         }
 
+        if !saw_bof {
+            return Err(DecryptError::InvalidFilePass(
+                "workbook stream does not start with BOF".to_string(),
+            ));
+        }
         if password.is_empty() {
             return Err(DecryptError::PasswordRequired);
         }
 
-        let encryption = parse_filepass_record(biff_version, record.data)?;
-        let payload_start = record.offset + 4;
-        let payload_end = payload_start + record.data.len();
+        // Parse FILEPASS from an owned copy so we can mutate the payload in-place.
+        let filepass_bytes = workbook_stream
+            .get(payload_start..payload_end)
+            .ok_or_else(|| {
+                DecryptError::InvalidFilePass("FILEPASS payload out of bounds".to_string())
+            })?
+            .to_vec();
+        let encryption = parse_filepass_record(biff_version, &filepass_bytes)?;
+
+        let Some(filepass_payload) = workbook_stream.get_mut(payload_start..payload_end) else {
+            return Err(DecryptError::InvalidFilePass(
+                "FILEPASS payload out of bounds".to_string(),
+            ));
+        };
         let encrypted_start = payload_end;
 
         match encryption {
             BiffEncryption::Biff5Xor { .. } => {
-                if record.data.len() < 4 {
+                if filepass_bytes.len() < 4 {
                     return Err(DecryptError::InvalidFilePass(
                         "BIFF5 XOR FILEPASS payload too short".to_string(),
                     ));
                 }
                 let verifier = xor::xor_password_verifier(password);
                 let key = verifier ^ 0xFFFF;
-                workbook_stream[payload_start..payload_start + 2].copy_from_slice(&key.to_le_bytes());
-                workbook_stream[payload_start + 2..payload_start + 4]
+                filepass_payload
+                    .get_mut(..2)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF5 XOR FILEPASS payload too short".to_string(),
+                        )
+                    })?
+                    .copy_from_slice(&key.to_le_bytes());
+                filepass_payload
+                    .get_mut(2..4)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF5 XOR FILEPASS payload too short".to_string(),
+                        )
+                    })?
                     .copy_from_slice(&verifier.to_le_bytes());
 
                 let (ranges, _total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;
@@ -1185,17 +1268,36 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 return Ok(());
             }
             BiffEncryption::Biff8Xor { .. } => {
-                if record.data.len() < 6 {
+                if filepass_bytes.len() < 6 {
                     return Err(DecryptError::InvalidFilePass(
                         "BIFF8 XOR FILEPASS payload too short".to_string(),
                     ));
                 }
                 let verifier = xor::xor_password_verifier(password);
                 let key = verifier ^ 0xFFFF;
-                workbook_stream[payload_start..payload_start + 2]
+                filepass_payload
+                    .get_mut(..2)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF8 XOR FILEPASS payload too short".to_string(),
+                        )
+                    })?
                     .copy_from_slice(&BIFF8_ENCRYPTION_TYPE_XOR.to_le_bytes());
-                workbook_stream[payload_start + 2..payload_start + 4].copy_from_slice(&key.to_le_bytes());
-                workbook_stream[payload_start + 4..payload_start + 6]
+                filepass_payload
+                    .get_mut(2..4)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF8 XOR FILEPASS payload too short".to_string(),
+                        )
+                    })?
+                    .copy_from_slice(&key.to_le_bytes());
+                filepass_payload
+                    .get_mut(4..6)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF8 XOR FILEPASS payload too short".to_string(),
+                        )
+                    })?
                     .copy_from_slice(&verifier.to_le_bytes());
 
                 let (ranges, _total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;
@@ -1219,16 +1321,18 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 // - encrypted verifier (16)
                 // - encrypted verifier hash (16)
                 const EXPECTED_LEN: usize = 6 + 16 + 16 + 16;
-                if record.data.len() < EXPECTED_LEN {
+                if filepass_bytes.len() < EXPECTED_LEN {
                     return Err(DecryptError::InvalidFilePass(format!(
                         "truncated FILEPASS RC4 payload (len={}, need at least {EXPECTED_LEN})",
-                        record.data.len()
+                        filepass_bytes.len()
                     )));
                 }
 
                 // Respect the placeholder's minor version (key length) when possible.
-                let minor =
-                    u16::from_le_bytes([workbook_stream[payload_start + 4], workbook_stream[payload_start + 5]]);
+                let minor_bytes = filepass_payload.get(4..6).ok_or_else(|| {
+                    DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                })?;
+                let minor = u16::from_le_bytes([minor_bytes[0], minor_bytes[1]]);
                 let key_len = match minor {
                     1 => 5usize,
                     2 => 16usize,
@@ -1254,20 +1358,48 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 rc4.apply_keystream(&mut buf);
 
                 // Patch FILEPASS payload.
-                workbook_stream[payload_start..payload_start + 2]
+                filepass_payload
+                    .get_mut(..2)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
                     .copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
-                workbook_stream[payload_start + 2..payload_start + 4].copy_from_slice(&1u16.to_le_bytes()); // major
-                workbook_stream[payload_start + 4..payload_start + 6]
+                filepass_payload
+                    .get_mut(2..4)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
+                    .copy_from_slice(&1u16.to_le_bytes()); // major
+                filepass_payload
+                    .get_mut(4..6)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
                     .copy_from_slice(&minor.to_le_bytes());
-                workbook_stream[payload_start + 6..payload_start + 22].copy_from_slice(&salt);
-                workbook_stream[payload_start + 22..payload_start + 38].copy_from_slice(&buf[..16]);
-                workbook_stream[payload_start + 38..payload_start + 54].copy_from_slice(&buf[16..]);
+                filepass_payload
+                    .get_mut(6..22)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
+                    .copy_from_slice(&salt);
+                filepass_payload
+                    .get_mut(22..38)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
+                    .copy_from_slice(&buf[..16]);
+                filepass_payload
+                    .get_mut(38..54)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidFilePass("truncated FILEPASS RC4 payload".to_string())
+                    })?
+                    .copy_from_slice(&buf[16..]);
 
                 // Encrypt record payload bytes after FILEPASS using an absolute-position mapping so
                 // boundary bugs in the production decryptor are caught by roundtrip tests.
                 let (ranges, total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;
                 let blocks = total.div_ceil(RC4_BLOCK_SIZE).max(1);
-                let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::with_capacity(blocks);
+                let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::new();
                 for b in 0..blocks {
                     let block_key = rc4::derive_biff8_rc4_block_key(&*intermediate_key, b as u32);
                     let mut rc4 = Rc4::new(&block_key[..key_len]);
@@ -1310,10 +1442,10 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 const ENC_INFO_LEN: usize = 12 + ENC_HEADER_SIZE + 60;
                 const FILEPASS_PAYLOAD_LEN: usize = 8 + ENC_INFO_LEN;
 
-                if record.data.len() < FILEPASS_PAYLOAD_LEN {
+                if filepass_bytes.len() < FILEPASS_PAYLOAD_LEN {
                     return Err(DecryptError::InvalidFilePass(format!(
                         "BIFF8 RC4 CryptoAPI FILEPASS payload too short: expected at least {FILEPASS_PAYLOAD_LEN} bytes, got {}",
-                        record.data.len()
+                        filepass_bytes.len()
                     )));
                 }
 
@@ -1398,7 +1530,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 // Encrypt record payload bytes after FILEPASS using an absolute-position mapping.
                 let (ranges, total) = collect_payload_ranges_after_offset(workbook_stream, encrypted_start)?;
                 let blocks = total.div_ceil(RC4_BLOCK_SIZE).max(1);
-                let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::with_capacity(blocks);
+                let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::new();
                 for b in 0..blocks {
                     let key = cryptoapi::derive_biff8_cryptoapi_key(
                         cryptoapi::CALG_SHA1,
@@ -1445,7 +1577,7 @@ mod tests {
     const RECORD_EOF: u16 = 0x000A;
     const RECORD_DUMMY: u16 = 0x00FC;
     fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&record_id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);
@@ -1480,7 +1612,7 @@ mod tests {
         let encrypted_verifier = &buf[0..16];
         let encrypted_verifier_hash = &buf[16..32];
 
-        let mut payload = Vec::with_capacity(54);
+        let mut payload = Vec::new();
         payload.extend_from_slice(&0x0001u16.to_le_bytes()); // wEncryptionType = RC4
         payload.extend_from_slice(&major.to_le_bytes());
         payload.extend_from_slice(&minor.to_le_bytes());
@@ -1508,15 +1640,21 @@ mod tests {
             if workbook_stream.len() - offset < 4 {
                 return Err("truncated record header".to_string());
             }
-            let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
-                as usize;
-            let data_start = offset + 4;
-            let data_end = data_start + len;
+            let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+                return Err("truncated record header".to_string());
+            };
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = offset.checked_add(4).ok_or_else(|| "record offset overflow".to_string())?;
+            let data_end = data_start
+                .checked_add(len)
+                .ok_or_else(|| "record length overflow".to_string())?;
             if data_end > workbook_stream.len() {
                 return Err("record extends past end".to_string());
             }
 
-            let mut data = &mut workbook_stream[data_start..data_end];
+            let mut data = workbook_stream
+                .get_mut(data_start..data_end)
+                .ok_or_else(|| "record payload out of bounds".to_string())?;
             while !data.is_empty() {
                 if pos_in_block == RC4_BLOCK_SIZE {
                     block = block.wrapping_add(1);
@@ -1704,11 +1842,17 @@ mod tests {
         plain.extend_from_slice(&record(RECORD_EOF, &[]));
 
         let mut encrypted = plain.clone();
-        let filepass_len = u16::from_le_bytes([
-            encrypted[filepass_offset + 2],
-            encrypted[filepass_offset + 3],
-        ]) as usize;
-        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let header_end = filepass_offset
+            .checked_add(4)
+            .expect("FILEPASS header offset overflow");
+        let header = encrypted
+            .get(filepass_offset..header_end)
+            .expect("FILEPASS header present");
+        let filepass_len = u16::from_le_bytes([header[2], header[3]]) as usize;
+        let encrypted_start = filepass_offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(filepass_len))
+            .expect("FILEPASS payload end offset overflow");
 
         let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, &*intermediate_key, key_len)
@@ -1915,11 +2059,17 @@ mod tests {
 
         // Encrypt in place using a reference implementation.
         let mut encrypted = plain.clone();
-        let filepass_len = u16::from_le_bytes([
-            encrypted[filepass_offset + 2],
-            encrypted[filepass_offset + 3],
-        ]) as usize;
-        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let header_end = filepass_offset
+            .checked_add(4)
+            .expect("FILEPASS header offset overflow");
+        let header = encrypted
+            .get(filepass_offset..header_end)
+            .expect("FILEPASS header present");
+        let filepass_len = u16::from_le_bytes([header[2], header[3]]) as usize;
+        let encrypted_start = filepass_offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(filepass_len))
+            .expect("FILEPASS payload end offset overflow");
 
         let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
@@ -1957,7 +2107,7 @@ mod tests {
             // Simple LCG for deterministic payload bytes.
             seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
             let len = 1 + (seed as usize % 64);
-            let mut payload = Vec::with_capacity(len);
+            let mut payload = Vec::new();
             let mut x = seed ^ i;
             for _ in 0..len {
                 x = x.wrapping_mul(1103515245).wrapping_add(12345);
@@ -1969,11 +2119,17 @@ mod tests {
 
         // Encrypt the record payloads after FILEPASS.
         let mut encrypted = plain.clone();
-        let filepass_len = u16::from_le_bytes([
-            encrypted[filepass_offset + 2],
-            encrypted[filepass_offset + 3],
-        ]) as usize;
-        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let header_end = filepass_offset
+            .checked_add(4)
+            .expect("FILEPASS header offset overflow");
+        let header = encrypted
+            .get(filepass_offset..header_end)
+            .expect("FILEPASS header present");
+        let filepass_len = u16::from_le_bytes([header[2], header[3]]) as usize;
+        let encrypted_start = filepass_offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(filepass_len))
+            .expect("FILEPASS payload end offset overflow");
         let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
             &mut encrypted,
@@ -2004,11 +2160,17 @@ mod tests {
 
         // Encrypt record payloads after FILEPASS.
         let mut encrypted = plain.clone();
-        let filepass_len = u16::from_le_bytes([
-            encrypted[filepass_offset + 2],
-            encrypted[filepass_offset + 3],
-        ]) as usize;
-        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let header_end = filepass_offset
+            .checked_add(4)
+            .expect("FILEPASS header offset overflow");
+        let header = encrypted
+            .get(filepass_offset..header_end)
+            .expect("FILEPASS header present");
+        let filepass_len = u16::from_le_bytes([header[2], header[3]]) as usize;
+        let encrypted_start = filepass_offset
+            .checked_add(4)
+            .and_then(|v| v.checked_add(filepass_len))
+            .expect("FILEPASS payload end offset overflow");
         let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
             &mut encrypted,
@@ -2031,11 +2193,11 @@ mod tests {
 
     fn filepass_payload_range(stream: &[u8]) -> std::ops::Range<usize> {
         let mut offset = 0usize;
-        while offset + 4 <= stream.len() {
-            let record_id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
-            let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
-            let data_start = offset + 4;
-            let data_end = data_start + len;
+        while let Some(header) = stream.get(offset..).and_then(|rest| rest.get(..4)) {
+            let record_id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = offset.checked_add(4).unwrap_or(usize::MAX);
+            let data_end = data_start.checked_add(len).unwrap_or(usize::MAX);
             if record_id == records::RECORD_FILEPASS {
                 return data_start..data_end;
             }
@@ -2065,9 +2227,13 @@ mod tests {
                 break;
             }
 
-            let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-            let len =
-                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+            let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+                return Err(DecryptError::InvalidFilePass(
+                    "truncated BIFF record header while encrypting XOR".to_string(),
+                ));
+            };
+            let record_id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
             let data_start = offset
                 .checked_add(4)
@@ -2102,9 +2268,17 @@ mod tests {
                     encrypt_from = 4.min(len);
                 }
 
-                let payload = &mut workbook_stream[data_start..data_end];
+                let Some(payload) = workbook_stream.get_mut(data_start..data_end) else {
+                    return Err(DecryptError::InvalidFilePass(
+                        "BIFF record payload out of bounds while encrypting XOR".to_string(),
+                    ));
+                };
                 for i in encrypt_from..payload.len() {
-                    let abs_pos = data_start + i;
+                    let abs_pos = data_start.checked_add(i).ok_or_else(|| {
+                        DecryptError::InvalidFilePass(
+                            "BIFF record absolute position overflow while encrypting XOR".to_string(),
+                        )
+                    })?;
                     let mut value = payload[i];
                     value = value.rotate_left(5);
                     value ^= xor_array[abs_pos % 16];

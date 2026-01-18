@@ -43,8 +43,8 @@ fn build_sheet_rename_rewrite_plan<'a>(
             .map(super::normalize_sheet_name_for_match),
     );
 
-    let mut old_to_tmp: Vec<(String, String)> = Vec::with_capacity(sheet_rename_pairs.len());
-    let mut tmp_to_new: Vec<(String, String)> = Vec::with_capacity(sheet_rename_pairs.len());
+    let mut old_to_tmp: Vec<(String, String)> = Vec::new();
+    let mut tmp_to_new: Vec<(String, String)> = Vec::new();
 
     let mut tmp_index: usize = 0;
     for (old, new) in sheet_rename_pairs {

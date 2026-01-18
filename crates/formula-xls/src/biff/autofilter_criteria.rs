@@ -330,22 +330,22 @@ fn parse_autofilter_record(
     if matches!(doper1.op, AutoFilterOp::Between | AutoFilterOp::NotBetween) {
         if let (DoperValue::Number(a), DoperValue::Number(b)) = (&doper1.value, &doper2.value) {
             let (min, max) = if a <= b { (*a, *b) } else { (*b, *a) };
-            let (join, criteria) = match doper1.op {
-                AutoFilterOp::Between => (
+            let (join, criteria) = if doper1.op == AutoFilterOp::Between {
+                (
                     FilterJoin::All,
                     vec![
                         FilterCriterion::Number(NumberComparison::GreaterThanOrEqual(min)),
                         FilterCriterion::Number(NumberComparison::LessThanOrEqual(max)),
                     ],
-                ),
-                AutoFilterOp::NotBetween => (
+                )
+            } else {
+                (
                     FilterJoin::Any,
                     vec![
                         FilterCriterion::Number(NumberComparison::LessThan(min)),
                         FilterCriterion::Number(NumberComparison::GreaterThan(max)),
                     ],
-                ),
-                _ => unreachable!(),
+                )
             };
             return Ok(Some(FilterColumn {
                 col_id,
@@ -614,7 +614,13 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
                 AutoFilterOp::Contains => TextMatchKind::Contains,
                 AutoFilterOp::BeginsWith => TextMatchKind::BeginsWith,
                 AutoFilterOp::EndsWith => TextMatchKind::EndsWith,
-                _ => unreachable!(),
+                other => {
+                    debug_assert!(
+                        false,
+                        "unexpected AUTOFILTER text-match op in text-match branch: {other:?}",
+                    );
+                    return opaque(other, None);
+                }
             };
             match &doper.value {
                 DoperValue::Text { value, .. } => Some(FilterCriterion::TextMatch(TextMatch {
@@ -767,7 +773,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (criteria string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -846,7 +855,9 @@ impl<'a> FragmentCursor<'a> {
             let bytes = self.read_exact_from_current(take_bytes)?;
 
             if is_unicode {
-                let mut u16s = Vec::with_capacity(take_chars);
+                let mut u16s = Vec::new();
+                u16s.try_reserve_exact(take_chars)
+                    .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                 for chunk in bytes.chunks_exact(2) {
                     u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
@@ -877,7 +888,7 @@ mod tests {
     use formula_model::{CellRef, Range};
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

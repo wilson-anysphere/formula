@@ -190,7 +190,11 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
                 if !valid_range(header) {
                     return;
                 }
-                let cce_bytes = match data.get(cce_offset..cce_offset + 2) {
+                let cce_end = match cce_offset.checked_add(2) {
+                    Some(v) => v,
+                    None => return,
+                };
+                let cce_bytes = match data.get(cce_offset..cce_end) {
                     Some(v) => v,
                     None => return,
                 };

@@ -315,12 +315,14 @@ fn parse_biff_sheet_print_settings_with_record_cap(
 }
 
 fn parse_u16_at(data: &[u8], offset: usize) -> Option<u16> {
-    let bytes = data.get(offset..offset + 2)?;
+    let end = offset.checked_add(2)?;
+    let bytes = data.get(offset..end)?;
     Some(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn parse_f64_at(data: &[u8], offset: usize) -> Option<f64> {
-    let bytes = data.get(offset..offset + 8)?;
+    let end = offset.checked_add(8)?;
+    let bytes = data.get(offset..end)?;
     Some(f64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
@@ -465,7 +467,13 @@ fn parse_margin_record(
         );
         return;
     }
-    let value = parse_f64_at(data, 0).expect("len check");
+    let Some(value) = parse_f64_at(data, 0) else {
+        push_warning_bounded(
+            warnings,
+            format!("failed to parse {name} f64 value at offset {offset}"),
+        );
+        return;
+    };
     if !is_valid_margin(value) {
         push_warning_bounded(
             warnings,
@@ -485,7 +493,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + data.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);

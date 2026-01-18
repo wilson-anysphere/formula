@@ -56,7 +56,13 @@ impl CryptoApiHashAlg {
 }
 
 fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, DecryptError> {
-    let b = bytes.get(offset..offset + 2).ok_or_else(|| {
+    let end = offset.checked_add(2).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "FILEPASS offset overflow (need u16 at offset {offset}, len={})",
+            bytes.len()
+        ))
+    })?;
+    let b = bytes.get(offset..end).ok_or_else(|| {
         DecryptError::InvalidFilePass(format!(
             "truncated FILEPASS payload (need u16 at offset {offset}, len={})",
             bytes.len()
@@ -66,7 +72,13 @@ fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, DecryptError> {
 }
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, DecryptError> {
-    let b = bytes.get(offset..offset + 4).ok_or_else(|| {
+    let end = offset.checked_add(4).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "FILEPASS offset overflow (need u32 at offset {offset}, len={})",
+            bytes.len()
+        ))
+    })?;
+    let b = bytes.get(offset..end).ok_or_else(|| {
         DecryptError::InvalidFilePass(format!(
             "truncated FILEPASS payload (need u32 at offset {offset}, len={})",
             bytes.len()
@@ -76,7 +88,8 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, DecryptError> {
 }
 
 fn utf16le_bytes(password: &str) -> Zeroizing<Vec<u8>> {
-    let mut out = Zeroizing::new(Vec::with_capacity(password.len().saturating_mul(2)));
+    let mut out = Zeroizing::new(Vec::new());
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
@@ -182,7 +195,7 @@ fn derive_block_key(
         CryptoApiHashAlg::Sha1 => {
             let mut digest = sha1_bytes(&[key_material, &block_bytes]);
             let key = if key_len == 5 && pad_40_bit_to_16 {
-                let mut key = Vec::with_capacity(16);
+                let mut key = Vec::new();
                 key.extend_from_slice(&digest[..5]);
                 key.resize(16, 0);
                 key
@@ -195,7 +208,7 @@ fn derive_block_key(
         CryptoApiHashAlg::Md5 => {
             let mut digest = md5_bytes(&[key_material, &block_bytes]);
             let key = if key_len == 5 && pad_40_bit_to_16 {
-                let mut key = Vec::with_capacity(16);
+                let mut key = Vec::new();
                 key.extend_from_slice(&digest[..5]);
                 key.resize(16, 0);
                 key
@@ -392,9 +405,9 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, DecryptErro
     //   DWORD Reserved1;
     //   DWORD Reserved2;
     //   WCHAR CSPName[];
-    let alg_id = u32::from_le_bytes(bytes[8..12].try_into().expect("slice len"));
-    let alg_id_hash = u32::from_le_bytes(bytes[12..16].try_into().expect("slice len"));
-    let key_size_bits = u32::from_le_bytes(bytes[16..20].try_into().expect("slice len"));
+    let alg_id = read_u32_le(bytes, 8)?;
+    let alg_id_hash = read_u32_le(bytes, 12)?;
+    let key_size_bits = read_u32_le(bytes, 16)?;
     Ok(EncryptionHeader {
         alg_id,
         alg_id_hash,
@@ -444,9 +457,22 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Decrypt
         )));
     }
 
-    let salt = bytes[salt_start..salt_end].to_vec();
+    let salt = bytes
+        .get(salt_start..salt_end)
+        .ok_or_else(|| {
+            DecryptError::InvalidFilePass("EncryptionVerifier salt out of bounds".to_string())
+        })?
+        .to_vec();
     let mut encrypted_verifier = [0u8; 16];
-    encrypted_verifier.copy_from_slice(&bytes[verifier_start..verifier_end]);
+    encrypted_verifier.copy_from_slice(
+        bytes
+            .get(verifier_start..verifier_end)
+            .ok_or_else(|| {
+                DecryptError::InvalidFilePass(
+                    "EncryptionVerifier encryptedVerifier out of bounds".to_string(),
+                )
+            })?,
+    );
     let verifier_hash_size = read_u32_le(bytes, hash_size_start)?;
     let verifier_hash_size_usize = verifier_hash_size as usize;
     const MAX_VERIFIER_HASH_SIZE: usize = 64;
@@ -466,7 +492,14 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Decrypt
         )));
     }
 
-    let encrypted_verifier_hash = bytes[encrypted_hash_start..encrypted_hash_end].to_vec();
+    let encrypted_verifier_hash = bytes
+        .get(encrypted_hash_start..encrypted_hash_end)
+        .ok_or_else(|| {
+            DecryptError::InvalidFilePass(
+                "EncryptionVerifier encryptedVerifierHash out of bounds".to_string(),
+            )
+        })?
+        .to_vec();
 
     Ok(EncryptionVerifier {
         salt,
@@ -507,8 +540,15 @@ fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionIn
         )));
     }
 
-    let header = parse_encryption_header(&bytes[header_start..header_end])?;
-    let verifier = parse_encryption_verifier(&bytes[header_end..])?;
+    let header_bytes = bytes.get(header_start..header_end).ok_or_else(|| {
+        DecryptError::InvalidFilePass("EncryptionInfo header out of bounds".to_string())
+    })?;
+    let verifier_bytes =
+        bytes.get(header_end..).ok_or_else(|| {
+            DecryptError::InvalidFilePass("EncryptionInfo verifier out of bounds".to_string())
+        })?;
+    let header = parse_encryption_header(header_bytes)?;
+    let verifier = parse_encryption_verifier(verifier_bytes)?;
     Ok(CryptoApiEncryptionInfo { header, verifier })
 }
 
@@ -562,8 +602,21 @@ fn parse_cryptoapi_encryption_info_legacy_filepass(
         )));
     }
 
-    let header = parse_encryption_header(&payload[header_start..header_end])?;
-    let verifier = parse_encryption_verifier(&payload[header_end..])?;
+    let header_bytes = payload.get(header_start..header_end).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "FILEPASS header slice out of bounds (payload_len={}, header_start={header_start}, header_end={header_end})",
+            payload.len()
+        ))
+    })?;
+    let verifier_bytes = payload.get(header_end..).ok_or_else(|| {
+        DecryptError::InvalidFilePass(format!(
+            "FILEPASS verifier slice out of bounds (payload_len={}, header_end={header_end})",
+            payload.len()
+        ))
+    })?;
+
+    let header = parse_encryption_header(header_bytes)?;
+    let verifier = parse_encryption_verifier(verifier_bytes)?;
     Ok(CryptoApiEncryptionInfo { header, verifier })
 }
 
@@ -863,7 +916,10 @@ fn decrypt_cryptoapi_standard(
         )));
     }
 
-    let info = parse_cryptoapi_encryption_info(&filepass_payload[enc_info_start..enc_info_end])?;
+    let enc_info_bytes = filepass_payload.get(enc_info_start..enc_info_end).ok_or_else(|| {
+        DecryptError::InvalidFilePass("FILEPASS EncryptionInfo out of bounds".to_string())
+    })?;
+    let info = parse_cryptoapi_encryption_info(enc_info_bytes)?;
     let (hash_alg, key_material, key_len, pad_40_bit_to_16) = verify_password(&info, password)?;
 
     let mut cipher = PayloadRc4::new(hash_alg, key_material, key_len, pad_40_bit_to_16);
@@ -877,9 +933,13 @@ fn decrypt_cryptoapi_standard(
             break;
         }
 
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len =
-            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting CryptoAPI".to_string(),
+            ));
+        };
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
         let data_start = offset.checked_add(4).ok_or_else(|| {
             DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
         })?;
@@ -893,7 +953,12 @@ fn decrypt_cryptoapi_standard(
             )));
         }
 
-        cipher.apply_keystream(&mut workbook_stream[data_start..data_end]);
+        let Some(payload) = workbook_stream.get_mut(data_start..data_end) else {
+            return Err(DecryptError::InvalidFilePass(
+                "BIFF record payload out of bounds while decrypting CryptoAPI".to_string(),
+            ));
+        };
+        cipher.apply_keystream(payload);
         offset = data_end;
     }
 
@@ -920,9 +985,13 @@ fn decrypt_cryptoapi_legacy(
             break;
         }
 
-        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
-        let len =
-            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+        let Some(header) = workbook_stream.get(offset..).and_then(|rest| rest.get(..4)) else {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting CryptoAPI legacy".to_string(),
+            ));
+        };
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
         let data_start = offset.checked_add(4).ok_or_else(|| {
             DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
         })?;
@@ -950,8 +1019,17 @@ fn decrypt_cryptoapi_legacy(
                         let decrypt_start = stream_pos.checked_add(4).ok_or_else(|| {
                             DecryptError::InvalidFilePass("stream position overflow".to_string())
                         })?;
+                        let range_start = data_start.checked_add(4).ok_or_else(|| {
+                            DecryptError::InvalidFilePass("BIFF record offset overflow".to_string())
+                        })?;
+                        let Some(payload) = workbook_stream.get_mut(range_start..data_end) else {
+                            return Err(DecryptError::InvalidFilePass(
+                                "BIFF record payload out of bounds while decrypting BoundSheet (CryptoAPI legacy)"
+                                    .to_string(),
+                            ));
+                        };
                         decrypt_range_by_offset(
-                            &mut workbook_stream[data_start + 4..data_end],
+                            payload,
                             decrypt_start,
                             hash_alg,
                             key_material.as_slice(),
@@ -960,14 +1038,22 @@ fn decrypt_cryptoapi_legacy(
                         );
                     }
                 }
-                _ => decrypt_range_by_offset(
-                    &mut workbook_stream[data_start..data_end],
-                    stream_pos,
-                    hash_alg,
-                    key_material.as_slice(),
-                    key_len,
-                    pad_40_bit_to_16,
-                ),
+                _ => {
+                    let Some(payload) = workbook_stream.get_mut(data_start..data_end) else {
+                        return Err(DecryptError::InvalidFilePass(
+                            "BIFF record payload out of bounds while decrypting CryptoAPI legacy"
+                                .to_string(),
+                        ));
+                    };
+                    decrypt_range_by_offset(
+                        payload,
+                        stream_pos,
+                        hash_alg,
+                        key_material.as_slice(),
+                        key_len,
+                        pad_40_bit_to_16,
+                    )
+                }
             }
         }
 
@@ -1169,7 +1255,7 @@ mod tests {
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
 
         fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
-            let mut out = Vec::with_capacity(4 + payload.len());
+            let mut out = Vec::new();
             out.extend_from_slice(&record_id.to_le_bytes());
             out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
             out.extend_from_slice(payload);
@@ -1265,10 +1351,22 @@ mod tests {
             if encrypted.len() - offset < 4 {
                 break;
             }
-            let len = u16::from_le_bytes([encrypted[offset + 2], encrypted[offset + 3]]) as usize;
-            let data_start = offset + 4;
-            let data_end = data_start + len;
-            cipher.apply_keystream(&mut encrypted[data_start..data_end]);
+            let Some(header) = encrypted.get(offset..).and_then(|rest| rest.get(..4)) else {
+                break;
+            };
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = match offset.checked_add(4) {
+                Some(v) => v,
+                None => break,
+            };
+            let data_end = match data_start.checked_add(len) {
+                Some(v) => v,
+                None => break,
+            };
+            let Some(payload) = encrypted.get_mut(data_start..data_end) else {
+                break;
+            };
+            cipher.apply_keystream(payload);
             offset = data_end;
         }
 
@@ -1287,7 +1385,7 @@ mod tests {
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
 
         fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
-            let mut out = Vec::with_capacity(4 + payload.len());
+            let mut out = Vec::new();
             out.extend_from_slice(&record_id.to_le_bytes());
             out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
             out.extend_from_slice(payload);
@@ -1377,10 +1475,19 @@ mod tests {
                 break;
             }
 
-            let record_id = u16::from_le_bytes([encrypted[offset], encrypted[offset + 1]]);
-            let len = u16::from_le_bytes([encrypted[offset + 2], encrypted[offset + 3]]) as usize;
-            let data_start = offset + 4;
-            let data_end = data_start + len;
+            let Some(header) = encrypted.get(offset..).and_then(|rest| rest.get(..4)) else {
+                break;
+            };
+            let record_id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = match offset.checked_add(4) {
+                Some(v) => v,
+                None => break,
+            };
+            let data_end = match data_start.checked_add(len) {
+                Some(v) => v,
+                None => break,
+            };
 
             // Record headers are not encrypted but still advance the CryptoAPI RC4 stream position.
             stream_pos += 4;
@@ -1388,14 +1495,18 @@ mod tests {
             // Avoid record types with special-case decryption behavior (we only emit dummy records
             // here), but mirror the "never encrypted" list for completeness.
             if !is_never_encrypted_record(record_id) && len > 0 {
-                decrypt_range_by_offset(
-                    &mut encrypted[data_start..data_end],
-                    stream_pos,
-                    CryptoApiHashAlg::Sha1,
-                    key_material.as_slice(),
-                    5,
-                    false,
-                );
+                if let Some(payload) = encrypted.get_mut(data_start..data_end) {
+                    decrypt_range_by_offset(
+                        payload,
+                        stream_pos,
+                        CryptoApiHashAlg::Sha1,
+                        key_material.as_slice(),
+                        5,
+                        false,
+                    );
+                } else {
+                    break;
+                }
             }
 
             stream_pos += len;
@@ -1420,7 +1531,7 @@ mod tests {
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
 
         fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
-            let mut out = Vec::with_capacity(4 + payload.len());
+            let mut out = Vec::new();
             out.extend_from_slice(&record_id.to_le_bytes());
             out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
             out.extend_from_slice(payload);
@@ -1532,10 +1643,19 @@ mod tests {
                 break;
             }
 
-            let record_id = u16::from_le_bytes([encrypted[offset], encrypted[offset + 1]]);
-            let len = u16::from_le_bytes([encrypted[offset + 2], encrypted[offset + 3]]) as usize;
-            let data_start = offset + 4;
-            let data_end = data_start + len;
+            let Some(header) = encrypted.get(offset..).and_then(|rest| rest.get(..4)) else {
+                break;
+            };
+            let record_id = u16::from_le_bytes([header[0], header[1]]);
+            let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+            let data_start = match offset.checked_add(4) {
+                Some(v) => v,
+                None => break,
+            };
+            let data_end = match data_start.checked_add(len) {
+                Some(v) => v,
+                None => break,
+            };
 
             // Record headers are not encrypted but still advance the CryptoAPI RC4 stream position.
             stream_pos += 4;
@@ -1543,24 +1663,36 @@ mod tests {
             if !is_never_encrypted_record(record_id) && len > 0 {
                 if record_id == super::super::RECORD_BOUNDSHEET {
                     if len > 4 {
+                        if let Some(range_start) = data_start.checked_add(4) {
+                            if let Some(payload) = encrypted.get_mut(range_start..data_end) {
+                                decrypt_range_by_offset(
+                                    payload,
+                                    stream_pos + 4,
+                                    CryptoApiHashAlg::Sha1,
+                                    key_material.as_slice(),
+                                    5,
+                                    true,
+                                );
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    if let Some(payload) = encrypted.get_mut(data_start..data_end) {
                         decrypt_range_by_offset(
-                            &mut encrypted[data_start + 4..data_end],
-                            stream_pos + 4,
+                            payload,
+                            stream_pos,
                             CryptoApiHashAlg::Sha1,
                             key_material.as_slice(),
                             5,
                             true,
                         );
+                    } else {
+                        break;
                     }
-                } else {
-                    decrypt_range_by_offset(
-                        &mut encrypted[data_start..data_end],
-                        stream_pos,
-                        CryptoApiHashAlg::Sha1,
-                        key_material.as_slice(),
-                        5,
-                        true,
-                    );
                 }
             }
 

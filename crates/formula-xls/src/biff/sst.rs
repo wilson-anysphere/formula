@@ -86,7 +86,8 @@ fn parse_sst_record_phonetics(record: &records::LogicalBiffRecord<'_>, codepage:
         Err(_) => return Vec::new(),
     };
 
-    let mut out: Vec<Option<String>> = Vec::with_capacity(cst_unique.min(1024));
+    let mut out: Vec<Option<String>> = Vec::new();
+    let _ = out.try_reserve_exact(cst_unique.min(1024));
     for _ in 0..cst_unique {
         match cursor.read_xl_unicode_rich_extended_string_phonetic(codepage) {
             Ok(v) => out.push(v),
@@ -104,10 +105,10 @@ fn extract_phonetic_from_ext_rst(ext: &[u8], codepage: u16) -> Option<String> {
     //
     // where `rt == 0x0001` indicates phonetic information (PhoneticInfo).
     let mut pos = 0usize;
-    while pos + 4 <= ext.len() {
-        let rt = u16::from_le_bytes([ext[pos], ext[pos + 1]]);
-        let cb = u16::from_le_bytes([ext[pos + 2], ext[pos + 3]]) as usize;
-        pos += 4;
+    while let Some(header) = ext.get(pos..).and_then(|rest| rest.get(..4)) {
+        let rt = u16::from_le_bytes([header[0], header[1]]);
+        let cb = u16::from_le_bytes([header[2], header[3]]) as usize;
+        pos = pos.checked_add(4)?;
         let end = match pos.checked_add(cb) {
             Some(v) => v,
             None => break,
@@ -251,7 +252,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (sst string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;

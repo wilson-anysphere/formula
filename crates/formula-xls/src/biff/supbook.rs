@@ -503,7 +503,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (biff8 string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -582,7 +585,9 @@ impl<'a> FragmentCursor<'a> {
             let bytes = self.read_exact_from_current(take_bytes)?;
 
             if is_unicode {
-                let mut u16s = Vec::with_capacity(take_chars);
+                let mut u16s = Vec::new();
+                u16s.try_reserve_exact(take_chars)
+                    .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                 for chunk in bytes.chunks_exact(2) {
                     u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
@@ -650,7 +655,9 @@ impl<'a> FragmentCursor<'a> {
             let bytes = self.read_exact_from_current(take_bytes)?;
 
             if is_unicode {
-                let mut u16s = Vec::with_capacity(take_chars);
+                let mut u16s = Vec::new();
+                u16s.try_reserve_exact(take_chars)
+                    .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                 for chunk in bytes.chunks_exact(2) {
                     u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
@@ -679,7 +686,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

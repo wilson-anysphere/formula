@@ -419,7 +419,8 @@ fn parse_array_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(Ce
         let Some((rw_first, rw_last, col_first, col_last)) = *header else {
             continue;
         };
-        let cce_bytes = data.get(*cce_offset..*cce_offset + 2)?;
+        let end = (*cce_offset).checked_add(2)?;
+        let cce_bytes = data.get(*cce_offset..end)?;
         let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]);
         if cce != expected_cce_u16 {
             continue;
@@ -513,7 +514,11 @@ fn parse_shrfmla_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(
         if !valid_range(header) {
             return;
         }
-        let cce_bytes = match data.get(cce_offset..cce_offset + 2) {
+        let cce_end = match cce_offset.checked_add(2) {
+            Some(v) => v,
+            None => return,
+        };
+        let cce_bytes = match data.get(cce_offset..cce_end) {
             Some(v) => v,
             None => return,
         };
@@ -1142,7 +1147,10 @@ impl<'a> FragmentCursor<'a> {
     }
 
     fn read_bytes(&mut self, mut n: usize) -> Result<Vec<u8>, String> {
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (worksheet formula bytes)".to_string())?;
         while n > 0 {
             let available = self.remaining_in_fragment();
             if available == 0 {
@@ -1202,7 +1210,10 @@ impl<'a> FragmentCursor<'a> {
         // workbooks. When we can't safely parse, callers fall back to raw `rgcb` bytes.
         const MAX_ARRAY_CELLS: usize = 4096;
 
-        let mut out = Vec::with_capacity(self.remaining_total_bytes());
+        let total = self.remaining_total_bytes();
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (worksheet rgcb)".to_string())?;
 
         while self.remaining_total_bytes() > 0 {
             // Array constant header: [cols_minus1: u16][rows_minus1: u16]
@@ -1308,7 +1319,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (worksheet string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -1330,7 +1344,9 @@ impl<'a> FragmentCursor<'a> {
         //
         // If we encounter an unsupported token, fall back to raw byte copying for the remainder of
         // the `rgce` stream (without special continuation handling).
-        let mut out = Vec::with_capacity(cce);
+        let mut out = Vec::new();
+        out.try_reserve_exact(cce)
+            .map_err(|_| "allocation failed (worksheet rgce)".to_string())?;
 
         while out.len() < cce {
             let ptg = self.read_u8()?;
@@ -2028,9 +2044,17 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 if let Some(anchor) =
                     resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
                 {
-                    let def = shrfmla
-                        .get(&anchor)
-                        .expect("resolved SHRFMLA anchor missing");
+                    let Some(def) = shrfmla.get(&anchor) else {
+                        warn_string(
+                            &mut out.warnings,
+                            format!(
+                                "cell {}: resolved SHRFMLA anchor is missing: anchor={} base=({base_row},{base_col})",
+                                format_cell(exp.cell),
+                                format_cell(anchor),
+                            ),
+                        );
+                        continue;
+                    };
                     let base_coord = rgce::CellCoord::new(anchor.row, anchor.col);
                     let target_coord = rgce::CellCoord::new(exp.cell.row, exp.cell.col);
 
@@ -2079,7 +2103,17 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 } else if let Some(anchor) =
                     resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
                 {
-                    let def = array.get(&anchor).expect("resolved ARRAY anchor missing");
+                    let Some(def) = array.get(&anchor) else {
+                        warn_string(
+                            &mut out.warnings,
+                            format!(
+                                "cell {}: resolved ARRAY anchor is missing: anchor={} base=({base_row},{base_col})",
+                                format_cell(exp.cell),
+                                format_cell(anchor),
+                            ),
+                        );
+                        continue;
+                    };
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -2133,9 +2167,17 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 } else if let Some(anchor) =
                     resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
                 {
-                    let def = shrfmla
-                        .get(&anchor)
-                        .expect("resolved SHRFMLA anchor missing");
+                    let Some(def) = shrfmla.get(&anchor) else {
+                        warn_string(
+                            &mut out.warnings,
+                            format!(
+                                "cell {}: resolved SHRFMLA anchor is missing: anchor={} base=({base_row},{base_col})",
+                                format_cell(exp.cell),
+                                format_cell(anchor),
+                            ),
+                        );
+                        continue;
+                    };
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -2153,7 +2195,17 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 } else if let Some(anchor) =
                     resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
                 {
-                    let def = array.get(&anchor).expect("resolved ARRAY anchor missing");
+                    let Some(def) = array.get(&anchor) else {
+                        warn_string(
+                            &mut out.warnings,
+                            format!(
+                                "cell {}: resolved ARRAY anchor is missing: anchor={} base=({base_row},{base_col})",
+                                format_cell(exp.cell),
+                                format_cell(anchor),
+                            ),
+                        );
+                        continue;
+                    };
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -2196,7 +2248,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

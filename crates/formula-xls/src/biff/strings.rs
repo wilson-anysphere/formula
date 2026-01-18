@@ -126,27 +126,28 @@ fn parse_biff8_string_payload(
     codepage: u16,
 ) -> Result<(String, usize), String> {
     let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-        if input.len() < offset + 2 {
-            return Err("unexpected end of string".to_string());
-        }
-        let runs = u16::from_le_bytes([input[offset], input[offset + 1]]) as usize;
-        offset += 2;
+        let end = offset
+            .checked_add(2)
+            .ok_or_else(|| "string offset overflow".to_string())?;
+        let bytes = input
+            .get(offset..end)
+            .ok_or_else(|| "unexpected end of string".to_string())?;
+        let runs = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+        offset = end;
         runs
     } else {
         0
     };
 
     let ext_size = if flags & STR_FLAG_EXT != 0 {
-        if input.len() < offset + 4 {
-            return Err("unexpected end of string".to_string());
-        }
-        let size = u32::from_le_bytes([
-            input[offset],
-            input[offset + 1],
-            input[offset + 2],
-            input[offset + 3],
-        ]) as usize;
-        offset += 4;
+        let end = offset
+            .checked_add(4)
+            .ok_or_else(|| "string offset overflow".to_string())?;
+        let bytes = input
+            .get(offset..end)
+            .ok_or_else(|| "unexpected end of string".to_string())?;
+        let size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        offset = end;
         size
     } else {
         0
@@ -160,13 +161,18 @@ fn parse_biff8_string_payload(
         cch
     };
 
+    let end = offset
+        .checked_add(char_bytes)
+        .ok_or_else(|| "string length overflow".to_string())?;
     let chars = input
-        .get(offset..offset + char_bytes)
+        .get(offset..end)
         .ok_or_else(|| "unexpected end of string".to_string())?;
-    offset += char_bytes;
+    offset = end;
 
     let value = if is_unicode {
-        let mut u16s = Vec::with_capacity(cch);
+        let mut u16s = Vec::new();
+        u16s.try_reserve_exact(cch)
+            .map_err(|_| "allocation failed (utf16 buffer)".to_string())?;
         for chunk in chars.chunks_exact(2) {
             u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
         }
@@ -178,10 +184,16 @@ fn parse_biff8_string_payload(
     let richtext_bytes = richtext_runs
         .checked_mul(4)
         .ok_or_else(|| "rich text run count overflow".to_string())?;
-    if input.len() < offset + richtext_bytes + ext_size {
+    let after_richtext = offset
+        .checked_add(richtext_bytes)
+        .ok_or_else(|| "string length overflow".to_string())?;
+    let end = after_richtext
+        .checked_add(ext_size)
+        .ok_or_else(|| "string length overflow".to_string())?;
+    if input.len() < end {
         return Err("unexpected end of string".to_string());
     }
-    offset += richtext_bytes + ext_size;
+    offset = end;
 
     Ok((value, offset))
 }
@@ -229,7 +241,8 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
     let bytes = &bytes[..take_bytes];
 
     Some(if is_unicode {
-        let mut u16s = Vec::with_capacity(take_chars);
+        let mut u16s = Vec::new();
+        let _ = u16s.try_reserve_exact(take_chars);
         for chunk in bytes.chunks_exact(2) {
             u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
         }
@@ -337,7 +350,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (biff8 string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -416,7 +432,9 @@ impl<'a> FragmentCursor<'a> {
             let bytes = self.read_exact_from_current(take_bytes)?;
 
             if is_unicode {
-                let mut u16s = Vec::with_capacity(take_chars);
+                let mut u16s = Vec::new();
+                u16s.try_reserve_exact(take_chars)
+                    .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                 for chunk in bytes.chunks_exact(2) {
                     u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }

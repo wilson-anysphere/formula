@@ -461,12 +461,14 @@ fn scan_biff8_rgce_for_array_constants(
                 }
                 // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
                 0x19 => {
-                    if i + 3 > input.len() {
+                    let Some(header) = input.get(i..).and_then(|rest| rest.get(..3)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let grbit = input[i];
-                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]) as usize;
-                    i += 3;
+                    };
+                    let grbit = header[0];
+                    let w_attr = u16::from_le_bytes([header[1], header[2]]) as usize;
+                    i = i
+                        .checked_add(3)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
 
                     const T_ATTR_CHOOSE: u8 = 0x04;
                     if grbit & T_ATTR_CHOOSE != 0 {
@@ -546,16 +548,21 @@ fn scan_biff8_rgce_for_array_constants(
                 // PtgMem* tokens: [cce: u16][rgce: cce bytes]
                 0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
                 | 0x69 | 0x2E | 0x4E | 0x6E => {
-                    if i + 2 > input.len() {
+                    let Some(bytes) = input.get(i..).and_then(|rest| rest.get(..2)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
-                    i += 2;
+                    };
+                    let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+                    i = i
+                        .checked_add(2)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
+                    let end = i
+                        .checked_add(cce)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                     let sub = input
-                        .get(i..i + cce)
+                        .get(i..end)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     inner(sub, cursor, rgcb_out)?;
-                    i += cce;
+                    i = end;
                 }
                 // PtgRefErr: 4 bytes.
                 0x2A | 0x4A | 0x6A => {
@@ -852,7 +859,10 @@ impl<'a> FragmentCursor<'a> {
     }
 
     fn read_bytes(&mut self, mut n: usize) -> Result<Vec<u8>, String> {
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (defined name bytes)".to_string())?;
         while n > 0 {
             let available = self.remaining_in_fragment();
             if available == 0 {
@@ -898,7 +908,10 @@ impl<'a> FragmentCursor<'a> {
     ) -> Result<Vec<u8>, String> {
         // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
         // continuation flags prefix that appears at the start of each continued fragment.
-        let mut out = Vec::with_capacity(n);
+        let total = n;
+        let mut out = Vec::new();
+        out.try_reserve_exact(total)
+            .map_err(|_| "allocation failed (defined name string bytes)".to_string())?;
         while n > 0 {
             if self.remaining_in_fragment() == 0 {
                 self.advance_fragment_in_biff8_string(is_unicode)?;
@@ -977,7 +990,9 @@ impl<'a> FragmentCursor<'a> {
             let bytes = self.read_exact_from_current(take_bytes)?;
 
             if is_unicode {
-                let mut u16s = Vec::with_capacity(take_chars);
+                let mut u16s = Vec::new();
+                u16s.try_reserve_exact(take_chars)
+                    .map_err(|_| "allocation failed (utf16 chunk)".to_string())?;
                 for chunk in bytes.chunks_exact(2) {
                     u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
@@ -1007,7 +1022,9 @@ impl<'a> FragmentCursor<'a> {
         //
         // If we encounter an unsupported token, fall back to raw byte copying for the remainder of
         // the `rgce` stream (without special continuation handling).
-        let mut out = Vec::with_capacity(cce);
+        let mut out = Vec::new();
+        out.try_reserve_exact(cce)
+            .map_err(|_| "allocation failed (defined name rgce)".to_string())?;
 
         while out.len() < cce {
             let ptg = self.read_u8()?;
@@ -1280,7 +1297,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);
@@ -1288,7 +1305,7 @@ mod tests {
     }
 
     fn xl_unicode_string_no_cch_compressed(s: &str) -> Vec<u8> {
-        let mut out = Vec::with_capacity(1 + s.len());
+        let mut out = Vec::new();
         out.push(0); // flags (compressed)
         out.extend_from_slice(s.as_bytes());
         out
@@ -2882,7 +2899,7 @@ mod tests {
             rgcb_rest_utf16.len() % 2 == 0,
             "expected UTF-16LE payload to have even length"
         );
-        let mut rgcb_rest_compressed = Vec::with_capacity(rgcb_rest_utf16.len() / 2);
+        let mut rgcb_rest_compressed = Vec::new();
         for chunk in rgcb_rest_utf16.chunks_exact(2) {
             assert_eq!(chunk[1], 0, "expected ASCII string for compressed segment");
             rgcb_rest_compressed.push(chunk[0]);

@@ -144,13 +144,40 @@ fn parse_externsheet_record(out: &mut ExternSheetTable, data: &[u8], offset: usi
         to_parse = MAX_XTI_ENTRIES;
     }
 
-    out.entries.reserve(to_parse);
+    let _ = out.entries.try_reserve_exact(to_parse);
 
     for _ in 0..to_parse {
-        let supbook = u16::from_le_bytes([data[cursor], data[cursor + 1]]);
-        let itab_first = i16::from_le_bytes([data[cursor + 2], data[cursor + 3]]);
-        let itab_last = i16::from_le_bytes([data[cursor + 4], data[cursor + 5]]);
-        cursor += 6;
+        let entry_end = match cursor.checked_add(6) {
+            Some(v) => v,
+            None => {
+                debug_assert!(
+                    false,
+                    "EXTERNSHEET cursor overflow (cursor={cursor}, len={})",
+                    data.len()
+                );
+                out.warnings.push(format!(
+                    "truncated EXTERNSHEET record at offset {offset}: XTI entry cursor overflow (cursor={cursor}, len={})",
+                    data.len()
+                ));
+                break;
+            }
+        };
+        let Some(chunk) = data.get(cursor..entry_end) else {
+            debug_assert!(
+                false,
+                "EXTERNSHEET cursor out of bounds (cursor={cursor}, len={})",
+                data.len()
+            );
+            out.warnings.push(format!(
+                "truncated EXTERNSHEET record at offset {offset}: missing XTI entry bytes (cursor={cursor}, len={})",
+                data.len()
+            ));
+            break;
+        };
+        let supbook = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let itab_first = i16::from_le_bytes([chunk[2], chunk[3]]);
+        let itab_last = i16::from_le_bytes([chunk[4], chunk[5]]);
+        cursor = entry_end;
 
         out.entries.push(ExternSheetEntry {
             supbook,
@@ -165,7 +192,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + payload.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);

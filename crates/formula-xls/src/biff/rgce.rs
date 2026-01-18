@@ -423,7 +423,14 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                     );
                     return unsupported(ptg, warnings, &mut warnings_suppressed);
                 };
-                let prec = binary_precedence(ptg).expect("precedence for binary ops");
+                let Some(prec) = binary_precedence(ptg) else {
+                    push_warning(
+                        &mut warnings,
+                        format!("unsupported rgce token 0x{ptg:02X} (binary precedence missing)"),
+                        &mut warnings_suppressed,
+                    );
+                    return unsupported(ptg, warnings, &mut warnings_suppressed);
+                };
 
                 let right = match stack.pop() {
                     Some(v) => v,
@@ -452,7 +459,8 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 let left_s = maybe_parenthesize(left, prec);
                 let right_s = maybe_parenthesize(right, prec);
 
-                let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
+                let mut text = String::new();
+                let _ = text.try_reserve(left_s.len() + op.len() + right_s.len());
                 text.push_str(&left_s);
                 text.push_str(op);
                 text.push_str(&right_s);
@@ -481,7 +489,8 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 };
                 let contains_union = expr.contains_union;
                 let inner = maybe_parenthesize(expr, prec);
-                let mut text = String::with_capacity(op.len() + inner.len());
+                let mut text = String::new();
+                let _ = text.try_reserve(op.len() + inner.len());
                 text.push_str(op);
                 text.push_str(&inner);
                 stack.push(ExprFragment {
@@ -567,7 +576,8 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
             0x17 => match strings::parse_biff8_short_string(input, ctx.codepage) {
                 Ok((s, consumed)) => {
                     input = input.get(consumed..).unwrap_or_default();
-                    let mut lit = String::with_capacity(s.len().saturating_add(2));
+                    let mut lit = String::new();
+                    let _ = lit.try_reserve(s.len().saturating_add(2));
                     lit.push('"');
                     push_escaped_excel_double_quotes(&mut lit, &s);
                     lit.push('"');
@@ -651,7 +661,8 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         let mut prec = 100;
                         let is_value_class = ptg == 0x38;
                         let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
-                        let mut out = String::with_capacity(
+                        let mut out = String::new();
+                        let _ = out.try_reserve(
                             estimated_structured_ref_len(display_table_name, item, &columns)
                                 .saturating_add(needs_at as usize),
                         );
@@ -890,9 +901,18 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         );
                         return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
-                    let mut args = Vec::with_capacity(argc);
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc);
                     for _ in 0..argc {
-                        args.push(stack.pop().expect("len checked"));
+                        let Some(arg) = stack.pop() else {
+                            push_warning(
+                                &mut warnings,
+                                "rgce stack underflow",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
+                        };
+                        args.push(arg);
                     }
                     args.reverse();
                     stack.push(format_function_call(spec.name, args));
@@ -956,10 +976,29 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         );
                         return unsupported(ptg, warnings, &mut warnings_suppressed);
                     }
-                    let func_name = stack.pop().expect("len checked").text;
-                    let mut args = Vec::with_capacity(argc.saturating_sub(1));
+                    let func_name = match stack.pop() {
+                        Some(v) => v.text,
+                        None => {
+                            push_warning(
+                                &mut warnings,
+                                "rgce stack underflow",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
+                        }
+                    };
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
-                        args.push(stack.pop().expect("len checked"));
+                        let Some(arg) = stack.pop() else {
+                            push_warning(
+                                &mut warnings,
+                                "rgce stack underflow",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
+                        };
+                        args.push(arg);
                     }
                     args.reverse();
                     stack.push(format_function_call(&func_name, args));
@@ -982,9 +1021,18 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         }
                     };
 
-                    let mut args = Vec::with_capacity(argc);
+                    let mut args = Vec::new();
+                    let _ = args.try_reserve_exact(argc);
                     for _ in 0..argc {
-                        args.push(stack.pop().expect("len checked"));
+                        let Some(arg) = stack.pop() else {
+                            push_warning(
+                                &mut warnings,
+                                "rgce stack underflow",
+                                &mut warnings_suppressed,
+                            );
+                            return unsupported(ptg, warnings, &mut warnings_suppressed);
+                        };
+                        args.push(arg);
                     }
                     args.reverse();
                     stack.push(format_function_call(name, args));
@@ -1649,7 +1697,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
 
     let text = match stack.len() {
         0 => String::new(),
-        1 => stack.pop().expect("len checked").text,
+        1 => stack.pop().map(|v| v.text).unwrap_or_default(),
         _ => {
             push_warning(
                 &mut warnings,
@@ -1659,7 +1707,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 ),
                 &mut warnings_suppressed,
             );
-            stack.pop().expect("non-empty").text
+            stack.pop().map(|v| v.text).unwrap_or_default()
         }
     };
 
@@ -1688,9 +1736,10 @@ fn decode_array_constant(
         return None;
     }
 
-    let cols_minus1 = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
-    let rows_minus1 = u16::from_le_bytes([rgcb[i + 2], rgcb[i + 3]]) as usize;
-    i += 4;
+    let header = rgcb.get(i..)?.get(..4)?;
+    let cols_minus1 = u16::from_le_bytes([header[0], header[1]]) as usize;
+    let rows_minus1 = u16::from_le_bytes([header[2], header[3]]) as usize;
+    i = i.checked_add(4)?;
 
     let cols = cols_minus1.saturating_add(1);
     let rows = rows_minus1.saturating_add(1);
@@ -1729,26 +1778,22 @@ fn decode_array_constant(
             match ty {
                 0x00 => {}
                 0x01 => {
-                    if rgcb.len().saturating_sub(i) < 8 {
-                        return None;
-                    }
+                    let end = i.checked_add(8)?;
+                    let raw = rgcb.get(i..end)?;
                     let mut bytes = [0u8; 8];
-                    bytes.copy_from_slice(&rgcb[i..i + 8]);
-                    i += 8;
+                    bytes.copy_from_slice(raw);
+                    i = end;
                     write!(&mut out, "{}", f64::from_le_bytes(bytes)).ok()?;
                 }
                 0x02 => {
-                    if rgcb.len().saturating_sub(i) < 2 {
-                        return None;
-                    }
-                    let cch = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
-                    i += 2;
+                    let end = i.checked_add(2)?;
+                    let cch_bytes = rgcb.get(i..end)?;
+                    let cch = u16::from_le_bytes([cch_bytes[0], cch_bytes[1]]) as usize;
+                    i = end;
                     let byte_len = cch.checked_mul(2)?;
-                    if rgcb.len().saturating_sub(i) < byte_len {
-                        return None;
-                    }
-                    let raw = &rgcb[i..i + byte_len];
-                    i += byte_len;
+                    let end = i.checked_add(byte_len)?;
+                    let raw = rgcb.get(i..end)?;
+                    i = end;
 
                     out.push('"');
                     let iter = raw
@@ -1763,19 +1808,13 @@ fn decode_array_constant(
                     out.push('"');
                 }
                 0x04 => {
-                    if rgcb.len().saturating_sub(i) < 1 {
-                        return None;
-                    }
-                    let b = rgcb[i];
-                    i += 1;
+                    let b = *rgcb.get(i)?;
+                    i = i.checked_add(1)?;
                     out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
                 0x10 => {
-                    if rgcb.len().saturating_sub(i) < 1 {
-                        return None;
-                    }
-                    let code = rgcb[i];
-                    i += 1;
+                    let code = *rgcb.get(i)?;
+                    i = i.checked_add(1)?;
                     let lit = match biff_error_literal(code) {
                         Some(lit) => lit,
                         None => {
@@ -1888,21 +1927,26 @@ fn consume_rgcb_arrays_in_subexpression(
                 }
                 // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
                 0x19 => {
-                    if i + 3 > input.len() {
+                    let Some(header) = input.get(i..).and_then(|rest| rest.get(..3)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let grbit = input[i];
-                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]);
-                    i += 3;
+                    };
+                    let grbit = header[0];
+                    let w_attr = u16::from_le_bytes([header[1], header[2]]);
+                    i = i
+                        .checked_add(3)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                     const T_ATTR_CHOOSE: u8 = 0x04;
                     if grbit & T_ATTR_CHOOSE != 0 {
                         let needed = (w_attr as usize)
                             .checked_mul(2)
                             .ok_or_else(|| "PtgAttr jump table length overflow".to_string())?;
-                        if i + needed > input.len() {
+                        let end = i
+                            .checked_add(needed)
+                            .ok_or_else(|| "rgce offset overflow".to_string())?;
+                        if end > input.len() {
                             return Err("unexpected end of rgce stream".to_string());
                         }
-                        i += needed;
+                        i = end;
                     }
                 }
                 // PtgErr / PtgBool: 1 byte.
@@ -1974,16 +2018,21 @@ fn consume_rgcb_arrays_in_subexpression(
                 // PtgMem* tokens: [cce: u16][rgce: cce bytes]
                 0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
                 | 0x69 | 0x2E | 0x4E | 0x6E => {
-                    if i + 2 > input.len() {
+                    let Some(bytes) = input.get(i..).and_then(|rest| rest.get(..2)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
-                    i += 2;
+                    };
+                    let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+                    i = i
+                        .checked_add(2)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
+                    let end = i
+                        .checked_add(cce)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                     let sub = input
-                        .get(i..i + cce)
+                        .get(i..end)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     inner(sub, rgcb, rgcb_pos, warnings, suppressed)?;
-                    i += cce;
+                    i = end;
                 }
                 // PtgRefErr: 4 bytes.
                 0x2A | 0x4A | 0x6A => {
@@ -2343,21 +2392,26 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
                 0x19 => {
-                    if i + 3 > input.len() {
+                    let Some(header) = input.get(i..).and_then(|rest| rest.get(..3)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let grbit = input[i];
-                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]);
-                    i += 3;
+                    };
+                    let grbit = header[0];
+                    let w_attr = u16::from_le_bytes([header[1], header[2]]);
+                    i = i
+                        .checked_add(3)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                     const T_ATTR_CHOOSE: u8 = 0x04;
                     if grbit & T_ATTR_CHOOSE != 0 {
                         let needed = (w_attr as usize)
                             .checked_mul(2)
                             .ok_or_else(|| "PtgAttr jump table length overflow".to_string())?;
-                        if i + needed > input.len() {
+                        let end = i
+                            .checked_add(needed)
+                            .ok_or_else(|| "rgce offset overflow".to_string())?;
+                        if end > input.len() {
                             return Err("unexpected end of rgce stream".to_string());
                         }
-                        i += needed;
+                        i = end;
                     }
                 }
                 // PtgErr / PtgBool: 1 byte.
@@ -2411,40 +2465,49 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgRef: [rw: u16][col: u16]
                 0x24 | 0x44 | 0x64 => {
-                    if i + 4 > input.len() {
+                    let Some(payload) = input.get(i..).and_then(|rest| rest.get(..4)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let col_field = u16::from_le_bytes([input[i + 2], input[i + 3]]);
+                    };
+                    let col_field = u16::from_le_bytes([payload[2], payload[3]]);
                     if (col_field & RELATIVE_MASK) != 0 {
                         out.has_abs_refs_with_relative_flags = true;
                     }
-                    i += 4;
+                    i = i
+                        .checked_add(4)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                 }
                 // PtgArea: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
                 0x25 | 0x45 | 0x65 => {
-                    if i + 8 > input.len() {
+                    let Some(payload) = input.get(i..).and_then(|rest| rest.get(..8)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let col1 = u16::from_le_bytes([input[i + 4], input[i + 5]]);
-                    let col2 = u16::from_le_bytes([input[i + 6], input[i + 7]]);
+                    };
+                    let col1 = u16::from_le_bytes([payload[4], payload[5]]);
+                    let col2 = u16::from_le_bytes([payload[6], payload[7]]);
                     if (col1 & RELATIVE_MASK) != 0 || (col2 & RELATIVE_MASK) != 0 {
                         out.has_abs_refs_with_relative_flags = true;
                     }
-                    i += 8;
+                    i = i
+                        .checked_add(8)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                 }
                 // PtgMem* tokens: [cce: u16][rgce: cce bytes]
                 0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
                 | 0x69 | 0x2E | 0x4E | 0x6E => {
-                    if i + 2 > input.len() {
+                    let Some(bytes) = input.get(i..).and_then(|rest| rest.get(..2)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
-                    i += 2;
+                    };
+                    let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+                    i = i
+                        .checked_add(2)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
+                    let end = i
+                        .checked_add(cce)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                     let sub = input
-                        .get(i..i + cce)
+                        .get(i..end)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     inner(sub, out)?;
-                    i += cce;
+                    i = end;
                 }
                 // PtgRefErr: 4 bytes.
                 0x2A | 0x4A | 0x6A => {
@@ -2485,26 +2548,30 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgRef3d: [ixti: u16][rw: u16][col: u16]
                 0x3A | 0x5A | 0x7A => {
-                    if i + 6 > input.len() {
+                    let Some(payload) = input.get(i..).and_then(|rest| rest.get(..6)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let col_field = u16::from_le_bytes([input[i + 4], input[i + 5]]);
+                    };
+                    let col_field = u16::from_le_bytes([payload[4], payload[5]]);
                     if (col_field & RELATIVE_MASK) != 0 {
                         out.has_abs_refs_with_relative_flags = true;
                     }
-                    i += 6;
+                    i = i
+                        .checked_add(6)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                 }
                 // PtgArea3d: [ixti: u16][rw1: u16][rw2: u16][col1: u16][col2: u16]
                 0x3B | 0x5B | 0x7B => {
-                    if i + 10 > input.len() {
+                    let Some(payload) = input.get(i..).and_then(|rest| rest.get(..10)) else {
                         return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let col1 = u16::from_le_bytes([input[i + 6], input[i + 7]]);
-                    let col2 = u16::from_le_bytes([input[i + 8], input[i + 9]]);
+                    };
+                    let col1 = u16::from_le_bytes([payload[6], payload[7]]);
+                    let col2 = u16::from_le_bytes([payload[8], payload[9]]);
                     if (col1 & RELATIVE_MASK) != 0 || (col2 & RELATIVE_MASK) != 0 {
                         out.has_abs_refs_with_relative_flags = true;
                     }
-                    i += 10;
+                    i = i
+                        .checked_add(10)
+                        .ok_or_else(|| "rgce offset overflow".to_string())?;
                 }
                 // PtgRefErr3d: 6 bytes.
                 0x3C | 0x5C | 0x7C => {
@@ -2575,8 +2642,23 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
     let delta_col = target_cell.col as i64 - base_cell.col as i64;
 
     fn inner(input: &[u8], delta_row: i64, delta_col: i64) -> Result<Vec<u8>, String> {
-        let mut out = Vec::with_capacity(input.len());
+        let mut out = Vec::new();
+        out.try_reserve_exact(input.len())
+            .map_err(|_| "allocation failed (materialized rgce)".to_string())?;
         let mut i = 0usize;
+
+        fn take<'a>(input: &'a [u8], i: &mut usize, n: usize) -> Result<&'a [u8], String> {
+            let start = *i;
+            let end = start
+                .checked_add(n)
+                .ok_or_else(|| "rgce offset overflow".to_string())?;
+            let payload = input
+                .get(start..end)
+                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+            *i = end;
+            Ok(payload)
+        }
+
         while i < input.len() {
             let ptg = *input
                 .get(i)
@@ -2586,12 +2668,9 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
             match ptg {
                 // PtgExp / PtgTbl: [rw: u16][col: u16]
                 0x01 | 0x02 => {
-                    let payload = input
-                        .get(i..i + 4)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 4)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 4;
                 }
                 // Fixed-width / no-payload operators and punctuation.
                 0x03..=0x16 | 0x2F => out.push(ptg),
@@ -2602,12 +2681,9 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     let (_s, consumed) = strings::parse_biff8_short_string(remaining, 1252)
                         .map_err(|e| format!("failed to parse PtgStr: {e}"))?;
-                    let payload = input
-                        .get(i..i + consumed)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, consumed)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += consumed;
                 }
                 // PtgExtend / PtgExtendV / PtgExtendA (+0x60): [etpg: u8][payload...]
                 0x18 | 0x38 | 0x58 | 0x78 => {
@@ -2619,45 +2695,57 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     out.push(etpg);
                     match etpg {
                         0x19 => {
+                            let end = i
+                                .checked_add(12)
+                                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                             let payload = input
-                                .get(i..i + 12)
+                                .get(i..end)
                                 .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                             out.extend_from_slice(payload);
-                            i += 12;
+                            i = end;
                         }
                         _ => {
+                            let end = i
+                                .checked_add(4)
+                                .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                             let payload = input
                                 // Like the rgce decoder, treat unknown Ptg18 variants as an opaque
                                 // 5-byte payload following the ptg (including the subtype byte).
                                 // Since we already consumed `etpg`, only 4 bytes remain.
-                                .get(i..i + 4)
+                                .get(i..end)
                                 .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                             out.extend_from_slice(payload);
-                            i += 4;
+                            i = end;
                         }
                     }
                 }
                 // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table.
                 0x19 => {
-                    if i + 3 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let grbit = input[i];
-                    let w_attr = u16::from_le_bytes([input[i + 1], input[i + 2]]);
+                    let end = i
+                        .checked_add(3)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let hdr = input
+                        .get(i..end)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let grbit = hdr[0];
+                    let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]);
                     out.push(ptg);
-                    out.extend_from_slice(&input[i..i + 3]);
-                    i += 3;
+                    out.extend_from_slice(hdr);
+                    i = end;
 
                     const T_ATTR_CHOOSE: u8 = 0x04;
                     if grbit & T_ATTR_CHOOSE != 0 {
                         let needed = (w_attr as usize)
                             .checked_mul(2)
                             .ok_or_else(|| "PtgAttr jump table length overflow".to_string())?;
+                        let end = i
+                            .checked_add(needed)
+                            .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                         let payload = input
-                            .get(i..i + needed)
+                            .get(i..end)
                             .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                         out.extend_from_slice(payload);
-                        i += needed;
+                        i = end;
                     }
                 }
                 // PtgErr / PtgBool: 1 byte.
@@ -2671,72 +2759,61 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                 }
                 // PtgInt: 2 bytes.
                 0x1E => {
+                    let end = i
+                        .checked_add(2)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     let payload = input
-                        .get(i..i + 2)
+                        .get(i..end)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 2;
+                    i = end;
                 }
                 // PtgNum: 8 bytes.
                 0x1F => {
+                    let end = i
+                        .checked_add(8)
+                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     let payload = input
-                        .get(i..i + 8)
+                        .get(i..end)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 8;
+                    i = end;
                 }
                 // PtgArray: [unused: 7 bytes] (array data in rgcb).
                 0x20 | 0x40 | 0x60 => {
-                    let payload = input
-                        .get(i..i + 7)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 7)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 7;
                 }
                 // PtgFunc: [iftab: u16]
                 0x21 | 0x41 | 0x61 => {
-                    let payload = input
-                        .get(i..i + 2)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 2)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 2;
                 }
                 // PtgFuncVar: [argc: u8][iftab: u16]
                 0x22 | 0x42 | 0x62 => {
-                    let payload = input
-                        .get(i..i + 3)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 3)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 3;
                 }
                 // PtgName: [nameId: u32][reserved: u16]
                 0x23 | 0x43 | 0x63 => {
-                    let payload = input
-                        .get(i..i + 6)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 6)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 6;
                 }
                 // PtgNameX: [ixti: u16][iname: u16][reserved: u16]
                 0x39 | 0x59 | 0x79 => {
-                    let payload = input
-                        .get(i..i + 6)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 6)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 6;
                 }
                 // PtgRef: [rw: u16][col: u16]
                 0x24 | 0x44 | 0x64 => {
-                    let payload = input
-                        .get(i..i + 4)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 4)?;
                     let row_raw = u16::from_le_bytes([payload[0], payload[1]]) as i64;
                     let col_field = u16::from_le_bytes([payload[2], payload[3]]);
                     let col_raw = (col_field & COL_INDEX_MASK) as i64;
@@ -2757,7 +2834,6 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
                         out.push(ptg.saturating_add(0x06)); // PtgRef* -> PtgRefErr*
                         out.extend_from_slice(payload);
-                        i += 4;
                         continue;
                     }
 
@@ -2766,13 +2842,10 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     out.push(ptg);
                     out.extend_from_slice(&(new_row as u16).to_le_bytes());
                     out.extend_from_slice(&new_col_field.to_le_bytes());
-                    i += 4;
                 }
                 // PtgArea: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
                 0x25 | 0x45 | 0x65 => {
-                    let payload = input
-                        .get(i..i + 8)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 8)?;
                     let row1_raw = u16::from_le_bytes([payload[0], payload[1]]) as i64;
                     let row2_raw = u16::from_le_bytes([payload[2], payload[3]]) as i64;
                     let col1_field = u16::from_le_bytes([payload[4], payload[5]]);
@@ -2818,7 +2891,6 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     {
                         out.push(ptg.saturating_add(0x06)); // PtgArea* -> PtgAreaErr*
                         out.extend_from_slice(payload);
-                        i += 8;
                         continue;
                     }
 
@@ -2832,67 +2904,46 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     out.extend_from_slice(&(new_row2 as u16).to_le_bytes());
                     out.extend_from_slice(&new_col1_field.to_le_bytes());
                     out.extend_from_slice(&new_col2_field.to_le_bytes());
-                    i += 8;
                 }
                 // PtgMem* tokens: [cce: u16][rgce: cce bytes]
                 0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
                 | 0x69 | 0x2E | 0x4E | 0x6E => {
-                    if i + 2 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    let cce = u16::from_le_bytes([input[i], input[i + 1]]) as usize;
-                    i += 2;
-                    let sub = input
-                        .get(i..i + cce)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let cce_bytes = take(input, &mut i, 2)?;
+                    let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
+                    let sub = take(input, &mut i, cce)?;
                     let materialized = inner(sub, delta_row, delta_col)?;
 
                     out.push(ptg);
                     out.extend_from_slice(&(cce as u16).to_le_bytes());
                     out.extend_from_slice(&materialized);
-                    i += cce;
                 }
                 // PtgRefErr: [rw: u16][col: u16]
                 0x2A | 0x4A | 0x6A => {
-                    let payload = input
-                        .get(i..i + 4)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 4)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 4;
                 }
                 // PtgAreaErr: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
                 0x2B | 0x4B | 0x6B => {
-                    let payload = input
-                        .get(i..i + 8)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 8)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 8;
                 }
                 // PtgRefN: relative offsets; copy through.
                 0x2C | 0x4C | 0x6C => {
-                    let payload = input
-                        .get(i..i + 4)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 4)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 4;
                 }
                 // PtgAreaN: relative offsets; copy through.
                 0x2D | 0x4D | 0x6D => {
-                    let payload = input
-                        .get(i..i + 8)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 8)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 8;
                 }
                 // PtgRef3d: [ixti: u16][rw: u16][col: u16]
                 0x3A | 0x5A | 0x7A => {
-                    let payload = input
-                        .get(i..i + 6)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 6)?;
                     let ixti = u16::from_le_bytes([payload[0], payload[1]]);
                     let row_raw = u16::from_le_bytes([payload[2], payload[3]]) as i64;
                     let col_field = u16::from_le_bytes([payload[4], payload[5]]);
@@ -2914,7 +2965,6 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
                         out.push(ptg.saturating_add(0x02)); // PtgRef3d* -> PtgRefErr3d*
                         out.extend_from_slice(payload);
-                        i += 6;
                         continue;
                     }
 
@@ -2924,13 +2974,10 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     out.extend_from_slice(&ixti.to_le_bytes());
                     out.extend_from_slice(&(new_row as u16).to_le_bytes());
                     out.extend_from_slice(&new_col_field.to_le_bytes());
-                    i += 6;
                 }
                 // PtgArea3d: [ixti: u16][rw1: u16][rw2: u16][col1: u16][col2: u16]
                 0x3B | 0x5B | 0x7B => {
-                    let payload = input
-                        .get(i..i + 10)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 10)?;
                     let ixti = u16::from_le_bytes([payload[0], payload[1]]);
                     let row1_raw = u16::from_le_bytes([payload[2], payload[3]]) as i64;
                     let row2_raw = u16::from_le_bytes([payload[4], payload[5]]) as i64;
@@ -2977,7 +3024,6 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     {
                         out.push(ptg.saturating_add(0x02)); // PtgArea3d* -> PtgAreaErr3d*
                         out.extend_from_slice(payload);
-                        i += 10;
                         continue;
                     }
 
@@ -2992,43 +3038,30 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     out.extend_from_slice(&(new_row2 as u16).to_le_bytes());
                     out.extend_from_slice(&new_col1_field.to_le_bytes());
                     out.extend_from_slice(&new_col2_field.to_le_bytes());
-                    i += 10;
                 }
                 // PtgRefErr3d: [ixti: u16][rw: u16][col: u16]
                 0x3C | 0x5C | 0x7C => {
-                    let payload = input
-                        .get(i..i + 6)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 6)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 6;
                 }
                 // PtgAreaErr3d: [ixti: u16][rw1: u16][rw2: u16][col1: u16][col2: u16]
                 0x3D | 0x5D | 0x7D => {
-                    let payload = input
-                        .get(i..i + 10)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 10)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 10;
                 }
                 // PtgRefN3d: relative offsets; copy through.
                 0x3E | 0x5E | 0x7E => {
-                    let payload = input
-                        .get(i..i + 6)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 6)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 6;
                 }
                 // PtgAreaN3d: relative offsets; copy through.
                 0x3F | 0x5F | 0x7F => {
-                    let payload = input
-                        .get(i..i + 10)
-                        .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
+                    let payload = take(input, &mut i, 10)?;
                     out.push(ptg);
                     out.extend_from_slice(payload);
-                    i += 10;
                 }
                 other => {
                     return Err(format!(
@@ -3513,10 +3546,16 @@ fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
     //   [table_id: u32][flags: u32][col_spec: u32]
     //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
     let candidates = decode_ptg_list_payload_candidates(payload);
-    *candidates
-        .iter()
-        .max_by_key(|cand| score_ptg_list_candidate(cand))
-        .expect("non-empty")
+    let mut best = candidates[0];
+    let mut best_score = score_ptg_list_candidate(&best);
+    for cand in candidates.iter().skip(1) {
+        let score = score_ptg_list_candidate(cand);
+        if score > best_score {
+            best = *cand;
+            best_score = score;
+        }
+    }
+    best
 }
 
 fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
@@ -7200,7 +7239,7 @@ mod tests {
         // present in malformed/corrupt inputs they can occur in long runs, generating one warning
         // per token.
         let reps = MAX_RGCE_WARNINGS + 25;
-        let mut rgce = Vec::with_capacity(reps * 5);
+        let mut rgce = Vec::new();
         for _ in 0..reps {
             rgce.extend_from_slice(&[0x01, 0, 0, 0, 0]);
         }

@@ -338,7 +338,8 @@ fn parse_biff_sheet_notes_with_record_cap(
         }
     }
 
-    let mut out: Vec<BiffNote> = Vec::with_capacity(notes.len());
+    let mut out: Vec<BiffNote> = Vec::new();
+    let _ = out.try_reserve_exact(notes.len());
     let mut out_by_obj_id: HashMap<u16, usize> = HashMap::new();
     for note in notes {
         let Some((obj_id, text)) = texts_by_obj_id
@@ -647,10 +648,19 @@ fn parse_obj_record_id(
     let mut idx = 0usize;
     let mut obj_id: Option<u16> = None;
 
-    while idx + 4 <= data.len() {
-        let ft = u16::from_le_bytes([data[idx], data[idx + 1]]);
-        let cb = u16::from_le_bytes([data[idx + 2], data[idx + 3]]) as usize;
-        idx += 4;
+    while let Some(header) = data.get(idx..).and_then(|rest| rest.get(..4)) {
+        let ft = u16::from_le_bytes([header[0], header[1]]);
+        let cb = u16::from_le_bytes([header[2], header[3]]) as usize;
+        idx = match idx.checked_add(4) {
+            Some(v) => v,
+            None => {
+                push_warning(
+                    warnings,
+                    format!("OBJ record at offset {record_offset} has subrecord offset overflow"),
+                );
+                break;
+            }
+        };
 
         let end = match idx.checked_add(cb) {
             Some(end) => end,
@@ -755,8 +765,9 @@ fn parse_txo_text_biff5(
     // Like BIFF8, some BIFF5 files reserve trailing continuation bytes for rich-text formatting
     // runs (per TXO `cbRuns`). Respect that so we don't decode formatting-run bytes as text when
     // `cchText` is larger than the available text bytes.
-    let cb_runs = first
-        .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
+    let cb_runs = TXO_RUNS_LEN_OFFSET
+        .checked_add(2)
+        .and_then(|end| first.get(TXO_RUNS_LEN_OFFSET..end))
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize);
     let has_cb_runs = cb_runs.is_some();
     let cb_runs = cb_runs.unwrap_or(0);
@@ -824,8 +835,9 @@ fn parse_txo_text_biff5(
         capacity_raw
     };
 
-    let spec_cch_text = first
-        .get(TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2)
+    let spec_cch_text = TXO_TEXT_LEN_OFFSET
+        .checked_add(2)
+        .and_then(|end| first.get(TXO_TEXT_LEN_OFFSET..end))
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
         .filter(|&cch| cch != 0 && cch <= TXO_MAX_TEXT_CHARS);
     // Prefer the spec-defined cchText field (offset 6) when present, even if it exceeds the
@@ -865,7 +877,8 @@ fn parse_txo_text_biff5(
 
     // Accumulate the byte payload first, then decode once. This preserves stateful multibyte
     // codepages (e.g. Shift-JIS) when a character boundary is split across CONTINUE records.
-    let mut bytes = Vec::with_capacity(remaining);
+    let mut bytes = Vec::new();
+    let _ = bytes.try_reserve_exact(remaining);
     let mut remaining_bytes = text_continue_bytes;
     for &frag in continues {
         if remaining == 0 || remaining_bytes == 0 {
@@ -978,8 +991,9 @@ fn parse_txo_text_biff8(
     // `cbRuns` indicates how many bytes at the end of the TXO continuation area are reserved for
     // rich-text formatting runs. We ignore those bytes so we don't misinterpret formatting run data
     // as characters if `cchText` is larger than the available text bytes (truncated/corrupt files).
-    let cb_runs = first
-        .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
+    let cb_runs = TXO_RUNS_LEN_OFFSET
+        .checked_add(2)
+        .and_then(|end| first.get(TXO_RUNS_LEN_OFFSET..end))
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize);
     let has_cb_runs = cb_runs.is_some();
     let cb_runs = cb_runs.unwrap_or(0);
@@ -1085,7 +1099,8 @@ fn parse_txo_text_biff8(
 
             let take_chars = remaining.min(available_chars);
             let take_bytes_total = take_chars * 2;
-            let mut buf = Vec::with_capacity(take_bytes_total);
+            let mut buf = Vec::new();
+            let _ = buf.try_reserve_exact(take_bytes_total);
             if let Some(b) = pending_unicode_byte.take() {
                 buf.push(b);
             }
@@ -1165,10 +1180,13 @@ fn detect_txo_cch_text(header: &[u8], continue_capacity: usize) -> Option<usize>
     }
 
     for off in TXO_TEXT_LEN_OFFSETS {
-        if header.len() < off + 2 {
+        let Some(bytes) = off
+            .checked_add(2)
+            .and_then(|end| header.get(off..end))
+        else {
             continue;
-        }
-        let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
+        };
+        let cch = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
         if cch == 0 {
             continue;
         }
@@ -1193,8 +1211,11 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
     let max_chars = max_chars.min(TXO_MAX_TEXT_CHARS);
 
     // Spec-defined BIFF8 offset for cchText.
-    let mut cch_at_6 =
-        u16::from_le_bytes([header[TXO_TEXT_LEN_OFFSET], header[TXO_TEXT_LEN_OFFSET + 1]]) as usize;
+    let mut cch_at_6 = TXO_TEXT_LEN_OFFSET
+        .checked_add(2)
+        .and_then(|end| header.get(TXO_TEXT_LEN_OFFSET..end))
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as usize)
+        .unwrap_or(0);
     if cch_at_6 > TXO_MAX_TEXT_CHARS {
         cch_at_6 = 0;
     }
@@ -1219,10 +1240,13 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
     // Some files report `cchText=0` while still setting `cbRuns=4`; treating `cbRuns` as an
     // alternate text length would incorrectly truncate the recovered comment text.
     for off in [4usize, 8usize, 10usize] {
-        if header.len() < off + 2 {
+        let Some(bytes) = off
+            .checked_add(2)
+            .and_then(|end| header.get(off..end))
+        else {
             continue;
-        }
-        let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
+        };
+        let cch = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
         if cch != 0 && cch <= max_chars && cch <= TXO_MAX_TEXT_CHARS {
             return Some(cch);
         }
@@ -1392,7 +1416,8 @@ fn fallback_decode_continue_fragments(
 
             let take_chars = remaining_chars.min(available_chars);
             let take_bytes_total = take_chars * 2;
-            let mut buf = Vec::with_capacity(take_bytes_total);
+            let mut buf = Vec::new();
+            let _ = buf.try_reserve_exact(take_bytes_total);
             if let Some(b) = pending_unicode_byte.take() {
                 buf.push(b);
             }
@@ -1444,7 +1469,7 @@ fn fallback_decode_continue_fragments(
 }
 
 fn decode_utf16le(bytes: &[u8]) -> String {
-    let mut u16s = Vec::with_capacity(bytes.len() / 2);
+    let mut u16s = Vec::new();
     for chunk in bytes.chunks_exact(2) {
         u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
@@ -1468,7 +1493,7 @@ mod tests {
     use super::*;
 
     fn record(id: u16, data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + data.len());
+        let mut out = Vec::new();
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
@@ -2916,7 +2941,7 @@ mod tests {
 
         let total_notes = MAX_NOTES_PER_SHEET + 10;
         // Approximate capacity: ~73 bytes per (NOTE+OBJ+TXO+CONTINUE) group.
-        let mut stream = Vec::with_capacity(4 + 16 + total_notes * 80 + 4);
+        let mut stream = Vec::new();
 
         append_record(&mut stream, records::RECORD_BOF_BIFF8, &[0u8; 16]);
 
