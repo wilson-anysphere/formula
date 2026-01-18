@@ -326,10 +326,17 @@ fn parse_reference(raw: &str) -> VBAReference {
     // Extract GUID from the first part if present.
     if let Some(first) = parts.first() {
         if let Some(start) = first.find('{') {
-            if let Some(end_rel) = first[start + 1..].find('}') {
-                let guid = &first[start + 1..start + 1 + end_rel];
-                if !guid.is_empty() {
-                    reference.guid = Some(guid.to_owned());
+            if let Some(begin) = start.checked_add(1) {
+                if let Some(after_start) = first.get(begin..) {
+                    if let Some(end_rel) = after_start.find('}') {
+                        if let Some(end) = begin.checked_add(end_rel) {
+                            if let Some(guid) = first.get(begin..end) {
+                                if !guid.is_empty() {
+                                    reference.guid = Some(guid.to_owned());
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -397,7 +404,10 @@ fn guess_text_offset(module_stream: &[u8]) -> usize {
         if module_stream[idx] != 0x01 {
             continue;
         }
-        let header = u16::from_le_bytes([module_stream[idx + 1], module_stream[idx + 2]]);
+        let Some(bytes) = module_stream.get(idx..).and_then(|rest| rest.get(..3)) else {
+            continue;
+        };
+        let header = u16::from_le_bytes([bytes[1], bytes[2]]);
         let signature_bits = (header & 0x7000) >> 12;
         if signature_bits == 0b011 {
             // Best-effort validation: module streams can contain header bytes before the compressed

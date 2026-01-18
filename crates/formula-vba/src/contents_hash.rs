@@ -95,30 +95,37 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     let mut offset = 0usize;
     let mut in_project_information = true;
     while offset < dir_decompressed.len() {
-        if offset + 2 > dir_decompressed.len() {
+        let Some(id_end) = offset.checked_add(2) else {
             return Err(DirParseError::Truncated.into());
-        }
-
-        let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+        };
+        let Some(id_bytes) = dir_decompressed.get(offset..id_end) else {
+            return Err(DirParseError::Truncated.into());
+        };
+        let id = u16::from_le_bytes([id_bytes[0], id_bytes[1]]);
 
         // PROJECTVERSION (0x0009) is fixed-length in spec-compliant `VBA/dir` streams, but some
         // synthetic fixtures encode it in a TLV form (`Id || Size || Data`). Disambiguate by
         // checking which interpretation yields a plausible next record boundary.
         if id == PROJECTVERSION {
-            if offset + 6 > dir_decompressed.len() {
+            let Some(header_end) = offset.checked_add(6) else {
                 return Err(DirParseError::Truncated.into());
-            }
-            let size_or_reserved = u32::from_le_bytes([
-                dir_decompressed[offset + 2],
-                dir_decompressed[offset + 3],
-                dir_decompressed[offset + 4],
-                dir_decompressed[offset + 5],
-            ]) as usize;
-            let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
-            let fixed_end = offset.saturating_add(12);
+            };
+            let Some(header) = dir_decompressed.get(offset..header_end) else {
+                return Err(DirParseError::Truncated.into());
+            };
+            let size_or_reserved =
+                u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as usize;
 
-            let tlv_next_ok =
-                looks_like_projectversion_following_record(&dir_decompressed, tlv_end);
+            let tlv_end = offset
+                .checked_add(6)
+                .and_then(|v| v.checked_add(size_or_reserved));
+            let fixed_end = offset
+                .checked_add(12)
+                .ok_or_else(|| DirParseError::Truncated)?;
+
+            let tlv_next_ok = tlv_end.is_some_and(|end| {
+                looks_like_projectversion_following_record(&dir_decompressed, end)
+            });
             let fixed_next_ok =
                 looks_like_projectversion_following_record(&dir_decompressed, fixed_end);
 
@@ -134,29 +141,37 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 // validate record framing to EOF (strictness) without accidentally including bytes
                 // from the module section.
                 if in_project_information {
-                    out.extend_from_slice(&dir_decompressed[offset + 2..fixed_end]);
+                    let start = offset
+                        .checked_add(2)
+                        .ok_or_else(|| DirParseError::Truncated)?;
+                    let bytes = dir_decompressed
+                        .get(start..fixed_end)
+                        .ok_or_else(|| DirParseError::Truncated)?;
+                    out.extend_from_slice(bytes);
                 }
                 offset = fixed_end;
                 continue;
             }
         }
 
-        if offset + 6 > dir_decompressed.len() {
+        let Some(header_end) = offset.checked_add(6) else {
             return Err(DirParseError::Truncated.into());
-        }
-
-        let len = u32::from_le_bytes([
-            dir_decompressed[offset + 2],
-            dir_decompressed[offset + 3],
-            dir_decompressed[offset + 4],
-            dir_decompressed[offset + 5],
-        ]) as usize;
+        };
+        let Some(header) = dir_decompressed.get(offset..header_end) else {
+            return Err(DirParseError::Truncated.into());
+        };
+        let len = u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as usize;
         offset += 6;
-        if offset + len > dir_decompressed.len() {
+        let Some(data_end) = offset.checked_add(len) else {
+            return Err(DirParseError::BadRecordLength { id, len }.into());
+        };
+        if data_end > dir_decompressed.len() {
             return Err(DirParseError::BadRecordLength { id, len }.into());
         }
-        let data = &dir_decompressed[offset..offset + len];
-        offset += len;
+        let data = dir_decompressed
+            .get(offset..data_end)
+            .ok_or_else(|| DirParseError::Truncated)?;
+        offset = data_end;
 
         // Stop *interpreting* records once we hit the first module record group, but keep parsing
         // to the end of the stream so truncation/length errors are still reported (strictness).
@@ -434,47 +449,57 @@ fn strip_ascii_quotes(bytes: &[u8]) -> &[u8] {
 fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
     // `VBA/dir` records are stored as: u16 id, u32 len, payload bytes.
     // Only treat a next record as present when the full 6-byte header is in-bounds.
-    if offset + 6 > bytes.len() {
-        return None;
-    }
-    Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
+    let end = offset.checked_add(6)?;
+    let hdr = bytes.get(offset..end)?;
+    Some(u16::from_le_bytes([hdr[0], hdr[1]]))
 }
 
 fn looks_like_dir_record_header(bytes: &[u8], offset: usize) -> bool {
     if offset == bytes.len() {
         return true;
     }
-    if offset + 2 > bytes.len() {
+    let id_end = match offset.checked_add(2) {
+        Some(v) => v,
+        None => return false,
+    };
+    let Some(id_bytes) = bytes.get(offset..id_end) else {
         return false;
-    }
-    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    };
+    let id = u16::from_le_bytes([id_bytes[0], id_bytes[1]]);
 
     // PROJECTVERSION (0x0009) is a fixed-length record (12 bytes total) in many spec-compliant dir
     // streams; v3 transcript parsing treats it as fixed-length.
     if id == 0x0009 {
-        return offset + 12 <= bytes.len();
+        return offset
+            .checked_add(12)
+            .is_some_and(|end| end <= bytes.len());
     }
 
-    if offset + 6 > bytes.len() {
+    let hdr_end = match offset.checked_add(6) {
+        Some(v) => v,
+        None => return false,
+    };
+    let Some(hdr) = bytes.get(offset..hdr_end) else {
         return false;
-    }
-    let len = u32::from_le_bytes([
-        bytes[offset + 2],
-        bytes[offset + 3],
-        bytes[offset + 4],
-        bytes[offset + 5],
-    ]) as usize;
-    offset + 6 + len <= bytes.len()
+    };
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+    hdr_end
+        .checked_add(len)
+        .is_some_and(|end| end <= bytes.len())
 }
 
 fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
     if offset == bytes.len() {
         return true;
     }
-    if offset + 6 > bytes.len() {
+    let hdr_end = match offset.checked_add(6) {
+        Some(v) => v,
+        None => return false,
+    };
+    let Some(hdr) = bytes.get(offset..hdr_end) else {
         return false;
-    }
-    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    };
+    let id = u16::from_le_bytes([hdr[0], hdr[1]]);
     // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
     // ProjectModules header, or (in some real-world streams) module records.
     if !matches!(
@@ -502,13 +527,10 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     ) {
         return false;
     }
-    let len = u32::from_le_bytes([
-        bytes[offset + 2],
-        bytes[offset + 3],
-        bytes[offset + 4],
-        bytes[offset + 5],
-    ]) as usize;
-    offset + 6 + len <= bytes.len()
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+    hdr_end
+        .checked_add(len)
+        .is_some_and(|end| end <= bytes.len())
 }
 
 fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
@@ -557,7 +579,11 @@ fn split_nwln_lines(bytes: &[u8]) -> Vec<&[u8]> {
         match bytes[i] {
             b'\r' => {
                 lines.push(&bytes[start..i]);
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                let next = i
+                    .checked_add(1)
+                    .and_then(|idx| bytes.get(idx))
+                    .copied();
+                if matches!(next, Some(b'\n')) {
                     i += 2;
                 } else {
                     i += 1;
@@ -566,7 +592,11 @@ fn split_nwln_lines(bytes: &[u8]) -> Vec<&[u8]> {
             }
             b'\n' => {
                 lines.push(&bytes[start..i]);
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\r' {
+                let next = i
+                    .checked_add(1)
+                    .and_then(|idx| bytes.get(idx))
+                    .copied();
+                if matches!(next, Some(b'\r')) {
                     i += 2;
                 } else {
                     i += 1;
@@ -660,23 +690,23 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
-        if offset + 6 > dir_decompressed.len() {
+        let Some(hdr_end) = offset.checked_add(6) else {
             return Err(DirParseError::Truncated.into());
-        }
+        };
+        let Some(hdr) = dir_decompressed.get(offset..hdr_end) else {
+            return Err(DirParseError::Truncated.into());
+        };
 
-        let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
-        let len = u32::from_le_bytes([
-            dir_decompressed[offset + 2],
-            dir_decompressed[offset + 3],
-            dir_decompressed[offset + 4],
-            dir_decompressed[offset + 5],
-        ]) as usize;
+        let id = u16::from_le_bytes([hdr[0], hdr[1]]);
+        let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
         offset += 6;
-        if offset + len > dir_decompressed.len() {
+        let Some(end) = offset.checked_add(len) else {
             return Err(DirParseError::BadRecordLength { id, len }.into());
-        }
-        let data = &dir_decompressed[offset..offset + len];
-        offset += len;
+        };
+        let Some(data) = dir_decompressed.get(offset..end) else {
+            return Err(DirParseError::BadRecordLength { id, len }.into());
+        };
+        offset = end;
 
         // If we just saw MODULESTREAMNAME and were expecting a Unicode stream name sub-record, any
         // other record indicates the Unicode name is absent.
@@ -932,46 +962,30 @@ impl<'a> DirCursor<'a> {
         Self { bytes, offset: 0 }
     }
 
-    fn remaining(&self) -> usize {
-        self.bytes.len().saturating_sub(self.offset)
-    }
-
     fn peek_u16(&self) -> Option<u16> {
-        if self.remaining() < 2 {
-            return None;
-        }
-        Some(u16::from_le_bytes([
-            self.bytes[self.offset],
-            self.bytes[self.offset + 1],
-        ]))
+        let end = self.offset.checked_add(2)?;
+        let b = self.bytes.get(self.offset..end)?;
+        Some(u16::from_le_bytes([b[0], b[1]]))
     }
 
     fn read_u16(&mut self) -> Option<u16> {
         let v = self.peek_u16()?;
-        self.offset += 2;
+        self.offset = self.offset.checked_add(2)?;
         Some(v)
     }
 
     fn read_u32(&mut self) -> Option<u32> {
-        if self.remaining() < 4 {
-            return None;
-        }
-        let v = u32::from_le_bytes([
-            self.bytes[self.offset],
-            self.bytes[self.offset + 1],
-            self.bytes[self.offset + 2],
-            self.bytes[self.offset + 3],
-        ]);
-        self.offset += 4;
+        let end = self.offset.checked_add(4)?;
+        let b = self.bytes.get(self.offset..end)?;
+        let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        self.offset = end;
         Some(v)
     }
 
     fn take(&mut self, n: usize) -> Option<&'a [u8]> {
-        if self.remaining() < n {
-            return None;
-        }
-        let out = &self.bytes[self.offset..self.offset + n];
-        self.offset += n;
+        let end = self.offset.checked_add(n)?;
+        let out = self.bytes.get(self.offset..end)?;
+        self.offset = end;
         Some(out)
     }
 
@@ -1140,27 +1154,35 @@ fn parse_reference_control_data_for_hash(data: &[u8]) -> Option<(Vec<u8>, u32, u
             let end = start.checked_add(n)?;
             let reserved1_offset = end;
             let reserved2_offset = reserved1_offset.checked_add(4)?;
+            let reserved1_end = reserved1_offset.checked_add(4)?;
+            let reserved2_end = reserved2_offset.checked_add(2)?;
+            let reserved1_bytes = data.get(reserved1_offset..reserved1_end)?;
+            let reserved2_bytes = data.get(reserved2_offset..reserved2_end)?;
             let reserved1 = u32::from_le_bytes([
-                data[reserved1_offset],
-                data[reserved1_offset + 1],
-                data[reserved1_offset + 2],
-                data[reserved1_offset + 3],
+                reserved1_bytes[0],
+                reserved1_bytes[1],
+                reserved1_bytes[2],
+                reserved1_bytes[3],
             ]);
-            let reserved2 = u16::from_le_bytes([data[reserved2_offset], data[reserved2_offset + 1]]);
+            let reserved2 = u16::from_le_bytes([reserved2_bytes[0], reserved2_bytes[1]]);
             return Some((data[start..end].to_vec(), reserved1, reserved2));
         }
     }
 
     // Fallback: treat the final 6 bytes as Reserved1+Reserved2, with the leading bytes as Libid.
     let reserved1_offset = data.len() - 6;
-    let reserved2_offset = reserved1_offset + 4;
+    let reserved2_offset = reserved1_offset.checked_add(4)?;
+    let reserved1_end = reserved1_offset.checked_add(4)?;
+    let reserved2_end = reserved2_offset.checked_add(2)?;
+    let reserved1_bytes = data.get(reserved1_offset..reserved1_end)?;
+    let reserved2_bytes = data.get(reserved2_offset..reserved2_end)?;
     let reserved1 = u32::from_le_bytes([
-        data[reserved1_offset],
-        data[reserved1_offset + 1],
-        data[reserved1_offset + 2],
-        data[reserved1_offset + 3],
+        reserved1_bytes[0],
+        reserved1_bytes[1],
+        reserved1_bytes[2],
+        reserved1_bytes[3],
     ]);
-    let reserved2 = u16::from_le_bytes([data[reserved2_offset], data[reserved2_offset + 1]]);
+    let reserved2 = u16::from_le_bytes([reserved2_bytes[0], reserved2_bytes[1]]);
     Some((data[..reserved1_offset].to_vec(), reserved1, reserved2))
 }
 
@@ -1252,9 +1274,14 @@ fn parse_reference_for_hash(cur: &mut DirCursor<'_>) -> Option<Option<ReferenceF
                 let n =
                     u32::from_le_bytes([libid_raw[0], libid_raw[1], libid_raw[2], libid_raw[3]])
                         as usize;
-                if 4 + n <= libid_raw.len() {
-                    libid_raw[4..4 + n].to_vec()
+                if let Some(end) = 4usize.checked_add(n) {
+                    if end <= libid_raw.len() {
+                        libid_raw[4..end].to_vec()
+                    } else {
+                        libid_raw
+                    }
                 } else {
+                    debug_assert!(false, "libid_original length overflow (n={n})");
                     libid_raw
                 }
             } else {
@@ -1572,11 +1599,14 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
-        if offset + 2 > dir_decompressed.len() {
+        let Some(id_end) = offset.checked_add(2) else {
             return Err(DirParseError::Truncated.into());
-        }
+        };
+        let Some(id_bytes) = dir_decompressed.get(offset..id_end) else {
+            return Err(DirParseError::Truncated.into());
+        };
 
-        let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+        let id = u16::from_le_bytes([id_bytes[0], id_bytes[1]]);
 
         if expect_module_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
             expect_module_stream_name_unicode = false;
@@ -1593,22 +1623,26 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // (and synthetic fixtures) encode it as a normal TLV record (`Id || Size || Data`).
             // Disambiguate the two encodings by checking which yields a plausible next record
             // boundary.
-            if offset + 6 > dir_decompressed.len() {
+            let Some(hdr_end) = offset.checked_add(6) else {
                 return Err(DirParseError::Truncated.into());
-            }
+            };
+            let Some(hdr) = dir_decompressed.get(offset..hdr_end) else {
+                return Err(DirParseError::Truncated.into());
+            };
             // For the fixed-length layout, the u32 after `Id` is `Reserved`.
             // For the TLV layout, the u32 after `Id` is `Size` (and must be excluded from the
             // transcript).
-            let size_or_reserved = u32::from_le_bytes([
-                dir_decompressed[offset + 2],
-                dir_decompressed[offset + 3],
-                dir_decompressed[offset + 4],
-                dir_decompressed[offset + 5],
-            ]) as usize;
-            let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
-            let fixed_end = offset.saturating_add(12);
+            let size_or_reserved = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+            let tlv_end = offset
+                .checked_add(6)
+                .and_then(|v| v.checked_add(size_or_reserved));
+            let fixed_end = offset
+                .checked_add(12)
+                .ok_or_else(|| DirParseError::Truncated)?;
 
-            let tlv_next_ok = looks_like_projectversion_following_record(&dir_decompressed, tlv_end);
+            let tlv_next_ok = tlv_end.is_some_and(|end| {
+                looks_like_projectversion_following_record(&dir_decompressed, end)
+            });
             let fixed_next_ok =
                 looks_like_projectversion_following_record(&dir_decompressed, fixed_end);
 
@@ -1619,7 +1653,10 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 && fixed_next_ok
                 && (!tlv_next_ok || size_or_reserved < 10)
             {
-                out.extend_from_slice(&dir_decompressed[offset..fixed_end]);
+                let bytes = dir_decompressed
+                    .get(offset..fixed_end)
+                    .ok_or_else(|| DirParseError::Truncated)?;
+                out.extend_from_slice(bytes);
                 offset = fixed_end;
                 expect_reference_name_unicode = false;
                 continue;
@@ -1627,8 +1664,15 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // Fall back to the TLV form: emit the normalized fixed-length bytes (exclude the Size
             // field but include the 10-byte payload prefix).
-            let data_start = offset + 6;
-            let data_end = data_start.saturating_add(size_or_reserved);
+            let data_start = offset
+                .checked_add(6)
+                .ok_or_else(|| DirParseError::Truncated)?;
+            let data_end = data_start.checked_add(size_or_reserved).ok_or_else(|| {
+                DirParseError::BadRecordLength {
+                    id,
+                    len: size_or_reserved,
+                }
+            })?;
             if data_end > dir_decompressed.len() {
                 return Err(DirParseError::BadRecordLength {
                     id,
@@ -1641,7 +1685,13 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             }
 
             out.extend_from_slice(&0x0009u16.to_le_bytes());
-            out.extend_from_slice(&dir_decompressed[data_start..data_start + 10]);
+            let Some(prefix_end) = data_start.checked_add(10) else {
+                return Err(DirParseError::Truncated.into());
+            };
+            let Some(prefix) = dir_decompressed.get(data_start..prefix_end) else {
+                return Err(DirParseError::Truncated.into());
+            };
+            out.extend_from_slice(prefix);
             offset = data_end;
             expect_reference_name_unicode = false;
             continue;
@@ -1654,22 +1704,22 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
         // If we treat the u32 as the total record length, we'll mis-align parsing when the Unicode
         // stream name is present. Parse the full record and advance `offset` correctly.
         if id == 0x001A {
-            if offset + 6 > dir_decompressed.len() {
+            let Some(hdr_end) = offset.checked_add(6) else {
                 return Err(DirParseError::Truncated.into());
-            }
+            };
+            let Some(hdr) = dir_decompressed.get(offset..hdr_end) else {
+                return Err(DirParseError::Truncated.into());
+            };
             // For disambiguation, compute `SizeOfStreamName` from the raw bytes. In spec-compliant
             // records this is the MBCS stream-name length; in TLV-ish fixtures it is typically the
             // full payload length.
-            let size_name = u32::from_le_bytes([
-                dir_decompressed[offset + 2],
-                dir_decompressed[offset + 3],
-                dir_decompressed[offset + 4],
-                dir_decompressed[offset + 5],
-            ]) as usize;
+            let size_name = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
             let mut cur = DirCursor::new(&dir_decompressed[offset..]);
             let stream_name =
                 parse_module_stream_name(&mut cur, encoding).ok_or(DirParseError::Truncated)?;
-            offset += cur.offset;
+            offset = offset
+                .checked_add(cur.offset)
+                .ok_or_else(|| DirParseError::Truncated)?;
             expect_reference_name_unicode = false;
 
             if let Some(m) = current_module.as_mut() {
@@ -1678,7 +1728,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             }
             // Only expect a separate Unicode stream-name record when the MODULESTREAMNAME record did
             // not include an in-record Unicode tail (Reserved=0x0032 + StreamNameUnicode bytes).
-            expect_module_stream_name_unicode = cur.offset == 6 + size_name && current_module.is_some();
+            let expected = 6usize.checked_add(size_name);
+            expect_module_stream_name_unicode =
+                expected.is_some_and(|v| v == cur.offset) && current_module.is_some();
             continue;
         }
 
@@ -1711,26 +1763,27 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             _ => {}
         }
 
-        if offset + 6 > dir_decompressed.len() {
+        let Some(hdr_end) = offset.checked_add(6) else {
             return Err(DirParseError::Truncated.into());
-        }
+        };
+        let Some(hdr) = dir_decompressed.get(offset..hdr_end) else {
+            return Err(DirParseError::Truncated.into());
+        };
 
-        let len = u32::from_le_bytes([
-            dir_decompressed[offset + 2],
-            dir_decompressed[offset + 3],
-            dir_decompressed[offset + 4],
-            dir_decompressed[offset + 5],
-        ]) as usize;
+        let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
 
         let record_start = offset;
-        let header_end = offset + 6;
-        offset += 6;
-
-        if offset + len > dir_decompressed.len() {
+        let header_end = offset.checked_add(6).ok_or_else(|| DirParseError::Truncated)?;
+        offset = header_end;
+        let record_end = offset
+            .checked_add(len)
+            .ok_or_else(|| DirParseError::BadRecordLength { id, len })?;
+        if record_end > dir_decompressed.len() {
             return Err(DirParseError::BadRecordLength { id, len }.into());
         }
-        let data = &dir_decompressed[offset..offset + len];
-        let record_end = offset + len;
+        let data = dir_decompressed
+            .get(offset..record_end)
+            .ok_or_else(|| DirParseError::Truncated)?;
         offset = record_end;
 
         if id != 0x003E {
@@ -2272,22 +2325,23 @@ fn skip_v3_reference_extended(dir_decompressed: &[u8], offset: &mut usize) -> Re
 }
 
 fn skip_dir_record(dir_decompressed: &[u8], offset: &mut usize) -> Result<(), ParseError> {
-    if *offset + 6 > dir_decompressed.len() {
+    let Some(hdr_end) = (*offset).checked_add(6) else {
         return Err(DirParseError::Truncated.into());
-    }
+    };
+    let Some(hdr) = dir_decompressed.get(*offset..hdr_end) else {
+        return Err(DirParseError::Truncated.into());
+    };
 
-    let id = u16::from_le_bytes([dir_decompressed[*offset], dir_decompressed[*offset + 1]]);
-    let len = u32::from_le_bytes([
-        dir_decompressed[*offset + 2],
-        dir_decompressed[*offset + 3],
-        dir_decompressed[*offset + 4],
-        dir_decompressed[*offset + 5],
-    ]) as usize;
+    let id = u16::from_le_bytes([hdr[0], hdr[1]]);
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
     *offset += 6;
-    if *offset + len > dir_decompressed.len() {
+    let Some(end) = (*offset).checked_add(len) else {
+        return Err(DirParseError::BadRecordLength { id, len }.into());
+    };
+    if end > dir_decompressed.len() {
         return Err(DirParseError::BadRecordLength { id, len }.into());
     }
-    *offset += len;
+    *offset = end;
     Ok(())
 }
 
@@ -2533,8 +2587,10 @@ fn normalize_reference_original(data: &[u8]) -> Result<Vec<u8>, ParseError> {
     // the record data. Support both encodings for robustness.
     if data.len() >= 4 {
         let len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-        if 4 + len <= data.len() {
-            return Ok(copy_until_nul(&data[4..4 + len]));
+        if let Some(end) = 4usize.checked_add(len) {
+            if let Some(payload) = data.get(4..end) {
+                return Ok(copy_until_nul(payload));
+            }
         }
     }
 
@@ -2582,7 +2638,10 @@ fn guess_text_offset(module_stream: &[u8]) -> usize {
         if module_stream[idx] != 0x01 {
             continue;
         }
-        let header = u16::from_le_bytes([module_stream[idx + 1], module_stream[idx + 2]]);
+        let Some(bytes) = module_stream.get(idx..).and_then(|rest| rest.get(..3)) else {
+            continue;
+        };
+        let header = u16::from_le_bytes([bytes[1], bytes[2]]);
         let signature_bits = (header & 0x7000) >> 12;
         if signature_bits == 0b011 {
             // Best-effort validation: module streams can contain header bytes before the compressed
@@ -2653,7 +2712,8 @@ fn append_v3_line(line: &[u8], out: &mut Vec<u8>) -> bool {
 }
 
 fn normalize_module_source(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(bytes.len());
 
     let mut line_start = 0usize;
     let mut i = 0usize;

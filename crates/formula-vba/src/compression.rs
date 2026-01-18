@@ -28,7 +28,8 @@ pub enum CompressionError {
 ///   the chunk is emitted as an *uncompressed* chunk (still within a
 ///   `CompressedContainer`).
 pub fn compress_container(input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(input.len().saturating_add(3));
+    let mut out = Vec::new();
+    let _ = out.try_reserve(input.len().saturating_add(3));
     out.push(0x01);
 
     for chunk in input.chunks(4096) {
@@ -68,11 +69,14 @@ pub fn decompress_container(input: &[u8]) -> Result<Vec<u8>, CompressionError> {
     let mut out = Vec::new();
     let mut offset = 0usize;
     while offset < rest.len() {
-        if offset + 2 > rest.len() {
+        let hdr_end = offset
+            .checked_add(2)
+            .ok_or(CompressionError::TruncatedChunkHeader)?;
+        let Some(hdr) = rest.get(offset..hdr_end) else {
             return Err(CompressionError::TruncatedChunkHeader);
-        }
+        };
 
-        let header = u16::from_le_bytes([rest[offset], rest[offset + 1]]);
+        let header = u16::from_le_bytes([hdr[0], hdr[1]]);
         offset += 2;
 
         // bits 12..14 must be 0b011.
@@ -86,11 +90,16 @@ pub fn decompress_container(input: &[u8]) -> Result<Vec<u8>, CompressionError> {
         // `chunk_size` includes the 2-byte header and is always >= 3.
         let chunk_data_size = chunk_size - 2;
 
-        if offset + chunk_data_size > rest.len() {
+        let Some(chunk_end) = offset.checked_add(chunk_data_size) else {
+            return Err(CompressionError::TruncatedChunkData);
+        };
+        if chunk_end > rest.len() {
             return Err(CompressionError::TruncatedChunkData);
         }
-        let chunk_data = &rest[offset..offset + chunk_data_size];
-        offset += chunk_data_size;
+        let chunk_data = rest
+            .get(offset..chunk_end)
+            .ok_or(CompressionError::TruncatedChunkData)?;
+        offset = chunk_end;
 
         if compressed {
             out.extend_from_slice(&decompress_chunk(chunk_data)?);
@@ -193,7 +202,8 @@ fn find_best_match(
 }
 
 fn decompress_chunk(chunk: &[u8]) -> Result<Vec<u8>, CompressionError> {
-    let mut out: Vec<u8> = Vec::with_capacity(4096);
+    let mut out: Vec<u8> = Vec::new();
+    let _ = out.try_reserve_exact(4096);
     let mut idx = 0usize;
 
     while idx < chunk.len() && out.len() < 4096 {
@@ -215,11 +225,14 @@ fn decompress_chunk(chunk: &[u8]) -> Result<Vec<u8>, CompressionError> {
             }
 
             // copy token (2 bytes)
-            if idx + 2 > chunk.len() {
-                return Err(CompressionError::TruncatedCopyToken);
-            }
-            let token = u16::from_le_bytes([chunk[idx], chunk[idx + 1]]);
-            idx += 2;
+            let end = idx
+                .checked_add(2)
+                .ok_or(CompressionError::TruncatedCopyToken)?;
+            let bytes = chunk
+                .get(idx..end)
+                .ok_or(CompressionError::TruncatedCopyToken)?;
+            let token = u16::from_le_bytes([bytes[0], bytes[1]]);
+            idx = end;
 
             let bit_count = copy_token_bit_count(out.len());
             let length_bit_count = 16 - bit_count;

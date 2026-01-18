@@ -29,7 +29,8 @@ fn der_len(len: usize) -> Vec<u8> {
         n >>= 8;
     }
     tmp.reverse();
-    let mut out = Vec::with_capacity(1 + tmp.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(1usize.saturating_add(tmp.len()));
     out.push(0x80 | (tmp.len() as u8));
     out.extend_from_slice(&tmp);
     out

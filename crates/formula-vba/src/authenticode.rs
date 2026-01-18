@@ -807,7 +807,8 @@ fn extract_source_hash_from_sig_data_v1_serialized_asn1(
 
 fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Option<Vec<u8>> {
     fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-        let b = bytes.get(offset..offset + 4)?;
+        let end = offset.checked_add(4)?;
+        let b = bytes.get(offset..end)?;
         Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
@@ -822,8 +823,10 @@ fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Optio
     //   [version u32][cbSourceHash u32][sourceHash bytes]
     if bytes.len() >= 8 {
         if let Some(len) = read_u32_le(bytes, 4).map(|n| n as usize) {
-            if len == 16 && bytes.len() >= 8 + 16 {
-                return Some(bytes[8..8 + 16].to_vec());
+            let start = 8usize;
+            let end = start.checked_add(16)?;
+            if len == 16 && bytes.len() >= end {
+                return bytes.get(start..end).map(|b| b.to_vec());
             }
         }
     }
@@ -834,16 +837,20 @@ fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Optio
     let mut offset = 4usize;
     let mut candidate = None;
     let mut steps = 0usize;
-    while offset + 4 <= bytes.len() && steps < 64 {
+    while offset.checked_add(4).is_some_and(|end| end <= bytes.len()) && steps < 64 {
         let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
             break;
         };
         offset += 4;
-        if offset + len > bytes.len() {
+        let Some(end) = offset.checked_add(len) else {
+            break;
+        };
+        if end > bytes.len() {
             break;
         }
         if len == 16 {
-            candidate = Some(bytes[offset..offset + 16].to_vec());
+            let end16 = offset.checked_add(16)?;
+            candidate = bytes.get(offset..end16).map(|b| b.to_vec());
         }
         offset += len;
         steps += 1;

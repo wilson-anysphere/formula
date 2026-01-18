@@ -224,7 +224,8 @@ fn escape_ole_path(path: &str) -> String {
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len().saturating_mul(2));
     for &b in bytes {
         out.push(HEX[(b >> 4) as usize] as char);
         out.push(HEX[(b & 0x0f) as usize] as char);

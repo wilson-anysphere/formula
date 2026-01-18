@@ -1143,7 +1143,8 @@ fn signature_path_rank(path: &str) -> u8 {
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len().saturating_mul(2));
     for &b in bytes {
         out.push(HEX[(b >> 4) as usize] as char);
         out.push(HEX[(b & 0x0F) as usize] as char);
@@ -1191,7 +1192,7 @@ fn parse_first_embedded_der_certificate(bytes: &[u8]) -> Option<&[u8]> {
 
     let (rem, _) = parse_x509_certificate(bytes).ok()?;
     let consumed_len = bytes.len().saturating_sub(rem.len());
-    Some(&bytes[..consumed_len])
+    bytes.get(..consumed_len)
 }
 
 fn scan_for_embedded_der_certificates(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
@@ -1200,16 +1201,16 @@ fn scan_for_embedded_der_certificates(bytes: &[u8]) -> impl Iterator<Item = &[u8
     // Heuristic: certificates are DER-encoded and begin with a SEQUENCE (0x30) tag.
     // Yield each candidate DER slice that parses as a certificate.
     (0..bytes.len()).filter_map(move |start| {
-        if bytes[start] != 0x30 {
+        if bytes.get(start).copied()? != 0x30 {
             return None;
         }
-        let slice = &bytes[start..];
+        let slice = bytes.get(start..)?;
         let (rem, _) = parse_x509_certificate(slice).ok()?;
         let consumed_len = slice.len().saturating_sub(rem.len());
         if consumed_len == 0 {
             return None;
         }
-        Some(&slice[..consumed_len])
+        slice.get(..consumed_len)
     })
 }
 
@@ -1554,10 +1555,13 @@ fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
     // is a best-effort heuristic: certificates are DER-encoded and begin with a
     // SEQUENCE (0x30) tag.
     for start in 0..bytes.len() {
-        if bytes[start] != 0x30 {
+        if bytes.get(start).copied() != Some(0x30) {
             continue;
         }
-        if let Ok((_, cert)) = parse_x509_certificate(&bytes[start..]) {
+        let Some(slice) = bytes.get(start..) else {
+            continue;
+        };
+        if let Ok((_, cert)) = parse_x509_certificate(slice) {
             return Some(cert.subject().to_string());
         }
     }

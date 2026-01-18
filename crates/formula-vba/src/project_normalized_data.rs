@@ -348,10 +348,13 @@ fn scan_unicode_presence(
 }
 
 fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), DirParseError> {
-    if offset + 6 > buf.len() {
+    let Some(hdr_end) = offset.checked_add(6) else {
         return Err(DirParseError::Truncated);
-    }
-    let id = u16::from_le_bytes([buf[offset], buf[offset + 1]]);
+    };
+    let Some(hdr) = buf.get(offset..hdr_end) else {
+        return Err(DirParseError::Truncated);
+    };
+    let id = u16::from_le_bytes([hdr[0], hdr[1]]);
 
     // MS-OVBA `VBA/dir` streams are usually encoded as `Id(u16) || Size(u32) || Data(Size)`.
     // However, some fixed-length records (notably PROJECTVERSION) are stored without an explicit
@@ -368,12 +371,7 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
         // producers) encode it as a normal TLV record (`Id || Size || Data`).
         //
         // Disambiguate by checking which interpretation yields a plausible next record header.
-        let size_or_reserved = u32::from_le_bytes([
-            buf[offset + 2],
-            buf[offset + 3],
-            buf[offset + 4],
-            buf[offset + 5],
-        ]) as usize;
+        let size_or_reserved = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
 
         let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
         let fixed_end = offset.saturating_add(12);
@@ -385,43 +383,52 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
         // implausible record boundary, or when the `Size` field is `0` (which is a common reserved
         // value in fixed-length PROJECTVERSION records).
         if fixed_end <= buf.len() && fixed_next_ok && (!tlv_next_ok || size_or_reserved == 0) {
-            return Ok((id, &buf[offset + 2..fixed_end], fixed_end));
+            let start = offset.checked_add(2).ok_or(DirParseError::Truncated)?;
+            let data = buf.get(start..fixed_end).ok_or(DirParseError::Truncated)?;
+            return Ok((id, data, fixed_end));
         }
 
         // Fall back to treating it as a TLV record (use the declared payload length).
-        let data_start = offset + 6;
-        let data_end = data_start + size_or_reserved;
+        let data_start = offset.checked_add(6).ok_or(DirParseError::Truncated)?;
+        let data_end = data_start
+            .checked_add(size_or_reserved)
+            .ok_or(DirParseError::BadRecordLength {
+                id,
+                len: size_or_reserved,
+            })?;
         if data_end > buf.len() {
             return Err(DirParseError::BadRecordLength {
                 id,
                 len: size_or_reserved,
             });
         }
-        return Ok((id, &buf[data_start..data_end], data_end));
+        let data = buf.get(data_start..data_end).ok_or(DirParseError::Truncated)?;
+        return Ok((id, data, data_end));
     }
 
-    let len = u32::from_le_bytes([
-        buf[offset + 2],
-        buf[offset + 3],
-        buf[offset + 4],
-        buf[offset + 5],
-    ]) as usize;
-    let data_start = offset + 6;
-    let data_end = data_start + len;
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+    let data_start = offset.checked_add(6).ok_or(DirParseError::Truncated)?;
+    let data_end = data_start
+        .checked_add(len)
+        .ok_or(DirParseError::BadRecordLength { id, len })?;
     if data_end > buf.len() {
         return Err(DirParseError::BadRecordLength { id, len });
     }
-    Ok((id, &buf[data_start..data_end], data_end))
+    let data = buf.get(data_start..data_end).ok_or(DirParseError::Truncated)?;
+    Ok((id, data, data_end))
 }
 
 fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
     if offset == bytes.len() {
         return true;
     }
-    if offset + 6 > bytes.len() {
+    let Some(hdr_end) = offset.checked_add(6) else {
         return false;
-    }
-    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    };
+    let Some(hdr) = bytes.get(offset..hdr_end) else {
+        return false;
+    };
+    let id = u16::from_le_bytes([hdr[0], hdr[1]]);
     // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
     // ProjectModules header, or (in some real-world streams) PROJECTCOMPATVERSION.
     if !matches!(
@@ -431,13 +438,11 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     ) {
         return false;
     }
-    let len = u32::from_le_bytes([
-        bytes[offset + 2],
-        bytes[offset + 3],
-        bytes[offset + 4],
-        bytes[offset + 5],
-    ]) as usize;
-    offset + 6 + len <= bytes.len()
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+    offset
+        .checked_add(6)
+        .and_then(|v| v.checked_add(len))
+        .is_some_and(|end| end <= bytes.len())
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {

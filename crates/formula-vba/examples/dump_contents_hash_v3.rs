@@ -249,7 +249,8 @@ fn parse_alg_str(s: &str) -> Option<Alg> {
 }
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len().saturating_mul(2));
     for b in bytes {
         use std::fmt::Write;
         write!(&mut out, "{:02x}", b).expect("writing to String cannot fail");

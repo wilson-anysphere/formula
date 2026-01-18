@@ -331,7 +331,8 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
 }
 
 fn bytes_to_hex_spaced(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 3);
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len().saturating_mul(3));
     for (i, b) in bytes.iter().enumerate() {
         use std::fmt::Write;
         if i != 0 {
@@ -343,7 +344,8 @@ fn bytes_to_hex_spaced(bytes: &[u8]) -> String {
 }
 
 fn bytes_to_ascii_preview(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(bytes.len());
     for &b in bytes {
         match b {
             b'\r' => out.push_str("\\r"),

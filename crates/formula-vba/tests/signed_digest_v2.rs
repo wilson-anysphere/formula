@@ -22,7 +22,8 @@ fn der_len(len: usize) -> Vec<u8> {
         tmp >>= 8;
     }
     bytes.reverse();
-    let mut out = Vec::with_capacity(1 + bytes.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(1usize.saturating_add(bytes.len()));
     out.push(0x80 | (bytes.len() as u8));
     out.extend_from_slice(&bytes);
     out

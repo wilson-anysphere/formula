@@ -41,7 +41,8 @@ fn utf16le_bytes(s: &str) -> Vec<u8> {
 
 fn unicode_record_data(s: &str) -> Vec<u8> {
     let units: Vec<u16> = s.encode_utf16().collect();
-    let mut out = Vec::with_capacity(4 + units.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(units.len().saturating_mul(2)));
     out.extend_from_slice(&(units.len() as u32).to_le_bytes());
     for u in units {
         out.extend_from_slice(&u.to_le_bytes());
@@ -51,7 +52,8 @@ fn unicode_record_data(s: &str) -> Vec<u8> {
 
 fn unicode_record_data_bytes_len(s: &str) -> Vec<u8> {
     let payload = utf16le_bytes(s);
-    let mut out = Vec::with_capacity(4 + payload.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(payload.len()));
     out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     out.extend_from_slice(&payload);
     out
@@ -67,7 +69,8 @@ fn unicode_record_data_bytes_len_excluding_trailing_nul(s: &str) -> Vec<u8> {
     let payload_without_nul = utf16le_bytes(s);
     let mut payload = payload_without_nul.clone();
     payload.extend_from_slice(&0u16.to_le_bytes()); // UTF-16 NUL terminator
-    let mut out = Vec::with_capacity(4 + payload.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(payload.len()));
     // Prefix is the byte count excluding the trailing terminator.
     out.extend_from_slice(&(payload_without_nul.len() as u32).to_le_bytes());
     out.extend_from_slice(&payload);
@@ -78,7 +81,8 @@ fn unicode_record_data_code_units_excluding_trailing_nul(s: &str) -> Vec<u8> {
     let payload_without_nul = utf16le_bytes(s);
     let mut payload = payload_without_nul.clone();
     payload.extend_from_slice(&0u16.to_le_bytes()); // UTF-16 NUL terminator
-    let mut out = Vec::with_capacity(4 + payload.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(payload.len()));
     // Prefix is the UTF-16 code unit count excluding the trailing terminator.
     out.extend_from_slice(&((payload_without_nul.len() / 2) as u32).to_le_bytes());
     out.extend_from_slice(&payload);
@@ -87,7 +91,8 @@ fn unicode_record_data_code_units_excluding_trailing_nul(s: &str) -> Vec<u8> {
 
 fn unicode_record_data_bytes_len_including_trailing_nul(s: &str) -> Vec<u8> {
     let payload = utf16le_bytes_with_trailing_nul(s);
-    let mut out = Vec::with_capacity(4 + payload.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(payload.len()));
     out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     out.extend_from_slice(&payload);
     out
@@ -95,7 +100,8 @@ fn unicode_record_data_bytes_len_including_trailing_nul(s: &str) -> Vec<u8> {
 
 fn unicode_record_data_code_units_including_trailing_nul(s: &str) -> Vec<u8> {
     let payload = utf16le_bytes_with_trailing_nul(s);
-    let mut out = Vec::with_capacity(4 + payload.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(4usize.saturating_add(payload.len()));
     out.extend_from_slice(&((payload.len() / 2) as u32).to_le_bytes());
     out.extend_from_slice(&payload);
     out

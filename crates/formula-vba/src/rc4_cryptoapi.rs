@@ -64,7 +64,8 @@ impl Rc4 {
 }
 
 fn password_utf16le(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for ch in password.encode_utf16() {
         out.extend_from_slice(&ch.to_le_bytes());
     }
@@ -232,7 +233,8 @@ impl Rc4CryptoApiDecryptor {
                 rc4.apply_keystream(chunk);
             }
 
-            let mut out = Vec::with_capacity(8 + ciphertext.len());
+            let mut out = Vec::new();
+            let _ = out.try_reserve_exact(8usize.saturating_add(ciphertext.len()));
             out.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
             out.extend_from_slice(&ciphertext);
             out

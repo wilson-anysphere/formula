@@ -33,7 +33,8 @@ fn hash(alg: HashAlg, bytes: &[u8]) -> Vec<u8> {
 
 fn password_utf16le_bytes(password: &str) -> Vec<u8> {
     // MS-OFFCRYPTO uses the UTF-16LE code units of the password string (without a NUL terminator).
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     out.extend(password.encode_utf16().flat_map(|u| u.to_le_bytes()));
     out
 }
@@ -65,7 +66,8 @@ pub(crate) fn derive_rc4_key_b(
     );
     let key_len = key_size_bits / 8;
 
-    let mut h_in = Vec::with_capacity(salt.len() + password.len() * 2);
+    let mut h_in = Vec::new();
+    let _ = h_in.try_reserve_exact(salt.len().saturating_add(password.len().saturating_mul(2)));
     h_in.extend_from_slice(salt);
     h_in.extend_from_slice(&password_utf16le_bytes(password));
 
@@ -74,14 +76,16 @@ pub(crate) fn derive_rc4_key_b(
     // Standard/CryptoAPI uses a fixed 50,000-iteration spin loop, hashing the 32-bit little-endian
     // counter *prepended* to the previous hash output each time.
     for i in 0..STANDARD_SPIN_COUNT {
-        let mut buf = Vec::with_capacity(4 + h.len());
+        let mut buf = Vec::new();
+        let _ = buf.try_reserve_exact(4usize.saturating_add(h.len()));
         buf.extend_from_slice(&i.to_le_bytes());
         buf.extend_from_slice(&h);
         h = hash(hash_alg, &buf);
     }
 
     // Derive the per-block key by appending the 32-bit little-endian block index to H.
-    let mut buf = Vec::with_capacity(h.len() + 4);
+    let mut buf = Vec::new();
+    let _ = buf.try_reserve_exact(h.len().saturating_add(4));
     buf.extend_from_slice(&h);
     buf.extend_from_slice(&block_index.to_le_bytes());
     let block_hash = hash(hash_alg, &buf);
@@ -98,7 +102,8 @@ mod tests {
             s.len() % 2 == 0,
             "hex string must have an even number of characters"
         );
-        let mut out = Vec::with_capacity(s.len() / 2);
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(s.len() / 2);
         for pair in s.as_bytes().chunks_exact(2) {
             let hi = (pair[0] as char)
                 .to_digit(16)

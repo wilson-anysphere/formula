@@ -40,12 +40,14 @@ pub(crate) struct DigSigInfoSerialized {
 }
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-    let b = bytes.get(offset..offset + 4)?;
+    let end = offset.checked_add(4)?;
+    let b = bytes.get(offset..end)?;
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
-    let b = bytes.get(offset..offset + 2)?;
+    let end = offset.checked_add(2)?;
+    let b = bytes.get(offset..end)?;
     Some(u16::from_le_bytes([b[0], b[1]]))
 }
 
@@ -153,13 +155,15 @@ pub(crate) fn parse_wordsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
     let base = 2usize;
     let siginfo_offset = base.checked_add(serialized_pointer)?;
     let siginfo_end = siginfo_offset.checked_add(cb_siginfo)?;
-    if siginfo_offset + 8 > total_len || siginfo_end > total_len {
+    let siginfo_min_end = siginfo_offset.checked_add(8)?;
+    if siginfo_min_end > total_len || siginfo_end > total_len {
         return None;
     }
 
     // DigSigInfoSerialized starts with: DWORD cbSignature; DWORD signatureOffset;
     let cb_signature = read_u32_le(stream, siginfo_offset)? as usize;
-    let signature_offset_rel = read_u32_le(stream, siginfo_offset + 4)? as usize;
+    let signature_offset_off = siginfo_offset.checked_add(4)?;
+    let signature_offset_rel = read_u32_le(stream, signature_offset_off)? as usize;
     if cb_signature == 0 {
         return None;
     }
@@ -614,7 +618,8 @@ pub(crate) fn standard_cryptoapi_rc4_block_key(
     }
     let key_size_bytes = key_size_bits / 8;
 
-    let mut password_utf16le = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut password_utf16le = Vec::new();
+    let _ = password_utf16le.try_reserve(password.len().saturating_mul(2));
     for ch in password.encode_utf16() {
         password_utf16le.extend_from_slice(&ch.to_le_bytes());
     }

@@ -59,10 +59,13 @@ impl DirStream {
         let mut expect_stream_name_unicode = false;
 
         while offset < decompressed.len() {
-            if offset + 2 > decompressed.len() {
+            let Some(id_end) = offset.checked_add(2) else {
                 return Err(DirParseError::Truncated);
-            }
-            let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
+            };
+            let Some(id_bytes) = decompressed.get(offset..id_end) else {
+                return Err(DirParseError::Truncated);
+            };
+            let id = u16::from_le_bytes([id_bytes[0], id_bytes[1]]);
 
             // Some spec-compliant `VBA/dir` record layouts include fixed-length records that do not
             // follow the common `Id(u16) || Size(u32) || Data(Size)` pattern. The one we most care
@@ -81,18 +84,17 @@ impl DirStream {
                 //
                 // We pick the layout whose end offset is followed by a plausible record header.
                 let record_start = offset;
-                if record_start + 6 > decompressed.len() {
+                let record_end = record_start
+                    .checked_add(6)
+                    .ok_or(DirParseError::Truncated)?;
+                let Some(header) = decompressed.get(record_start..record_end) else {
                     return Err(DirParseError::Truncated);
-                }
-                let size_field = u32::from_le_bytes([
-                    decompressed[record_start + 2],
-                    decompressed[record_start + 3],
-                    decompressed[record_start + 4],
-                    decompressed[record_start + 5],
-                ]) as usize;
+                };
+                let size_field =
+                    u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as usize;
 
-                let tlv_end = record_start.saturating_add(6).saturating_add(size_field);
-                let fixed_end = record_start.saturating_add(12);
+                let tlv_end = record_end.checked_add(size_field).unwrap_or(usize::MAX);
+                let fixed_end = record_start.checked_add(12).unwrap_or(usize::MAX);
 
                 let tlv_next_ok = looks_like_projectversion_following_record(decompressed, tlv_end);
                 let fixed_next_ok =
@@ -135,36 +137,58 @@ impl DirStream {
             // Reserved=0x0032 + Unicode tail is present.
             if id == 0x001A {
                 let record_start = offset;
-                if record_start + 6 > decompressed.len() {
+                let header_end = record_start
+                    .checked_add(6)
+                    .ok_or(DirParseError::Truncated)?;
+                let Some(header) = decompressed.get(record_start..header_end) else {
                     return Err(DirParseError::Truncated);
-                }
-                let size_name = u32::from_le_bytes([
-                    decompressed[record_start + 2],
-                    decompressed[record_start + 3],
-                    decompressed[record_start + 4],
-                    decompressed[record_start + 5],
-                ]) as usize;
+                };
+                let size_name =
+                    u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as usize;
 
-                let name_start = record_start + 6;
-                let name_end = name_start + size_name;
+                let name_start = record_start
+                    .checked_add(6)
+                    .ok_or(DirParseError::Truncated)?;
+                let name_end = name_start
+                    .checked_add(size_name)
+                    .ok_or(DirParseError::BadRecordLength { id, len: size_name })?;
                 if name_end > decompressed.len() {
                     return Err(DirParseError::BadRecordLength { id, len: size_name });
                 }
 
                 // Parse the Unicode stream name when the reserved marker is present immediately
                 // after the MBCS bytes.
-                if name_end + 6 <= decompressed.len() {
-                    let reserved =
-                        u16::from_le_bytes([decompressed[name_end], decompressed[name_end + 1]]);
+                if name_end.checked_add(6).is_some_and(|end| end <= decompressed.len()) {
+                    let reserved_end = name_end
+                        .checked_add(2)
+                        .ok_or(DirParseError::Truncated)?;
+                    let Some(reserved_bytes) = decompressed.get(name_end..reserved_end) else {
+                        return Err(DirParseError::Truncated);
+                    };
+                    let reserved = u16::from_le_bytes([reserved_bytes[0], reserved_bytes[1]]);
                     if reserved == 0x0032 {
+                        let len_start = reserved_end;
+                        let len_end = len_start
+                            .checked_add(4)
+                            .ok_or(DirParseError::Truncated)?;
+                        let Some(unicode_len_bytes) = decompressed.get(len_start..len_end) else {
+                            return Err(DirParseError::Truncated);
+                        };
                         let size_unicode = u32::from_le_bytes([
-                            decompressed[name_end + 2],
-                            decompressed[name_end + 3],
-                            decompressed[name_end + 4],
-                            decompressed[name_end + 5],
+                            unicode_len_bytes[0],
+                            unicode_len_bytes[1],
+                            unicode_len_bytes[2],
+                            unicode_len_bytes[3],
                         ]) as usize;
-                        let unicode_start = name_end + 6;
-                        let unicode_end = unicode_start + size_unicode;
+                        let unicode_start = name_end
+                            .checked_add(6)
+                            .ok_or(DirParseError::Truncated)?;
+                        let unicode_end = unicode_start
+                            .checked_add(size_unicode)
+                            .ok_or(DirParseError::BadRecordLength {
+                                id,
+                                len: size_unicode,
+                            })?;
                         if unicode_end > decompressed.len() {
                             return Err(DirParseError::BadRecordLength {
                                 id,
@@ -199,21 +223,22 @@ impl DirStream {
                 continue;
             }
 
-            if offset + 6 > decompressed.len() {
+            let Some(header_end) = offset.checked_add(6) else {
                 return Err(DirParseError::Truncated);
-            }
-            let len = u32::from_le_bytes([
-                decompressed[offset + 2],
-                decompressed[offset + 3],
-                decompressed[offset + 4],
-                decompressed[offset + 5],
-            ]) as usize;
+            };
+            let Some(header) = decompressed.get(offset..header_end) else {
+                return Err(DirParseError::Truncated);
+            };
+            let len = u32::from_le_bytes([header[2], header[3], header[4], header[5]]) as usize;
             offset += 6;
-            if offset + len > decompressed.len() {
+            let Some(end) = offset.checked_add(len) else {
+                return Err(DirParseError::BadRecordLength { id, len });
+            };
+            if end > decompressed.len() {
                 return Err(DirParseError::BadRecordLength { id, len });
             }
-            let data = &decompressed[offset..offset + len];
-            offset += len;
+            let data = decompressed.get(offset..end).ok_or(DirParseError::Truncated)?;
+            offset = end;
 
             if expect_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
                 expect_stream_name_unicode = false;
@@ -351,20 +376,21 @@ impl DirStream {
     /// Best-effort extraction of `PROJECTCODEPAGE` from a decompressed `VBA/dir` stream.
     pub fn detect_codepage(decompressed: &[u8]) -> Option<u16> {
         let mut offset = 0usize;
-        while offset + 6 <= decompressed.len() {
-            let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
-            let len = u32::from_le_bytes([
-                decompressed[offset + 2],
-                decompressed[offset + 3],
-                decompressed[offset + 4],
-                decompressed[offset + 5],
-            ]) as usize;
-            offset += 6;
-            if offset + len > decompressed.len() {
+        while let Some(hdr_end) = offset.checked_add(6) {
+            let Some(hdr) = decompressed.get(offset..hdr_end) else {
                 break;
-            }
-            let data = &decompressed[offset..offset + len];
-            offset += len;
+            };
+            let id = u16::from_le_bytes([hdr[0], hdr[1]]);
+            let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+            offset = hdr_end;
+
+            let Some(end) = offset.checked_add(len) else {
+                break;
+            };
+            let Some(data) = decompressed.get(offset..end) else {
+                break;
+            };
+            offset = end;
             if id == 0x0003 && data.len() >= 2 {
                 return Some(u16::from_le_bytes([data[0], data[1]]));
             }
@@ -377,10 +403,13 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     if offset == bytes.len() {
         return true;
     }
-    if offset + 6 > bytes.len() {
+    let Some(hdr_end) = offset.checked_add(6) else {
         return false;
-    }
-    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    };
+    let Some(hdr) = bytes.get(offset..hdr_end) else {
+        return false;
+    };
+    let id = u16::from_le_bytes([hdr[0], hdr[1]]);
     // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
     // ProjectModules header, or (in some real-world streams) PROJECTCOMPATVERSION.
     if !matches!(
@@ -404,13 +433,11 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     ) {
         return false;
     }
-    let len = u32::from_le_bytes([
-        bytes[offset + 2],
-        bytes[offset + 3],
-        bytes[offset + 4],
-        bytes[offset + 5],
-    ]) as usize;
-    offset + 6 + len <= bytes.len()
+    let len = u32::from_le_bytes([hdr[2], hdr[3], hdr[4], hdr[5]]) as usize;
+    offset
+        .checked_add(6)
+        .and_then(|v| v.checked_add(len))
+        .is_some_and(|end| end <= bytes.len())
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
