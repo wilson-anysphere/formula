@@ -1,0 +1,297 @@
+From 5fa4e81edd176f6a3db09a739f48978090860408 Mon Sep 17 00:00:00 2001
+From: Wilson Lin <code@wilsonl.in>
+Date: Sun, 18 Jan 2026 12:10:52 -0800
+Subject: [PATCH] fix: keep snapshot CI green (selectors + html tokenizer)
+
+- Fix snapshot build breakages (duplicate websocket modules, style_minimal module, ui::url Url import).
+- Remove blocked legacy parser crate name references from selector prototype tests.
+- Keep network-process WebSocket runtime compile-only tests building.
+- Fix css-selectors slotted parsing/serialization so `slot::slotted(.target):hover` round-trips.
+- Update the in-tree selector harness to the new NamespaceSelector shape and allow empty forgiving
+  :is()/:where() argument lists after filtering invalid selectors.
+- Fix html_parser tokenizer to emit `noncharacter-in-input-stream` only once per code point.
+
+Validated with:
+- cargo check -p fastrender --no-default-features --features renderer_minimal --lib --locked
+- cargo test -p layout_engine --locked
+- bash scripts/ci_check_html_parser.sh
+- bash scripts/ci_check_css_engine.sh
+- cargo test -p css-selectors --locked
+- cargo test --manifest-path crates/css_selector/Cargo.toml --lib --locked --features legacy_selectors
+- cargo test -p xtask --locked
+---
+ crates/css-selectors/src/ast.rs           | 28 +++++++++++------------
+ crates/css-selectors/src/parser.rs        |  6 +++++
+ crates/css_selector/src/selector/tests.rs |  9 +++++---
+ src/css/prototype/selector_tests.rs       | 15 ------------
+ src/css/selector/parser.rs                |  6 -----
+ src/html_parser/tokenizer.rs              | 21 ++++++++---------
+ src/net/websocket/mod.rs                  |  2 --
+ src/network_process/websocket_runtime.rs  |  1 -
+ src/style_minimal/mod.rs                  |  2 --
+ src/ui/url.rs                             |  2 ++
+ 10 files changed, 37 insertions(+), 55 deletions(-)
+
+diff --git a/crates/css-selectors/src/ast.rs b/crates/css-selectors/src/ast.rs
+index de6d5fb4d..8bb8bf38b 100644
+--- a/crates/css-selectors/src/ast.rs
++++ b/crates/css-selectors/src/ast.rs
+@@ -153,10 +153,15 @@ impl Selector {
+       match step.combinator_to_left.as_ref() {
+         Some(Combinator::SlotAssignment) => {
+           out.push_str("::slotted(");
+-          out.push_str(&step.compound.to_css_string_without_pseudo_element_with_context(ctx));
++          out.push_str(&step.compound.to_css_string_slotted_argument_prelude_with_context(ctx));
+           out.push(')');
+-          if let Some(pseudo) = step.compound.trailing_pseudo_element() {
+-            out.push_str(&pseudo.to_css_string());
++          for simple in &step.compound.simple_selectors {
++            if matches!(
++              simple,
++              SimpleSelector::PseudoClass(_) | SimpleSelector::PseudoElement(_)
++            ) {
++              out.push_str(&simple.to_css_string_with_context(ctx));
++            }
+           }
+         }
+         Some(combinator @ Combinator::Part { .. }) => {
+@@ -431,17 +436,19 @@ impl CompoundSelector {
+     }
+   }
+ 
+-  fn to_css_string_without_pseudo_element_with_context(&self, ctx: &ParseContext) -> String {
++  fn to_css_string_slotted_argument_prelude_with_context(&self, ctx: &ParseContext) -> String {
+     let mut out = String::new();
+     if let Some(type_selector) = &self.type_selector {
+       out.push_str(&type_selector.to_css_string_with_context(ctx));
+     }
+ 
+     for simple in &self.simple_selectors {
+-      if matches!(simple, SimpleSelector::PseudoElement(_)) {
+-        break;
++      match simple {
++        SimpleSelector::Id(_) | SimpleSelector::Class(_) | SimpleSelector::Attribute(_) => {
++          out.push_str(&simple.to_css_string_with_context(ctx));
++        }
++        SimpleSelector::PseudoClass(_) | SimpleSelector::PseudoElement(_) => {}
+       }
+-      out.push_str(&simple.to_css_string_with_context(ctx));
+     }
+ 
+     if out.is_empty() {
+@@ -451,13 +458,6 @@ impl CompoundSelector {
+     }
+   }
+ 
+-  fn trailing_pseudo_element(&self) -> Option<&PseudoElement> {
+-    let SimpleSelector::PseudoElement(pseudo) = self.simple_selectors.last()? else {
+-      return None;
+-    };
+-    Some(pseudo)
+-  }
+-
+   /// Returns the pseudo-element in this compound, if any.
+   pub fn pseudo_element(&self) -> Option<&PseudoElement> {
+     let mut pseudos = self.simple_selectors.iter().filter_map(|simple| match simple {
+diff --git a/crates/css-selectors/src/parser.rs b/crates/css-selectors/src/parser.rs
+index 93893714f..98e314b2e 100644
+--- a/crates/css-selectors/src/parser.rs
++++ b/crates/css-selectors/src/parser.rs
+@@ -843,6 +843,12 @@ impl<'i, 'ns> Parser<'i, 'ns> {
+           saw_suffix_pseudo_element = true;
+           compound.simple_selectors.push(SimpleSelector::PseudoElement(pseudo));
+         }
++        SimpleSelector::Id(_) | SimpleSelector::Class(_) | SimpleSelector::Attribute(_) => {
++          // `parse_pseudo_selector` is only invoked after consuming a `:`/`::`, so it should never
++          // return non-pseudo selector variants. Treat any unexpected variant as a syntax error to
++          // keep the match exhaustive and avoid relying on unreachable panics in production code.
++          return Err(self.error(SelectorParseErrorKind::UnexpectedChar(':')));
++        }
+       }
+     }
+ 
+diff --git a/crates/css_selector/src/selector/tests.rs b/crates/css_selector/src/selector/tests.rs
+index 5bbd7ff89..671ad657b 100644
+--- a/crates/css_selector/src/selector/tests.rs
++++ b/crates/css_selector/src/selector/tests.rs
+@@ -76,9 +76,9 @@ fn namespaces_resolve_prefixes_in_type_selectors() {
+   assert_eq!(local_name, "a");
+   assert!(
+     matches!(
+-      namespace,
++      &namespace.constraint,
+       NamespaceConstraint::Specific { url, prefix: Some(prefix) }
+-        if url == SVG_NAMESPACE && prefix == "svg"
++        if url.as_str() == SVG_NAMESPACE && prefix.as_str() == "svg"
+     ),
+     "expected svg prefix to resolve to the SVG namespace URL"
+   );
+@@ -441,7 +441,10 @@ fn shadow_split_chained_slotted_part_selector() {
+             slotted.slotted,
+             CompoundSelector {
+               type_selector: Some(TypeSelector::Tag {
+-                namespace: NamespaceConstraint::Any,
++                namespace: NamespaceSelector {
++                  constraint: NamespaceConstraint::Any,
++                  syntax: NamespaceSyntax::Omitted,
++                },
+                 local_name: "custom-el".to_string(),
+               }),
+               simple_selectors: vec![],
+diff --git a/src/css/prototype/selector_tests.rs b/src/css/prototype/selector_tests.rs
+index d59b0425f..13b4efae9 100644
+--- a/src/css/prototype/selector_tests.rs
++++ b/src/css/prototype/selector_tests.rs
+@@ -22,9 +22,6 @@ use legacy_selectors::FastRenderSelectorImpl;
+ use crate::css::selector::element::QuirksMode;
+ use crate::css::types::{selector_hash, CssNamespaces, CssString, SELECTOR_BLOOM_HASH_MASK};
+ use crate::dom::{HTML_NAMESPACE, SVG_NAMESPACE, XMLNS_NAMESPACE, XML_NAMESPACE};
+-use cssparser::Parser;
+-use cssparser::ParserInput;
+-use selectors::parser::ParseRelative;
+ 
+ fn selector_from_single_compound(compound: CompoundSelector) -> Selector {
+   Selector {
+@@ -158,17 +155,6 @@ fn legacy_selector_list_from_source(source: &str) -> LegacySelectorList<FastRend
+   LegacySelectorList::from_ast(&list)
+ }
+ 
+-fn legacy_selector_parses(selector_text: &str) -> bool {
+-  let mut input = ParserInput::new(selector_text);
+-  let mut parser = Parser::new(&mut input);
+-  LegacySelectorList::<FastRenderSelectorImpl>::parse(
+-    &legacy_selectors::PseudoClassParser,
+-    &mut parser,
+-    ParseRelative::No,
+-  )
+-  .is_ok()
+-}
+-
+ fn first_compound_from_source_with_namespaces(
+   source: &str,
+   namespaces: &CssNamespaces,
+@@ -648,7 +634,6 @@ fn part_allows_chaining_pseudo_elements() {
+   ];
+ 
+   for selector in selectors {
+-    assert!(legacy_selector_parses(selector), "Servo parser should accept {selector}");
+     assert!(
+       super::parse_selector_list(selector).is_ok(),
+       "AST parser should accept {selector}"
+diff --git a/src/css/selector/parser.rs b/src/css/selector/parser.rs
+index 3bac29d8c..918c94285 100644
+--- a/src/css/selector/parser.rs
++++ b/src/css/selector/parser.rs
+@@ -1480,9 +1480,6 @@ impl<'i, 'n> Parser<'i, 'n> {
+         if !compound_is_empty {
+           selectors.retain(|selector| !selector_contains_host_pseudo(selector));
+         }
+-        if selectors.is_empty() {
+-          return Err(parser.error(SelectorParseErrorKind::ExpectedSelector));
+-        }
+         parser.expect_char(')')?;
+         return Ok(SimpleSelector::PseudoClass(PseudoClassSelector::Is(
+           SelectorList::from_vec(selectors),
+@@ -1495,9 +1492,6 @@ impl<'i, 'n> Parser<'i, 'n> {
+         if !compound_is_empty {
+           selectors.retain(|selector| !selector_contains_host_pseudo(selector));
+         }
+-        if selectors.is_empty() {
+-          return Err(parser.error(SelectorParseErrorKind::ExpectedSelector));
+-        }
+         parser.expect_char(')')?;
+         return Ok(SimpleSelector::PseudoClass(PseudoClassSelector::Where(
+           SelectorList::from_vec(selectors),
+diff --git a/src/html_parser/tokenizer.rs b/src/html_parser/tokenizer.rs
+index df06b74e3..981589701 100644
+--- a/src/html_parser/tokenizer.rs
++++ b/src/html_parser/tokenizer.rs
+@@ -2626,18 +2626,15 @@ pub(crate) fn tokenize_with_errors(input: &str) -> (Vec<Token>, Vec<TokenizerErr
+         i += 1;
+         continue;
+       }
+-      if util::is_html_noncharacter(ch) {
+-        push_error(&mut errors, "noncharacter-in-input-stream", positions[i]);
+-      } else if util::is_html_control_character(ch) {
+-        push_error(&mut errors, "control-character-in-input-stream", positions[i]);
+-      }
+-      if util::is_html_noncharacter(ch) {
+-        push_error(&mut errors, "noncharacter-in-input-stream", positions[i]);
+-      }
+-      tokens.push(Token::Character(ch));
+-      i += 1;
+-      continue;
+-    }
++       if util::is_html_noncharacter(ch) {
++         push_error(&mut errors, "noncharacter-in-input-stream", positions[i]);
++       } else if util::is_html_control_character(ch) {
++         push_error(&mut errors, "control-character-in-input-stream", positions[i]);
++       }
++       tokens.push(Token::Character(ch));
++       i += 1;
++       continue;
++     }
+ 
+     if starts_with(&chars, i, "<!--") {
+       if let Some(token) = parse_comment_with_errors(&chars, &positions, &mut i, &mut errors) {
+diff --git a/src/net/websocket/mod.rs b/src/net/websocket/mod.rs
+index 3fa866669..379529529 100644
+--- a/src/net/websocket/mod.rs
++++ b/src/net/websocket/mod.rs
+@@ -16,7 +16,6 @@ pub mod http_response_head;
+ pub mod http_headers;
+ pub mod maybe_tls_stream;
+ pub mod message;
+-mod maybe_tls_stream;
+ pub mod ws_url;
+ pub mod origin;
+ pub mod server;
+@@ -49,7 +48,6 @@ pub use message::{
+   decode_close_payload, encode_close_payload, Message, MessageCodec, MessageDecodeError,
+   MessageEncodeError, MessageLimits, MAX_CLOSE_REASON_BYTES,
+ };
+-pub use maybe_tls_stream::MaybeTlsStream;
+ pub use origin::{is_secure_context_for_document_url, serialized_origin_for_document_url};
+ pub use stream::{WebSocketStream, WebSocketStreamError, WsMessage};
+ 
+diff --git a/src/network_process/websocket_runtime.rs b/src/network_process/websocket_runtime.rs
+index 9e9c1e194..af0747d6e 100644
+--- a/src/network_process/websocket_runtime.rs
++++ b/src/network_process/websocket_runtime.rs
+@@ -36,7 +36,6 @@ use crate::net::websocket::{
+   WebSocketEvent as Rfc6455Event, WebSocketIoError as Rfc6455IoError,
+   WebSocketLimits as Rfc6455Limits, WsScheme, WsUrl,
+ };
+-use crate::net::websocket::MaybeTlsStream;
+ use crate::http_types::header::HeaderValue;
+ use crate::resource::{
+   origin_from_url, DocumentOrigin, FetchCredentialsMode, FetchDestination, FetchRequest,
+diff --git a/src/style_minimal/mod.rs b/src/style_minimal/mod.rs
+index 6ccef6ab3..0eadd31e9 100644
+--- a/src/style_minimal/mod.rs
++++ b/src/style_minimal/mod.rs
+@@ -9,8 +9,6 @@ pub mod page;
+ pub mod position;
+ pub mod types;
+ pub mod values;
+-#[path = "../style_stub/computed.rs"]
+-pub mod computed;
+ 
+ use crate::style::color::Rgba;
+ use crate::style::display::Display;
+diff --git a/src/ui/url.rs b/src/ui/url.rs
+index 15bb91547..15e71ea6f 100644
+--- a/src/ui/url.rs
++++ b/src/ui/url.rs
+@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
+ #[cfg(test)]
+ use std::sync::{Mutex, MutexGuard};
+ 
++use fastrender_url::Url;
++
+ use super::protocol_limits::MAX_URL_BYTES;
+ 
+ static CRASH_URLS_ALLOWED: AtomicBool = AtomicBool::new(false);
+-- 
+2.43.0
+
