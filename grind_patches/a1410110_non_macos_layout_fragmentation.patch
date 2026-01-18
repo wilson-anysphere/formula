@@ -1,4 +1,4 @@
-From bae8c4c72bf9ff313e6a44fa218a911feb6202f6 Mon Sep 17 00:00:00 2001
+From a1410110dbc2c845b8b5aeb472b82b3c2e149bc9 Mon Sep 17 00:00:00 2001
 From: Wilson Lin <code@wilsonl.in>
 Date: Sun, 18 Jan 2026 04:14:58 -0800
 Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
@@ -11,8 +11,10 @@ Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
 - Clean up non-macOS build breakage (WebSocket module exports, ipc_stack feature, fastrender_url helper, Cargo.lock)
 - Enable and fix grid track range regression tests (no inner-test warnings; keep 0px tracks intact)
 - Ensure flex abspos profiling calls record_out_of_flow_placement_time (keeps layout_engine policy tests passing)
+- Fix xtask guardrails (vendoring policy expectations + remove duplicate workspace excludes)
 ---
  Cargo.lock                                    |   8 -
+ Cargo.toml                                    |   3 -
  crates/fastrender_url/src/code_points.rs      |   1 -
  crates/ipc_stack/Cargo.toml                   |   3 +
  src/css/loader.rs                             |  45 ++++
@@ -33,7 +35,8 @@ Subject: [PATCH] fix: stabilize non-macOS layout fragmentation and URL
  src/net/websocket/stream.rs                   |   1 +
  src/platform/macos/scroll_end.rs              |   4 +-
  src/utils/js_escapes.rs                       |  14 ++
- 21 files changed, 515 insertions(+), 119 deletions(-)
+ xtask/src/lint_vendoring_policy.rs            |  10 +-
+ 23 files changed, 520 insertions(+), 127 deletions(-)
 
 diff --git a/Cargo.lock b/Cargo.lock
 index 73bb2fbee5..4e1e724411 100644
@@ -54,6 +57,20 @@ index 73bb2fbee5..4e1e724411 100644
  [[package]]
  name = "utf8_iter"
  version = "1.0.4"
+diff --git a/Cargo.toml b/Cargo.toml
+index 2ec85a6236..d1775f3023 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -114,9 +114,6 @@ exclude = [
+   "crates/svg_scene",
+   "crates/tar",
+   "crates/tls_test_support",
+-  # Keep the in-tree compatibility shim for the blocked crates.io `url` crate out of the snapshot
+-  # workspace. (Standalone builds can use their own lockfile via `--manifest-path`.)
+-  "crates/url",
+   "crates/vm-js-check",
+   "crates/whatwg_url",
+   "crates/wpt-import",
 diff --git a/crates/fastrender_url/src/code_points.rs b/crates/fastrender_url/src/code_points.rs
 index 8037df7030..2abf204655 100644
 --- a/crates/fastrender_url/src/code_points.rs
@@ -1242,6 +1259,38 @@ index cc5dc49753..d2548184e5 100644
                  if let Some(ch) = char::from_u32(code as u32) {
                    out.push(ch);
                    i += 6;
+diff --git a/xtask/src/lint_vendoring_policy.rs b/xtask/src/lint_vendoring_policy.rs
+index cd12bafe84..7575244186 100644
+--- a/xtask/src/lint_vendoring_policy.rs
++++ b/xtask/src/lint_vendoring_policy.rs
+@@ -549,9 +549,9 @@ foo = { path = "../foo" }
+   fn reports_unexpected_vendor_directory() {
+     let dir = tempfile::tempdir().expect("tempdir");
+     fs::create_dir_all(dir.path().join("vendor/ecma-rs")).expect("mkdir vendor/ecma-rs");
+-    fs::create_dir_all(dir.path().join("vendor/taffy")).expect("mkdir vendor/taffy");
+     fs::create_dir_all(dir.path().join("vendor/html5lib-tests"))
+       .expect("mkdir vendor/html5lib-tests");
++    fs::create_dir_all(dir.path().join("vendor/taffy")).expect("mkdir vendor/taffy");
+     fs::create_dir_all(dir.path().join("vendor/not-allowed")).expect("mkdir vendor/not-allowed");
+ 
+     let hits = lint_repo(dir.path()).expect("lint temp repo");
+@@ -560,12 +560,12 @@ foo = { path = "../foo" }
+       "expected vendor/not-allowed violation; got {hits:#?}"
+     );
+     assert!(
+-      !hits.iter().any(|hit| hit.path == "vendor/ecma-rs"),
+-      "did not expect allowlisted vendor/ecma-rs to be reported; got {hits:#?}"
++      hits.iter().any(|hit| hit.path == "vendor/taffy"),
++      "expected vendor/taffy violation; got {hits:#?}"
+     );
+     assert!(
+-      !hits.iter().any(|hit| hit.path == "vendor/taffy"),
+-      "did not expect allowlisted vendor/taffy to be reported; got {hits:#?}"
++      !hits.iter().any(|hit| hit.path == "vendor/ecma-rs"),
++      "did not expect allowlisted vendor/ecma-rs to be reported; got {hits:#?}"
+     );
+     assert!(
+       !hits.iter().any(|hit| hit.path == "vendor/html5lib-tests"),
 -- 
 2.43.0
 
