@@ -337,8 +337,10 @@ fn read_encrypted_package_stream<R: Read + Seek>(
 
     // Mirror `util::parse_encrypted_package_original_size`, but use the stream length rather than
     // requiring the whole ciphertext in memory up front.
-    let len_lo = u32::from_le_bytes(size_prefix[..4].try_into().unwrap()) as u64;
-    let len_hi = u32::from_le_bytes(size_prefix[4..].try_into().unwrap()) as u64;
+    let len_lo = u32::from_le_bytes([size_prefix[0], size_prefix[1], size_prefix[2], size_prefix[3]])
+        as u64;
+    let len_hi = u32::from_le_bytes([size_prefix[4], size_prefix[5], size_prefix[6], size_prefix[7]])
+        as u64;
     let size_u64 = len_lo | (len_hi << 32);
     let total_size = if len_lo != 0
         && len_hi != 0

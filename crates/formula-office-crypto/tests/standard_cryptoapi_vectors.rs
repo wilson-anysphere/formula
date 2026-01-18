@@ -23,14 +23,16 @@ const EXPECTED_KEY_AES192_BLOCK0: [u8; 24] = [
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     s = s.trim();
-    let mut compact = String::with_capacity(s.len());
+    let mut compact = String::new();
+    let _ = compact.try_reserve(s.len());
     for ch in s.chars() {
         if ch.is_ascii_hexdigit() {
             compact.push(ch);
         }
     }
     assert_eq!(compact.len() % 2, 0, "hex string must have even length");
-    let mut out = Vec::with_capacity(compact.len() / 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(compact.len() / 2);
     let bytes = compact.as_bytes();
     for i in (0..bytes.len()).step_by(2) {
         let hi = (bytes[i] as char).to_digit(16).unwrap();
@@ -41,7 +43,8 @@ fn hex_decode(mut s: &str) -> Vec<u8> {
 }
 
 fn password_to_utf16le(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for cu in password.encode_utf16() {
         out.extend_from_slice(&cu.to_le_bytes());
     }
@@ -267,7 +270,8 @@ fn standard_cryptoapi_rc4_sha1_vector_decrypts_package() {
     let verifier_plain: [u8; 16] = *b"formula-rc4-test";
     let verifier_hash: [u8; 20] = Sha1::digest(&verifier_plain).into();
     let verifier_hash_size = verifier_hash.len() as u32;
-    let mut verifier_buf = Vec::with_capacity(16 + verifier_hash.len());
+    let mut verifier_buf = Vec::new();
+    let _ = verifier_buf.try_reserve_exact(16usize.saturating_add(verifier_hash.len()));
     verifier_buf.extend_from_slice(&verifier_plain);
     verifier_buf.extend_from_slice(&verifier_hash);
     rc4_apply(&key0, &mut verifier_buf); // single continuous RC4 stream
@@ -386,7 +390,8 @@ fn standard_cryptoapi_rc4_md5_vector_decrypts_package() {
     let verifier_hash: [u8; 16] = Md5::digest(&verifier_plain).into();
     let verifier_hash_size = verifier_hash.len() as u32;
 
-    let mut verifier_buf = Vec::with_capacity(16 + verifier_hash.len());
+    let mut verifier_buf = Vec::new();
+    let _ = verifier_buf.try_reserve_exact(16usize.saturating_add(verifier_hash.len()));
     verifier_buf.extend_from_slice(&verifier_plain);
     verifier_buf.extend_from_slice(&verifier_hash);
     rc4_apply(&key0, &mut verifier_buf);

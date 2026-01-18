@@ -596,8 +596,12 @@ fn verify_password_standard_with_key_and_mode(
             // RC4 is a stream cipher. CryptoAPI encrypts/decrypts the verifier and verifier hash
             // using the **same** RC4 stream (continuing the keystream), so we must apply RC4 to the
             // concatenated bytes rather than resetting the cipher per field.
-            let mut buf = Vec::with_capacity(
-                verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
+            let mut buf = Vec::new();
+            let _ = buf.try_reserve_exact(
+                verifier
+                    .encrypted_verifier
+                    .len()
+                    .saturating_add(verifier.encrypted_verifier_hash.len()),
             );
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);
@@ -714,8 +718,12 @@ fn verify_password_standard_with_key_and_mode(
 
                 // 2) Some producers may encrypt the verifier + verifier hash as one CBC stream.
                 // Attempt that as well (decrypt concatenation, then split).
-                let mut concat = Vec::with_capacity(
-                    verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
+                let mut concat = Vec::new();
+                let _ = concat.try_reserve_exact(
+                    verifier
+                        .encrypted_verifier
+                        .len()
+                        .saturating_add(verifier.encrypted_verifier_hash.len()),
                 );
                 concat.extend_from_slice(&verifier.encrypted_verifier);
                 concat.extend_from_slice(&verifier.encrypted_verifier_hash);
@@ -1026,7 +1034,15 @@ fn decrypt_standard_with_scheme(
                 })?;
                 iv.to_vec()
             }
-            StandardScheme::Ecb => unreachable!("guarded by !matches!(scheme, Ecb)"),
+            StandardScheme::Ecb => {
+                debug_assert!(
+                    false,
+                    "CBC verifier fallback attempted with ECB scheme"
+                );
+                return Err(OfficeCryptoError::InvalidFormat(
+                    "internal error: CBC verifier fallback attempted with ECB scheme".to_string(),
+                ));
+            }
         };
 
         let verifier_plain = aes_cbc_decrypt(
@@ -1280,7 +1296,8 @@ pub(crate) fn encrypt_standard_encrypted_package(
 }
 
 fn encode_utf16le_nul_terminated(s: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len() * 2 + 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(s.len().saturating_mul(2).saturating_add(2));
     for cu in s.encode_utf16() {
         out.extend_from_slice(&cu.to_le_bytes());
     }
@@ -1535,7 +1552,8 @@ pub(crate) mod tests {
         );
 
         let verifier_hash = hash_alg.digest(&verifier_plain);
-        let mut verifier_buf = Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
+        let mut verifier_buf = Vec::new();
+        let _ = verifier_buf.try_reserve_exact(verifier_plain.len().saturating_add(verifier_hash.len()));
         verifier_buf.extend_from_slice(&verifier_plain);
         verifier_buf.extend_from_slice(&verifier_hash);
         rc4_xor_in_place(&key0, &mut verifier_buf).expect("rc4 encrypt verifier");
@@ -1597,7 +1615,8 @@ pub(crate) mod tests {
         let pw = password_to_utf16le(password);
         let pw_hash = hash_password(hash_alg, salt, &pw, 50_000);
 
-        let mut buf = Vec::with_capacity(pw_hash.len() + 4);
+        let mut buf = Vec::new();
+        let _ = buf.try_reserve_exact(pw_hash.len().saturating_add(4));
         buf.extend_from_slice(&pw_hash);
         buf.extend_from_slice(&block_index.to_le_bytes());
         let h = hash_alg.digest(&buf);
@@ -1694,8 +1713,9 @@ pub(crate) mod tests {
                 // Encrypt verifier + verifierHash with RC4 using a single continuous stream (the
                 // CryptoAPI/Office behavior).
                 let verifier_hash = hash_alg.digest(&verifier_plain);
-                let mut verifier_buf =
-                    Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
+                let mut verifier_buf = Vec::new();
+                let _ = verifier_buf
+                    .try_reserve_exact(verifier_plain.len().saturating_add(verifier_hash.len()));
                 verifier_buf.extend_from_slice(&verifier_plain);
                 verifier_buf.extend_from_slice(&verifier_hash);
                 rc4_xor_in_place(&key_ref, &mut verifier_buf).expect("rc4 encrypt verifier buf");
@@ -1866,7 +1886,8 @@ pub(crate) mod tests {
         // Ensure the AES derivation is *not* the RC4-style truncation.
         let pw = password_to_utf16le(password);
         let pw_hash = hash_password(hash_alg, &salt, &pw, 50_000);
-        let mut buf = Vec::with_capacity(pw_hash.len() + 4);
+        let mut buf = Vec::new();
+        let _ = buf.try_reserve_exact(pw_hash.len().saturating_add(4));
         buf.extend_from_slice(&pw_hash);
         buf.extend_from_slice(&0u32.to_le_bytes());
         let h_final = hash_alg.digest(&buf);

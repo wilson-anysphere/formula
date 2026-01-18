@@ -85,7 +85,8 @@ fn parse_hash_algorithm(name: &str) -> HashAlgorithm {
 }
 
 fn password_to_utf16le(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for cu in password.encode_utf16() {
         out.extend_from_slice(&cu.to_le_bytes());
     }
@@ -118,12 +119,14 @@ fn hash_password(
     password_utf16le: &[u8],
     spin_count: u32,
 ) -> Vec<u8> {
-    let mut initial = Vec::with_capacity(salt.len() + password_utf16le.len());
+    let mut initial = Vec::new();
+    let _ = initial.try_reserve_exact(salt.len().saturating_add(password_utf16le.len()));
     initial.extend_from_slice(salt);
     initial.extend_from_slice(password_utf16le);
     let mut h = digest(hash_alg, &initial);
     for i in 0..spin_count {
-        let mut tmp = Vec::with_capacity(4 + h.len());
+        let mut tmp = Vec::new();
+        let _ = tmp.try_reserve_exact(4usize.saturating_add(h.len()));
         tmp.extend_from_slice(&i.to_le_bytes());
         tmp.extend_from_slice(&h);
         h = digest(hash_alg, &tmp);
@@ -140,14 +143,16 @@ fn derive_agile_key(
     block_key: &[u8],
 ) -> Vec<u8> {
     let h = hash_password(hash_alg, salt, password_utf16le, spin_count);
-    let mut tmp = Vec::with_capacity(h.len() + block_key.len());
+    let mut tmp = Vec::new();
+    let _ = tmp.try_reserve_exact(h.len().saturating_add(block_key.len()));
     tmp.extend_from_slice(&h);
     tmp.extend_from_slice(block_key);
     truncate_hash(digest(hash_alg, &tmp), key_bytes)
 }
 
 fn derive_iv(hash_alg: HashAlgorithm, salt: &[u8], block_key: &[u8], iv_len: usize) -> Vec<u8> {
-    let mut tmp = Vec::with_capacity(salt.len() + block_key.len());
+    let mut tmp = Vec::new();
+    let _ = tmp.try_reserve_exact(salt.len().saturating_add(block_key.len()));
     tmp.extend_from_slice(salt);
     tmp.extend_from_slice(block_key);
     truncate_hash(digest(hash_alg, &tmp), iv_len)
@@ -313,7 +318,8 @@ fn replace_xml_attr(xml: &str, attr: &str, new_value: &str) -> String {
         .unwrap_or_else(|| panic!("unterminated attribute {attr}"));
     let value_end = value_start + end_rel;
 
-    let mut out = String::with_capacity(xml.len() - (value_end - value_start) + new_value.len());
+    let mut out = String::new();
+    let _ = out.try_reserve(xml.len().saturating_sub(value_end - value_start).saturating_add(new_value.len()));
     out.push_str(&xml[..value_start]);
     out.push_str(new_value);
     out.push_str(&xml[value_end..]);

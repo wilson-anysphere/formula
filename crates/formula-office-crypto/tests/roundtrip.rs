@@ -1706,7 +1706,8 @@ fn encrypt_agile_ooxml_ole_header_plus_plaintext_hmac_with_size_header(
 
     // Integrity (HMAC over 8-byte header + plaintext).
     let hmac_key_plain = [0x22u8; 64];
-    let mut header_plus_plain = Vec::with_capacity(size_header.len() + plaintext.len());
+    let mut header_plus_plain = Vec::new();
+    let _ = header_plus_plain.try_reserve_exact(size_header.len().saturating_add(plaintext.len()));
     header_plus_plain.extend_from_slice(&size_header);
     header_plus_plain.extend_from_slice(plaintext);
     let hmac_value_plain = hmac_sha512(&hmac_key_plain, &header_plus_plain);
@@ -1768,7 +1769,8 @@ fn encrypt_agile_ooxml_ole_header_plus_plaintext_hmac_with_size_header(
 }
 
 fn password_to_utf16le(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for cu in password.encode_utf16() {
         out.extend_from_slice(&cu.to_le_bytes());
     }
@@ -1784,7 +1786,8 @@ fn sha1_digest(data: &[u8]) -> [u8; 20] {
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     s = s.trim();
-    let mut compact = String::with_capacity(s.len());
+    let mut compact = String::new();
+    let _ = compact.try_reserve(s.len());
     for ch in s.chars() {
         if ch.is_ascii_hexdigit() {
             compact.push(ch);
@@ -1792,7 +1795,8 @@ fn hex_decode(mut s: &str) -> Vec<u8> {
     }
     assert_eq!(compact.len() % 2, 0, "hex string must have even length");
     let bytes = compact.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(bytes.len() / 2);
     for i in (0..bytes.len()).step_by(2) {
         let hi = (bytes[i] as char).to_digit(16).unwrap();
         let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
@@ -1815,17 +1819,20 @@ fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
 
 fn standard_derive_key_sha1(password: &str, salt: &[u8], key_bits: u32, block: u32) -> [u8; 16] {
     let pw = password_to_utf16le(password);
-    let mut buf = Vec::with_capacity(salt.len() + pw.len());
+    let mut buf = Vec::new();
+    let _ = buf.try_reserve_exact(salt.len().saturating_add(pw.len()));
     buf.extend_from_slice(salt);
     buf.extend_from_slice(&pw);
     let mut h = sha1_digest(&buf).to_vec();
     for i in 0..50_000u32 {
-        let mut tmp = Vec::with_capacity(4 + h.len());
+        let mut tmp = Vec::new();
+        let _ = tmp.try_reserve_exact(4usize.saturating_add(h.len()));
         tmp.extend_from_slice(&i.to_le_bytes());
         tmp.extend_from_slice(&h);
         h = sha1_digest(&tmp).to_vec();
     }
-    let mut tmp = Vec::with_capacity(h.len() + 4);
+    let mut tmp = Vec::new();
+    let _ = tmp.try_reserve_exact(h.len().saturating_add(4));
     tmp.extend_from_slice(&h);
     tmp.extend_from_slice(&block.to_le_bytes());
     let h_block = sha1_digest(&tmp);
@@ -1911,17 +1918,20 @@ fn agile_derive_key_sha512(
     key_bits: usize,
     block_key: &[u8; 8],
 ) -> [u8; 32] {
-    let mut initial = Vec::with_capacity(salt.len() + password_utf16le.len());
+    let mut initial = Vec::new();
+    let _ = initial.try_reserve_exact(salt.len().saturating_add(password_utf16le.len()));
     initial.extend_from_slice(salt);
     initial.extend_from_slice(password_utf16le);
     let mut h = sha512_digest(&initial);
     for i in 0..spin_count {
-        let mut tmp = Vec::with_capacity(4 + h.len());
+        let mut tmp = Vec::new();
+        let _ = tmp.try_reserve_exact(4usize.saturating_add(h.len()));
         tmp.extend_from_slice(&i.to_le_bytes());
         tmp.extend_from_slice(&h);
         h = sha512_digest(&tmp);
     }
-    let mut tmp = Vec::with_capacity(h.len() + block_key.len());
+    let mut tmp = Vec::new();
+    let _ = tmp.try_reserve_exact(h.len().saturating_add(block_key.len()));
     tmp.extend_from_slice(&h);
     tmp.extend_from_slice(block_key);
     let h2 = sha512_digest(&tmp);

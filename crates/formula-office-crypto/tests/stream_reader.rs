@@ -6,7 +6,8 @@ use formula_office_crypto::{
 };
 
 fn make_plaintext(len: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(len);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(len);
     out.extend_from_slice(b"PK"); // satisfy ZIP signature check
     for i in 2..len {
         out.push((i % 251) as u8);

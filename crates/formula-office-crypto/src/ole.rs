@@ -84,7 +84,8 @@ pub fn extract_ole_entries<R: Read + Seek>(
         }
     }
 
-    let mut streams: Vec<OleStream> = Vec::with_capacity(stream_paths.len());
+    let mut streams: Vec<OleStream> = Vec::new();
+    let _ = streams.try_reserve(stream_paths.len());
     let mut total_bytes: usize = 0;
     for path in stream_paths {
         let mut stream = ole.open_stream(&path)?;

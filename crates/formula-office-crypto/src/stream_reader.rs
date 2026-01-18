@@ -502,8 +502,12 @@ fn verify_standard_password_with_key(
             // RC4 is a stream cipher. CryptoAPI encrypts/decrypts the verifier and verifier hash
             // using the **same** RC4 stream (continuing the keystream), so we must apply RC4 to the
             // concatenated bytes rather than resetting the cipher per field.
-            let mut buf = Vec::with_capacity(
-                verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
+            let mut buf = Vec::new();
+            let _ = buf.try_reserve_exact(
+                verifier
+                    .encrypted_verifier
+                    .len()
+                    .saturating_add(verifier.encrypted_verifier_hash.len()),
             );
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);

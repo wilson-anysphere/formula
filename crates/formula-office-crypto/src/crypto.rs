@@ -162,7 +162,8 @@ impl HashAlgorithm {
 }
 
 pub(crate) fn password_to_utf16le(password: &str) -> Zeroizing<Vec<u8>> {
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve(password.len().saturating_mul(2));
     for cu in password.encode_utf16() {
         out.extend_from_slice(&cu.to_le_bytes());
     }
@@ -705,7 +706,8 @@ mod tests {
     fn hex_decode(mut s: &str) -> Vec<u8> {
         // Keep parsing permissive for readability in expected-value literals.
         s = s.trim();
-        let mut compact = String::with_capacity(s.len());
+        let mut compact = String::new();
+        let _ = compact.try_reserve(s.len());
         for ch in s.chars() {
             if ch.is_ascii_hexdigit() {
                 compact.push(ch);
@@ -717,7 +719,8 @@ mod tests {
             compact.len()
         );
 
-        let mut out = Vec::with_capacity(compact.len() / 2);
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(compact.len() / 2);
         let bytes = compact.as_bytes();
         for i in (0..bytes.len()).step_by(2) {
             let hi = (bytes[i] as char).to_digit(16).unwrap();

@@ -211,7 +211,8 @@ fn encrypt_ooxml_standard(plaintext_zip: &[u8], password: &str) -> Vec<u8> {
 }
 
 fn utf16le_bytes(s: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve(s.len().saturating_mul(2));
     for unit in s.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
@@ -388,7 +389,8 @@ fn encrypt_biff_rc4_cryptoapi_workbook_stream(workbook_stream: &[u8], password: 
     let filepass_len = filepass_payload.len();
     assert!(filepass_len <= u16::MAX as usize);
 
-    let mut filepass_record = Vec::with_capacity(4 + filepass_len);
+    let mut filepass_record = Vec::new();
+    let _ = filepass_record.try_reserve_exact(4usize.saturating_add(filepass_len));
     filepass_record.extend_from_slice(&RECORD_FILEPASS.to_le_bytes());
     filepass_record.extend_from_slice(&(filepass_len as u16).to_le_bytes());
     filepass_record.extend_from_slice(&filepass_payload);

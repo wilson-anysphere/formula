@@ -276,7 +276,8 @@ fn parse_agile_descriptor_utf16le(bytes: &[u8]) -> Result<AgileDescriptor, Strin
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
     bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
 
-    let mut code_units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    let mut code_units: Vec<u16> = Vec::new();
+    let _ = code_units.try_reserve_exact(bytes.len() / 2);
     for pair in bytes.chunks_exact(2) {
         code_units.push(u16::from_le_bytes([pair[0], pair[1]]));
     }
@@ -1099,7 +1100,8 @@ fn encrypt_encrypted_package_stream(
 ) -> Result<Vec<u8>, OfficeCryptoError> {
     const SEGMENT_LEN: usize = 4096;
     let original_size = zip_bytes.len() as u64;
-    let mut out = Vec::with_capacity(8 + zip_bytes.len());
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(8usize.saturating_add(zip_bytes.len()));
     out.extend_from_slice(&original_size.to_le_bytes());
 
     let mut block_index = 0u32;
@@ -1815,7 +1817,8 @@ fn decode_b64_attr(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
     let mut cleaned: Option<Vec<u8>> = None;
     for (idx, &b) in bytes.iter().enumerate() {
         if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
-            let mut out = Vec::with_capacity(bytes.len());
+            let mut out = Vec::new();
+            let _ = out.try_reserve_exact(bytes.len());
             out.extend_from_slice(&bytes[..idx]);
             for &b2 in &bytes[idx..] {
                 if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {

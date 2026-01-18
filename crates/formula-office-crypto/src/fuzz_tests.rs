@@ -51,7 +51,8 @@ proptest! {
         //
         // Ensure we are *not* misdetected as a length-prefixed descriptor by writing a huge
         // candidate length at offset 8.
-        let mut bytes = Vec::with_capacity(8 + 4 + 2 + tail.len());
+        let mut bytes = Vec::new();
+        let _ = bytes.try_reserve_exact(8usize.saturating_add(4).saturating_add(2).saturating_add(tail.len()));
         bytes.extend_from_slice(&4u16.to_le_bytes());
         bytes.extend_from_slice(&4u16.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
@@ -82,7 +83,8 @@ proptest! {
             (ciphertext.len() as u64).saturating_add(1)
         };
 
-        let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
+        let mut encrypted_package = Vec::new();
+        let _ = encrypted_package.try_reserve_exact(8usize.saturating_add(ciphertext.len()));
         encrypted_package.extend_from_slice(&declared_len.to_le_bytes());
         encrypted_package.extend_from_slice(&ciphertext);
 

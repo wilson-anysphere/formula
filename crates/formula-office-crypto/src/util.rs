@@ -213,7 +213,8 @@ pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, Offi
         ));
     }
 
-    let mut code_units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    let mut code_units: Vec<u16> = Vec::new();
+    let _ = code_units.try_reserve_exact(bytes.len() / 2);
     for pair in bytes.chunks_exact(2) {
         let cu = u16::from_le_bytes([pair[0], pair[1]]);
         if cu == 0 {
