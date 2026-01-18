@@ -63,7 +63,8 @@ proptest! {
     fn parse_encryption_info_agile_is_panic_free_and_rejects_malformed_xml(tail in proptest::collection::vec(any::<u8>(), 0..=MAX_INPUT_LEN)) {
         // Ensure this is not accidentally a valid XML document (which could cause a rare `Ok` and
         // make the property test flaky). Inject a byte sequence that is never valid UTF-8.
-        let mut bytes = Vec::with_capacity(8 + 2 + tail.len());
+        let mut bytes = Vec::new();
+        let _ = bytes.try_reserve_exact(8 + 2 + tail.len());
         bytes.extend_from_slice(&4u16.to_le_bytes());
         bytes.extend_from_slice(&4u16.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
@@ -102,7 +103,8 @@ proptest! {
             ciphertext.len() as u64 + 1
         };
 
-        let mut encrypted_package = Vec::with_capacity(8 + ciphertext.len());
+        let mut encrypted_package = Vec::new();
+        let _ = encrypted_package.try_reserve_exact(8 + ciphertext.len());
         encrypted_package.extend_from_slice(&declared_len.to_le_bytes());
         encrypted_package.extend_from_slice(&ciphertext);
 

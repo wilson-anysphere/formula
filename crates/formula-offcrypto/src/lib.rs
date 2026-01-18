@@ -648,7 +648,8 @@ fn decode_csp_name_utf16le(bytes: &[u8]) -> Result<String, OffcryptoError> {
         });
     }
 
-    let mut code_units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    let mut code_units: Vec<u16> = Vec::new();
+    let _ = code_units.try_reserve_exact(bytes.len() / 2);
     for chunk in bytes.chunks_exact(2) {
         code_units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
@@ -996,7 +997,8 @@ fn decode_utf16le_xml(bytes: &[u8]) -> Result<String, OffcryptoError> {
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
     bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
 
-    let mut units = Vec::with_capacity(bytes.len() / 2);
+    let mut units = Vec::new();
+    let _ = units.try_reserve_exact(bytes.len() / 2);
     for chunk in bytes.chunks_exact(2) {
         units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
@@ -1893,7 +1895,8 @@ fn decode_b64_attr(value: &str) -> Result<Vec<u8>, OffcryptoError> {
     }
 
     let cleaned = if has_ws {
-        let mut out = Vec::with_capacity(non_ws_len);
+        let mut out = Vec::new();
+        let _ = out.try_reserve_exact(non_ws_len);
         for &b in bytes {
             if !matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
                 out.push(b);
@@ -2127,9 +2130,10 @@ impl StandardAlgId {
 impl fmt::Display for StandardAlgId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StandardAlgId::Aes128 | StandardAlgId::Aes192 | StandardAlgId::Aes256 | StandardAlgId::Rc4 => {
-                f.write_str(self.as_display_name().expect("known Standard cipher variant"))
-            }
+            StandardAlgId::Aes128 => f.write_str("AES-128"),
+            StandardAlgId::Aes192 => f.write_str("AES-192"),
+            StandardAlgId::Aes256 => f.write_str("AES-256"),
+            StandardAlgId::Rc4 => f.write_str("RC4"),
             StandardAlgId::Unknown(raw) => write!(f, "0x{raw:08X}"),
         }
     }
@@ -2291,7 +2295,8 @@ pub fn standard_decrypt_encrypted_package(
     })
 }
 fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(password.len().saturating_mul(2));
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
@@ -2444,9 +2449,7 @@ pub fn decrypt_encrypted_package_ecb(
         )));
     }
 
-    let size_bytes: [u8; 8] = encrypted_package[..8]
-        .try_into()
-        .expect("slice length checked above");
+    let size_bytes = &encrypted_package[..8];
     let len_lo =
         u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]]) as u64;
     let len_hi =
@@ -2703,12 +2706,9 @@ fn looks_like_zip_container(bytes: &[u8]) -> bool {
             None => continue,
         };
 
-        let cd_size = u32::from_le_bytes(eocd[12..16].try_into().expect("slice length checked"))
-            as usize;
-        let cd_offset =
-            u32::from_le_bytes(eocd[16..20].try_into().expect("slice length checked")) as usize;
-        let comment_len =
-            u16::from_le_bytes(eocd[20..22].try_into().expect("slice length checked")) as usize;
+        let cd_size = u32::from_le_bytes([eocd[12], eocd[13], eocd[14], eocd[15]]) as usize;
+        let cd_offset = u32::from_le_bytes([eocd[16], eocd[17], eocd[18], eocd[19]]) as usize;
+        let comment_len = u16::from_le_bytes([eocd[20], eocd[21]]) as usize;
 
         // Ensure the EOCD record (plus comment) ends at EOF.
         if i + EOCD_MIN_LEN + comment_len != bytes.len() {
@@ -3088,7 +3088,8 @@ fn derive_iv_from_salt_and_block_key(
     hash_algorithm: HashAlgorithm,
     block_key: &[u8],
 ) -> [u8; 16] {
-    let mut buf = Vec::with_capacity(salt.len() + block_key.len());
+    let mut buf = Vec::new();
+    let _ = buf.try_reserve_exact(salt.len() + block_key.len());
     buf.extend_from_slice(salt);
     buf.extend_from_slice(block_key);
     let digest = hash_algorithm.digest(&buf);
@@ -3598,77 +3599,102 @@ fn verify_agile_integrity(
             .ok_or(OffcryptoError::InvalidEncryptionInfo {
                 context: "decrypted HMAC value is truncated",
             })?;
-    fn compute_hmac(hash: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+    fn compute_hmac(hash: HashAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, OffcryptoError> {
         match hash {
             HashAlgorithm::Md5 => {
-                let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<md5::Md5> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(data);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha1 => {
                 let mut mac =
-                    <Hmac<Sha1> as Mac>::new_from_slice(key).expect("HMAC key length is unrestricted");
+                    <Hmac<Sha1> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(data);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha256 => {
-                let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha256> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(data);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha384 => {
-                let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha384> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(data);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha512 => {
-                let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha512> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(data);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
         }
     }
 
-    fn compute_hmac_two(hash: HashAlgorithm, key: &[u8], a: &[u8], b: &[u8]) -> Vec<u8> {
+    fn compute_hmac_two(
+        hash: HashAlgorithm,
+        key: &[u8],
+        a: &[u8],
+        b: &[u8],
+    ) -> Result<Vec<u8>, OffcryptoError> {
         match hash {
             HashAlgorithm::Md5 => {
-                let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<md5::Md5> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(a);
                 mac.update(b);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha1 => {
                 let mut mac =
-                    <Hmac<Sha1> as Mac>::new_from_slice(key).expect("HMAC key length is unrestricted");
+                    <Hmac<Sha1> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(a);
                 mac.update(b);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha256 => {
-                let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha256> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(a);
                 mac.update(b);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha384 => {
-                let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha384> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(a);
                 mac.update(b);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
             HashAlgorithm::Sha512 => {
-                let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(key)
-                    .expect("HMAC key length is unrestricted");
+                let mut mac =
+                    <Hmac<Sha512> as Mac>::new_from_slice(key).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid HMAC key length",
+                    })?;
                 mac.update(a);
                 mac.update(b);
-                mac.finalize().into_bytes().to_vec()
+                Ok(mac.finalize().into_bytes().to_vec())
             }
         }
     }
@@ -3681,7 +3707,8 @@ fn verify_agile_integrity(
     };
 
     // --- Variant 1 (MS-OFFCRYPTO): HMAC over the full EncryptedPackage stream bytes ---
-    let actual_hmac_full = compute_hmac(info.key_data_hash_algorithm, hmac_key, encrypted_package);
+    let actual_hmac_full =
+        compute_hmac(info.key_data_hash_algorithm, hmac_key, encrypted_package)?;
     if matches_expected(&actual_hmac_full)? {
         return Ok(());
     }
@@ -3692,14 +3719,16 @@ fn verify_agile_integrity(
         .ok_or(OffcryptoError::Truncated {
             context: "EncryptedPackageHeader.original_size",
         })?;
-    let actual_hmac_ciphertext = compute_hmac(info.key_data_hash_algorithm, hmac_key, ciphertext);
+    let actual_hmac_ciphertext =
+        compute_hmac(info.key_data_hash_algorithm, hmac_key, ciphertext)?;
     if matches_expected(&actual_hmac_ciphertext)? {
         return Ok(());
     }
 
     // --- Variants requiring the decrypted plaintext (compat) ---
     if let Some(plaintext) = decrypted_package {
-        let actual_hmac_plaintext = compute_hmac(info.key_data_hash_algorithm, hmac_key, plaintext);
+        let actual_hmac_plaintext =
+            compute_hmac(info.key_data_hash_algorithm, hmac_key, plaintext)?;
         if matches_expected(&actual_hmac_plaintext)? {
             return Ok(());
         }
@@ -3712,7 +3741,7 @@ fn verify_agile_integrity(
                 context: "EncryptedPackageHeader.original_size",
             })?;
         let actual_hmac_size_and_plaintext =
-            compute_hmac_two(info.key_data_hash_algorithm, hmac_key, size_prefix, plaintext);
+            compute_hmac_two(info.key_data_hash_algorithm, hmac_key, size_prefix, plaintext)?;
         if matches_expected(&actual_hmac_size_and_plaintext)? {
             return Ok(());
         }
@@ -3836,8 +3865,25 @@ pub fn decrypt_encrypted_package(
             password,
         )?,
         EncryptionInfo::Agile { info, .. } => decrypt_agile_stream(&info, encrypted_package, password, &options)?,
-        // Unsupported cases are handled above (before expensive work).
-        EncryptionInfo::Unsupported { .. } => unreachable!("handled above"),
+        // Unsupported cases are handled above (before expensive work), but avoid panicking if
+        // invariants drift over time.
+        EncryptionInfo::Unsupported { version } => {
+            debug_assert!(
+                false,
+                "Unsupported EncryptionInfo variant reached decryption: {}.{}",
+                version.major,
+                version.minor
+            );
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
     };
 
     validate_zip_like(&decrypted)?;
@@ -4230,7 +4276,8 @@ mod tests {
         }
 
         fn with_spaces(s: &str) -> String {
-            let mut out = String::with_capacity(s.len() + s.len() / 5);
+            let mut out = String::new();
+            let _ = out.try_reserve_exact(s.len() + s.len() / 5);
             for (idx, ch) in s.chars().enumerate() {
                 if idx != 0 && idx % 5 == 0 {
                     out.push(' ');
@@ -4289,7 +4336,8 @@ mod tests {
         }
 
         fn with_spaces(s: &str) -> String {
-            let mut out = String::with_capacity(s.len() + s.len() / 5);
+            let mut out = String::new();
+            let _ = out.try_reserve_exact(s.len() + s.len() / 5);
             for (idx, ch) in s.chars().enumerate() {
                 if idx != 0 && idx % 5 == 0 {
                     out.push(' ');

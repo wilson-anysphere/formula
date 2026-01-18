@@ -37,7 +37,8 @@ fn digest_len(hash_alg: HashAlgorithm) -> Result<usize, OffcryptoError> {
 }
 
 fn password_to_utf16le_bytes(password: &str) -> Zeroizing<Vec<u8>> {
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::new();
+    let _ = out.try_reserve_exact(password.len() * 2);
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
