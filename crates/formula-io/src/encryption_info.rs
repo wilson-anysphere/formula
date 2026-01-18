@@ -208,7 +208,8 @@ fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     if len == 0 || len > payload.len().saturating_sub(4) {
         return None;
     }
-    let candidate = payload.get(4..4 + len)?;
+    let end = 4usize.checked_add(len)?;
+    let candidate = payload.get(4..end)?;
 
     // Ensure the candidate *looks* like XML to avoid false positives on arbitrary data.
     let candidate_trimmed = trim_start_ascii_whitespace(trim_utf8_bom(candidate));
@@ -246,14 +247,14 @@ fn scan_to_encryption_xml_blob(payload: &[u8]) -> Option<&[u8]> {
     let start = payload
         .windows(START.len())
         .position(|w| w.eq_ignore_ascii_case(START))?;
-    let after_start = start.saturating_add(START.len());
+    let after_start = start.checked_add(START.len())?;
     let end_rel = payload
         .get(after_start..)?
         .windows(END.len())
         .position(|w| w.eq_ignore_ascii_case(END))?;
     let end = after_start
-        .saturating_add(end_rel)
-        .saturating_add(END.len());
+        .checked_add(end_rel)?
+        .checked_add(END.len())?;
     payload.get(start..end)
 }
 

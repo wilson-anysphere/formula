@@ -88,10 +88,12 @@ pub fn extract_encryption_info_xml<'a>(
             as usize;
         let available = encryption_info_stream.len().saturating_sub(12);
         if len > 0 && len <= available {
-            if let Some(candidate) = encryption_info_stream.get(12..12 + len) {
+            if let Some(end) = 12usize.checked_add(len) {
+                if let Some(candidate) = encryption_info_stream.get(12..end) {
                 if candidate_looks_like_xml(candidate) {
                     xml = candidate;
                 }
+            }
             }
         }
     }
@@ -240,7 +242,8 @@ fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     if len == 0 || len > payload.len().saturating_sub(4) {
         return None;
     }
-    let candidate = payload.get(4..4 + len)?;
+    let end = 4usize.checked_add(len)?;
+    let candidate = payload.get(4..end)?;
 
     // Ensure the candidate *looks* like XML to avoid false positives on arbitrary data.
     let trimmed = strip_utf8_bom(trim_start_ascii_whitespace(candidate));

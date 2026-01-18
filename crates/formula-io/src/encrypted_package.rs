@@ -309,9 +309,15 @@ impl<R: Read + Seek> Read for StandardAesEncryptedPackageReader<R> {
                     "output slice bounds are inconsistent with bytes to copy",
                 )
             })?;
+            let segment_end = segment_off.checked_add(to_copy).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "segment range overflow",
+                )
+            })?;
             let src = self
                 .cached_plaintext
-                .get(segment_off..segment_off + to_copy)
+                .get(segment_off..segment_end)
                 .ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
