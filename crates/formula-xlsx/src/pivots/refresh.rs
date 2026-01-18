@@ -316,13 +316,29 @@ fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
         while i < bytes.len() {
             match bytes[i] {
                 b'\'' => {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'\'') {
                         sheet.push('\'');
                         i += 2;
                         continue;
                     }
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'!' {
-                        return (Some(sheet), &s[(i + 2)..]);
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'!') {
+                        let Some(rest_start) = i.checked_add(2) else {
+                            debug_assert!(
+                                false,
+                                "expected i+2 in split_sheet_qualified_reference at i={i} len={} for {s:?}",
+                                s.len()
+                            );
+                            return (None, s);
+                        };
+                        let Some(rest) = s.get(rest_start..) else {
+                            debug_assert!(
+                                false,
+                                "expected utf-8 boundary at rest_start={rest_start} len={} for {s:?}",
+                                s.len()
+                            );
+                            return (None, s);
+                        };
+                        return (Some(sheet), rest);
                     }
                     // Not actually a sheet-qualified reference; treat the whole string as the token.
                     return (None, s);
@@ -355,7 +371,33 @@ fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
     }
 
     match s.find('!') {
-        Some(idx) => (Some(s[..idx].to_string()), &s[(idx + 1)..]),
+        Some(idx) => {
+            let Some(sheet) = s.get(..idx) else {
+                debug_assert!(
+                    false,
+                    "expected utf-8 boundary at idx={idx} len={} for {s:?}",
+                    s.len()
+                );
+                return (None, s);
+            };
+            let Some(rest_start) = idx.checked_add(1) else {
+                debug_assert!(
+                    false,
+                    "expected idx+1 in split_sheet_qualified_reference at idx={idx} len={} for {s:?}",
+                    s.len()
+                );
+                return (None, s);
+            };
+            let Some(rest) = s.get(rest_start..) else {
+                debug_assert!(
+                    false,
+                    "expected utf-8 boundary at rest_start={rest_start} len={} for {s:?}",
+                    s.len()
+                );
+                return (None, s);
+            };
+            (Some(sheet.to_string()), rest)
+        }
         None => (None, s),
     }
 }

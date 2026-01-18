@@ -176,7 +176,7 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
                 out.push(b'"');
                 if in_string {
                     // Excel escapes `"` within strings by doubling it (`""`).
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'"') {
                         out.push(b'"');
                         i += 2;
                         continue;
@@ -256,7 +256,7 @@ pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
             b'"' => {
                 out.push(b'"');
                 if in_string {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'"') {
                         out.push(b'"');
                         i += 2;
                         continue;

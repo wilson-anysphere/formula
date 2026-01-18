@@ -203,7 +203,7 @@ fn split_areas(formula: &str) -> Result<Vec<&str>, PrintError> {
         match bytes[i] {
             b'\'' => {
                 if in_quotes {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'\'') {
                         // Escaped quote in a sheet name.
                         i += 1;
                     } else {
@@ -253,7 +253,7 @@ fn split_sheet_name(input: &str) -> Result<(String, &str), PrintError> {
         while i < bytes.len() {
             match bytes[i] {
                 b'\'' => {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    if bytes.get(i..).and_then(|s| s.get(1)) == Some(&b'\'') {
                         sheet.push('\'');
                         i += 2;
                         continue;
