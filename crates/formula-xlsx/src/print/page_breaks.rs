@@ -112,8 +112,9 @@ pub fn calculate_pages(
     let row_segments = starts_to_segments(&row_starts, print_area.end_row);
 
     let mut pages = Vec::new();
-    let est = col_segments.len().saturating_mul(row_segments.len());
-    let _ = pages.try_reserve(est);
+    if let Some(est) = col_segments.len().checked_mul(row_segments.len()) {
+        let _ = pages.try_reserve(est);
+    }
     for row in row_segments {
         for col in &col_segments {
             pages.push(Page {

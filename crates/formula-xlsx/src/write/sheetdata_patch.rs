@@ -198,7 +198,10 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                 let e = e.into_owned();
                 let row_num = row_num_from_attrs(&e)?;
                 let has_unknown_attrs = row_has_unknown_attrs(&e)?;
-                let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
+                let keep_due_to_row_props = row_num
+                    .checked_sub(1)
+                    .and_then(|row0| sheet.row_properties(row0))
+                    .is_some();
                 write_missing_rows_before(
                     doc,
                     sheet_meta,
@@ -246,7 +249,10 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                 let e = e.into_owned();
                 let row_num = row_num_from_attrs(&e)?;
                 let has_unknown_attrs = row_has_unknown_attrs(&e)?;
-                let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
+                let keep_due_to_row_props = row_num
+                    .checked_sub(1)
+                    .and_then(|row0| sheet.row_properties(row0))
+                    .is_some();
                 write_missing_rows_before(
                     doc,
                     sheet_meta,
@@ -752,7 +758,9 @@ fn write_new_row<W: Write>(
     let row_str = row_num.to_string();
     row_start.push_attribute(("r", row_str.as_str()));
     let outline_entry = sheet.outline.rows.entry(row_num);
-    let row_props = sheet.row_properties(row_num.saturating_sub(1));
+    let row_props = row_num
+        .checked_sub(1)
+        .and_then(|row0| sheet.row_properties(row0));
 
     let height_str = row_props.and_then(|props| props.height.map(|h| h.to_string()));
     if let Some(height_str) = &height_str {
@@ -1493,7 +1501,9 @@ fn row_semantics_from_model(
     style_to_xf: &HashMap<u32, u32>,
     row_num: u32,
 ) -> RowSemantics {
-    let props = sheet.row_properties(row_num.saturating_sub(1));
+    let props = row_num
+        .checked_sub(1)
+        .and_then(|row0| sheet.row_properties(row0));
     let height = props.and_then(|p| p.height);
     let hidden = props.map(|p| p.hidden).unwrap_or(false);
     let style_xf = props

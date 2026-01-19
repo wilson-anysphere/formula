@@ -121,7 +121,12 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(sheet_xml.len().saturating_add(256)).is_err() {
+    let Some(cap) = sheet_xml.len().checked_add(256) else {
+        return Err(XlsxError::AllocationFailure(
+            "update_worksheet_conditional_formatting_xml output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure(
             "update_worksheet_conditional_formatting_xml output",
         ));

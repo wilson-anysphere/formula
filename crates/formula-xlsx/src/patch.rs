@@ -987,10 +987,13 @@ fn patch_worksheet_xml(
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(original.len().saturating_add(patches.cells.len().saturating_mul(64)))
-        .is_err()
-    {
+    let Some(extra) = patches.cells.len().checked_mul(64) else {
+        return Err(XlsxError::AllocationFailure("apply_cell_patches worksheet xml output").into());
+    };
+    let Some(cap) = original.len().checked_add(extra) else {
+        return Err(XlsxError::AllocationFailure("apply_cell_patches worksheet xml output").into());
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("apply_cell_patches worksheet xml output").into());
     }
     let mut writer = Writer::new(out);
@@ -1331,7 +1334,7 @@ pub(crate) fn merge_col_properties_into_attrs_by_col(
     col_properties: &BTreeMap<u32, ColProperties>,
 ) {
     let mut touched_cols: BTreeSet<u32> = attrs_by_col.keys().copied().collect();
-    touched_cols.extend(col_properties.keys().copied().map(|c0| c0.saturating_add(1)));
+    touched_cols.extend(col_properties.keys().copied().filter_map(|c0| c0.checked_add(1)));
 
     for col_1 in touched_cols {
         if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
@@ -1468,8 +1471,10 @@ pub(crate) fn render_cols_xml(
     // `col_properties` keys are 0-based; OOXML uses 1-based column indices.
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
     for (&col0, props) in col_properties {
-        let col_1 = col0.saturating_add(1);
-        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+        let Some(col_1) = col0.checked_add(1) else {
+            continue;
+        };
+        if col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
         if props.width.is_none() && !props.hidden {
@@ -1732,7 +1737,9 @@ fn patch_cols_bounds(
         if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
             continue;
         }
-        let col_1 = col_0.saturating_add(1);
+        let Some(col_1) = col_0.checked_add(1) else {
+            continue;
+        };
         min_c = min_c.min(col_1);
         max_c = max_c.max(col_1);
     }
@@ -3624,8 +3631,12 @@ fn patch_bounds(
         }
 
         // Convert to 1-based coordinates for A1 formatting.
-        let row_1 = cell_ref.row.saturating_add(1);
-        let col_1 = cell_ref.col.saturating_add(1);
+        let Some(row_1) = cell_ref.row.checked_add(1) else {
+            continue;
+        };
+        let Some(col_1) = cell_ref.col.checked_add(1) else {
+            continue;
+        };
 
         min_row = min_row.min(row_1);
         min_col = min_col.min(col_1);
@@ -3701,10 +3712,10 @@ fn parse_dimension_ref(ref_str: &str) -> Option<(u32, u32, u32, u32)> {
 fn format_dimension(min_r: u32, min_c: u32, max_r: u32, max_c: u32) -> String {
     let mut out = String::new();
     formula_model::push_a1_cell_range(
-        min_r.saturating_sub(1),
-        min_c.saturating_sub(1),
-        max_r.saturating_sub(1),
-        max_c.saturating_sub(1),
+        min_r.checked_sub(1).unwrap_or(0),
+        min_c.checked_sub(1).unwrap_or(0),
+        max_r.checked_sub(1).unwrap_or(0),
+        max_c.checked_sub(1).unwrap_or(0),
         false,
         false,
         &mut out,
