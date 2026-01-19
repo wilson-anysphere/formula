@@ -543,7 +543,9 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                 let mut resolved_offset_1 = 0usize;
 
                 let resolves_image = |vm_raw: u32, offset: u32| -> bool {
-                    let vm = vm_raw.saturating_add(offset);
+                    let Some(vm) = vm_raw.checked_add(offset) else {
+                        return false;
+                    };
                     let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
                         return false;
                     };
@@ -600,7 +602,9 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         for (cell, vm, _cm) in cells_with_metadata {
             let Some(vm) = vm else { continue };
 
-            let vm = vm.saturating_add(vm_offset);
+            let Some(vm) = vm.checked_add(vm_offset) else {
+                continue;
+            };
             let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
                 continue;
             };
@@ -746,7 +750,7 @@ fn parse_local_image_structure_positions(
                         }
                     }
                 }
-                current_key_idx = current_key_idx.saturating_add(1);
+                current_key_idx += 1;
             }
             _ => {}
         }
@@ -797,7 +801,10 @@ fn parse_rdrichvalue(
                 in_v = false;
                 current_v_text.clear();
                 current_structure_index = None;
-                rich_value_index = rich_value_index.saturating_add(1);
+                rich_value_index = match rich_value_index.checked_add(1) {
+                    Some(v) => v,
+                    None => break,
+                };
             }
             Event::End(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 in_rv = false;
@@ -818,7 +825,10 @@ fn parse_rdrichvalue(
                     // This rich value record doesn't correspond to a `_localImage` structure.
                     // Skip it rather than attempting to interpret positional values.
                     current_structure_index = None;
-                    rich_value_index = rich_value_index.saturating_add(1);
+                    rich_value_index = match rich_value_index.checked_add(1) {
+                        Some(v) => v,
+                        None => break,
+                    };
                     continue;
                 }
 
@@ -869,7 +879,10 @@ fn parse_rdrichvalue(
                 }
 
                 current_structure_index = None;
-                rich_value_index = rich_value_index.saturating_add(1);
+                rich_value_index = match rich_value_index.checked_add(1) {
+                    Some(v) => v,
+                    None => break,
+                };
             }
             Event::Start(e) if in_rv && e.local_name().as_ref().eq_ignore_ascii_case(b"v") => {
                 in_v = true;

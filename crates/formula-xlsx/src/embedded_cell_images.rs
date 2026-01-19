@@ -175,12 +175,14 @@ impl XlsxPackage {
                 };
                 for (_cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
                     if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, vm) {
-                        zero_based_matches = zero_based_matches.saturating_add(1);
+                        zero_based_matches =
+                            zero_based_matches.checked_add(1).unwrap_or(usize::MAX);
                     }
                     if let Some(slot) = vm.checked_sub(1) {
                         if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, slot)
                         {
-                            one_based_matches = one_based_matches.saturating_add(1);
+                            one_based_matches =
+                                one_based_matches.checked_add(1).unwrap_or(usize::MAX);
                         }
                     }
                 }
@@ -285,7 +287,9 @@ impl XlsxPackage {
                 let mut resolved_offset_1 = 0usize;
 
                 let resolves_image = |vm_raw: u32, offset: u32| -> bool {
-                    let vm = vm_raw.saturating_add(offset);
+                    let Some(vm) = vm_raw.checked_add(offset) else {
+                        return false;
+                    };
                     let Some(&rich_value_index) = vm_to_rich_value.get(&vm) else {
                         return false;
                     };
@@ -345,7 +349,9 @@ impl XlsxPackage {
             for (cell_ref, vm) in vm_cells {
                 // First resolve the cell's `vm` into a rich value index when possible.
                 let rich_value_index = if has_vm_mapping {
-                    let vm = vm.saturating_add(vm_offset);
+                    let Some(vm) = vm.checked_add(vm_offset) else {
+                        continue;
+                    };
                     let Some(&idx) = vm_to_rich_value.get(&vm) else {
                         continue;
                     };
@@ -754,7 +760,10 @@ fn parse_local_image_structure(xml: &[u8]) -> Result<Option<LocalImageStructure>
             Event::Empty(e) => {
                 if e.local_name().as_ref() == b"s" {
                     // Empty struct definition.
-                    struct_index = struct_index.saturating_add(1);
+                    struct_index = match struct_index.checked_add(1) {
+                        Some(v) => v,
+                        None => return Ok(None),
+                    };
                 } else if in_target_struct && e.local_name().as_ref() == b"k" {
                     if let Some(name) = attr_value(&e, b"n")? {
                         match name.as_str() {
@@ -774,7 +783,10 @@ fn parse_local_image_structure(xml: &[u8]) -> Result<Option<LocalImageStructure>
                     if in_target_struct {
                         break;
                     }
-                    struct_index = struct_index.saturating_add(1);
+                    struct_index = match struct_index.checked_add(1) {
+                        Some(v) => v,
+                        None => return Ok(None),
+                    };
                 }
             }
             Event::Eof => break,
@@ -821,13 +833,19 @@ fn parse_local_image_rich_values(
                 let s = attr_value(&e, b"s")?;
                 let Some(struct_idx) = s.as_deref().and_then(|s| s.parse::<u32>().ok()) else {
                     reader.read_to_end_into(e.name(), &mut Vec::new())?;
-                    rv_index = rv_index.saturating_add(1);
+                    rv_index = match rv_index.checked_add(1) {
+                        Some(v) => v,
+                        None => return Ok(out),
+                    };
                     continue;
                 };
 
                 if struct_idx != structure.struct_index {
                     reader.read_to_end_into(e.name(), &mut Vec::new())?;
-                    rv_index = rv_index.saturating_add(1);
+                    rv_index = match rv_index.checked_add(1) {
+                        Some(v) => v,
+                        None => return Ok(out),
+                    };
                     continue;
                 }
 
@@ -835,11 +853,17 @@ fn parse_local_image_rich_values(
                 if let Some(row) = local_image_row_from_values(&values, structure) {
                     out.insert(rv_index, row);
                 }
-                rv_index = rv_index.saturating_add(1);
+                rv_index = match rv_index.checked_add(1) {
+                    Some(v) => v,
+                    None => return Ok(out),
+                };
             }
             Event::Empty(e) => {
                 if e.local_name().as_ref() == b"rv" {
-                    rv_index = rv_index.saturating_add(1);
+                    rv_index = match rv_index.checked_add(1) {
+                        Some(v) => v,
+                        None => return Ok(out),
+                    };
                 }
             }
             Event::Eof => break,
