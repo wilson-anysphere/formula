@@ -404,8 +404,7 @@ impl SharedStringsWriterStreaming {
 
 fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     let utf16_end = reusable_plain_si_utf16_end(payload)?;
-    let _cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
-    let raw = payload.get(5..utf16_end)?;
+    let raw = payload.get(SI_TEXT_PREFIX_LEN..utf16_end)?;
 
     // Avoid allocating an intermediate `Vec<u16>` for attacker-controlled strings; decode
     // UTF-16LE directly into a `String`.
@@ -435,12 +434,12 @@ pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
     // Rich/phonetic data are only present if corresponding flag bits are set.
     let flags = *payload.first()?;
 
-    if payload.len() < 1 + 4 {
+    if payload.len() < SI_TEXT_PREFIX_LEN {
         return None;
     }
-    let cch = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?) as usize;
+    let cch = u32::from_le_bytes(payload.get(1..SI_TEXT_PREFIX_LEN)?.try_into().ok()?) as usize;
     let byte_len = cch.checked_mul(2)?;
-    let utf16_end = 1usize.checked_add(4)?.checked_add(byte_len)?;
+    let utf16_end = SI_TEXT_PREFIX_LEN.checked_add(byte_len)?;
     if payload.len() < utf16_end {
         return None;
     }
@@ -486,6 +485,9 @@ pub(crate) fn reusable_plain_si_utf16_end(payload: &[u8]) -> Option<usize> {
 
     Some(utf16_end)
 }
+
+/// `BrtSI` text header byte length: `[flags: u8][cch: u32]`.
+const SI_TEXT_PREFIX_LEN: usize = 5;
 
 fn write_appended_si_records(out: &mut impl Write, strings: &[String]) -> Result<(), Error> {
     for s in strings {
