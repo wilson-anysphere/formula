@@ -182,7 +182,13 @@ impl RichDataVmIndex {
     /// 0-based worksheet indices, so callers should pass the raw `vm` value as it appears on the
     /// worksheet cell.
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
-        let vm = vm.saturating_add(self.vm_offset);
+        let Some(vm) = vm.checked_add(self.vm_offset) else {
+            return RichDataVmResolution {
+                rich_value_index: None,
+                rel_index: None,
+                target_part: None,
+            };
+        };
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
         let mut rel_index = rich_value_index.and_then(|idx| {
             self.rich_value_index_to_rel_index
@@ -210,7 +216,8 @@ impl RichDataVmIndex {
         if target_part.is_none() && rich_value_index.is_none() {
             // Excel's `vm` is commonly 1-based; the RichData relationship table appears 0-based.
             // Try `vm-1` first, then `vm`.
-            for candidate in [vm.saturating_sub(1), vm] {
+            let candidates: [Option<u32>; 2] = [vm.checked_sub(1), Some(vm)];
+            for candidate in candidates.into_iter().flatten() {
                 if let Some(part) = self
                     .rel_index_to_target_part
                     .get(candidate as usize)
@@ -363,7 +370,9 @@ fn extract_rich_data_images_via_rel_table(
         };
 
         for (cell, vm) in cells {
-            let vm = vm.saturating_add(vm_offset);
+            let Some(vm) = vm.checked_add(vm_offset) else {
+                continue;
+            };
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
@@ -445,7 +454,9 @@ pub fn extract_rich_cell_images(
         };
 
         for (cell, vm) in cells {
-            let vm = vm.saturating_add(vm_offset);
+            let Some(vm) = vm.checked_add(vm_offset) else {
+                continue;
+            };
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
@@ -1078,7 +1089,10 @@ fn parse_rich_value_parts_image_pointers(
                     },
                 );
             }
-            global_idx = global_idx.saturating_add(1);
+            let Some(next) = global_idx.checked_add(1) else {
+                return Ok(out);
+            };
+            global_idx = next;
         }
     }
 
@@ -1096,7 +1110,10 @@ fn parse_rich_value_parts_image_pointers(
                         out.insert(global_idx, RichValueImagePointer::RelIndex(rel_idx));
                     }
                 }
-                global_idx = global_idx.saturating_add(1);
+                let Some(next) = global_idx.checked_add(1) else {
+                    return Ok(out);
+                };
+                global_idx = next;
             }
         }
     }
@@ -1163,7 +1180,10 @@ fn parse_rich_value_parts_rel_indices(
             if let Some(rel_idx) = parse_rv_rel_index(rv, rich_value_types.as_ref()) {
                 out.insert(global_idx, rel_idx);
             }
-            global_idx = global_idx.saturating_add(1);
+            let Some(next) = global_idx.checked_add(1) else {
+                return Ok(out);
+            };
+            global_idx = next;
         }
     }
 
@@ -1183,7 +1203,10 @@ fn parse_rich_value_parts_rel_indices(
                         out.insert(global_idx, rel_idx);
                     }
                 }
-                global_idx = global_idx.saturating_add(1);
+                let Some(next) = global_idx.checked_add(1) else {
+                    return Ok(out);
+                };
+                global_idx = next;
             }
         }
     }

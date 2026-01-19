@@ -338,14 +338,23 @@ fn parse_value_metadata_mappings(
         }
 
         let Some(v) = resolved_v else {
-            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            vm_start_1_based = match vm_start_1_based.checked_add(count) {
+                Some(v) => v,
+                None => break,
+            };
             continue;
         };
 
         for offset in 0..count {
-            out.insert(vm_start_1_based.saturating_add(offset), v);
+            let Some(vm_idx) = vm_start_1_based.checked_add(offset) else {
+                break;
+            };
+            out.insert(vm_idx, v);
         }
-        vm_start_1_based = vm_start_1_based.saturating_add(count);
+        vm_start_1_based = match vm_start_1_based.checked_add(count) {
+            Some(v) => v,
+            None => break,
+        };
     }
 
     out

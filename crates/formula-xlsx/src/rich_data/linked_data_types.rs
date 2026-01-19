@@ -90,7 +90,9 @@ pub fn extract_linked_data_types(
         };
 
         for (cell, vm) in cells {
-            let vm = vm.saturating_add(vm_offset);
+            let Some(vm) = vm.checked_add(vm_offset) else {
+                continue;
+            };
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
