@@ -3743,7 +3743,9 @@ fn decrypt_encrypted_ooxml_package(
             })? as usize;
 
         let header_start = 12usize;
-        let header_end = header_start.saturating_add(header_size);
+        let header_end = header_start.checked_add(header_size).ok_or_else(|| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?;
         let header_bytes = encryption_info
             .get(header_start..header_end)
             .ok_or_else(|| Error::InvalidPassword {
