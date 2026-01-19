@@ -331,8 +331,12 @@ impl<R: Read + Seek> Read for StandardAesEncryptedPackageReader<R> {
                     )
                 })?;
             dst.copy_from_slice(src);
-            self.pos += to_copy as u64;
-            written += to_copy;
+            self.pos = self.pos.checked_add(to_copy as u64).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "position overflow")
+            })?;
+            written = written.checked_add(to_copy).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "output offset overflow")
+            })?;
         }
 
         Ok(written)
