@@ -2413,10 +2413,11 @@ fn scan_worksheet_cell_types<R: Read>(
                 }
                 if let Some(coord) = coord {
                     if targets.contains(&coord) {
-                        out.insert(coord, t);
-                        remaining = remaining.saturating_sub(1);
-                        if remaining == 0 {
-                            break;
+                        if out.insert(coord, t).is_none() {
+                            remaining -= 1;
+                            if remaining == 0 {
+                                break;
+                            }
                         }
                     }
                 }
@@ -2526,10 +2527,11 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                 }
                 if let Some(coord) = coord {
                     if targets.contains(&coord) {
-                        out.insert(coord, None);
-                        remaining = remaining.saturating_sub(1);
-                        if remaining == 0 {
-                            break;
+                        if out.insert(coord, None).is_none() {
+                            remaining -= 1;
+                            if remaining == 0 {
+                                break;
+                            }
                         }
                     }
                 }
@@ -2559,14 +2561,15 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     );
                     continue;
                 };
-                out.insert(coord, current_idx);
+                if out.insert(coord, current_idx).is_none() {
+                    remaining -= 1;
+                    if remaining == 0 {
+                        break;
+                    }
+                }
                 current_t = None;
                 in_v = false;
                 current_idx = None;
-                remaining = remaining.saturating_sub(1);
-                if remaining == 0 {
-                    break;
-                }
             }
             Event::Eof => break,
             _ => {}

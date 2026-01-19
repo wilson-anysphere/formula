@@ -227,7 +227,7 @@ fn capture_element_xml<B: std::io::BufRead>(
                         if depth == 0 {
                             break;
                         }
-                        depth = depth.saturating_sub(1);
+                        depth -= 1;
                     }
                     Event::Eof => break,
                     ev => {
