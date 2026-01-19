@@ -101,13 +101,27 @@ fn format_cell(cell: CellRef) -> String {
 
 fn range_area(range: (CellRef, CellRef)) -> u64 {
     let (start, end) = range;
-    let rows = end.row.saturating_sub(start.row).saturating_add(1) as u64;
-    let cols = end.col.saturating_sub(start.col).saturating_add(1) as u64;
-    rows.saturating_mul(cols)
+    let Some(rows) = end
+        .row
+        .checked_sub(start.row)
+        .and_then(|d| d.checked_add(1))
+        .map(u64::from)
+    else {
+        return u64::MAX;
+    };
+    let Some(cols) = end
+        .col
+        .checked_sub(start.col)
+        .and_then(|d| d.checked_add(1))
+        .map(u64::from)
+    else {
+        return u64::MAX;
+    };
+    rows.checked_mul(cols).unwrap_or(u64::MAX)
 }
 
 fn manhattan_distance(a: CellRef, b: CellRef) -> u64 {
-    (a.row.abs_diff(b.row) as u64).saturating_add(a.col.abs_diff(b.col) as u64)
+    u64::from(a.row.abs_diff(b.row)) + u64::from(a.col.abs_diff(b.col))
 }
 
 fn choose_best_range_match<'a, T>(
@@ -947,6 +961,14 @@ fn range_contains(range: (CellRef, CellRef), cell: CellRef) -> bool {
 
 fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
     // Best-effort scan: stay aligned for common fixed-width ptgs and bail on unknown tokens.
+    fn advance(i: &mut usize, n: usize) -> bool {
+        let Some(next) = i.checked_add(n) else {
+            return false;
+        };
+        *i = next;
+        true
+    }
+
     let mut i = 0usize;
     while i < rgce_bytes.len() {
         let ptg = rgce_bytes[i];
@@ -957,7 +979,11 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
             0x20 | 0x40 | 0x60 => return true,
 
             // PtgExp / PtgTbl: [rw:u16][col:u16]
-            0x01 | 0x02 => i = i.saturating_add(4),
+            0x01 | 0x02 => {
+                if !advance(&mut i, 4) {
+                    return false;
+                }
+            }
 
             // Fixed-width/no-payload operators + PtgParen.
             0x03..=0x16 | 0x2F => {}
@@ -969,12 +995,16 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
                 };
                 let grbit = attr[0];
                 let w_attr = u16::from_le_bytes([attr[1], attr[2]]) as usize;
-                i = i.saturating_add(3);
+                if !advance(&mut i, 3) {
+                    return false;
+                }
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
-                    let needed = w_attr.saturating_mul(2);
-                    i = i.saturating_add(needed);
+                    let needed = w_attr * 2;
+                    if !advance(&mut i, needed) {
+                        return false;
+                    }
                 }
             }
 
@@ -985,29 +1015,65 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
                 };
                 let cch = header[0] as usize;
                 let flags = header[1];
-                i = i.saturating_add(2);
-                let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
-                i = i.saturating_add(bytes);
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+                let bytes = if flags & 0x01 != 0 { cch * 2 } else { cch };
+                if !advance(&mut i, bytes) {
+                    return false;
+                }
             }
 
             // PtgErr / PtgBool
-            0x1C | 0x1D => i = i.saturating_add(1),
+            0x1C | 0x1D => {
+                if !advance(&mut i, 1) {
+                    return false;
+                }
+            }
             // PtgInt
-            0x1E => i = i.saturating_add(2),
+            0x1E => {
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+            }
             // PtgNum
-            0x1F => i = i.saturating_add(8),
+            0x1F => {
+                if !advance(&mut i, 8) {
+                    return false;
+                }
+            }
 
             // PtgFunc
-            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
+            0x21 | 0x41 | 0x61 => {
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+            }
             // PtgFuncVar
-            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
+            0x22 | 0x42 | 0x62 => {
+                if !advance(&mut i, 3) {
+                    return false;
+                }
+            }
             // PtgName
-            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
+            0x23 | 0x43 | 0x63 => {
+                if !advance(&mut i, 6) {
+                    return false;
+                }
+            }
 
             // PtgRef
-            0x24 | 0x44 | 0x64 => i = i.saturating_add(4),
+            0x24 | 0x44 | 0x64 => {
+                if !advance(&mut i, 4) {
+                    return false;
+                }
+            }
             // PtgArea
-            0x25 | 0x45 | 0x65 => i = i.saturating_add(8),
+            0x25 | 0x45 | 0x65 => {
+                if !advance(&mut i, 8) {
+                    return false;
+                }
+            }
 
             // PtgMem* tokens: [cce:u16][rgce:cce bytes]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
@@ -1016,12 +1082,25 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
                     return false;
                 };
                 let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
-                i = i.saturating_add(2 + cce);
+                let Some(step) = 2usize.checked_add(cce) else {
+                    return false;
+                };
+                if !advance(&mut i, step) {
+                    return false;
+                }
             }
 
             // 3D references: PtgRef3d / PtgArea3d.
-            0x3A | 0x5A | 0x7A => i = i.saturating_add(6),
-            0x3B | 0x5B | 0x7B => i = i.saturating_add(10),
+            0x3A | 0x5A | 0x7A => {
+                if !advance(&mut i, 6) {
+                    return false;
+                }
+            }
+            0x3B | 0x5B | 0x7B => {
+                if !advance(&mut i, 10) {
+                    return false;
+                }
+            }
 
             // Unknown/unsupported token; bail so we don't mis-scan.
             _ => return false,
@@ -1038,6 +1117,14 @@ fn rgce_contains_ptgarray(rgce_bytes: &[u8]) -> bool {
 fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
     // Best-effort scan: parse only a subset of tokens needed to find PtgArea3d while staying
     // aligned for common fixed-width ptgs.
+    fn advance(i: &mut usize, n: usize) -> bool {
+        let Some(next) = i.checked_add(n) else {
+            return false;
+        };
+        *i = next;
+        true
+    }
+
     let mut i = 0usize;
     while i < rgce_bytes.len() {
         let ptg = rgce_bytes[i];
@@ -1045,7 +1132,11 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
 
         match ptg {
             // PtgExp / PtgTbl: [rw:u16][col:u16]
-            0x01 | 0x02 => i = i.saturating_add(4),
+            0x01 | 0x02 => {
+                if !advance(&mut i, 4) {
+                    return false;
+                }
+            }
 
             // Fixed-width/no-payload operators + PtgParen.
             0x03..=0x16 | 0x2F => {}
@@ -1057,12 +1148,16 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
                 };
                 let grbit = attr[0];
                 let w_attr = u16::from_le_bytes([attr[1], attr[2]]) as usize;
-                i = i.saturating_add(3);
+                if !advance(&mut i, 3) {
+                    return false;
+                }
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
-                    let needed = w_attr.saturating_mul(2);
-                    i = i.saturating_add(needed);
+                    let needed = w_attr * 2;
+                    if !advance(&mut i, needed) {
+                        return false;
+                    }
                 }
             }
 
@@ -1073,31 +1168,71 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
                 };
                 let cch = header[0] as usize;
                 let flags = header[1];
-                i = i.saturating_add(2);
-                let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
-                i = i.saturating_add(bytes);
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+                let bytes = if flags & 0x01 != 0 { cch * 2 } else { cch };
+                if !advance(&mut i, bytes) {
+                    return false;
+                }
                 // Ignore rich/ext segments; this is best-effort and our fixtures emit none.
             }
 
             // PtgErr / PtgBool
-            0x1C | 0x1D => i = i.saturating_add(1),
+            0x1C | 0x1D => {
+                if !advance(&mut i, 1) {
+                    return false;
+                }
+            }
             // PtgInt
-            0x1E => i = i.saturating_add(2),
+            0x1E => {
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+            }
             // PtgNum
-            0x1F => i = i.saturating_add(8),
+            0x1F => {
+                if !advance(&mut i, 8) {
+                    return false;
+                }
+            }
             // PtgArray
-            0x20 | 0x40 | 0x60 => i = i.saturating_add(7),
+            0x20 | 0x40 | 0x60 => {
+                if !advance(&mut i, 7) {
+                    return false;
+                }
+            }
             // PtgFunc
-            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
+            0x21 | 0x41 | 0x61 => {
+                if !advance(&mut i, 2) {
+                    return false;
+                }
+            }
             // PtgFuncVar
-            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
+            0x22 | 0x42 | 0x62 => {
+                if !advance(&mut i, 3) {
+                    return false;
+                }
+            }
             // PtgName
-            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
+            0x23 | 0x43 | 0x63 => {
+                if !advance(&mut i, 6) {
+                    return false;
+                }
+            }
 
             // PtgRef: [row:u16][col+flags:u16]
-            0x24 | 0x44 | 0x64 => i = i.saturating_add(4),
+            0x24 | 0x44 | 0x64 => {
+                if !advance(&mut i, 4) {
+                    return false;
+                }
+            }
             // PtgArea: [row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
-            0x25 | 0x45 | 0x65 => i = i.saturating_add(8),
+            0x25 | 0x45 | 0x65 => {
+                if !advance(&mut i, 8) {
+                    return false;
+                }
+            }
 
             // PtgMem* tokens: [cce:u16][rgce:cce bytes]
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
@@ -1106,11 +1241,20 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
                     return false;
                 };
                 let cce = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
-                i = i.saturating_add(2 + cce);
+                let Some(step) = 2usize.checked_add(cce) else {
+                    return false;
+                };
+                if !advance(&mut i, step) {
+                    return false;
+                }
             }
 
             // PtgRef3d: [ixti:u16][row:u16][col+flags:u16]
-            0x3A | 0x5A | 0x7A => i = i.saturating_add(6),
+            0x3A | 0x5A | 0x7A => {
+                if !advance(&mut i, 6) {
+                    return false;
+                }
+            }
 
             // PtgArea3d: [ixti:u16][row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
             0x3B | 0x5B | 0x7B => {
@@ -1122,7 +1266,9 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
                 if (col1 & RELATIVE_MASK) != 0 || (col2 & RELATIVE_MASK) != 0 {
                     return true;
                 }
-                i = i.saturating_add(10);
+                if !advance(&mut i, 10) {
+                    return false;
+                }
             }
 
             // Unknown/unsupported token; bail so we don't mis-scan.
@@ -1405,7 +1551,7 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(&new_col_field.to_le_bytes());
                 } else {
                     // Out-of-bounds references materialize as PtgRefErr*.
-                    out.push(ptg.saturating_add(0x06));
+                    out.push(ptg.checked_add(0x06).unwrap_or(ptg));
                     out.extend_from_slice(payload);
                 }
 
@@ -1432,7 +1578,7 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(&new_col1.to_le_bytes());
                     out.extend_from_slice(&new_col2.to_le_bytes());
                 } else {
-                    out.push(ptg.saturating_add(0x06));
+                    out.push(ptg.checked_add(0x06).unwrap_or(ptg));
                     out.extend_from_slice(payload);
                 }
 
@@ -1483,12 +1629,12 @@ pub(crate) fn materialize_biff8_rgce(
                 let col_raw = col_field & COL_INDEX_MASK;
 
                 let abs_row = if row_rel {
-                    cell_row.saturating_add(row_raw as i16 as i64)
+                    cell_row + row_raw as i16 as i64
                 } else {
                     row_raw as i64
                 };
                 let abs_col = if col_rel {
-                    cell_col.saturating_add(sign_extend_14(col_raw) as i64)
+                    cell_col + sign_extend_14(col_raw) as i64
                 } else {
                     col_raw as i64
                 };
@@ -1498,7 +1644,7 @@ pub(crate) fn materialize_biff8_rgce(
                 } else {
                     // Excel materializes out-of-bounds `PtgRefN` / `PtgAreaN` refs in shared formulas
                     // as `#REF!` error ptgs (`PtgRefErr*` / `PtgAreaErr*`).
-                    out.push(ptg.saturating_sub(0x02));
+                    out.push(ptg.checked_sub(0x02).unwrap_or(ptg));
                 }
                 out.extend_from_slice(payload);
                 i = end;
@@ -1523,23 +1669,23 @@ pub(crate) fn materialize_biff8_rgce(
                 let col2_raw = col2_field & COL_INDEX_MASK;
 
                 let abs_row1 = if row1_rel {
-                    cell_row.saturating_add(row1_raw as i16 as i64)
+                    cell_row + row1_raw as i16 as i64
                 } else {
                     row1_raw as i64
                 };
                 let abs_row2 = if row2_rel {
-                    cell_row.saturating_add(row2_raw as i16 as i64)
+                    cell_row + row2_raw as i16 as i64
                 } else {
                     row2_raw as i64
                 };
 
                 let abs_col1 = if col1_rel {
-                    cell_col.saturating_add(sign_extend_14(col1_raw) as i64)
+                    cell_col + sign_extend_14(col1_raw) as i64
                 } else {
                     col1_raw as i64
                 };
                 let abs_col2 = if col2_rel {
-                    cell_col.saturating_add(sign_extend_14(col2_raw) as i64)
+                    cell_col + sign_extend_14(col2_raw) as i64
                 } else {
                     col2_raw as i64
                 };
@@ -1547,7 +1693,7 @@ pub(crate) fn materialize_biff8_rgce(
                 if cell_in_bounds(abs_row1, abs_col1) && cell_in_bounds(abs_row2, abs_col2) {
                     out.push(ptg);
                 } else {
-                    out.push(ptg.saturating_sub(0x02));
+                    out.push(ptg.checked_sub(0x02).unwrap_or(ptg));
                 }
                 out.extend_from_slice(payload);
                 i = end;
@@ -1578,7 +1724,7 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(&new_col_field.to_le_bytes());
                 } else {
                     // Out-of-bounds -> PtgRefErr3d*
-                    out.push(ptg.saturating_add(0x02));
+                    out.push(ptg.checked_add(0x02).unwrap_or(ptg));
                     out.extend_from_slice(payload);
                 }
 
@@ -1608,7 +1754,7 @@ pub(crate) fn materialize_biff8_rgce(
                     out.extend_from_slice(&new_col2.to_le_bytes());
                 } else {
                     // Out-of-bounds -> PtgAreaErr3d*
-                    out.push(ptg.saturating_add(0x02));
+                    out.push(ptg.checked_add(0x02).unwrap_or(ptg));
                     out.extend_from_slice(payload);
                 }
 
