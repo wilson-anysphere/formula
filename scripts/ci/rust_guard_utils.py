@@ -8,6 +8,9 @@ These scripts are intentionally *not* full Rust parsers. They implement:
 - a common file eligibility predicate for "production Rust sources"
 
 Keep this module dependency-free and fast.
+
+Note: the guard scripts intentionally scan only paths containing `src/`, so build scripts
+(`**/build.rs`) and other non-library entrypoints (`examples/`, `benches/`, etc.) are out-of-scope.
 """
 
 from __future__ import annotations
@@ -212,6 +215,11 @@ def strip_cfg_test_items(lines: list[str]) -> list[str]:
 
 
 def should_scan_file(path: Path, skip_basenames: set[str]) -> bool:
+    """Return True if a Rust file should be scanned by CI guardrails.
+
+    Scope: only files under a `src/` directory (so this excludes `build.rs`, `examples/`, `benches/`,
+    etc.) and excludes `**/src/bin/**` binaries.
+    """
     if path.name in skip_basenames:
         return False
 

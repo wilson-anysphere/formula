@@ -12,6 +12,7 @@ and fail if we find any of:
   - debug-only output / placeholders: `println!`, `eprintln!`, `dbg!`, `todo!`, `unimplemented!`
 
 We intentionally skip:
+  - build scripts (`**/build.rs`) by virtue of scanning only `src/**`
   - `**/src/bin/**` (tooling binaries)
   - test-only modules/files (best-effort):
     - entire items annotated with `#[cfg(test)]` / `#[cfg(all(test, ...))]` / etc.

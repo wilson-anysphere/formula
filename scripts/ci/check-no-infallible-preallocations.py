@@ -13,6 +13,7 @@ We scan production Rust sources under:
 and fail if we find common infallible preallocation constructors for standard collections.
 
 We intentionally skip:
+  - build scripts (`**/build.rs`) by virtue of scanning only `src/**`
   - `**/src/bin/**` (tooling binaries)
   - test-only modules/files (best-effort):
     - entire items annotated with `#[cfg(test)]` / `#[cfg(all(test, ...))]` / etc.
