@@ -2275,20 +2275,30 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
     rgce: &[u8],
 ) -> Result<Biff8SharedFormulaRgceAnalysis, String> {
     fn inner(input: &[u8], out: &mut Biff8SharedFormulaRgceAnalysis) -> Result<(), String> {
+        fn advance(i: &mut usize, delta: usize, input_len: usize) -> Result<(), String> {
+            let end = i
+                .checked_add(delta)
+                .ok_or_else(|| "rgce offset overflow".to_string())?;
+            if end > input_len {
+                return Err("unexpected end of rgce stream".to_string());
+            }
+            *i = end;
+            Ok(())
+        }
+
         let mut i = 0usize;
         while i < input.len() {
             let ptg = *input
                 .get(i)
                 .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
-            i = i.saturating_add(1);
+            i = i
+                .checked_add(1)
+                .ok_or_else(|| "rgce offset overflow".to_string())?;
 
             match ptg {
                 // PtgExp / PtgTbl: [rw: u16][col: u16]
                 0x01 | 0x02 => {
-                    if i + 4 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 4;
+                    advance(&mut i, 4, input.len())?;
                 }
                 // Fixed-width / no-payload operators and punctuation.
                 0x03..=0x16 | 0x2F => {}
@@ -2311,24 +2321,18 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                     let etpg = *input
                         .get(i)
                         .ok_or_else(|| "unexpected end of rgce stream".to_string())?;
-                    i += 1;
+                    advance(&mut i, 1, input.len())?;
                     match etpg {
                         0x19 => {
                             // PtgList: fixed 12-byte payload.
-                            if i + 12 > input.len() {
-                                return Err("unexpected end of rgce stream".to_string());
-                            }
-                            i += 12;
+                            advance(&mut i, 12, input.len())?;
                         }
                         _ => {
                             // Opaque 5-byte payload (see decoder heuristics).
                             //
                             // The ptg itself is followed by 5 bytes; since we consumed the first
                             // one as the "etpg" discriminator above, skip the remaining 4 bytes.
-                            if i + 4 > input.len() {
-                                return Err("unexpected end of rgce stream".to_string());
-                            }
-                            i += 4;
+                            advance(&mut i, 4, input.len())?;
                         }
                     }
                 }
@@ -2358,52 +2362,31 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgErr / PtgBool: 1 byte.
                 0x1C | 0x1D => {
-                    if i + 1 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 1;
+                    advance(&mut i, 1, input.len())?;
                 }
                 // PtgInt: 2 bytes.
                 0x1E => {
-                    if i + 2 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 2;
+                    advance(&mut i, 2, input.len())?;
                 }
                 // PtgNum: 8 bytes.
                 0x1F => {
-                    if i + 8 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 8;
+                    advance(&mut i, 8, input.len())?;
                 }
                 // PtgArray: 7 bytes.
                 0x20 | 0x40 | 0x60 => {
-                    if i + 7 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 7;
+                    advance(&mut i, 7, input.len())?;
                 }
                 // PtgFunc: 2 bytes.
                 0x21 | 0x41 | 0x61 => {
-                    if i + 2 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 2;
+                    advance(&mut i, 2, input.len())?;
                 }
                 // PtgFuncVar: 3 bytes.
                 0x22 | 0x42 | 0x62 => {
-                    if i + 3 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 3;
+                    advance(&mut i, 3, input.len())?;
                 }
                 // PtgName: 6 bytes.
                 0x23 | 0x43 | 0x63 => {
-                    if i + 6 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 6;
+                    advance(&mut i, 6, input.len())?;
                 }
                 // PtgRef: [rw: u16][col: u16]
                 0x24 | 0x44 | 0x64 => {
@@ -2453,40 +2436,25 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgRefErr: 4 bytes.
                 0x2A | 0x4A | 0x6A => {
-                    if i + 4 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 4;
+                    advance(&mut i, 4, input.len())?;
                 }
                 // PtgAreaErr: 8 bytes.
                 0x2B | 0x4B | 0x6B => {
-                    if i + 8 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 8;
+                    advance(&mut i, 8, input.len())?;
                 }
                 // PtgRefN: 4 bytes.
                 0x2C | 0x4C | 0x6C => {
                     out.has_refn_or_arean = true;
-                    if i + 4 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 4;
+                    advance(&mut i, 4, input.len())?;
                 }
                 // PtgAreaN: 8 bytes.
                 0x2D | 0x4D | 0x6D => {
                     out.has_refn_or_arean = true;
-                    if i + 8 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 8;
+                    advance(&mut i, 8, input.len())?;
                 }
                 // PtgNameX: 6 bytes.
                 0x39 | 0x59 | 0x79 => {
-                    if i + 6 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 6;
+                    advance(&mut i, 6, input.len())?;
                 }
                 // PtgRef3d: [ixti: u16][rw: u16][col: u16]
                 0x3A | 0x5A | 0x7A => {
@@ -2517,33 +2485,21 @@ pub(crate) fn analyze_biff8_shared_formula_rgce(
                 }
                 // PtgRefErr3d: 6 bytes.
                 0x3C | 0x5C | 0x7C => {
-                    if i + 6 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 6;
+                    advance(&mut i, 6, input.len())?;
                 }
                 // PtgAreaErr3d: 10 bytes.
                 0x3D | 0x5D | 0x7D => {
-                    if i + 10 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 10;
+                    advance(&mut i, 10, input.len())?;
                 }
                 // PtgRefN3d: 6 bytes.
                 0x3E | 0x5E | 0x7E => {
                     out.has_refn_or_arean = true;
-                    if i + 6 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 6;
+                    advance(&mut i, 6, input.len())?;
                 }
                 // PtgAreaN3d: 10 bytes.
                 0x3F | 0x5F | 0x7F => {
                     out.has_refn_or_arean = true;
-                    if i + 10 > input.len() {
-                        return Err("unexpected end of rgce stream".to_string());
-                    }
-                    i += 10;
+                    advance(&mut i, 10, input.len())?;
                 }
                 other => {
                     // Unknown/unsupported token. We can't safely skip it without knowing its payload
