@@ -201,9 +201,10 @@ fn guess_utf16_endianness(bytes: &[u8]) -> Option<Utf16Endian> {
 
     // For UTF-16LE ASCII, the high byte is typically 0, which lands at odd indexes.
     // For UTF-16BE ASCII, the high byte lands at even indexes.
-    if odd_zero > even_zero.saturating_mul(3) {
+    // `even_zero` / `odd_zero` are bounded by the 512-byte sample length, so `* 3` is safe.
+    if odd_zero > even_zero * 3 {
         Some(Utf16Endian::Le)
-    } else if even_zero > odd_zero.saturating_mul(3) {
+    } else if even_zero > odd_zero * 3 {
         Some(Utf16Endian::Be)
     } else {
         None
