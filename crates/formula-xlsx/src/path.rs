@@ -164,7 +164,10 @@ fn percent_encode_best_effort(input: &str) -> Cow<'_, str> {
     }
 
     let mut out = String::new();
-    if out.try_reserve(input.len().saturating_add(2)).is_err() {
+    let Some(cap) = input.len().checked_add(2) else {
+        return Cow::Borrowed(input);
+    };
+    if out.try_reserve(cap).is_err() {
         return Cow::Borrowed(input);
     }
     for ch in input.chars() {

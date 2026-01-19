@@ -207,7 +207,9 @@ fn build_pdf(page_w: f64, page_h: f64, page_streams: &[Vec<u8>]) -> Vec<u8> {
     bytes.extend_from_slice(b"%PDF-1.4\n");
 
     let mut offsets = Vec::new();
-    let _ = offsets.try_reserve_exact((total_objs.saturating_add(1)) as usize);
+    if let Some(total_plus_one) = total_objs.checked_add(1) {
+        let _ = offsets.try_reserve_exact(total_plus_one as usize);
+    }
     offsets.push(0u64); // xref entry 0
 
     let write_obj = |obj_no: u32, content: &[u8], bytes: &mut Vec<u8>, offsets: &mut Vec<u64>| {

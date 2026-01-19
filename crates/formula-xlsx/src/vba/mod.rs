@@ -488,7 +488,10 @@ fn get_part<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a 
             // Some producers incorrectly store OPC part names with a leading `/` in the ZIP.
             // Preserve exact names for round-trip, but make lookups resilient.
             let mut with_slash = String::new();
-            if with_slash.try_reserve(name.len().saturating_add(1)).is_err() {
+            let Some(cap) = name.len().checked_add(1) else {
+                return None;
+            };
+            if with_slash.try_reserve(cap).is_err() {
                 return None;
             }
             with_slash.push('/');

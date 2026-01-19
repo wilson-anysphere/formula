@@ -183,7 +183,9 @@ fn xml_escape(input: &str) -> String {
     }
 
     let mut out = String::new();
-    let _ = out.try_reserve(input.len().saturating_add(extra));
+    if let Some(cap) = input.len().checked_add(extra) {
+        let _ = out.try_reserve(cap);
+    }
     let mut start = 0usize;
     for (i, ch) in input.char_indices() {
         let escaped = match ch {

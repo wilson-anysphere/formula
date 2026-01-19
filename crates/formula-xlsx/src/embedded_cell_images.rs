@@ -630,8 +630,13 @@ fn parse_rich_value_rel_image_targets(
         } else if target.starts_with("xl/") {
             // Treat `xl/...` targets as absolute part names (some producers omit the leading `/`).
             let mut absolute = String::new();
+            let Some(cap) = target.len().checked_add(1) else {
+                return Err(XlsxError::AllocationFailure(
+                    "parse_rich_value_rel_image_targets absolute target",
+                ));
+            };
             if absolute
-                .try_reserve(target.len().saturating_add(1))
+                .try_reserve(cap)
                 .is_err()
             {
                 return Err(XlsxError::AllocationFailure(

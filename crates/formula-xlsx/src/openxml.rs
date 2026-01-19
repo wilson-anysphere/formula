@@ -126,8 +126,11 @@ where
                     return get_part(stripped).is_some();
                 }
                 let mut with_slash = String::new();
+                let Some(cap) = candidate.len().checked_add(1) else {
+                    return false;
+                };
                 if with_slash
-                    .try_reserve(candidate.len().saturating_add(1))
+                    .try_reserve(cap)
                     .is_err()
                 {
                     return false;

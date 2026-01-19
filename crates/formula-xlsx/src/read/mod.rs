@@ -81,7 +81,9 @@ const PIVOT_BINDING_NAMESPACE: PivotTableId =
 fn pivot_table_id_from_part_name(part_name: &str) -> PivotTableId {
     let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
     let mut key = String::new();
-    let _ = key.try_reserve("pivotTable:".len().saturating_add(part_name.len()));
+    if let Some(cap) = "pivotTable:".len().checked_add(part_name.len()) {
+        let _ = key.try_reserve(cap);
+    }
     key.push_str("pivotTable:");
     key.push_str(part_name);
     PivotTableId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
@@ -90,7 +92,9 @@ fn pivot_table_id_from_part_name(part_name: &str) -> PivotTableId {
 fn pivot_chart_id_from_part_name(part_name: &str) -> PivotChartId {
     let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
     let mut key = String::new();
-    let _ = key.try_reserve("pivotChart:".len().saturating_add(part_name.len()));
+    if let Some(cap) = "pivotChart:".len().checked_add(part_name.len()) {
+        let _ = key.try_reserve(cap);
+    }
     key.push_str("pivotChart:");
     key.push_str(part_name);
     PivotChartId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
