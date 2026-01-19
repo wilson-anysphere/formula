@@ -119,7 +119,7 @@ impl MetadataPart {
         let mut cursor: u32 = 0;
         for block in blocks {
             let count = block.count.max(1);
-            let end = cursor.saturating_add(count);
+            let end = cursor.checked_add(count)?;
             if idx < end {
                 return Some(&block.block);
             }

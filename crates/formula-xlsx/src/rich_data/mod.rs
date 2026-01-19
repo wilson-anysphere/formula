@@ -977,12 +977,18 @@ fn parse_metadata_vm_mapping_fallback(
                 continue;
             };
             for offset in 0..count {
-                out.insert(vm_idx.saturating_add(offset), rich_value_idx);
+                let Some(vm_key) = vm_idx.checked_add(offset) else {
+                    break;
+                };
+                out.insert(vm_key, rich_value_idx);
             }
             break;
         }
 
-        vm_idx = vm_idx.saturating_add(count);
+        let Some(next_vm_idx) = vm_idx.checked_add(count) else {
+            break;
+        };
+        vm_idx = next_vm_idx;
     }
 
     Ok(out)

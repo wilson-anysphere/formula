@@ -402,7 +402,7 @@ fn resolve_bk_run<T: Copy>(runs: &[BkRun<T>], idx: u32) -> Option<T> {
     let mut cursor: u32 = 0;
     for run in runs {
         let count = run.count.max(1);
-        let end = cursor.saturating_add(count);
+        let end = cursor.checked_add(count)?;
         if idx < end {
             return Some(run.value);
         }
@@ -445,19 +445,31 @@ fn parse_value_metadata_direct_mappings(
         });
 
         let Some(rc) = rc else {
-            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            vm_start_1_based = match vm_start_1_based.checked_add(count) {
+                Some(v) => v,
+                None => break,
+            };
             continue;
         };
 
         let Some(v) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
-            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            vm_start_1_based = match vm_start_1_based.checked_add(count) {
+                Some(v) => v,
+                None => break,
+            };
             continue;
         };
 
         for offset in 0..count {
-            out.insert(vm_start_1_based.saturating_add(offset), v);
+            let Some(vm_idx) = vm_start_1_based.checked_add(offset) else {
+                break;
+            };
+            out.insert(vm_idx, v);
         }
-        vm_start_1_based = vm_start_1_based.saturating_add(count);
+        vm_start_1_based = match vm_start_1_based.checked_add(count) {
+            Some(v) => v,
+            None => break,
+        };
     }
 
     out

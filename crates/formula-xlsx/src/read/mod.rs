@@ -1682,10 +1682,13 @@ fn reconcile_user_hidden_with_outline(worksheet: &mut formula_model::Worksheet) 
     let mut rows_to_check: Vec<u32> = rows_to_check.into_iter().collect();
     rows_to_check.sort_unstable();
     for row0 in rows_to_check {
+        let Some(row1) = row0.checked_add(1) else {
+            continue;
+        };
         let desired = worksheet
             .outline
             .rows
-            .entry(row0.saturating_add(1))
+            .entry(row1)
             .hidden
             .user;
         let current = worksheet
@@ -1717,10 +1720,13 @@ fn reconcile_user_hidden_with_outline(worksheet: &mut formula_model::Worksheet) 
     let mut cols_to_check: Vec<u32> = cols_to_check.into_iter().collect();
     cols_to_check.sort_unstable();
     for col0 in cols_to_check {
+        let Some(col1) = col0.checked_add(1) else {
+            continue;
+        };
         let desired = worksheet
             .outline
             .cols
-            .entry(col0.saturating_add(1))
+            .entry(col1)
             .hidden
             .user;
         let current = worksheet
@@ -2083,7 +2089,9 @@ impl MetadataPart {
                             rich_type_indices.insert(next_metadata_type_idx);
                         }
                     }
-                    next_metadata_type_idx = next_metadata_type_idx.saturating_add(1);
+                    next_metadata_type_idx = next_metadata_type_idx.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("metadataTypes index overflow".to_string())
+                    })?;
                 }
 
                 Event::Start(e) if e.local_name().as_ref() == b"metadataRecords" => {
@@ -2097,12 +2105,16 @@ impl MetadataPart {
                 Event::Start(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
                     in_mdr = true;
                     current_mdr_idx = Some(next_mdr_idx);
-                    next_mdr_idx = next_mdr_idx.saturating_add(1);
+                    next_mdr_idx = next_mdr_idx.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("metadataRecords index overflow".to_string())
+                    })?;
                     drop(e);
                 }
                 Event::Empty(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
                     // Empty metadata record; still consume an index.
-                    next_mdr_idx = next_mdr_idx.saturating_add(1);
+                    next_mdr_idx = next_mdr_idx.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("metadataRecords index overflow".to_string())
+                    })?;
                     drop(e);
                 }
                 Event::End(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
@@ -2471,7 +2483,7 @@ impl MetadataPart {
         let mut cursor: u32 = 0;
         for block in &self.value_metadata {
             let count = block.count.max(1);
-            let end = cursor.saturating_add(count);
+            let end = cursor.checked_add(count)?;
             if vm_idx < end {
                 return Some(block);
             }
@@ -3635,10 +3647,13 @@ fn parse_worksheet_into_model(
             // Note: outline indices are 1-based, while row/col properties are 0-based.
             let row_keys: Vec<u32> = worksheet.row_properties.keys().copied().collect();
             for row_0based in row_keys {
+                let Some(row_1based) = row_0based.checked_add(1) else {
+                    continue;
+                };
                 let user_hidden = worksheet
                     .outline
                     .rows
-                    .entry(row_0based.saturating_add(1))
+                    .entry(row_1based)
                     .hidden
                     .user;
                 worksheet.set_row_hidden(row_0based, user_hidden);
@@ -3646,10 +3661,13 @@ fn parse_worksheet_into_model(
 
             let col_keys: Vec<u32> = worksheet.col_properties.keys().copied().collect();
             for col_0based in col_keys {
+                let Some(col_1based) = col_0based.checked_add(1) else {
+                    continue;
+                };
                 let user_hidden = worksheet
                     .outline
                     .cols
-                    .entry(col_0based.saturating_add(1))
+                    .entry(col_1based)
                     .hidden
                     .user;
                 worksheet.set_col_hidden(col_0based, user_hidden);

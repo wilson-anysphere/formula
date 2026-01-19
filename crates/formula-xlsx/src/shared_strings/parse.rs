@@ -72,7 +72,7 @@ fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> 
                 let sb = attr_value(&e, b"sb")?.and_then(|s| s.parse::<u32>().ok());
                 let text = parse_rph(reader)?;
                 phonetic_runs.push((sb, phonetic_order, text));
-                phonetic_order = phonetic_order.saturating_add(1);
+                phonetic_order += 1;
             }
             Event::Start(e) => {
                 // Only treat `<t>` as visible text when it is a direct child of `<si>` or
