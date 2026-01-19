@@ -128,8 +128,8 @@ pub(crate) fn parse_biff_sheet_sort_state(
                 if pending
                     .payload
                     .len()
-                    .saturating_add(payload.len())
-                    > records::MAX_LOGICAL_RECORD_BYTES
+                    .checked_add(payload.len())
+                    .is_none_or(|n| n > records::MAX_LOGICAL_RECORD_BYTES)
                 {
                     let kind = match pending.rt {
                         RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
@@ -140,7 +140,10 @@ pub(crate) fn parse_biff_sheet_sort_state(
                     continue;
                 }
                 pending.payload.extend_from_slice(payload);
-                pending.fragments = pending.fragments.saturating_add(1);
+                pending.fragments = match pending.fragments.checked_add(1) {
+                    Some(v) => v,
+                    None => records::MAX_LOGICAL_RECORD_FRAGMENTS,
+                };
             }
             id if (RECORD_FRT_MIN..=RECORD_FRT_MAX).contains(&id) => {
                 let data = record.data.as_ref();
@@ -399,7 +402,7 @@ fn build_sort_state_from_parsed(
 ) -> Option<SortState> {
     let has_header = sort_record_has_header(parsed.grbit, parsed.range, auto_filter_range);
     let start_row = if has_header {
-        parsed.range.start.row.saturating_add(1)
+        parsed.range.start.row.checked_add(1)?
     } else {
         parsed.range.start.row
     };
@@ -579,7 +582,7 @@ fn resolve_key_col(col_raw: u16, sort_range: Range) -> Option<u32> {
     }
 
     // Some writers store the sort key as an offset within the sorted range.
-    let abs = sort_range.start.col.saturating_add(col_masked);
+    let abs = sort_range.start.col.checked_add(col_masked)?;
     (abs >= sort_range.start.col && abs <= sort_range.end.col).then_some(abs)
 }
 

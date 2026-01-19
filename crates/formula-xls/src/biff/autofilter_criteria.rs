@@ -131,7 +131,10 @@ enum AutoFilterEntryMode {
 fn choose_entry_mode(raw_entries: &[u32], range: Range) -> AutoFilterEntryMode {
     let start_col = range.start.col;
     let end_col = range.end.col;
-    let width = end_col.saturating_sub(start_col).saturating_add(1);
+    let width = end_col
+        .checked_sub(start_col)
+        .and_then(|d| d.checked_add(1))
+        .unwrap_or(1);
 
     let mut relative_hits = 0usize;
     let mut absolute_hits = 0usize;
@@ -398,7 +401,10 @@ fn resolve_col_id(
 ) -> Result<u32, String> {
     let start_col = range.start.col;
     let end_col = range.end.col;
-    let width = end_col.saturating_sub(start_col).saturating_add(1);
+    let width = end_col
+        .checked_sub(start_col)
+        .and_then(|d| d.checked_add(1))
+        .unwrap_or(1);
 
     match entry_mode {
         AutoFilterEntryMode::Relative => {
@@ -663,7 +669,7 @@ fn locate_fragment_offset(
         if remaining < size {
             return Some((idx, remaining));
         }
-        remaining = remaining.saturating_sub(size);
+        remaining -= size;
     }
     None
 }
@@ -695,14 +701,14 @@ impl<'a> FragmentCursor<'a> {
             && self
                 .fragments
                 .iter()
-                .skip(self.frag_idx.saturating_add(1))
+                .skip(self.frag_idx.checked_add(1).unwrap_or(self.fragments.len()))
                 .all(|f| f.is_empty())
     }
 
     fn remaining_in_fragment(&self) -> usize {
         self.fragments
             .get(self.frag_idx)
-            .map(|f| f.len().saturating_sub(self.offset))
+            .map(|f| f.len().checked_sub(self.offset).unwrap_or(0))
             .unwrap_or(0)
     }
 

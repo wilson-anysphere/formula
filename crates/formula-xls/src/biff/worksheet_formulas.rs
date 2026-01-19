@@ -462,9 +462,23 @@ fn parse_shrfmla_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(
     }
 
     fn range_area(h: RangeHeader) -> u64 {
-        let rows = (h.rw_last.saturating_sub(h.rw_first) as u64).saturating_add(1);
-        let cols = (h.col_last.saturating_sub(h.col_first) as u64).saturating_add(1);
-        rows.saturating_mul(cols)
+        let Some(rows) = h
+            .rw_last
+            .checked_sub(h.rw_first)
+            .and_then(|d| d.checked_add(1))
+            .map(u64::from)
+        else {
+            return u64::MAX;
+        };
+        let Some(cols) = h
+            .col_last
+            .checked_sub(h.col_first)
+            .and_then(|d| d.checked_add(1))
+            .map(u64::from)
+        else {
+            return u64::MAX;
+        };
+        rows.checked_mul(cols).unwrap_or(u64::MAX)
     }
 
     fn parse_refu_range(data: &[u8]) -> Option<RangeHeader> {
@@ -1084,7 +1098,7 @@ impl<'a> FragmentCursor<'a> {
     fn remaining_in_fragment(&self) -> usize {
         self.fragments
             .get(self.frag_idx)
-            .map(|f| f.len().saturating_sub(self.offset))
+            .map(|f| f.len().checked_sub(self.offset).unwrap_or(0))
             .unwrap_or(0)
     }
 
@@ -1168,11 +1182,15 @@ impl<'a> FragmentCursor<'a> {
     fn remaining_total_bytes(&self) -> usize {
         let mut total = 0usize;
         for (idx, frag) in self.fragments.iter().enumerate().skip(self.frag_idx) {
-            if idx == self.frag_idx {
-                total = total.saturating_add(frag.len().saturating_sub(self.offset));
+            let add = if idx == self.frag_idx {
+                frag.len().checked_sub(self.offset).unwrap_or(0)
             } else {
-                total = total.saturating_add(frag.len());
-            }
+                frag.len()
+            };
+            total = match total.checked_add(add) {
+                Some(v) => v,
+                None => usize::MAX,
+            };
         }
         total
     }
@@ -1227,11 +1245,14 @@ impl<'a> FragmentCursor<'a> {
             if cols == 0 || rows == 0 {
                 return Err("invalid array constant dimensions".to_string());
             }
-            if cols.saturating_mul(rows) > MAX_ARRAY_CELLS {
+            let Some(cell_count) = cols.checked_mul(rows) else {
+                return Err("array constant too large".to_string());
+            };
+            if cell_count > MAX_ARRAY_CELLS {
                 return Err("array constant too large".to_string());
             }
 
-            for _ in 0..rows.saturating_mul(cols) {
+            for _ in 0..cell_count {
                 let ty = self.read_u8()?;
                 out.push(ty);
                 match ty {
@@ -1364,7 +1385,7 @@ impl<'a> FragmentCursor<'a> {
                     //
                     // Preserve the normal fixed-width behavior so subsequent tokens (e.g. `PtgStr`)
                     // stay aligned and we can still skip continuation flags.
-                    let remaining = cce.saturating_sub(out.len());
+                    let remaining = cce.checked_sub(out.len()).unwrap_or(0);
                     let payload_len = match (out.len(), remaining) {
                         // Non-standard payload widths: treat the whole stream as a single token.
                         (1, 6) | (1, 8) => remaining,
@@ -1444,7 +1465,7 @@ impl<'a> FragmentCursor<'a> {
                         .checked_add(ext_size)
                         .ok_or_else(|| "PtgStr extra payload length overflow".to_string())?;
                     if extra_len > 0 {
-                        let remaining = cce.saturating_sub(out.len());
+                        let remaining = cce.checked_sub(out.len()).unwrap_or(0);
                         if extra_len > remaining {
                             return Err(
                                 "PtgStr extra payload exceeds declared rgce length".to_string(),
@@ -1591,7 +1612,7 @@ impl<'a> FragmentCursor<'a> {
                 _ => {
                     // Unsupported token: copy the remaining bytes as-is to satisfy the `cce`
                     // contract and avoid dropping the formula entirely.
-                    let remaining = cce.saturating_sub(out.len());
+                    let remaining = cce.checked_sub(out.len()).unwrap_or(0);
                     if remaining > 0 {
                         let bytes = self.read_bytes(remaining)?;
                         out.extend_from_slice(&bytes);
@@ -1720,9 +1741,23 @@ fn range_contains_cell(range: (CellRef, CellRef), cell: CellRef) -> bool {
 
 fn range_area(range: (CellRef, CellRef)) -> u64 {
     let (start, end) = range;
-    let rows = end.row.saturating_sub(start.row).saturating_add(1) as u64;
-    let cols = end.col.saturating_sub(start.col).saturating_add(1) as u64;
-    rows.saturating_mul(cols)
+    let Some(rows) = end
+        .row
+        .checked_sub(start.row)
+        .and_then(|d| d.checked_add(1))
+        .map(u64::from)
+    else {
+        return u64::MAX;
+    };
+    let Some(cols) = end
+        .col
+        .checked_sub(start.col)
+        .and_then(|d| d.checked_add(1))
+        .map(u64::from)
+    else {
+        return u64::MAX;
+    };
+    rows.checked_mul(cols).unwrap_or(u64::MAX)
 }
 
 fn resolve_definition_anchor_for_base_cell<T>(
@@ -1794,7 +1829,7 @@ fn parse_formula_record_for_wide_ptgexp(
         return Err(format!(
             "truncated FORMULA rgce payload at offset {} (cce={cce}, have {} bytes)",
             record.offset,
-            data.len().saturating_sub(rgce_start)
+            data.len().checked_sub(rgce_start).unwrap_or(0)
         ));
     }
     let rgce = &data[rgce_start..rgce_end];

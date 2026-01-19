@@ -154,7 +154,17 @@ pub(crate) fn parse_biff_filter_database_ranges(
                 {
                     internal_supbook_index = Some(supbook_count);
                 }
-                supbook_count = supbook_count.saturating_add(1);
+                supbook_count = match supbook_count.checked_add(1) {
+                    Some(v) => v,
+                    None => {
+                        push_warning(
+                            &mut out,
+                            "SUPBOOK counter overflow while scanning workbook globals; stopping early"
+                                .to_string(),
+                        );
+                        break;
+                    }
+                };
             }
             RECORD_EXTERNSHEET => {
                 let parsed = externsheet::parse_biff8_externsheet_record_data(
@@ -204,7 +214,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
     for name in filter_database_names {
         let base_sheet = if name.itab != 0 {
             // NAME.itab is 1-based; 0 indicates workbook-scope.
-            Some(name.itab.saturating_sub(1) as usize)
+            usize::try_from(name.itab).ok().and_then(|v| v.checked_sub(1))
         } else {
             None
         };
@@ -438,14 +448,18 @@ impl<'a> FragmentCursor<'a> {
     fn remaining_in_fragment(&self) -> usize {
         self.fragments
             .get(self.frag_idx)
-            .map(|f| f.len().saturating_sub(self.offset))
+            .map(|f| f.len().checked_sub(self.offset).unwrap_or(0))
             .unwrap_or(0)
     }
 
     fn remaining_in_record(&self) -> usize {
         let mut remaining = self.remaining_in_fragment();
-        for frag in self.fragments.iter().skip(self.frag_idx.saturating_add(1)) {
-            remaining = remaining.saturating_add(frag.len());
+        let start = self.frag_idx.checked_add(1).unwrap_or(self.fragments.len());
+        for frag in self.fragments.iter().skip(start) {
+            remaining = match remaining.checked_add(frag.len()) {
+                Some(v) => v,
+                None => usize::MAX,
+            };
         }
         remaining
     }
@@ -735,10 +749,16 @@ fn decode_filter_database_rgce(
     while pos < rgce.len() {
         match rgce[pos] {
             // PtgParen (explicit parentheses): no payload.
-            0x15 => pos = pos.saturating_add(1),
+            0x15 => {
+                pos = pos
+                    .checked_add(1)
+                    .ok_or_else(|| "rgce offset overflow".to_string())?;
+            }
             // PtgAttr: [grbit: u8][wAttr: u16]
             0x19 => {
-                pos = pos.saturating_add(1);
+                pos = pos
+                    .checked_add(1)
+                    .ok_or_else(|| "rgce offset overflow".to_string())?;
                 let Some(bytes) = rgce.get(pos..).and_then(|rest| rest.get(..3)) else {
                     return Err("truncated PtgAttr token".to_string());
                 };
