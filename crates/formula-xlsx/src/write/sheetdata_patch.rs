@@ -2414,7 +2414,7 @@ fn skip_element(events: &[Event<'static>], start_idx: usize) -> usize {
         match &events[idx] {
             Event::Start(_) => depth += 1,
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                depth -= 1;
                 if depth == 0 {
                     return idx + 1;
                 }
@@ -2434,11 +2434,11 @@ fn extract_preserved_cell_children(events: &[Event<'static>]) -> Vec<Event<'stat
     let mut preserved = Vec::new();
     let mut skipping: usize = 0;
 
-    for ev in events.iter().skip(1).take(events.len().saturating_sub(2)) {
+    for ev in events.iter().skip(1).take(events.len() - 2) {
         if skipping > 0 {
             match ev {
                 Event::Start(_) => skipping += 1,
-                Event::End(_) => skipping = skipping.saturating_sub(1),
+                Event::End(_) => skipping -= 1,
                 _ => {}
             }
             continue;

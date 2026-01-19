@@ -368,7 +368,7 @@ impl ZipInflateBudget {
     }
 
     pub(crate) fn remaining_bytes(&self) -> u64 {
-        self.max_total_bytes.saturating_sub(self.used_bytes)
+        self.max_total_bytes.checked_sub(self.used_bytes).unwrap_or(0)
     }
 
     pub(crate) fn used_bytes(&self) -> u64 {
