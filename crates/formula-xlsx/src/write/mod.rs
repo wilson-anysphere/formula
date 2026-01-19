@@ -253,7 +253,13 @@ fn plan_sheet_structure(
 
   let mut removed: Vec<SheetMeta> = Vec::new();
   removed
-    .try_reserve(doc.meta.sheets.len().saturating_sub(matched_meta_idxs.len()))
+    .try_reserve(
+      doc.meta
+        .sheets
+        .len()
+        .checked_sub(matched_meta_idxs.len())
+        .unwrap_or(0),
+    )
     .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure removed"))?;
   for (idx, meta) in doc.meta.sheets.iter().enumerate() {
     if !matched_meta_idxs.contains(&idx) {
@@ -313,7 +319,13 @@ fn plan_sheet_structure(
     .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure sheets"))?;
     let mut added: Vec<SheetMeta> = Vec::new();
   added
-    .try_reserve(doc.workbook.sheets.len().saturating_sub(matched_meta_by_ws_id.len()))
+    .try_reserve(
+      doc.workbook
+        .sheets
+        .len()
+        .checked_sub(matched_meta_by_ws_id.len())
+        .unwrap_or(0),
+    )
     .map_err(|_| XlsxError::AllocationFailure("plan_sheet_structure added"))?;
 
     for sheet in &doc.workbook.sheets {
@@ -1244,9 +1256,17 @@ fn build_parts(
                     // If the expected per-sheet drawing part already exists (e.g. a workbook with
                     // a missing/corrupt worksheet `.rels`), reuse it instead of synthesizing a new
                     // `drawing{n}.xml` part and leaving the existing part orphaned.
-                    let fallback = format!("xl/drawings/drawing{}.xml", sheet_index.saturating_add(1));
-                    if parts.contains_key(&fallback) {
-                        (None, fallback)
+                    let fallback = sheet_index
+                        .checked_add(1)
+                        .map(|idx| format!("xl/drawings/drawing{}.xml", idx));
+                    if let Some(fallback) = fallback {
+                        if parts.contains_key(&fallback) {
+                            (None, fallback)
+                        } else {
+                            let n = next_drawing_part;
+                            next_drawing_part += 1;
+                            (None, format!("xl/drawings/drawing{n}.xml"))
+                        }
                     } else {
                         let n = next_drawing_part;
                         next_drawing_part += 1;
@@ -1414,10 +1434,10 @@ fn apply_print_settings_patches(
 
     fn model_range_to_cell_range(range: formula_model::Range) -> crate::print::CellRange {
         crate::print::CellRange {
-            start_row: range.start.row.saturating_add(1),
-            end_row: range.end.row.saturating_add(1),
-            start_col: range.start.col.saturating_add(1),
-            end_col: range.end.col.saturating_add(1),
+            start_row: range.start.row.checked_add(1).unwrap_or(u32::MAX),
+            end_row: range.end.row.checked_add(1).unwrap_or(u32::MAX),
+            start_col: range.start.col.checked_add(1).unwrap_or(u32::MAX),
+            end_col: range.end.col.checked_add(1).unwrap_or(u32::MAX),
         }
     }
 
@@ -1426,12 +1446,12 @@ fn apply_print_settings_patches(
     ) -> crate::print::PrintTitles {
         crate::print::PrintTitles {
             repeat_rows: titles.repeat_rows.map(|r| crate::print::RowRange {
-                start: r.start.saturating_add(1),
-                end: r.end.saturating_add(1),
+                start: r.start.checked_add(1).unwrap_or(u32::MAX),
+                end: r.end.checked_add(1).unwrap_or(u32::MAX),
             }),
             repeat_cols: titles.repeat_cols.map(|c| crate::print::ColRange {
-                start: c.start.saturating_add(1),
-                end: c.end.saturating_add(1),
+                start: c.start.checked_add(1).unwrap_or(u32::MAX),
+                end: c.end.checked_add(1).unwrap_or(u32::MAX),
             }),
         }
     }
@@ -1469,12 +1489,12 @@ fn apply_print_settings_patches(
             row_breaks_after: breaks
                 .row_breaks_after
                 .into_iter()
-                .map(|v| v.saturating_add(1))
+                .map(|v| v.checked_add(1).unwrap_or(u32::MAX))
                 .collect(),
             col_breaks_after: breaks
                 .col_breaks_after
                 .into_iter()
-                .map(|v| v.saturating_add(1))
+                .map(|v| v.checked_add(1).unwrap_or(u32::MAX))
                 .collect(),
         }
     }
@@ -3595,7 +3615,12 @@ fn update_sheet_protection_xml(
             },
             _ if sheet_calc_pr_depth > 0 => match event {
                 Event::Start(ref e) => {
-                    sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_add(1);
+                    sheet_calc_pr_depth =
+                        sheet_calc_pr_depth.checked_add(1).ok_or_else(|| {
+                            WriteError::Xlsx(XlsxError::Invalid(
+                                "sheetProtection calcPr depth overflow".to_string(),
+                            ))
+                        })?;
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
                 Event::Empty(ref e) => {
@@ -6760,8 +6785,10 @@ fn cols_xml_props_from_sheet(
     // `outline.cols` 1-based.
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
     for (col0, props) in sheet.col_properties.iter() {
-        let col_1 = col0.saturating_add(1);
-        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+        let Some(col_1) = col0.checked_add(1) else {
+            continue;
+        };
+        if col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
         // Preserve `style="0"` when the workbook's xf index 0 maps to a non-default style
@@ -7095,7 +7122,9 @@ fn render_sheet_data(
         let outline_entry: OutlineEntry = outline
             .map(|outline| outline.rows.entry(row_1_based))
             .unwrap_or_default();
-        let row_props = sheet.row_properties(row_1_based.saturating_sub(1));
+        let row_props = row_1_based
+            .checked_sub(1)
+            .and_then(|row0| sheet.row_properties(row0));
 
         out.push_str(&format!(r#"<row r="{row_1_based}""#));
         if let Some(row_props) = row_props {
@@ -7215,17 +7244,30 @@ fn render_sheet_data_columnar(
     let extra_rows: Vec<u32> = extra_rows.keys().copied().collect();
     let mut extra_idx = 0usize;
 
-    let table_row_start_1 = origin.row.saturating_add(1);
-    let table_row_end_1 = origin
-        .row
-        .saturating_add(table_rows.saturating_sub(1) as u32)
-        .saturating_add(1);
+    let Some(table_row_start_1) = origin.row.checked_add(1) else {
+        out.push_str("</sheetData>");
+        return out;
+    };
+    let Ok(table_rows_u32) = u32::try_from(table_rows) else {
+        out.push_str("</sheetData>");
+        return out;
+    };
+    if table_rows_u32 == 0 {
+        out.push_str("</sheetData>");
+        return out;
+    }
+    let table_row_end_1 = table_row_start_1
+        .checked_add(table_rows_u32 - 1)
+        .unwrap_or(u32::MAX);
 
-    let mut table_row_1 = table_row_start_1;
+    let mut table_row_1: Option<u32> = Some(table_row_start_1);
 
     loop {
         let next_extra = extra_rows.get(extra_idx).copied();
-        let next_table = (table_row_1 <= table_row_end_1).then_some(table_row_1);
+        let next_table = match table_row_1 {
+            Some(r) if r <= table_row_end_1 => Some(r),
+            _ => None,
+        };
 
         let Some(row_1_based) = (match (next_table, next_extra) {
             (Some(t), Some(e)) => Some(t.min(e)),
@@ -7240,20 +7282,32 @@ fn render_sheet_data_columnar(
             extra_idx += 1;
         }
         if next_table == Some(row_1_based) {
-            table_row_1 = table_row_1.saturating_add(1);
+            table_row_1 = row_1_based.checked_add(1);
         }
 
-        let row_zero = row_1_based.saturating_sub(1);
+        let Some(row_zero) = row_1_based.checked_sub(1) else {
+            continue;
+        };
 
         // Gather overlay cells for this row.
         while overlay_idx < overlay_cells.len()
-            && overlay_cells[overlay_idx].0.row.saturating_add(1) < row_1_based
+            && overlay_cells[overlay_idx]
+                .0
+                .row
+                .checked_add(1)
+                .unwrap_or(u32::MAX)
+                < row_1_based
         {
             overlay_idx += 1;
         }
         let overlay_start = overlay_idx;
         while overlay_idx < overlay_cells.len()
-            && overlay_cells[overlay_idx].0.row.saturating_add(1) == row_1_based
+            && overlay_cells[overlay_idx]
+                .0
+                .row
+                .checked_add(1)
+                .unwrap_or(u32::MAX)
+                == row_1_based
         {
             overlay_idx += 1;
         }
@@ -7300,8 +7354,11 @@ fn render_sheet_data_columnar(
         let mut cells_xml = String::new();
         let mut wrote_any_cell = false;
 
-        let in_table_row =
-            row_zero >= origin.row && row_zero < origin.row.saturating_add(table_rows as u32);
+        let table_end_exclusive = origin
+            .row
+            .checked_add(table_rows_u32)
+            .unwrap_or(u32::MAX);
+        let in_table_row = row_zero >= origin.row && row_zero < table_end_exclusive;
 
         if in_table_row {
             let row_off = (row_zero - origin.row) as usize;
@@ -7332,7 +7389,12 @@ fn render_sheet_data_columnar(
 
             // Table columns (overlay overrides).
             for col_off in 0..table_cols {
-                let col_idx = origin.col.saturating_add(col_off as u32);
+                let Ok(col_off_u32) = u32::try_from(col_off) else {
+                    break;
+                };
+                let Some(col_idx) = origin.col.checked_add(col_off_u32) else {
+                    break;
+                };
                 if overlay_cell_idx < overlay_slice.len()
                     && overlay_slice[overlay_cell_idx].0.col == col_idx
                 {
@@ -8313,8 +8375,12 @@ fn relative_target(base_dir: &str, part_name: &str) -> Result<String, WriteError
         .iter()
         .filter(|&&b| b == b'/')
         .count()
-        .saturating_add(1);
-    if base_parts.try_reserve(base_parts_capacity).is_err() {
+        .checked_add(1);
+    if let Some(cap) = base_parts_capacity {
+        if base_parts.try_reserve(cap).is_err() {
+            return Err(XlsxError::AllocationFailure("relative_target base parts").into());
+        }
+    } else {
         return Err(XlsxError::AllocationFailure("relative_target base parts").into());
     }
     for part in base_dir.split('/').filter(|p| !p.is_empty()) {
@@ -8327,8 +8393,12 @@ fn relative_target(base_dir: &str, part_name: &str) -> Result<String, WriteError
         .iter()
         .filter(|&&b| b == b'/')
         .count()
-        .saturating_add(1);
-    if target_parts.try_reserve(target_parts_capacity).is_err() {
+        .checked_add(1);
+    if let Some(cap) = target_parts_capacity {
+        if target_parts.try_reserve(cap).is_err() {
+            return Err(XlsxError::AllocationFailure("relative_target target parts").into());
+        }
+    } else {
         return Err(XlsxError::AllocationFailure("relative_target target parts").into());
     }
     for part in part_name.split('/').filter(|p| !p.is_empty()) {
@@ -8343,25 +8413,29 @@ fn relative_target(base_dir: &str, part_name: &str) -> Result<String, WriteError
         common += 1;
     }
 
-    let up = base_parts.len().saturating_sub(common);
-    let down = target_parts.len().saturating_sub(common);
-    let segments = up.saturating_add(down);
+    let up = base_parts.len() - common;
+    let down = target_parts.len() - common;
+    let segments = up
+        .checked_add(down)
+        .ok_or_else(|| XlsxError::AllocationFailure("relative_target segments"))?;
     if segments == 0 {
         return Ok(".".to_string());
     }
 
-    let mut estimated_len = 0usize;
+    let mut estimated_len = Some(0usize);
     if segments > 1 {
-        estimated_len = estimated_len.saturating_add(segments - 1);
+        estimated_len = estimated_len.and_then(|v| v.checked_add(segments - 1));
     }
-    estimated_len = estimated_len.saturating_add(up.saturating_mul(2));
+    estimated_len = estimated_len.and_then(|v| v.checked_add(up.checked_mul(2)?));
     for part in &target_parts[common..] {
-        estimated_len = estimated_len.saturating_add(part.len());
+        estimated_len = estimated_len.and_then(|v| v.checked_add(part.len()));
     }
 
     let mut out = String::new();
-    if out.try_reserve_exact(estimated_len).is_err() {
-        return Err(XlsxError::AllocationFailure("relative_target output").into());
+    if let Some(estimated_len) = estimated_len {
+        if out.try_reserve_exact(estimated_len).is_err() {
+            return Err(XlsxError::AllocationFailure("relative_target output").into());
+        }
     }
 
     let mut first = true;
@@ -8433,10 +8507,10 @@ fn ensure_content_types_override(
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(existing.len().saturating_add(128))
-        .is_err()
-    {
+    let Some(cap) = existing.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("ensure_content_types_override output").into());
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("ensure_content_types_override output").into());
     }
     let mut writer = Writer::new(out);
@@ -8576,10 +8650,10 @@ fn ensure_content_types_default(
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(existing.len().saturating_add(128))
-        .is_err()
-    {
+    let Some(cap) = existing.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("ensure_content_types_default output").into());
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("ensure_content_types_default output").into());
     }
     let mut writer = Writer::new(out);
@@ -9029,10 +9103,12 @@ fn ensure_workbook_rels_has_relationship(
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(existing.len().saturating_add(128))
-        .is_err()
-    {
+    let Some(cap) = existing.len().checked_add(128) else {
+        return Err(
+            XlsxError::AllocationFailure("ensure_workbook_rels_has_relationship output").into(),
+        );
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(
             XlsxError::AllocationFailure("ensure_workbook_rels_has_relationship output").into(),
         );
@@ -9199,10 +9275,13 @@ fn patch_workbook_rels_for_sheet_edits(
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(existing.len().saturating_add(added.len().saturating_mul(128)))
-        .is_err()
-    {
+    let Some(extra) = added.len().checked_mul(128) else {
+        return Err(XlsxError::AllocationFailure("patch_workbook_rels output").into());
+    };
+    let Some(cap) = existing.len().checked_add(extra) else {
+        return Err(XlsxError::AllocationFailure("patch_workbook_rels output").into());
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("patch_workbook_rels output").into());
     }
     let mut writer = Writer::new(out);
@@ -9424,10 +9503,13 @@ fn patch_content_types_for_sheet_edits(
     let mut reader = Reader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(existing.len().saturating_add(added.len().saturating_mul(128)))
-        .is_err()
-    {
+    let Some(extra) = added.len().checked_mul(128) else {
+        return Err(XlsxError::AllocationFailure("patch_content_types output").into());
+    };
+    let Some(cap) = existing.len().checked_add(extra) else {
+        return Err(XlsxError::AllocationFailure("patch_content_types output").into());
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("patch_content_types output").into());
     }
     let mut writer = Writer::new(out);
@@ -9628,7 +9710,11 @@ fn next_relationship_id_in_xml(xml: &str) -> u32 {
                     for &b in &value_bytes[3..] {
                         if b.is_ascii_digit() {
                             saw_digit = true;
-                            n = n.saturating_mul(10).saturating_add((b - b'0') as u32);
+                            let digit = (b - b'0') as u32;
+                            n = n
+                                .checked_mul(10)
+                                .and_then(|v| v.checked_add(digit))
+                                .unwrap_or(u32::MAX);
                         } else {
                             break;
                         }
