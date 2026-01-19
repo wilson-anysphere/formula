@@ -114,7 +114,16 @@ pub(crate) fn parse_biff_sheet_labelsst_indices(
 
     let mut scanned = 0usize;
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_warning_bounded_force(
+                    &mut out.warnings,
+                    "record counter overflow while scanning LABELSST indices; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_LABELSST_SCAN {
             push_warning_bounded_force(
                 &mut out.warnings,
@@ -335,9 +344,9 @@ fn push_sheet_metadata_warning_force(warnings: &mut Vec<String>, warning: impl I
             .last()
             .is_some_and(|w| w == SHEET_METADATA_WARNINGS_SUPPRESSED)
     {
-        MAX_WARNINGS_PER_SHEET_METADATA.saturating_sub(1)
+        MAX_WARNINGS_PER_SHEET_METADATA - 1
     } else {
-        warnings.len().saturating_sub(1)
+        warnings.len() - 1
     };
 
     if let Some(slot) = warnings.get_mut(replace_idx) {
@@ -390,9 +399,9 @@ fn push_warning_bounded_force(warnings: &mut Vec<String>, warning: impl Into<Str
             .last()
             .is_some_and(|w| w == WARNINGS_SUPPRESSED_MESSAGE)
     {
-        MAX_WARNINGS_PER_SHEET.saturating_sub(1)
+        MAX_WARNINGS_PER_SHEET - 1
     } else {
-        warnings.len().saturating_sub(1)
+        warnings.len() - 1
     };
 
     if let Some(slot) = warnings.get_mut(replace_idx) {
@@ -519,7 +528,16 @@ pub(crate) fn parse_biff_sheet_protection(
             break;
         }
 
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_sheet_metadata_warning_force(
+                    &mut out.warnings,
+                    "record counter overflow while scanning sheet protection; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
             push_sheet_metadata_warning_force(
                 &mut out.warnings,
@@ -851,7 +869,7 @@ fn parse_allow_mask_best_effort(payload: &[u8]) -> Option<u32> {
     }
 
     let mut best: Option<(u32, usize, u16)> = None;
-    for offset in 0..=payload.len().saturating_sub(2) {
+    for offset in 0..=(payload.len() - 2) {
         let Some(end) = offset.checked_add(2) else {
             break;
         };
@@ -917,7 +935,16 @@ pub(crate) fn parse_biff_sheet_view_state(
             break;
         }
 
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_sheet_metadata_warning_force(
+                    &mut out.warnings,
+                    "record counter overflow while scanning sheet view state; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
             push_sheet_metadata_warning_force(
                 &mut out.warnings,
@@ -1049,7 +1076,16 @@ pub(crate) fn parse_biff_sheet_manual_page_breaks(
             break;
         }
 
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_warning_bounded_force(
+                    &mut out.warnings,
+                    "record counter overflow while scanning sheet manual page breaks; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_PAGE_BREAK_SCAN {
             push_warning_bounded_force(
                 &mut out.warnings,
@@ -1108,7 +1144,7 @@ fn parse_horizontal_page_breaks_record(
 
     let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
 
-    let max_entries_by_len = data.len().saturating_sub(2) / ENTRY_LEN;
+    let max_entries_by_len = data.len().checked_sub(2).unwrap_or(0) / ENTRY_LEN;
     let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
     if cbrk > iter_entries {
@@ -1122,7 +1158,18 @@ fn parse_horizontal_page_breaks_record(
     }
 
     for i in 0..iter_entries {
-        let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
+        let Some(base) = i
+            .checked_mul(ENTRY_LEN)
+            .and_then(|n| n.checked_add(2usize))
+        else {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "HorizontalPageBreaks record at offset {record_offset}: overflow computing entry offset for entry {i}"
+                ),
+            );
+            break;
+        };
         let Some(bytes) = data.get(base..).and_then(|rest| rest.get(..2)) else {
             push_warning_bounded(
                 warnings,
@@ -1166,7 +1213,7 @@ fn parse_vertical_page_breaks_record(
 
     let cbrk = u16::from_le_bytes([data[0], data[1]]) as usize;
 
-    let max_entries_by_len = data.len().saturating_sub(2) / ENTRY_LEN;
+    let max_entries_by_len = data.len().checked_sub(2).unwrap_or(0) / ENTRY_LEN;
     let iter_entries = cbrk.min(max_entries_by_len).min(SPEC_MAX);
 
     if cbrk > iter_entries {
@@ -1180,7 +1227,18 @@ fn parse_vertical_page_breaks_record(
     }
 
     for i in 0..iter_entries {
-        let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
+        let Some(base) = i
+            .checked_mul(ENTRY_LEN)
+            .and_then(|n| n.checked_add(2usize))
+        else {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "VerticalPageBreaks record at offset {record_offset}: overflow computing entry offset for entry {i}"
+                ),
+            );
+            break;
+        };
         let Some(bytes) = data.get(base..).and_then(|rest| rest.get(..2)) else {
             push_warning_bounded(
                 warnings,
@@ -1362,7 +1420,10 @@ fn parse_selection_record(
     };
 
     let cref_usize = cref as usize;
-    let payload_len = data.len().saturating_sub(refs_start);
+    let payload_len = data
+        .len()
+        .checked_sub(refs_start)
+        .ok_or_else(|| "SELECTION refs start out of bounds".to_string())?;
     let available_refs = payload_len / ref_len;
     let parsed_refs = cref_usize
         .min(available_refs)
@@ -1578,7 +1639,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 for frag in fragments {
                     let payload = if remaining_header > 0 {
                         if frag.len() <= remaining_header {
-                            remaining_header = remaining_header.saturating_sub(frag.len());
+                            remaining_header -= frag.len();
                             continue;
                         }
                         let start = remaining_header;
@@ -1603,9 +1664,18 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         dropped = true;
                         break;
                     }
-                    if pending.payload.len().saturating_add(payload.len())
-                        > records::MAX_LOGICAL_RECORD_BYTES
-                    {
+                    let Some(next_len) = pending.payload.len().checked_add(payload.len()) else {
+                        push_warning_bounded_force(
+                            &mut props.warnings,
+                            format!(
+                                "AutoFilter12 continued payload length overflow (cap={} bytes); dropping continued AutoFilter12",
+                                records::MAX_LOGICAL_RECORD_BYTES
+                            ),
+                        );
+                        dropped = true;
+                        break;
+                    };
+                    if next_len > records::MAX_LOGICAL_RECORD_BYTES {
                         push_warning_bounded_force(
                             &mut props.warnings,
                             format!(
@@ -1646,7 +1716,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         for frag in fragments {
                             let payload = if remaining_header > 0 {
                                 if frag.len() <= remaining_header {
-                                    remaining_header = remaining_header.saturating_sub(frag.len());
+                                    remaining_header -= frag.len();
                                     continue;
                                 }
                                 let start = remaining_header;
@@ -1661,9 +1731,20 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                             }
                             // Avoid holding on to pathological payloads in tests where
                             // MAX_LOGICAL_RECORD_BYTES is small.
-                            if pending.payload.len().saturating_add(payload.len())
-                                > records::MAX_LOGICAL_RECORD_BYTES
-                            {
+                            let Some(next_len) = pending.payload.len().checked_add(payload.len())
+                            else {
+                                push_warning_bounded_force(
+                                    &mut props.warnings,
+                                    format!(
+                                        "AutoFilter12 payload length overflow (cap={} bytes); dropping AutoFilter12",
+                                        records::MAX_LOGICAL_RECORD_BYTES
+                                    ),
+                                );
+                                pending.payload.clear();
+                                pending.fragment_sizes.clear();
+                                break;
+                            };
+                            if next_len > records::MAX_LOGICAL_RECORD_BYTES {
                                 push_warning_bounded_force(
                                     &mut props.warnings,
                                     format!(
@@ -1800,7 +1881,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         continue;
                     }
 
-                    let max_col = EXCEL_MAX_COLS.saturating_sub(1);
+                    let max_col = EXCEL_MAX_COLS - 1;
                     let clamped_last_col = last_col.min(max_col);
                     if clamped_last_col != last_col {
                         push_warning_bounded(
@@ -1898,19 +1979,23 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         if let Some((first_row, last_row_plus1, first_col, last_col_plus1)) = dimensions {
             // DIMENSIONS uses "last row/col + 1" semantics.
             if last_row_plus1 > 0 && last_col_plus1 > 0 {
-                let mut end_row = last_row_plus1.saturating_sub(1);
-                let mut end_col = last_col_plus1.saturating_sub(1);
+                let mut end_row = last_row_plus1 - 1;
+                let mut end_col = last_col_plus1 - 1;
 
                 if first_row >= EXCEL_MAX_ROWS || first_col >= EXCEL_MAX_COLS {
                     // Ignore out-of-bounds dimensions.
                 } else {
-                    end_row = end_row.min(EXCEL_MAX_ROWS.saturating_sub(1));
-                    end_col = end_col.min(EXCEL_MAX_COLS.saturating_sub(1));
+                    end_row = end_row.min(EXCEL_MAX_ROWS - 1);
+                    end_col = end_col.min(EXCEL_MAX_COLS - 1);
 
                     if let Some(cols) = autofilter_cols {
                         if cols > 0 {
-                            let last_filter_col = first_col.saturating_add(cols.saturating_sub(1));
-                            end_col = end_col.min(last_filter_col);
+                            if let Some(last_filter_col) = cols
+                                .checked_sub(1)
+                                .and_then(|d| first_col.checked_add(d))
+                            {
+                                end_col = end_col.min(last_filter_col);
+                            }
                         }
                     }
 
@@ -2024,7 +2109,7 @@ fn parse_sort_record_best_effort(data: &[u8]) -> Result<Option<SortState>, Strin
     let mut start_row = rw_first.min(rw_last);
     let end_row = rw_first.max(rw_last);
     if has_header {
-        start_row = start_row.saturating_add(1);
+        start_row += 1;
     }
     if start_row > end_row {
         // Range contains only a header row (or is otherwise empty).
@@ -2116,7 +2201,7 @@ fn decode_autofilter12_record(
             if remaining < size {
                 return Some((idx, remaining));
             }
-            remaining = remaining.saturating_sub(size);
+            remaining -= size;
         }
         None
     }
@@ -2169,7 +2254,7 @@ fn decode_autofilter12_record(
         fn remaining_in_fragment(&self) -> usize {
             self.fragments
                 .get(self.frag_idx)
-                .map(|f| f.len().saturating_sub(self.offset))
+                .map(|f| f.len().checked_sub(self.offset).unwrap_or(0))
                 .unwrap_or(0)
         }
 
@@ -2386,7 +2471,9 @@ fn decode_autofilter12_record(
             continue;
         }
         // Basic sanity check: a BIFF8 XLUnicodeString is at least 3 bytes (cch:u16 + flags:u8).
-        if count > MAX_VALUES || count.saturating_mul(3) > payload.len().saturating_sub(vals_off) {
+        let min_bytes = count.checked_mul(3).unwrap_or(usize::MAX);
+        let available = payload.len().checked_sub(vals_off).unwrap_or(0);
+        if count > MAX_VALUES || min_bytes > available {
             continue;
         }
 
@@ -2583,7 +2670,7 @@ fn parse_biff_sheet_cell_xf_indices_filtered_with_cap(
                 let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let col_last =
                     u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]]) as u32;
-                let rk_data = &data[4..data.len().saturating_sub(2)];
+                let rk_data = &data[4..data.len() - 2];
                 for (idx, chunk) in rk_data.chunks_exact(6).enumerate() {
                     let col = match col_first.checked_add(idx as u32) {
                         Some(col) => col,
@@ -2605,7 +2692,7 @@ fn parse_biff_sheet_cell_xf_indices_filtered_with_cap(
                 let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let col_last =
                     u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]]) as u32;
-                let xf_data = &data[4..data.len().saturating_sub(2)];
+                let xf_data = &data[4..data.len() - 2];
                 for (idx, chunk) in xf_data.chunks_exact(2).enumerate() {
                     let col = match col_first.checked_add(idx as u32) {
                         Some(col) => col,
@@ -3052,7 +3139,7 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                             "truncated FORMULA rgce stream at offset {}: need {} bytes, got {}",
                             record.offset,
                             cce,
-                            data.len().saturating_sub(22)
+                            data.len().checked_sub(22).unwrap_or(0)
                         ),
                     );
                     continue;
@@ -3068,7 +3155,7 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
                         format!(
                             "truncated PtgTbl token in FORMULA record at offset {}: expected 4-byte payload, got {} bytes",
                             record.offset,
-                            rgce.len().saturating_sub(1)
+                            rgce.len().checked_sub(1).unwrap_or(0)
                         ),
                     );
                     out.formulas.insert(cell, "TABLE(#REF!,#REF!)".to_string());
@@ -3280,7 +3367,16 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
             break;
         }
 
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_warning_bounded_force(
+                    &mut out.warnings,
+                    "record counter overflow while scanning sheet hyperlinks; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > MAX_RECORDS_SCANNED_PER_SHEET_HYPERLINK_SCAN {
             push_warning_bounded_force(
                 &mut out.warnings,
@@ -3573,7 +3669,7 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
             let unicode_len =
                 u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
 
-            let available = input.len().saturating_sub(unicode_header_end);
+            let available = input.len().checked_sub(unicode_header_end).unwrap_or(0);
             let end_server_plausible = ansi_len == 0 || end_server <= ansi_len;
             let unicode_len_plausible = unicode_len == 0
                 || (unicode_len <= available && unicode_len % 2 == 0)
