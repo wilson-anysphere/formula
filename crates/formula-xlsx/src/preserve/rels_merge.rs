@@ -122,10 +122,17 @@ fn insert_relationships_before_close(
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out
-        .try_reserve(xml.len().saturating_add(to_insert.len().saturating_mul(128)))
-        .is_err()
-    {
+    let Some(extra) = to_insert.len().checked_mul(128) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_relationships_before_close output",
+        ));
+    };
+    let Some(cap) = xml.len().checked_add(extra) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_relationships_before_close output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure(
             "insert_relationships_before_close output",
         ));

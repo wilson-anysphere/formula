@@ -113,7 +113,10 @@ pub(crate) fn ensure_xlsm_content_types(
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(existing.len().saturating_add(256)).is_err() {
+    let Some(cap) = existing.len().checked_add(256) else {
+        return Err(XlsxError::AllocationFailure("macro_repair [Content_Types].xml output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("macro_repair [Content_Types].xml output"));
     }
     let mut writer = XmlWriter::new(out);
@@ -413,7 +416,10 @@ pub(crate) fn ensure_workbook_rels_has_vba(
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(existing.len().saturating_add(128)).is_err() {
+    let Some(cap) = existing.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("ensure_workbook_rels_has_vba output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("ensure_workbook_rels_has_vba output"));
     }
     let mut writer = XmlWriter::new(out);
@@ -615,7 +621,10 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
             let mut reader = XmlReader::from_reader(existing.as_slice());
             reader.config_mut().trim_text(false);
             let mut out = Vec::new();
-            if out.try_reserve(existing.len().saturating_add(128)).is_err() {
+            let Some(cap) = existing.len().checked_add(128) else {
+                return Err(XlsxError::AllocationFailure("ensure_vba_signature_relationship output"));
+            };
+            if out.try_reserve(cap).is_err() {
                 return Err(XlsxError::AllocationFailure("ensure_vba_signature_relationship output"));
             }
             let mut writer = XmlWriter::new(out);

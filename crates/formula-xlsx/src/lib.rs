@@ -1180,7 +1180,7 @@ impl XlsxDocument {
         }
 
         let mut next = match max_explicit {
-            Some(max) => max.saturating_add(1),
+            Some(max) => max.checked_add(1).unwrap_or(u32::MAX),
             None => 0,
         };
         for rv in &parsed {
@@ -1188,10 +1188,16 @@ impl XlsxDocument {
                 continue;
             }
             while out.contains_key(&next) {
-                next = next.saturating_add(1);
+                let Some(next_idx) = next.checked_add(1) else {
+                    return Ok(out.get(&rich_value_index).copied().flatten());
+                };
+                next = next_idx;
             }
             out.insert(next, rv.rel_index);
-            next = next.saturating_add(1);
+            match next.checked_add(1) {
+                Some(v) => next = v,
+                None => break,
+            }
         }
 
         Ok(out.get(&rich_value_index).copied().flatten())

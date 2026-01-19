@@ -775,7 +775,8 @@ impl DrawingPart {
             .map(|o| o.id.0)
             .max()
             .unwrap_or(0)
-            .saturating_add(1);
+            .checked_add(1)
+            .unwrap_or(u32::MAX);
 
         let embed_rel_id = self.relationships.next_r_id();
         let target = format!("../media/{}", image_id.as_str());

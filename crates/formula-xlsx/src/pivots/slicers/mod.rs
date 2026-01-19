@@ -1030,7 +1030,10 @@ fn patch_timeline_selection_xml(
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+    let Some(cap) = xml.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("patch_timeline_selection_xml output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("patch_timeline_selection_xml output"));
     }
     let mut writer = Writer::new(out);
@@ -1761,7 +1764,10 @@ fn patch_slicer_selection_xml(
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+    let Some(cap) = xml.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("patch_slicer_selection_xml output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("patch_slicer_selection_xml output"));
     }
     let mut writer = Writer::new(out);
@@ -2112,7 +2118,10 @@ fn slicer_cache_xml_set_selection(
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(xml.len().saturating_add(128)).is_err() {
+    let Some(cap) = xml.len().checked_add(128) else {
+        return Err(XlsxError::AllocationFailure("slicer_cache_xml_set_selection output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(XlsxError::AllocationFailure("slicer_cache_xml_set_selection output"));
     }
     let mut writer = Writer::new(out);

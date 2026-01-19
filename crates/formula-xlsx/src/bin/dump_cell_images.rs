@@ -394,7 +394,7 @@ fn parse_cell_images_root_and_blips(
 
         // Count only embeds (not links).
         if node.attribute((REL_NS, "embed")).or_else(|| node.attribute("r:embed")).is_some() {
-            embed_count = embed_count.saturating_add(1);
+            embed_count += 1;
         }
     }
 

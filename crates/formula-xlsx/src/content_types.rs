@@ -91,7 +91,10 @@ fn patch_content_types_xml(
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut out = Vec::new();
-    if out.try_reserve(xml.len().saturating_add(256)).is_err() {
+    let Some(cap) = xml.len().checked_add(256) else {
+        return Err(ChartExtractionError::AllocationFailure("patch_content_types_xml output"));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure("patch_content_types_xml output"));
     }
     let mut writer = XmlWriter::new(out);

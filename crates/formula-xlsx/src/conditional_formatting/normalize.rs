@@ -63,7 +63,10 @@ pub(crate) fn patch_cf_rule_priority(raw_xml: &str, priority: u32) -> String {
         }
 
         let mut out = String::new();
-        if out.try_reserve(raw_xml.len().saturating_add(12)).is_err() {
+        let Some(cap) = raw_xml.len().checked_add(12) else {
+            return raw_xml.to_string();
+        };
+        if out.try_reserve(cap).is_err() {
             return raw_xml.to_string();
         }
         out.push_str(&raw_xml[..value_start]);
@@ -75,7 +78,10 @@ pub(crate) fn patch_cf_rule_priority(raw_xml: &str, priority: u32) -> String {
     // Otherwise insert a new attribute.
     let insert_pos = priority_insert_pos(bytes, tag_start, tag_end);
     let mut out = String::new();
-    if out.try_reserve(raw_xml.len().saturating_add(24)).is_err() {
+    let Some(cap) = raw_xml.len().checked_add(24) else {
+        return raw_xml.to_string();
+    };
+    if out.try_reserve(cap).is_err() {
         return raw_xml.to_string();
     }
     out.push_str(&raw_xml[..insert_pos]);

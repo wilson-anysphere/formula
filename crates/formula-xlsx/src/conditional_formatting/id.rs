@@ -58,7 +58,13 @@ pub fn ensure_rule_ids(rules: &mut [CfRule], seed: u128) {
                 rule.id = Some(id);
                 break;
             }
-            attempt = attempt.saturating_add(1);
+            let Some(next_attempt) = attempt.checked_add(1) else {
+                // Extremely defensive: a collision count of 2^32 implies a broken PRNG or a wildly
+                // adversarial rule set; keep the current id rather than looping forever.
+                rule.id = Some(id);
+                break;
+            };
+            attempt = next_attempt;
         }
     }
 }

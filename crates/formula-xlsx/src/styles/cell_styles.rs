@@ -102,7 +102,10 @@ impl StylesPart {
             max_custom = max_custom.max(*id);
         }
 
-        let next_custom_num_fmt_id = max_custom.saturating_add(1).max(164);
+        let next_custom_num_fmt_id = max_custom
+            .checked_add(1)
+            .unwrap_or(u16::MAX)
+            .max(164);
 
         let fonts = parse_fonts(&root);
         let mut font_index = HashMap::new();
@@ -458,7 +461,10 @@ impl StylesPart {
         }
 
         let id = self.next_custom_num_fmt_id;
-        self.next_custom_num_fmt_id = self.next_custom_num_fmt_id.saturating_add(1);
+        self.next_custom_num_fmt_id = self
+            .next_custom_num_fmt_id
+            .checked_add(1)
+            .unwrap_or(u16::MAX);
         self.num_fmt_by_id.insert(id, fmt.to_string());
         self.num_fmt_id_by_code.insert(fmt.to_string(), id);
 
