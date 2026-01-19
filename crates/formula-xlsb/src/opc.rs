@@ -2861,7 +2861,10 @@ mod zip_guardrail_tests {
 
         let mut patched_local = false;
         for i in 0..zip_bytes.len().saturating_sub(4) {
-            if zip_bytes.get(i..i + 4) != Some(&LOCAL_SIG) {
+            let Some(sig_end) = i.checked_add(4) else {
+                continue;
+            };
+            if zip_bytes.get(i..sig_end) != Some(&LOCAL_SIG) {
                 continue;
             }
             let Some(header_start) = zip_bytes.get(i..) else {
@@ -2904,7 +2907,10 @@ mod zip_guardrail_tests {
 
         let mut patched_central = false;
         for i in 0..zip_bytes.len().saturating_sub(4) {
-            if zip_bytes.get(i..i + 4) != Some(&CENTRAL_SIG) {
+            let Some(sig_end) = i.checked_add(4) else {
+                continue;
+            };
+            if zip_bytes.get(i..sig_end) != Some(&CENTRAL_SIG) {
                 continue;
             }
             let Some(header_start) = zip_bytes.get(i..) else {
