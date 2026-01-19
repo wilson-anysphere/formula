@@ -303,7 +303,13 @@ impl<R: Read + Seek> Read for StandardAesEncryptedPackageReader<R> {
             })?;
 
             let to_copy = min(available, out.len() - written);
-            let dst = out.get_mut(written..written + to_copy).ok_or_else(|| {
+            let dst_end = written.checked_add(to_copy).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "output range overflow",
+                )
+            })?;
+            let dst = out.get_mut(written..dst_end).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "output slice bounds are inconsistent with bytes to copy",
