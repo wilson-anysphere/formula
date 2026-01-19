@@ -486,11 +486,13 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         if let Some(areas) = settings.print_area.as_ref().filter(|a| !a.is_empty()) {
             let ranges: Vec<crate::print::CellRange> = areas
                 .iter()
-                .map(|range| crate::print::CellRange {
-                    start_row: range.start.row.saturating_add(1),
-                    end_row: range.end.row.saturating_add(1),
-                    start_col: range.start.col.saturating_add(1),
-                    end_col: range.end.col.saturating_add(1),
+                .filter_map(|range| {
+                    Some(crate::print::CellRange {
+                        start_row: range.start.row.checked_add(1)?,
+                        end_row: range.end.row.checked_add(1)?,
+                        start_col: range.start.col.checked_add(1)?,
+                        end_col: range.end.col.checked_add(1)?,
+                    })
                 })
                 .collect();
             let value = crate::print::format_print_area_defined_name(&sheet.name, &ranges);
@@ -510,12 +512,12 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         {
             let titles = crate::print::PrintTitles {
                 repeat_rows: titles.repeat_rows.map(|rows| crate::print::RowRange {
-                    start: rows.start.saturating_add(1),
-                    end: rows.end.saturating_add(1),
+                    start: rows.start.checked_add(1).unwrap_or(u32::MAX),
+                    end: rows.end.checked_add(1).unwrap_or(u32::MAX),
                 }),
                 repeat_cols: titles.repeat_cols.map(|cols| crate::print::ColRange {
-                    start: cols.start.saturating_add(1),
-                    end: cols.end.saturating_add(1),
+                    start: cols.start.checked_add(1).unwrap_or(u32::MAX),
+                    end: cols.end.checked_add(1).unwrap_or(u32::MAX),
                 }),
             };
             let value = crate::print::format_print_titles_defined_name(&sheet.name, &titles);
@@ -984,8 +986,10 @@ fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, 
 
     // Column properties are stored 0-based in the model; OOXML uses 1-based indices.
     for (col0, props) in sheet.col_properties.iter() {
-        let col_1 = col0.saturating_add(1);
-        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+        let Some(col_1) = col0.checked_add(1) else {
+            continue;
+        };
+        if col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
         let style_xf = props
@@ -1304,7 +1308,7 @@ fn sheet_xml(
         .iter()
         .filter_map(|(row_1, entry)| {
             if entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed {
-                Some(row_1.saturating_sub(1))
+                row_1.checked_sub(1)
             } else {
                 None
             }
@@ -1317,7 +1321,11 @@ fn sheet_xml(
     let mut table_row: Option<u32> = columnar.as_ref().map(|c| c.origin.row);
     let table_end_row: Option<u32> = columnar
         .as_ref()
-        .map(|c| c.origin.row.saturating_add(c.rows.saturating_sub(1) as u32));
+        .and_then(|c| {
+            let rows_minus_one = c.rows.checked_sub(1)?;
+            let rows_minus_one_u32 = u32::try_from(rows_minus_one).ok()?;
+            c.origin.row.checked_add(rows_minus_one_u32)
+        });
     let mut outline_row_idx: usize = 0;
     let mut row_props_row_idx: usize = 0;
 
@@ -1369,7 +1377,9 @@ fn sheet_xml(
 
         if let Some(columnar) = columnar.as_ref() {
             let in_table_row = row_idx >= columnar.origin.row
-                && row_idx < columnar.origin.row.saturating_add(columnar.rows as u32);
+                && row_idx
+                    < columnar.origin.row.checked_add(u32::try_from(columnar.rows).unwrap_or(u32::MAX))
+                        .unwrap_or(u32::MAX);
             if in_table_row {
                 let row_off = (row_idx - columnar.origin.row) as usize;
                 let mut overlay_cell_idx = 0usize;
@@ -1791,7 +1801,9 @@ fn render_row_breaks_xml(breaks: &ManualPageBreaks) -> String {
         r#"<rowBreaks count="{count}" manualBreakCount="{count}">"#
     ));
     for row0 in &breaks.row_breaks_after {
-        let id = row0.saturating_add(1);
+        let Some(id) = row0.checked_add(1) else {
+            continue;
+        };
         out.push_str(&format!(r#"<brk id="{id}" max="16383" man="1"/>"#));
     }
     out.push_str("</rowBreaks>");
@@ -1808,7 +1820,9 @@ fn render_col_breaks_xml(breaks: &ManualPageBreaks) -> String {
         r#"<colBreaks count="{count}" manualBreakCount="{count}">"#
     ));
     for col0 in &breaks.col_breaks_after {
-        let id = col0.saturating_add(1);
+        let Some(id) = col0.checked_add(1) else {
+            continue;
+        };
         out.push_str(&format!(r#"<brk id="{id}" max="1048575" man="1"/>"#));
     }
     out.push_str("</colBreaks>");
