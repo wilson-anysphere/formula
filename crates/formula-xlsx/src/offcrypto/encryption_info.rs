@@ -92,7 +92,7 @@ pub fn extract_encryption_info_xml<'a>(
     if let Some(len_bytes) = encryption_info_stream.get(8..12) {
         let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]])
             as usize;
-        let available = encryption_info_stream.len().saturating_sub(12);
+        let available = encryption_info_stream.len() - 12;
         if len > 0 && len <= available {
             if let Some(end) = 12usize.checked_add(len) {
                 if let Some(candidate) = encryption_info_stream.get(12..end) {
@@ -219,7 +219,7 @@ fn decode_utf16_xml(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
     };
 
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
-    let bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+    let bytes = &bytes[..bytes.len() - (bytes.len() % 2)];
 
     let mut code_units: Vec<u16> = Vec::new();
     if code_units.try_reserve_exact(bytes.len() / 2).is_err() {
@@ -245,7 +245,7 @@ fn decode_utf16_xml(bytes: &[u8], endian: Utf16Endian) -> Result<String> {
 fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     let len_bytes: [u8; 4] = payload.get(0..4)?.try_into().ok()?;
     let len = u32::from_le_bytes(len_bytes) as usize;
-    if len == 0 || len > payload.len().saturating_sub(4) {
+    if len == 0 || len > payload.len() - 4 {
         return None;
     }
     let end = 4usize.checked_add(len)?;

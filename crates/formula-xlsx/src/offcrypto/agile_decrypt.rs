@@ -762,7 +762,7 @@ pub fn decrypt_agile_encrypted_package_stream_with_options<R: Read + Seek, W: Wr
     let len_hi =
         u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as u64;
     let declared_len_u64 = len_lo | (len_hi << 32);
-    let ciphertext_len = encrypted_package_len.saturating_sub(8);
+    let ciphertext_len = encrypted_package_len.checked_sub(8).unwrap_or(0);
     let declared_len =
         if len_lo != 0 && len_hi != 0 && declared_len_u64 > ciphertext_len && len_lo <= ciphertext_len {
             len_lo
