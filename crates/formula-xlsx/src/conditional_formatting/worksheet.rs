@@ -182,7 +182,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
             _ if skip_cf_depth > 0 => {
                 match event {
                     Event::Start(_) => skip_cf_depth += 1,
-                    Event::End(_) => skip_cf_depth = skip_cf_depth.saturating_sub(1),
+                    Event::End(_) => skip_cf_depth -= 1,
                     Event::Empty(_) => {}
                     _ => {}
                 }
@@ -191,7 +191,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
             _ if skip_ext_depth > 0 => {
                 match event {
                     Event::Start(_) => skip_ext_depth += 1,
-                    Event::End(_) => skip_ext_depth = skip_ext_depth.saturating_sub(1),
+                    Event::End(_) => skip_ext_depth -= 1,
                     Event::Empty(_) => {}
                     _ => {}
                 }
@@ -326,10 +326,14 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
         if in_worksheet {
             match event {
                 Event::Start(ref e) if e.local_name().as_ref() != b"worksheet" => {
-                    ws_depth = ws_depth.saturating_add(1);
+                    ws_depth = ws_depth.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("worksheet depth overflow".to_string())
+                    })?;
                 }
                 Event::End(ref e) if e.local_name().as_ref() != b"worksheet" => {
-                    ws_depth = ws_depth.saturating_sub(1);
+                    ws_depth = ws_depth.checked_sub(1).ok_or_else(|| {
+                        XlsxError::Invalid("worksheet depth underflow".to_string())
+                    })?;
                 }
                 _ => {}
             }

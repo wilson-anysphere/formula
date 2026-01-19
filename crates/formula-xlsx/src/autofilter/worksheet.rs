@@ -67,7 +67,7 @@ pub fn write_worksheet_autofilter(
                 skip_depth += 1;
             }
             Event::End(ref e) if skip_depth > 0 => {
-                skip_depth = skip_depth.saturating_sub(1);
+                skip_depth -= 1;
             }
             Event::Start(ref e) | Event::Empty(ref e)
                 if skip_depth == 0

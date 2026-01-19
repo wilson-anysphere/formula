@@ -544,7 +544,7 @@ pub fn write_sheet_tab_color(
         if skip_tab_color_depth > 0 {
             match event {
                 Event::Start(_) => skip_tab_color_depth += 1,
-                Event::End(_) => skip_tab_color_depth = skip_tab_color_depth.saturating_sub(1),
+                Event::End(_) => skip_tab_color_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             }

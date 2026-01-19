@@ -2716,8 +2716,13 @@ fn update_sheet_views_xml(sheet_xml: &str, desired: &SheetView) -> Result<String
                         target_depth += 1;
                     }
                     Event::End(_) => {
-                        skip_depth = skip_depth.saturating_sub(1);
-                        target_depth = target_depth.saturating_sub(1);
+                        if target_depth == 0 {
+                            return Err(WriteError::Xlsx(XlsxError::Invalid(
+                                "sheetViews target depth underflow".to_string(),
+                            )));
+                        }
+                        skip_depth -= 1;
+                        target_depth -= 1;
                     }
                     Event::Empty(_) => {}
                     _ => {}
@@ -2986,7 +2991,11 @@ fn update_sheet_views_xml(sheet_xml: &str, desired: &SheetView) -> Result<String
             }
             Event::End(ref e) if in_target_sheet_view => {
                 writer.write_event(Event::End(e.to_owned()))?;
-                target_depth = target_depth.saturating_sub(1);
+                target_depth = target_depth.checked_sub(1).ok_or_else(|| {
+                    WriteError::Xlsx(XlsxError::Invalid(
+                        "sheetViews target depth underflow".to_string(),
+                    ))
+                })?;
             }
 
             other => writer.write_event(other.to_owned())?,
@@ -3580,7 +3589,7 @@ fn update_sheet_protection_xml(
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },
@@ -3593,7 +3602,7 @@ fn update_sheet_protection_xml(
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
                 Event::End(ref e) => {
-                    sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_sub(1);
+                    sheet_calc_pr_depth -= 1;
                     writer.write_event(Event::End(e.to_owned()))?;
                     if sheet_calc_pr_depth == 0 && !replaced && !inserted && !new_section.is_empty()
                     {
@@ -3949,7 +3958,7 @@ fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> Result<String, WriteE
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },
@@ -4043,7 +4052,7 @@ fn remove_worksheet_drawing_xml(sheet_xml: &str) -> Result<String, WriteError> {
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },
@@ -4086,7 +4095,7 @@ fn update_worksheet_drawing_xml(
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },
@@ -4819,7 +4828,7 @@ fn patch_workbook_xml(
                     skipping_defined_name += 1;
                 }
                 Event::End(_) => {
-                    skipping_defined_name = skipping_defined_name.saturating_sub(1);
+                    skipping_defined_name -= 1;
                 }
                 _ => {}
             }

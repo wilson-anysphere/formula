@@ -99,7 +99,7 @@ pub(crate) fn update_worksheet_data_validations_xml(
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },

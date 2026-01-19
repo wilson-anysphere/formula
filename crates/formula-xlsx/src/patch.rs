@@ -1810,7 +1810,7 @@ fn patch_row<R: std::io::BufRead>(
             ev if cell_depth > 0 => {
                 match &ev {
                     Event::Start(_) => cell_depth += 1,
-                    Event::End(_) => cell_depth = cell_depth.saturating_sub(1),
+                    Event::End(_) => cell_depth -= 1,
                     _ => {}
                 }
                 writer.write_event(ev.into_owned())?;
