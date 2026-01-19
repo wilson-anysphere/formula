@@ -981,10 +981,10 @@ fn rewrite_sheet_name_in_ref(ref_value: &str, mapping: &HashMap<String, String>)
     let quote = was_quoted || formula_model::sheet_name_needs_quotes_a1(new_sheet);
     let new_token = if quote {
         let mut out = String::new();
-        if out
-            .try_reserve(new_sheet.len().saturating_add(2))
-            .is_err()
-        {
+        let Some(cap) = new_sheet.len().checked_add(2) else {
+            return Some(ref_value.to_string());
+        };
+        if out.try_reserve(cap).is_err() {
             return Some(ref_value.to_string());
         }
         formula_model::push_excel_single_quoted_identifier(&mut out, new_sheet);
@@ -1334,10 +1334,12 @@ fn merge_pivot_caches(
             ))
         })?;
         let mut section = String::new();
-        if section
-            .try_reserve(existing_section.len().saturating_add(inserted_xml.len()))
-            .is_err()
-        {
+        let Some(cap) = existing_section.len().checked_add(inserted_xml.len()) else {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches section",
+            ));
+        };
+        if section.try_reserve(cap).is_err() {
             return Err(ChartExtractionError::AllocationFailure(
                 "insert_pivot_caches section",
             ));
@@ -1353,10 +1355,12 @@ fn merge_pivot_caches(
     new_section = update_pivot_caches_count_attr(&new_section, new_count);
 
     let mut out = String::new();
-    if out
-        .try_reserve(workbook_xml.len().saturating_add(inserted_xml.len()))
-        .is_err()
-    {
+    let Some(cap) = workbook_xml.len().checked_add(inserted_xml.len()) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_pivot_caches workbook.xml output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure(
             "insert_pivot_caches workbook.xml output",
         ));
@@ -1400,16 +1404,18 @@ fn insert_pivot_caches(
         let start = start.trim_end();
 
         let mut expanded_root = String::new();
-        if expanded_root
-            .try_reserve(
-                start.len()
-                    .saturating_add(1)
-                    .saturating_add(preserved_pivot_caches_xml.len())
-                    .saturating_add(close_tag.len())
-                    .saturating_add(trailing_ws.len()),
-            )
-            .is_err()
-        {
+        let Some(cap) = start
+            .len()
+            .checked_add(1)
+            .and_then(|v| v.checked_add(preserved_pivot_caches_xml.len()))
+            .and_then(|v| v.checked_add(close_tag.len()))
+            .and_then(|v| v.checked_add(trailing_ws.len()))
+        else {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches expanded workbook root",
+            ));
+        };
+        if expanded_root.try_reserve(cap).is_err() {
             return Err(ChartExtractionError::AllocationFailure(
                 "insert_pivot_caches expanded workbook root",
             ));
@@ -1421,16 +1427,17 @@ fn insert_pivot_caches(
         expanded_root.push_str(trailing_ws);
 
         let mut out = String::new();
-        if out
-            .try_reserve(
-                workbook_xml
-                    .len()
-                    .saturating_add(preserved_pivot_caches_xml.len())
-                    .saturating_add(close_tag.len())
-                    .saturating_add(1),
-            )
-            .is_err()
-        {
+        let Some(cap) = workbook_xml
+            .len()
+            .checked_add(preserved_pivot_caches_xml.len())
+            .and_then(|v| v.checked_add(close_tag.len()))
+            .and_then(|v| v.checked_add(1))
+        else {
+            return Err(ChartExtractionError::AllocationFailure(
+                "insert_pivot_caches workbook.xml output",
+            ));
+        };
+        if out.try_reserve(cap).is_err() {
             return Err(ChartExtractionError::AllocationFailure(
                 "insert_pivot_caches workbook.xml output",
             ));
@@ -1487,10 +1494,12 @@ fn insert_pivot_caches(
     };
 
     let mut out = String::new();
-    if out
-        .try_reserve(workbook_xml.len().saturating_add(preserved_pivot_caches_xml.len()))
-        .is_err()
-    {
+    let Some(cap) = workbook_xml.len().checked_add(preserved_pivot_caches_xml.len()) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_pivot_caches workbook.xml output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure(
             "insert_pivot_caches workbook.xml output",
         ));
@@ -1686,10 +1695,12 @@ fn merge_workbook_cache_refs(
             ))
         })?;
         let mut section = String::new();
-        if section
-            .try_reserve(existing_section.len().saturating_add(inserted_xml.len()))
-            .is_err()
-        {
+        let Some(cap) = existing_section.len().checked_add(inserted_xml.len()) else {
+            return Err(ChartExtractionError::AllocationFailure(
+                "merge_workbook_cache_refs section",
+            ));
+        };
+        if section.try_reserve(cap).is_err() {
             return Err(ChartExtractionError::AllocationFailure(
                 "merge_workbook_cache_refs section",
             ));
@@ -1704,10 +1715,12 @@ fn merge_workbook_cache_refs(
     new_section = update_pivot_caches_count_attr(&new_section, new_count);
 
     let mut out = String::new();
-    if out
-        .try_reserve(workbook_xml.len().saturating_add(inserted_xml.len()))
-        .is_err()
-    {
+    let Some(cap) = workbook_xml.len().checked_add(inserted_xml.len()) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "merge_workbook_cache_refs workbook.xml output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure(
             "merge_workbook_cache_refs workbook.xml output",
         ));
@@ -1778,10 +1791,12 @@ fn insert_workbook_cache_refs(
     };
 
     let mut out = String::new();
-    if out
-        .try_reserve(workbook_xml.len().saturating_add(preserved_xml.len()))
-        .is_err()
-    {
+    let Some(cap) = workbook_xml.len().checked_add(preserved_xml.len()) else {
+        return Err(ChartExtractionError::AllocationFailure(
+            "insert_workbook_cache_refs workbook.xml output",
+        ));
+    };
+    if out.try_reserve(cap).is_err() {
         return Err(ChartExtractionError::AllocationFailure(
             "insert_workbook_cache_refs workbook.xml output",
         ));
@@ -1938,9 +1953,9 @@ fn ensure_workbook_has_namespace_prefix(
                 }
                 let trimmed = tag.trim_end();
                 let insert_rel = if trimmed.ends_with("/>") {
-                    trimmed.len().saturating_sub(2)
+                    trimmed.len() - 2
                 } else if trimmed.ends_with('>') {
-                    trimmed.len().saturating_sub(1)
+                    trimmed.len() - 1
                 } else {
                     return Err(ChartExtractionError::XmlStructure(format!(
                         "{part_name}: invalid <workbook> start tag"
@@ -2007,10 +2022,16 @@ fn expand_self_closing_workbook_root_if_needed<'a>(
                 let tag_start = tag_start.trim_end();
 
                 let mut out = String::new();
-                if out
-                    .try_reserve(workbook_xml.len().saturating_add(close_tag.len()).saturating_add(1))
-                    .is_err()
-                {
+                let Some(cap) = workbook_xml
+                    .len()
+                    .checked_add(close_tag.len())
+                    .and_then(|v| v.checked_add(1))
+                else {
+                    return Err(ChartExtractionError::AllocationFailure(
+                        "expand_self_closing_workbook_root_if_needed output",
+                    ));
+                };
+                if out.try_reserve(cap).is_err() {
                     return Err(ChartExtractionError::AllocationFailure(
                         "expand_self_closing_workbook_root_if_needed output",
                     ));
