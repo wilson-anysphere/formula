@@ -488,6 +488,10 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
     }
 }
 
+fn remaining_len(buf: &[u8], i: usize) -> usize {
+    buf.len().checked_sub(i).unwrap_or(0)
+}
+
 fn decode_rgce_impl(
     rgce: &[u8],
     rgcb: &[u8],
@@ -506,8 +510,9 @@ fn decode_rgce_impl(
     // legitimate array constants whose `rgce` stream is tiny but `rgcb` is not.
     let max_len = rgce
         .len()
-        .saturating_add(rgcb.len())
-        .saturating_mul(MAX_OUTPUT_FACTOR);
+        .checked_add(rgcb.len())
+        .and_then(|n| n.checked_mul(MAX_OUTPUT_FACTOR))
+        .unwrap_or(usize::MAX);
 
     let mut i = 0usize;
     let mut last_ptg_offset = 0usize;
@@ -667,49 +672,52 @@ fn decode_rgce_impl(
             0x16 => stack.push(ExprFragment::missing()),
             // PtgStr: [cch: u16][utf16 chars...]
             0x17 => {
-                if rgce.len().saturating_sub(i) < 2 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let len_end = i.checked_add(2).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let len_bytes = rgce.get(i..len_end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cch = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
                 i = len_end;
 
-                let needed = cch.saturating_mul(2);
-                if rgce.len().saturating_sub(i) < needed {
+                // `cch` is a u16 widened to usize, so `* 2` cannot overflow.
+                let needed = cch * 2;
+                let remaining = remaining_len(rgce, i);
+                if remaining < needed {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let end = i.checked_add(needed).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 i = end;
 
@@ -718,7 +726,7 @@ fn decode_rgce_impl(
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
                 let mut lit = String::new();
-                let _ = lit.try_reserve(cch.saturating_add(2));
+                let _ = lit.try_reserve(cch + 2);
                 lit.push('"');
                 for decoded in std::char::decode_utf16(iter) {
                     match decoded {
@@ -737,12 +745,13 @@ fn decode_rgce_impl(
                 //
                 // We currently decode the variants required for Excel structured references
                 // (tables), which appear as `etpg=0x19` (`PtgList` in documentation).
-                if rgce.len().saturating_sub(i) < 1 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 1 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let Some(&etpg) = rgce.get(i) else {
@@ -750,7 +759,7 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 };
                 i += 1;
@@ -775,7 +784,7 @@ fn decode_rgce_impl(
                         let default_ctx = WorkbookContext::default();
                         let ctx_for_scoring = Some(ctx.unwrap_or(&default_ctx));
 
-                        let remaining = rgce.len().saturating_sub(i);
+                        let remaining = remaining_len(rgce, i);
                         let tail = rgce.get(i..).unwrap_or(&[]);
                         let Some(payload_len) = ptg_list_payload_len_best_effort(tail, ctx_for_scoring)
                         else {
@@ -882,10 +891,11 @@ fn decode_rgce_impl(
                         let is_value_class = ptg == 0x38;
                         let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
                         let mut out = String::new();
-                        let _ = out.try_reserve(
-                            estimated_structured_ref_len(display_table_name, item, &columns)
-                                .saturating_add(needs_at as usize),
-                        );
+                        if let Some(cap) = estimated_structured_ref_len(display_table_name, item, &columns)
+                            .checked_add(needs_at as usize)
+                        {
+                            let _ = out.try_reserve(cap);
+                        }
                         if needs_at {
                             // Like value-class range/name tokens, Excel uses value-class list
                             // tokens to represent legacy implicit intersection.
@@ -916,25 +926,26 @@ fn decode_rgce_impl(
                 // formatting metadata that do not affect the reconstructed formula text, but some
                 // do. In particular, `tAttrSum` is used for an optimization where `SUM(A1:A10)` is
                 // encoded as `PtgArea` + `PtgAttr(tAttrSum)` (no explicit `PtgFuncVar(SUM)` token).
-                if rgce.len().saturating_sub(i) < 3 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 3 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let end = i.checked_add(3).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let hdr = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let grbit = hdr[0];
                 let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]);
@@ -960,16 +971,23 @@ fn decode_rgce_impl(
                     //
                     // We don't need it for printing, but we must consume it so subsequent tokens
                     // stay aligned.
-                    let needed = (w_attr as usize).saturating_mul(2);
-                    if rgce.len().saturating_sub(i) < needed {
+                    // `w_attr` is a u16 widened to usize, so `* 2` cannot overflow.
+                    let needed = (w_attr as usize) * 2;
+                    let remaining = remaining_len(rgce, i);
+                    if remaining < needed {
                         return Err(DecodeError::UnexpectedEof {
                             offset: ptg_offset,
                             ptg,
                             needed,
-                            remaining: rgce.len().saturating_sub(i),
+                            remaining,
                         });
                     }
-                    i += needed;
+                    i = i.checked_add(needed).ok_or(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed,
+                        remaining: remaining_len(rgce, i),
+                    })?;
                 } else {
                     // Ignore other attributes for printing, but keep the constants referenced so
                     // this doesn't accidentally get treated as dead code.
@@ -979,12 +997,13 @@ fn decode_rgce_impl(
             }
             // PtgErr: [err: u8]
             0x1C => {
-                if rgce.len().saturating_sub(i) < 1 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 1 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let code_offset = i;
@@ -993,7 +1012,7 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 };
                 i += 1;
@@ -1016,12 +1035,13 @@ fn decode_rgce_impl(
             }
             // PtgBool: [b: u8]
             0x1D => {
-                if rgce.len().saturating_sub(i) < 1 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 1 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let Some(&b) = rgce.get(i) else {
@@ -1029,7 +1049,7 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 };
                 i += 1;
@@ -1039,25 +1059,26 @@ fn decode_rgce_impl(
             }
             // PtgInt: [n: u16]
             0x1E => {
-                if rgce.len().saturating_sub(i) < 2 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let end = i.checked_add(2).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let n_bytes = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let n = u16::from_le_bytes([n_bytes[0], n_bytes[1]]);
                 i = end;
@@ -1065,12 +1086,13 @@ fn decode_rgce_impl(
             }
             // PtgNum: [f64]
             0x1F => {
-                if rgce.len().saturating_sub(i) < 8 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let mut bytes = [0u8; 8];
@@ -1078,13 +1100,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 8,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 8,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 bytes.copy_from_slice(raw);
                 i = end;
@@ -1092,12 +1114,13 @@ fn decode_rgce_impl(
             }
             // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
             0x20 | 0x40 | 0x60 => {
-                if rgce.len().saturating_sub(i) < 7 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 7 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 7,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 i += 7;
@@ -1112,12 +1135,13 @@ fn decode_rgce_impl(
             }
             // PtgRef: [row: u32][col: u16 (with relative flags in high bits)]
             0x24 | 0x44 | 0x64 => {
-                if rgce.len().saturating_sub(i) < 6 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1125,16 +1149,16 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let row0 = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
-                let row = (row0 as u64).saturating_add(1);
+                let row = u64::from(row0) + 1;
                 let flags = raw[5];
                 let col = u16::from_le_bytes([raw[4], flags & 0x3F]);
                 i = end;
@@ -1984,7 +2008,7 @@ fn decode_array_constant(
     // We decode a minimal subset that is sufficient for common array constants.
 
     let mut i = *pos;
-    if rgcb.len().saturating_sub(i) < 4 {
+    if remaining_len(rgcb, i) < 4 {
         return None;
     }
 
@@ -1994,11 +2018,9 @@ fn decode_array_constant(
     let rows_minus1 = u16::from_le_bytes([hdr[2], hdr[3]]) as usize;
     i = hdr_end;
 
-    let cols = cols_minus1.saturating_add(1);
-    let rows = rows_minus1.saturating_add(1);
-    if cols == 0 || rows == 0 {
-        return None;
-    }
+    // Values are u16 widened to usize, so `+ 1` cannot overflow.
+    let cols = cols_minus1 + 1;
+    let rows = rows_minus1 + 1;
 
     use core::fmt::Write as _;
 
@@ -2021,7 +2043,7 @@ fn decode_array_constant(
             match ty {
                 0x00 => {}
                 0x01 => {
-                    if rgcb.len().saturating_sub(i) < 8 {
+                    if remaining_len(rgcb, i) < 8 {
                         return None;
                     }
                     let mut bytes = [0u8; 8];
@@ -2032,7 +2054,7 @@ fn decode_array_constant(
                     write!(&mut out, "{}", f64::from_le_bytes(bytes)).ok()?;
                 }
                 0x02 => {
-                    if rgcb.len().saturating_sub(i) < 2 {
+                    if remaining_len(rgcb, i) < 2 {
                         return None;
                     }
                     let len_end = i.checked_add(2)?;
@@ -2040,7 +2062,7 @@ fn decode_array_constant(
                     let cch = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
                     i = len_end;
                     let byte_len = cch.checked_mul(2)?;
-                    if rgcb.len().saturating_sub(i) < byte_len {
+                    if remaining_len(rgcb, i) < byte_len {
                         return None;
                     }
                     let end = i.checked_add(byte_len)?;
@@ -2059,7 +2081,7 @@ fn decode_array_constant(
                     out.push('"');
                 }
                 0x04 => {
-                    if rgcb.len().saturating_sub(i) < 1 {
+                    if remaining_len(rgcb, i) < 1 {
                         return None;
                     }
                     let b = *rgcb.get(i)?;
@@ -2067,7 +2089,7 @@ fn decode_array_constant(
                     out.push_str(if b == 0 { "FALSE" } else { "TRUE" });
                 }
                 0x10 => {
-                    if rgcb.len().saturating_sub(i) < 1 {
+                    if remaining_len(rgcb, i) < 1 {
                         return None;
                     }
                     let code_offset = i;
@@ -2111,12 +2133,12 @@ fn consume_rgcb_arrays_in_subexpression(
     ctx: Option<&WorkbookContext>,
 ) -> Result<(), DecodeError> {
     fn has_remaining(buf: &[u8], i: usize, needed: usize) -> bool {
-        buf.len().saturating_sub(i) >= needed
+        remaining_len(buf, i) >= needed
     }
 
     let mut i = 0usize;
     while i < rgce.len() {
-        let ptg_offset = rgce_base_offset.saturating_add(i);
+        let ptg_offset = rgce_base_offset.checked_add(i).unwrap_or(usize::MAX);
         let Some(&ptg) = rgce.get(i) else {
             debug_assert!(false, "rgce cursor out of bounds (i={i}, len={})", rgce.len());
             return Err(DecodeError::UnexpectedEof {
@@ -2194,7 +2216,8 @@ fn consume_rgcb_arrays_in_subexpression(
                 })?;
                 let cch = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
                 i = end;
-                let byte_len = cch.saturating_mul(2);
+                // `cch` is a u16 widened to usize, so `* 2` cannot overflow.
+                let byte_len = cch * 2;
                 if !has_remaining(rgce, i, byte_len) {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -2290,7 +2313,8 @@ fn consume_rgcb_arrays_in_subexpression(
 
                 const T_ATTR_CHOOSE: u8 = 0x04;
                 if grbit & T_ATTR_CHOOSE != 0 {
-                    let needed = w_attr.saturating_mul(2);
+                    // `w_attr` is a u16 widened to usize, so `* 2` cannot overflow.
+                    let needed = w_attr * 2;
                     if !has_remaining(rgce, i, needed) {
                         return Err(DecodeError::UnexpectedEof {
                             offset: ptg_offset,
@@ -2464,7 +2488,7 @@ fn consume_rgcb_arrays_in_subexpression(
                     subexpr,
                     rgcb,
                     rgcb_pos,
-                    rgce_base_offset.saturating_add(i),
+                    rgce_base_offset.checked_add(i).unwrap_or(usize::MAX),
                     ctx,
                 )?;
                 i = subexpr_end;
@@ -2599,7 +2623,7 @@ fn format_cell_ref(row1: u64, col: u32, flags: u8) -> String {
 }
 
 fn push_cell_ref_from_field(out: &mut String, row0: u32, col_field: u16) {
-    let row1 = (row0 as u64).saturating_add(1);
+    let row1 = u64::from(row0) + 1;
     let col = (col_field & 0x3FFF) as u32;
     let col_relative = (col_field & 0x8000) == 0x8000;
     let row_relative = (col_field & 0x4000) == 0x4000;
@@ -2619,7 +2643,7 @@ fn push_col_ref_from_field(out: &mut String, col_field: u16) {
 }
 
 fn push_row_ref_from_field(out: &mut String, row0: u32, col_field: u16) {
-    let row1 = (row0 as u64).saturating_add(1);
+    let row1 = u64::from(row0) + 1;
     let row_relative = (col_field & ROW_RELATIVE_MASK) == ROW_RELATIVE_MASK;
     formula_model::push_a1_row_ref_row1(row1, !row_relative, out);
 }
@@ -3173,8 +3197,8 @@ mod encode_ast {
                         if let Some(true) = ctx.table_is_on_sheet(table_id, sheet_name) {
                             return Err(EncodeError::Parse(format!(
                                 "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
-                                base.row.saturating_add(1),
-                                base.col.saturating_add(1)
+                                base.row.checked_add(1).unwrap_or(u32::MAX),
+                                base.col.checked_add(1).unwrap_or(u32::MAX)
                             )));
                         }
 
@@ -3182,8 +3206,8 @@ mod encode_ast {
                     } else {
                         return Err(EncodeError::Parse(format!(
                             "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
-                            base.row.saturating_add(1),
-                            base.col.saturating_add(1)
+                            base.row.checked_add(1).unwrap_or(u32::MAX),
+                            base.col.checked_add(1).unwrap_or(u32::MAX)
                         )));
                     }
                 } else {
@@ -3197,8 +3221,8 @@ mod encode_ast {
                         ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
                             EncodeError::Parse(format!(
                                 "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
-                                base.row.saturating_add(1),
-                                base.col.saturating_add(1)
+                                base.row.checked_add(1).unwrap_or(u32::MAX),
+                                base.col.checked_add(1).unwrap_or(u32::MAX)
                             ))
                         })?
                     } else {
