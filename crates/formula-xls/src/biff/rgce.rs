@@ -299,7 +299,7 @@ fn namex_is_udf_call(remaining: &[u8]) -> bool {
                 input = &input[4..];
 
                 if grbit & T_ATTR_CHOOSE != 0 {
-                    let needed = (w_attr as usize).saturating_mul(2);
+                    let needed = (w_attr as usize) * 2;
                     if input.len() < needed {
                         return false;
                     }
@@ -577,7 +577,9 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 Ok((s, consumed)) => {
                     input = input.get(consumed..).unwrap_or_default();
                     let mut lit = String::new();
-                    let _ = lit.try_reserve(s.len().saturating_add(2));
+                    if let Some(cap) = s.len().checked_add(2) {
+                        let _ = lit.try_reserve(cap);
+                    }
                     lit.push('"');
                     push_escaped_excel_double_quotes(&mut lit, &s);
                     lit.push('"');
@@ -662,10 +664,11 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         let is_value_class = ptg == 0x38;
                         let needs_at = is_value_class && !structured_ref_is_single_cell(item, &columns);
                         let mut out = String::new();
-                        let _ = out.try_reserve(
-                            estimated_structured_ref_len(display_table_name, item, &columns)
-                                .saturating_add(needs_at as usize),
-                        );
+                        if let Some(cap) = estimated_structured_ref_len(display_table_name, item, &columns)
+                            .checked_add(needs_at as usize)
+                        {
+                            let _ = out.try_reserve(cap);
+                        }
                         if needs_at {
                             // Like value-class range/name tokens, Excel uses value-class list
                             // tokens to represent legacy implicit intersection.
@@ -723,7 +726,7 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
 
                 if grbit & T_ATTR_CHOOSE != 0 {
                     // tAttrChoose is followed by a jump table of u16 offsets; consume it.
-                    let needed = (w_attr as usize).saturating_mul(2);
+                    let needed = (w_attr as usize) * 2;
                     if input.len() < needed {
                         push_warning(
                             &mut warnings,
@@ -988,8 +991,9 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                         }
                     };
                     let mut args = Vec::new();
-                    let _ = args.try_reserve_exact(argc.saturating_sub(1));
-                    for _ in 0..argc.saturating_sub(1) {
+                    let argc_minus1 = argc.checked_sub(1).unwrap_or(0);
+                    let _ = args.try_reserve_exact(argc_minus1);
+                    for _ in 0..argc_minus1 {
                         let Some(arg) = stack.pop() else {
                             push_warning(
                                 &mut warnings,
@@ -1055,7 +1059,15 @@ fn decode_biff8_rgce_with_base_and_rgcb_opt(
                 // Skip reserved bytes.
                 input = &input[6..];
 
-                let idx = name_id.saturating_sub(1) as usize;
+                let Some(idx) = usize::try_from(name_id).ok().and_then(|n| n.checked_sub(1)) else {
+                    push_warning(
+                        &mut warnings,
+                        format!("PtgName references invalid name index {name_id}"),
+                        &mut warnings_suppressed,
+                    );
+                    stack.push(ExprFragment::new("#NAME?".to_string()));
+                    continue;
+                };
                 let Some(meta) = ctx.defined_names.get(idx) else {
                     push_warning(
                         &mut warnings,
@@ -1732,7 +1744,7 @@ fn decode_array_constant(
     const MAX_ARRAY_CELLS: usize = 4096;
 
     let mut i = *pos;
-    if rgcb.len().saturating_sub(i) < 4 {
+    if rgcb.len().checked_sub(i).unwrap_or(0) < 4 {
         return None;
     }
 
@@ -1741,12 +1753,20 @@ fn decode_array_constant(
     let rows_minus1 = u16::from_le_bytes([header[2], header[3]]) as usize;
     i = i.checked_add(4)?;
 
-    let cols = cols_minus1.saturating_add(1);
-    let rows = rows_minus1.saturating_add(1);
-    if cols == 0 || rows == 0 {
+    // Values are u16 widened to usize, so `+ 1` cannot overflow.
+    let cols = cols_minus1 + 1;
+    let rows = rows_minus1 + 1;
+    let Some(cells) = cols.checked_mul(rows) else {
+        push_warning(
+            warnings,
+            format!(
+                "array constant is too large to decode (rows={rows}, cols={cols}); rendering #UNKNOWN!"
+            ),
+            suppressed,
+        );
         return None;
-    }
-    if cols.saturating_mul(rows) > MAX_ARRAY_CELLS {
+    };
+    if cells > MAX_ARRAY_CELLS {
         push_warning(
             warnings,
             format!(
@@ -2116,15 +2136,19 @@ fn decode_ref_n(
     };
 
     let abs_row = if row_relative {
-        (base.row as i64).saturating_add(row_off as i64)
+        i64::from(base.row)
+            .checked_add(i64::from(row_off))
+            .unwrap_or(i64::MAX)
     } else {
-        row_raw as i64
+        i64::from(row_raw)
     };
 
     let abs_col = if col_relative {
-        (base.col as i64).saturating_add(col_off as i64)
+        i64::from(base.col)
+            .checked_add(i64::from(col_off))
+            .unwrap_or(i64::MAX)
     } else {
-        col_raw as i64
+        i64::from(col_raw)
     };
 
     if !cell_in_bounds(abs_row, abs_col) {
@@ -2172,27 +2196,31 @@ fn decode_area_n(
     let col2_raw = col2_field & COL_INDEX_MASK;
 
     let abs_row1 = if row1_relative {
-        (base.row as i64).saturating_add(row1_raw as i16 as i64)
+        i64::from(base.row)
+            .checked_add(i64::from(row1_raw as i16))
+            .unwrap_or(i64::MAX)
     } else {
-        row1_raw as i64
+        i64::from(row1_raw)
     };
     let abs_row2 = if row2_relative {
-        (base.row as i64).saturating_add(row2_raw as i16 as i64)
+        i64::from(base.row)
+            .checked_add(i64::from(row2_raw as i16))
+            .unwrap_or(i64::MAX)
     } else {
-        row2_raw as i64
+        i64::from(row2_raw)
     };
 
     let abs_col1 = if col1_relative {
         let col_off = sign_extend_14(col1_raw) as i64;
-        (base.col as i64).saturating_add(col_off)
+        i64::from(base.col).checked_add(col_off).unwrap_or(i64::MAX)
     } else {
-        col1_raw as i64
+        i64::from(col1_raw)
     };
     let abs_col2 = if col2_relative {
         let col_off = sign_extend_14(col2_raw) as i64;
-        (base.col as i64).saturating_add(col_off)
+        i64::from(base.col).checked_add(col_off).unwrap_or(i64::MAX)
     } else {
-        col2_raw as i64
+        i64::from(col2_raw)
     };
 
     if !cell_in_bounds(abs_row1, abs_col1) || !cell_in_bounds(abs_row2, abs_col2) {
@@ -2730,7 +2758,7 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     };
 
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
-                        out.push(ptg.saturating_add(0x06)); // PtgRef* -> PtgRefErr*
+                        out.push(ptg.checked_add(0x06).unwrap_or(ptg)); // PtgRef* -> PtgRefErr*
                         out.extend_from_slice(payload);
                         continue;
                     }
@@ -2787,7 +2815,7 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                         || new_col2 < 0
                         || new_col2 > MAX_COL
                     {
-                        out.push(ptg.saturating_add(0x06)); // PtgArea* -> PtgAreaErr*
+                        out.push(ptg.checked_add(0x06).unwrap_or(ptg)); // PtgArea* -> PtgAreaErr*
                         out.extend_from_slice(payload);
                         continue;
                     }
@@ -2861,7 +2889,7 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                     };
 
                     if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
-                        out.push(ptg.saturating_add(0x02)); // PtgRef3d* -> PtgRefErr3d*
+                        out.push(ptg.checked_add(0x02).unwrap_or(ptg)); // PtgRef3d* -> PtgRefErr3d*
                         out.extend_from_slice(payload);
                         continue;
                     }
@@ -2920,7 +2948,7 @@ pub(crate) fn materialize_biff8_shared_formula_rgce(
                         || new_col2 < 0
                         || new_col2 > MAX_COL
                     {
-                        out.push(ptg.saturating_add(0x02)); // PtgArea3d* -> PtgAreaErr3d*
+                        out.push(ptg.checked_add(0x02).unwrap_or(ptg)); // PtgArea3d* -> PtgAreaErr3d*
                         out.extend_from_slice(payload);
                         continue;
                     }
