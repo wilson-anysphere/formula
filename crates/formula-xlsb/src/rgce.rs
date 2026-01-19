@@ -1167,12 +1167,13 @@ fn decode_rgce_impl(
             }
             // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x25 | 0x45 | 0x65 => {
-                if rgce.len().saturating_sub(i) < 12 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1180,13 +1181,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 12,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 12,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let row_first0 = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                 let row_last0 = u32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]);
@@ -1236,12 +1237,13 @@ fn decode_rgce_impl(
             // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
-                if rgce.len().saturating_sub(i) < 2 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 // MS-XLSB/BIFF: u16 cce (size of a subexpression, used by the evaluator).
@@ -1249,22 +1251,23 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cce_bytes = rgce.get(i..cce_end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
                 i = cce_end;
-                if rgce.len().saturating_sub(i) < cce {
+                let remaining = remaining_len(rgce, i);
+                if remaining < cce {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: cce,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1277,13 +1280,13 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                         needed: cce,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     })?;
                     let subexpr = rgce.get(i..subexpr_end).ok_or(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: cce,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     })?;
                     consume_rgcb_arrays_in_subexpression(
                         subexpr,
@@ -1297,17 +1300,18 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: cce,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
             }
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
-                if rgce.len().saturating_sub(i) < 6 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 i += 6;
@@ -1315,12 +1319,13 @@ fn decode_rgce_impl(
             }
             // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
-                if rgce.len().saturating_sub(i) < 12 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 i += 12;
@@ -1328,12 +1333,13 @@ fn decode_rgce_impl(
             }
             // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                if rgce.len().saturating_sub(i) < 6 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let Some(base) = base else {
@@ -1347,13 +1353,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let row_off = i32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
                 let col_off = i16::from_le_bytes([raw[4], raw[5]]) as i64;
@@ -1375,12 +1381,13 @@ fn decode_rgce_impl(
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                if rgce.len().saturating_sub(i) < 12 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 let Some(base) = base else {
@@ -1394,13 +1401,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 12,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 12,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let row_first_off = i32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
                 let row_last_off = i32::from_le_bytes([raw[4], raw[5], raw[6], raw[7]]) as i64;
@@ -1465,12 +1472,13 @@ fn decode_rgce_impl(
             }
             // PtgRef3d: [ixti: u16][row: u32][col: u16]
             0x3A | 0x5A | 0x7A => {
-                if rgce.len().saturating_sub(i) < 8 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1485,13 +1493,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 8,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 8,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let ixti = u16::from_le_bytes([raw[0], raw[1]]);
                 let row0 = u32::from_le_bytes([raw[2], raw[3], raw[4], raw[5]]);
@@ -1514,12 +1522,13 @@ fn decode_rgce_impl(
             }
             // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
-                if rgce.len().saturating_sub(i) < 14 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 14 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1534,13 +1543,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 14,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 14,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let ixti = u16::from_le_bytes([raw[0], raw[1]]);
                 let row_first0 = u32::from_le_bytes([raw[2], raw[3], raw[4], raw[5]]);
@@ -1598,12 +1607,13 @@ fn decode_rgce_impl(
             }
             // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
             0x3C | 0x5C | 0x7C => {
-                if rgce.len().saturating_sub(i) < 8 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 i += 8;
@@ -1611,12 +1621,13 @@ fn decode_rgce_impl(
             }
             // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3D | 0x5D | 0x7D => {
-                if rgce.len().saturating_sub(i) < 14 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 14 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
                 i += 14;
@@ -1624,12 +1635,13 @@ fn decode_rgce_impl(
             }
             // PtgName: [nameId: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
-                if rgce.len().saturating_sub(i) < 6 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1644,13 +1656,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 6,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let name_id = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
                 i = end; // nameId + reserved
@@ -1692,12 +1704,13 @@ fn decode_rgce_impl(
             }
             // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
-                if rgce.len().saturating_sub(i) < 4 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 4 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1712,13 +1725,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 4,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 4,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let ixti = u16::from_le_bytes([raw[0], raw[1]]);
                 let name_index = u16::from_le_bytes([raw[2], raw[3]]);
@@ -1734,12 +1747,13 @@ fn decode_rgce_impl(
             }
             // PtgFunc: [iftab: u16] (argument count is implicit and fixed for the function).
             0x21 | 0x41 | 0x61 => {
-                if rgce.len().saturating_sub(i) < 2 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1747,13 +1761,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let iftab = u16::from_le_bytes([raw[0], raw[1]]);
                 i = end;
@@ -1848,12 +1862,13 @@ fn decode_rgce_impl(
             }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
-                if rgce.len().saturating_sub(i) < 3 {
+                let remaining = remaining_len(rgce, i);
+                if remaining < 3 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -1861,13 +1876,13 @@ fn decode_rgce_impl(
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let raw = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let argc = raw[0] as usize;
                 let iftab = u16::from_le_bytes([raw[1], raw[2]]);
@@ -1895,8 +1910,9 @@ fn decode_rgce_impl(
                         ptg,
                     })?.text;
                     let mut args = Vec::new();
-                    let _ = args.try_reserve_exact(argc.saturating_sub(1));
-                    for _ in 0..argc.saturating_sub(1) {
+                    let argc_minus1 = argc.checked_sub(1).unwrap_or(0);
+                    let _ = args.try_reserve_exact(argc_minus1);
+                    for _ in 0..argc_minus1 {
                         args.push(stack.pop().ok_or(DecodeError::StackUnderflow {
                             offset: ptg_offset,
                             ptg,
@@ -2163,7 +2179,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 4;
@@ -2176,7 +2192,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 7,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 7;
@@ -2199,20 +2215,20 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 let end = i.checked_add(2).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let len_bytes = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cch = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
                 i = end;
@@ -2223,7 +2239,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: byte_len,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += byte_len;
@@ -2236,7 +2252,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 let Some(&etpg) = rgce.get(i) else {
@@ -2244,7 +2260,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 };
                 i += 1;
@@ -2259,7 +2275,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         let default_ctx = WorkbookContext::default();
                         let ctx_for_scoring = Some(ctx.unwrap_or(&default_ctx));
 
-                        let remaining = rgce.len().saturating_sub(i);
+                        let remaining = remaining_len(rgce, i);
                         let tail = rgce.get(i..).unwrap_or(&[]);
                         let Some(payload_len) = ptg_list_payload_len_best_effort(tail, ctx_for_scoring)
                         else {
@@ -2292,20 +2308,20 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 let end = i.checked_add(3).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let hdr = rgce.get(i..end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 3,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let grbit = hdr[0];
                 let w_attr = u16::from_le_bytes([hdr[1], hdr[2]]) as usize;
@@ -2320,7 +2336,7 @@ fn consume_rgcb_arrays_in_subexpression(
                             offset: ptg_offset,
                             ptg,
                             needed,
-                            remaining: rgce.len().saturating_sub(i),
+                            remaining: remaining_len(rgce, i),
                         });
                     }
                     i += needed;
@@ -2334,7 +2350,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 1;
@@ -2346,7 +2362,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 1,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 1;
@@ -2358,7 +2374,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 2;
@@ -2370,7 +2386,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 8;
@@ -2383,7 +2399,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 2;
@@ -2395,7 +2411,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 3,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 3;
@@ -2408,7 +2424,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 6;
@@ -2421,7 +2437,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 6;
@@ -2433,7 +2449,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 12;
@@ -2447,20 +2463,20 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 2,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 let cce_end = i.checked_add(2).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cce_bytes = rgce.get(i..cce_end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: 2,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
                 i = cce_end;
@@ -2469,20 +2485,20 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: cce,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 let subexpr_end = i.checked_add(cce).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: cce,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 let subexpr = rgce.get(i..subexpr_end).ok_or(DecodeError::UnexpectedEof {
                     offset: ptg_offset,
                     ptg,
                     needed: cce,
-                    remaining: rgce.len().saturating_sub(i),
+                    remaining: remaining_len(rgce, i),
                 })?;
                 consume_rgcb_arrays_in_subexpression(
                     subexpr,
@@ -2501,7 +2517,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 6;
@@ -2513,7 +2529,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 12;
@@ -2526,7 +2542,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 6;
@@ -2538,7 +2554,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 12;
@@ -2551,7 +2567,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 4;
@@ -2564,7 +2580,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 8;
@@ -2576,7 +2592,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 14;
@@ -2588,7 +2604,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 8,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 8;
@@ -2600,7 +2616,7 @@ fn consume_rgcb_arrays_in_subexpression(
                         offset: ptg_offset,
                         ptg,
                         needed: 14,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining: remaining_len(rgce, i),
                     });
                 }
                 i += 14;
