@@ -149,7 +149,10 @@ pub(crate) fn mask_workbook_globals_filepass_record_id_in_place(
                 break;
             };
             dst.copy_from_slice(&RECORD_MASKED_UNKNOWN.to_le_bytes());
-            masked = masked.saturating_add(1);
+            masked = match masked.checked_add(1) {
+                Some(v) => v,
+                None => break,
+            };
         }
 
         if record_id == RECORD_EOF {
@@ -208,7 +211,7 @@ impl<'a> Iterator for BiffRecordIter<'a> {
             return None;
         }
 
-        let remaining = self.stream.len().saturating_sub(self.offset);
+        let remaining = self.stream.len().checked_sub(self.offset).unwrap_or(0);
         if remaining < 4 {
             self.offset = self.stream.len();
             return Some(Err("truncated BIFF record header".to_string()));
@@ -367,7 +370,7 @@ impl<'a> Iterator for FragmentIter<'a> {
         let start = self.offset;
         let end = start.checked_add(size)?;
         let out = self.data.get(start..end)?;
-        self.idx = self.idx.saturating_add(1);
+        self.idx = self.idx.checked_add(1)?;
         self.offset = end;
         Some(out)
     }

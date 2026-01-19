@@ -151,10 +151,12 @@ fn split_txo_text_and_formatting_run_suffix(bytes: &[u8]) -> (&[u8], bool) {
         return (bytes, false);
     }
 
-    let max_suffix_len = bytes.len().saturating_sub(bytes.len() % 4);
+    let max_suffix_len = bytes.len() - (bytes.len() % 4);
     let mut suffix_len = max_suffix_len;
     while suffix_len >= 4 {
-        let start = bytes.len().saturating_sub(suffix_len);
+        let Some(start) = bytes.len().checked_sub(suffix_len) else {
+            break;
+        };
         let suffix = &bytes[start..];
         if suffix.len() >= 4
             && suffix[0] == 0
@@ -251,7 +253,16 @@ fn parse_biff_sheet_notes_with_record_cap(
             break;
         }
 
-        scanned = scanned.saturating_add(1);
+        scanned = match scanned.checked_add(1) {
+            Some(v) => v,
+            None => {
+                push_warning_force(
+                    &mut warnings,
+                    "record counter overflow while scanning worksheet notes; stopping early",
+                );
+                break;
+            }
+        };
         if scanned > record_cap {
             push_warning_force(
                 &mut warnings,
@@ -772,7 +783,7 @@ fn parse_txo_text_biff5(
     let has_cb_runs = cb_runs.is_some();
     let cb_runs = cb_runs.unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
-    let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    let mut text_continue_bytes = total_continue_bytes.checked_sub(cb_runs).unwrap_or(0);
     if cb_runs > total_continue_bytes {
         push_warning(
             warnings,
@@ -795,12 +806,15 @@ fn parse_txo_text_biff5(
             break;
         }
         let take_len = frag.len().min(remaining_bytes);
-        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        remaining_bytes -= take_len;
         let frag = &frag[..take_len];
         if looks_like_txo_formatting_runs(frag) {
             break;
         }
-        capacity_raw = capacity_raw.saturating_add(take_len).min(TXO_MAX_TEXT_CHARS);
+        capacity_raw = match capacity_raw.checked_add(take_len) {
+            Some(v) => v.min(TXO_MAX_TEXT_CHARS),
+            None => TXO_MAX_TEXT_CHARS,
+        };
     }
 
     let first_continue_has_flag = matches!(
@@ -818,17 +832,20 @@ fn parse_txo_text_biff5(
                 break;
             }
             let take_len = frag.len().min(remaining_bytes);
-            remaining_bytes = remaining_bytes.saturating_sub(take_len);
+            remaining_bytes -= take_len;
             let frag = &frag[..take_len];
             if looks_like_txo_formatting_runs(frag) {
                 break;
             }
             let len = if matches!(frag.first().copied(), Some(0) | Some(1)) {
-                frag.len().saturating_sub(1)
+                frag.len().checked_sub(1).unwrap_or(0)
             } else {
                 frag.len()
             };
-            cap = cap.saturating_add(len).min(TXO_MAX_TEXT_CHARS);
+            cap = match cap.checked_add(len) {
+                Some(v) => v.min(TXO_MAX_TEXT_CHARS),
+                None => TXO_MAX_TEXT_CHARS,
+            };
         }
         cap
     } else {
@@ -889,7 +906,7 @@ fn parse_txo_text_biff5(
         }
 
         let take_len = frag.len().min(remaining_bytes);
-        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        remaining_bytes -= take_len;
         let frag = &frag[..take_len];
         if looks_like_txo_formatting_runs(frag) {
             break;
@@ -927,7 +944,7 @@ fn parse_txo_text_biff5(
                 format!(
                     "TXO record at offset {} truncated text (wanted {cch} chars, got {})",
                     record.offset,
-                    cch.saturating_sub(remaining)
+                    cch.checked_sub(remaining).unwrap_or(0)
                 ),
             );
         }
@@ -998,7 +1015,7 @@ fn parse_txo_text_biff8(
     let has_cb_runs = cb_runs.is_some();
     let cb_runs = cb_runs.unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
-    let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    let mut text_continue_bytes = total_continue_bytes.checked_sub(cb_runs).unwrap_or(0);
     if cb_runs > total_continue_bytes {
         push_warning(
             warnings,
@@ -1035,7 +1052,7 @@ fn parse_txo_text_biff8(
         }
 
         let take_len = frag.len().min(remaining_bytes);
-        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        remaining_bytes -= take_len;
         let frag = &frag[..take_len];
         if looks_like_txo_formatting_runs(frag) {
             break;
@@ -1104,7 +1121,7 @@ fn parse_txo_text_biff8(
             if let Some(b) = pending_unicode_byte.take() {
                 buf.push(b);
             }
-            let need_from_current = take_bytes_total.saturating_sub(buf.len());
+            let need_from_current = take_bytes_total.checked_sub(buf.len()).unwrap_or(0);
             let take_from_current = need_from_current.min(bytes.len());
             buf.extend_from_slice(&bytes[..take_from_current]);
             let used_current = take_from_current;
@@ -1150,7 +1167,7 @@ fn parse_txo_text_biff8(
             format!(
                 "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
                 record.offset,
-                cch_text.saturating_sub(remaining)
+                cch_text.checked_sub(remaining).unwrap_or(0)
             ),
         );
     }
@@ -1280,7 +1297,7 @@ fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) ->
             break;
         }
         let take_len = frag.len().min(remaining);
-        remaining = remaining.saturating_sub(take_len);
+        remaining -= take_len;
         let frag = &frag[..take_len];
         if frag.is_empty() {
             continue;
@@ -1304,12 +1321,16 @@ fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) ->
         if is_unicode {
             let combined_len = bytes.len() + usize::from(pending_unicode_byte);
             total = total
-                .saturating_add(combined_len / 2)
+                .checked_add(combined_len / 2)
+                .unwrap_or(usize::MAX)
                 .min(TXO_MAX_TEXT_CHARS);
             pending_unicode_byte = combined_len % 2 == 1;
         } else {
             pending_unicode_byte = false;
-            total = total.saturating_add(bytes.len()).min(TXO_MAX_TEXT_CHARS);
+            total = total
+                .checked_add(bytes.len())
+                .unwrap_or(usize::MAX)
+                .min(TXO_MAX_TEXT_CHARS);
         }
     }
     total
@@ -1421,7 +1442,7 @@ fn fallback_decode_continue_fragments(
             if let Some(b) = pending_unicode_byte.take() {
                 buf.push(b);
             }
-            let need_from_current = take_bytes_total.saturating_sub(buf.len());
+            let need_from_current = take_bytes_total.checked_sub(buf.len()).unwrap_or(0);
             let take_from_current = need_from_current.min(bytes.len());
             buf.extend_from_slice(&bytes[..take_from_current]);
             let used_current = take_from_current;
