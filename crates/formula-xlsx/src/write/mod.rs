@@ -6508,7 +6508,7 @@ fn strip_worksheet_conditional_formatting_blocks(sheet_xml: &[u8]) -> Result<Vec
             Event::Eof => break,
             _ if skip_depth > 0 => match event {
                 Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::End(_) => skip_depth -= 1,
                 Event::Empty(_) => {}
                 _ => {}
             },
@@ -6524,7 +6524,11 @@ fn strip_worksheet_conditional_formatting_blocks(sheet_xml: &[u8]) -> Result<Vec
                         skip_depth = 1;
                     } else {
                         writer.write_event(Event::Start(e.to_owned()))?;
-                        depth = depth.saturating_add(1);
+                        depth = depth.checked_add(1).ok_or_else(|| {
+                            WriteError::Xlsx(XlsxError::Invalid(
+                                "worksheet conditional formatting depth overflow".to_string(),
+                            ))
+                        })?;
                     }
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
@@ -6554,7 +6558,11 @@ fn strip_worksheet_conditional_formatting_blocks(sheet_xml: &[u8]) -> Result<Vec
                         writer.write_event(Event::End(e.to_owned()))?;
                         saw_root = false;
                     } else {
-                        depth = depth.saturating_sub(1);
+                        depth = depth.checked_sub(1).ok_or_else(|| {
+                            WriteError::Xlsx(XlsxError::Invalid(
+                                "worksheet conditional formatting depth underflow".to_string(),
+                            ))
+                        })?;
                         writer.write_event(Event::End(e.to_owned()))?;
                     }
                 } else {

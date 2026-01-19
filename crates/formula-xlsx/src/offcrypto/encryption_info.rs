@@ -447,7 +447,13 @@ pub fn decode_base64_field_limited(
             has_ws = true;
             continue;
         }
-        stripped_len = stripped_len.saturating_add(1);
+        stripped_len = stripped_len
+            .checked_add(1)
+            .ok_or(OffCryptoError::FieldTooLarge {
+                field: attr,
+                len: usize::MAX,
+                max: opts.max_base64_field_len,
+            })?;
         if stripped_len > opts.max_base64_field_len {
             return Err(OffCryptoError::FieldTooLarge {
                 field: attr,
@@ -472,10 +478,10 @@ pub fn decode_base64_field_limited(
                 (_, Some(b'=')) => 1,
                 _ => 0,
             };
-            max_decoded = max_decoded.saturating_sub(pad);
+            max_decoded = max_decoded.checked_sub(pad).unwrap_or(0);
         }
-        2 => max_decoded = max_decoded.saturating_add(1),
-        3 => max_decoded = max_decoded.saturating_add(2),
+        2 => max_decoded = max_decoded.checked_add(1).unwrap_or(usize::MAX),
+        3 => max_decoded = max_decoded.checked_add(2).unwrap_or(usize::MAX),
         _ => {}
     }
     if max_decoded > opts.max_base64_decoded_len {

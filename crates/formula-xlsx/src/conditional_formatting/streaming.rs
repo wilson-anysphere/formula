@@ -16,6 +16,8 @@ pub enum ConditionalFormattingStreamingError {
     Attr(#[from] quick_xml::events::attributes::AttrError),
     #[error(transparent)]
     Parse(#[from] ConditionalFormattingError),
+    #[error("invalid worksheet xml: {0}")]
+    Invalid(&'static str),
     #[error("missing worksheet root element")]
     MissingWorksheetRoot,
 }
@@ -107,7 +109,11 @@ fn extract_conditional_formatting_wrapper(
                     continue;
                 }
 
-                depth = depth.saturating_add(1);
+                depth = depth
+                    .checked_add(1)
+                    .ok_or(ConditionalFormattingStreamingError::Invalid(
+                        "worksheet depth overflow",
+                    ))?;
             }
             Event::Empty(e) => {
                 if root_qname.is_none() {
@@ -138,7 +144,11 @@ fn extract_conditional_formatting_wrapper(
                 if depth == 0 {
                     break;
                 }
-                depth = depth.saturating_sub(1);
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or(ConditionalFormattingStreamingError::Invalid(
+                        "worksheet depth underflow",
+                    ))?;
             }
             Event::Eof => break,
             _ => {}

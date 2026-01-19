@@ -1889,7 +1889,9 @@ fn read_slicer_cache_item_payload<R: std::io::BufRead>(
         match &event {
             Event::Start(start) => {
                 if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
-                    depth = depth.saturating_add(1);
+                    depth = depth.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("slicerCacheItem depth overflow".to_string())
+                    })?;
                 }
             }
             Event::End(end) => {
@@ -2023,7 +2025,9 @@ fn read_slicer_cache_item_text<R: std::io::BufRead>(
         match reader.read_event_into(buf)? {
             Event::Start(start) => {
                 if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
-                    depth = depth.saturating_add(1);
+                    depth = depth.checked_add(1).ok_or_else(|| {
+                        XlsxError::Invalid("slicerCacheItem depth overflow".to_string())
+                    })?;
                 }
             }
             Event::End(end) => {
@@ -2542,7 +2546,9 @@ fn read_timeline_selection_text<R: std::io::BufRead>(
     loop {
         match reader.read_event_into(buf)? {
             Event::Start(_) => {
-                depth = depth.saturating_add(1);
+                depth = depth
+                    .checked_add(1)
+                    .ok_or_else(|| XlsxError::Invalid("timeline selection depth overflow".to_string()))?;
             }
             Event::End(end) => {
                 let name = end.name();
