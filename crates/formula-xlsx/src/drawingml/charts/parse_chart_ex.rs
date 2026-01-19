@@ -493,11 +493,15 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
 
     // Excel often uses camelCase identifiers, with some values sometimes ending
     // in `Chart` (e.g. `treemapChart`).
-    let base = if raw
-        .get(raw.len().saturating_sub("chart".len())..)
-        .is_some_and(|tail| tail.eq_ignore_ascii_case("chart"))
-    {
-        &raw[..raw.len() - 5]
+    let base = if let Some(start) = raw.len().checked_sub("chart".len()) {
+        if raw
+            .get(start..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case("chart"))
+        {
+            raw.get(..start).unwrap_or(raw)
+        } else {
+            raw
+        }
     } else {
         raw
     };

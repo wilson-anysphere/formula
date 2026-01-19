@@ -228,7 +228,7 @@ impl SharedStringsEditor {
             return Some(&self.entries[idx].rich);
         }
         self.appended
-            .get(idx.saturating_sub(self.entries.len()))
+            .get(idx - self.entries.len())
             .map(|entry| &entry.rich)
     }
 

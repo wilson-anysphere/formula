@@ -291,8 +291,9 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         {
             return None;
         }
+        let suffix_start = name.len().checked_sub(".xml".len())?;
         if !name
-            .get(name.len().saturating_sub(".xml".len())..)
+            .get(suffix_start..)
             .is_some_and(|s| s.eq_ignore_ascii_case(".xml"))
         {
             return None;
@@ -1184,8 +1185,9 @@ fn load_from_zip_archive<R: Read + Seek>(
         {
             return None;
         }
+        let suffix_start = name.len().checked_sub(".xml".len())?;
         if !name
-            .get(name.len().saturating_sub(".xml".len())..)
+            .get(suffix_start..)
             .is_some_and(|s| s.eq_ignore_ascii_case(".xml"))
         {
             return None;
