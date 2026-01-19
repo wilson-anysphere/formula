@@ -2685,7 +2685,10 @@ pub(crate) fn ptg_list_payload_len_best_effort(
     let mut best_len = CORE_LEN;
 
     for &offset in &OFFSETS {
-        let Some(window) = data.get(offset..offset + CORE_LEN) else {
+        let Some(end) = offset.checked_add(CORE_LEN) else {
+            continue;
+        };
+        let Some(window) = data.get(offset..end) else {
             continue;
         };
 

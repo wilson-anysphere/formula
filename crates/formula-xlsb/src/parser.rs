@@ -415,11 +415,10 @@ impl<'a> RecordReader<'a> {
     }
 
     pub(crate) fn read_slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
-        let raw = self
-            .data
-            .get(self.offset..self.offset + len)
-            .ok_or(Error::UnexpectedEof)?;
-        self.offset += len;
+        let start = self.offset;
+        let end = start.checked_add(len).ok_or(Error::UnexpectedEof)?;
+        let raw = self.data.get(start..end).ok_or(Error::UnexpectedEof)?;
+        self.offset = end;
         Ok(raw)
     }
 }
@@ -1528,7 +1527,10 @@ fn parse_rich_runs_best_effort(
         if data.len().saturating_sub(off) < *count_size {
             continue;
         }
-        let Some(count_bytes) = data.get(off..off + count_size) else {
+        let Some(count_end) = off.checked_add(*count_size) else {
+            continue;
+        };
+        let Some(count_bytes) = data.get(off..count_end) else {
             debug_assert!(
                 false,
                 "rich run count slice out of bounds (len={}, off={off}, count_size={count_size})",
@@ -1537,7 +1539,7 @@ fn parse_rich_runs_best_effort(
             continue;
         };
         let count = read_count(count_bytes);
-        off += count_size;
+        off = count_end;
 
         // Sanity: avoid absurd allocations if the count is garbage.
         if count > 1_000_000 {
@@ -1550,8 +1552,13 @@ fn parse_rich_runs_best_effort(
             continue;
         }
 
-        let run_bytes = data.get(off..off + needed)?;
-        off += needed;
+        let Some(run_end) = off.checked_add(needed) else {
+            continue;
+        };
+        let Some(run_bytes) = data.get(off..run_end) else {
+            continue;
+        };
+        off = run_end;
 
         // If there is no phonetic data, we expect to consume the whole record payload.
         if !has_phonetic && off != data.len() {
