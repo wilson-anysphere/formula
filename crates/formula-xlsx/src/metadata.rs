@@ -514,8 +514,13 @@ fn capture_inner_xml(
                 if depth == 0 && e.local_name().as_ref() == end_local_name {
                     break;
                 }
+                if depth == 0 {
+                    return Err(MetadataError::Malformed(
+                        "unexpected end tag while capturing inner xml",
+                    ));
+                }
                 writer.write_event(Event::End(e.into_owned()))?;
-                depth = depth.saturating_sub(1);
+                depth -= 1;
             }
             Event::Eof => return Err(MetadataError::Malformed("unexpected eof capturing inner xml")),
             ev => {

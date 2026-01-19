@@ -3468,7 +3468,10 @@ fn cell_contains_formula<R: BufRead>(
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"f" => return Ok(true),
             Event::Start(_) => depth += 1,
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
                 if depth == 0 {
                     break;
                 }
@@ -4263,9 +4266,19 @@ fn parse_cols_attribute_map_from_reader<R: BufRead>(
                 }
             }
             Event::End(e) => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 && local_name(e.name().as_ref()) == b"cols" {
-                    break;
+                if depth == 0 {
+                    return Err(StreamingPatchError::Xlsx(crate::XlsxError::Invalid(
+                        "unexpected end tag while parsing <cols> section".to_string(),
+                    )));
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if local_name(e.name().as_ref()) == b"cols" {
+                        break;
+                    }
+                    return Err(StreamingPatchError::Xlsx(crate::XlsxError::Invalid(
+                        "unexpected end tag while parsing <cols> section".to_string(),
+                    )));
                 }
             }
             _ => {}
@@ -4852,7 +4865,11 @@ fn write_owned_subtree<W: Write>(
                 match &ev {
                     Event::Start(_) => depth += 1,
                     Event::End(_) => {
-                        depth = depth.saturating_sub(1);
+                        depth = depth.checked_sub(1).ok_or_else(|| {
+                            StreamingPatchError::Xlsx(crate::XlsxError::Invalid(
+                                "unexpected end event while writing owned subtree".to_string(),
+                            ))
+                        })?;
                     }
                     _ => {}
                 }
@@ -4880,7 +4897,11 @@ fn skip_owned_subtree(events: &[Event<'static>], mut idx: usize) -> usize {
                 match &events[idx] {
                     Event::Start(_) => depth += 1,
                     Event::End(_) => {
-                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            idx += 1;
+                            break;
+                        }
+                        depth -= 1;
                         if depth == 0 {
                             idx += 1;
                             break;
