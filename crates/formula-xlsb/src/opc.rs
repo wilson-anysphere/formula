@@ -2347,7 +2347,7 @@ fn preflight_zip_entry_count<R: Read + Seek>(reader: &mut R) -> Result<(), Parse
     // signature embedded inside the ZIP comment itself.
     const EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06]; // PK\05\06
     let mut eocd_pos: Option<usize> = None;
-    let max_start = tail.len().saturating_sub(22);
+    let max_start = tail.len() - 22;
     for i in (0..=max_start).rev() {
         let Some(sig_end) = i.checked_add(4) else {
             continue;
@@ -2864,7 +2864,8 @@ mod zip_guardrail_tests {
         let entry_name = entry_name.as_bytes();
 
         let mut patched_local = false;
-        for i in 0..zip_bytes.len().saturating_sub(4) {
+        let max = zip_bytes.len().checked_sub(4).unwrap_or(0);
+        for i in 0..max {
             let Some(sig_end) = i.checked_add(4) else {
                 continue;
             };
@@ -2910,7 +2911,8 @@ mod zip_guardrail_tests {
         }
 
         let mut patched_central = false;
-        for i in 0..zip_bytes.len().saturating_sub(4) {
+        let max = zip_bytes.len().checked_sub(4).unwrap_or(0);
+        for i in 0..max {
             let Some(sig_end) = i.checked_add(4) else {
                 continue;
             };
@@ -3419,7 +3421,10 @@ mod zip_guardrail_tests {
         impl Read for PanicAfterReadThreshold {
             fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
                 let n = self.inner.read(buf)?;
-                self.bytes_read = self.bytes_read.saturating_add(n);
+                self.bytes_read = self
+                    .bytes_read
+                    .checked_add(n)
+                    .expect("bytes_read overflow");
                 if self.bytes_read > self.max_bytes {
                     panic!(
                         "unexpectedly buffered too much of the package: {} bytes (limit {})",
@@ -4326,7 +4331,7 @@ fn sheet_cell_records_streaming<R: Read>(
                                 let chunk_len = buf.len().min(remaining);
                                 sheet_bin.read_exact(&mut buf[..chunk_len])?;
                                 payload.extend_from_slice(&buf[..chunk_len]);
-                                remaining = remaining.saturating_sub(chunk_len);
+                                remaining -= chunk_len;
                             }
                         }
                         found.insert(coord, CellRecordInfo { id, payload });
@@ -4353,7 +4358,7 @@ fn skip_record_payload<R: Read>(r: &mut R, mut len: usize) -> Result<(), ParseEr
     while len > 0 {
         let chunk_len = buf.len().min(len);
         r.read_exact(&mut buf[..chunk_len])?;
-        len = len.saturating_sub(chunk_len);
+        len -= chunk_len;
     }
     Ok(())
 }
@@ -4532,7 +4537,7 @@ fn remove_calc_chain_from_content_types(xml_bytes: &[u8]) -> Result<Vec<u8>, Par
                 if skip_depth > 0 {
                     match event {
                         Event::Start(_) => skip_depth += 1,
-                        Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                        Event::End(_) => skip_depth -= 1,
                         _ => {}
                     }
                 } else if should_drop_content_type_event(&event, &reader)? {
@@ -4595,7 +4600,7 @@ fn remove_calc_chain_from_workbook_rels(xml_bytes: &[u8]) -> Result<Vec<u8>, Par
                 if skip_depth > 0 {
                     match event {
                         Event::Start(_) => skip_depth += 1,
-                        Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                        Event::End(_) => skip_depth -= 1,
                         _ => {}
                     }
                 } else if should_drop_workbook_rel_event(&event, &reader)? {

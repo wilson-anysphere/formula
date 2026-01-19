@@ -1482,7 +1482,7 @@ fn parse_shared_string_item(data: &[u8]) -> Result<SharedString, Error> {
     };
 
     rr.offset = offset_after_rich;
-    let remaining = rr.data.len().saturating_sub(rr.offset);
+    let remaining = rr.data.len().checked_sub(rr.offset).unwrap_or(0);
     let phonetic = if has_phonetic && remaining > 0 {
         Some(rr.read_slice(remaining)?.to_vec())
     } else {
@@ -1524,7 +1524,7 @@ fn parse_rich_runs_best_effort(
 
     for (count_size, run_size, read_count) in LAYOUTS {
         let mut off = offset;
-        if data.len().saturating_sub(off) < *count_size {
+        if data.len().checked_sub(off).unwrap_or(0) < *count_size {
             continue;
         }
         let Some(count_end) = off.checked_add(*count_size) else {
@@ -1546,7 +1546,7 @@ fn parse_rich_runs_best_effort(
             continue;
         }
 
-        let remaining = data.len().saturating_sub(off);
+        let remaining = data.len().checked_sub(off).unwrap_or(0);
         let needed = count.checked_mul(*run_size)?;
         if needed > remaining {
             continue;
@@ -1770,12 +1770,17 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                 let r2 = rr.read_u32()?;
                 let c1 = rr.read_u32()?;
                 let c2 = rr.read_u32()?;
-                dimension = Some(Dimension {
-                    start_row: r1,
-                    start_col: c1,
-                    height: r2.saturating_sub(r1) + 1,
-                    width: c2.saturating_sub(c1) + 1,
-                });
+                let height = r2.checked_sub(r1).and_then(|d| d.checked_add(1));
+                let width = c2.checked_sub(c1).and_then(|d| d.checked_add(1));
+                dimension = match (height, width) {
+                    (Some(height), Some(width)) => Some(Dimension {
+                        start_row: r1,
+                        start_col: c1,
+                        height,
+                        width,
+                    }),
+                    _ => None,
+                };
             }
             biff12::SHEETDATA => {
                 in_sheet_data = true;
@@ -3050,7 +3055,9 @@ fn looks_like_workbook_path(value: &str) -> bool {
     }
     for suffix in WORKBOOK_PATH_SUFFIXES {
         if value
-            .get(value.len().saturating_sub(suffix.len())..)
+            .len()
+            .checked_sub(suffix.len())
+            .and_then(|start| value.get(start..))
             .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
         {
             return true;
