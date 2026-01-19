@@ -1109,7 +1109,16 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
     // `EncryptedPackage` stores the unencrypted package size (`declared_len`) separately from the
     // ciphertext bytes. A corrupt/malicious size can otherwise induce large allocations (OOM) or
     // panics in `Vec::with_capacity` on 64-bit targets.
-    let plausible_max = (ciphertext.len() as u64).saturating_add(SEGMENT_LEN as u64);
+    let plausible_max = (ciphertext.len() as u64)
+        .checked_add(SEGMENT_LEN as u64)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "EncryptedPackage".to_string(),
+            attr: "originalSize".to_string(),
+            reason: format!(
+                "ciphertext length {} is implausibly large (overflow computing plausible max)",
+                ciphertext.len()
+            ),
+        })?;
     if declared_len_u64 > plausible_max {
         return Err(OffCryptoError::InvalidAttribute {
             element: "EncryptedPackage".to_string(),
@@ -2526,7 +2535,9 @@ mod tests {
             hash_size: 20,
         };
 
-        let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+        let spin_count = DEFAULT_MAX_SPIN_COUNT
+            .checked_add(1)
+            .unwrap_or(u32::MAX);
         let info = AgileEncryptionInfo {
             key_data,
             data_integrity: None,
@@ -2571,7 +2582,9 @@ mod tests {
             hash_size: 20,
         };
 
-        let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+        let spin_count = DEFAULT_MAX_SPIN_COUNT
+            .checked_add(1)
+            .unwrap_or(u32::MAX);
         let info = AgileEncryptionInfo {
             key_data,
             data_integrity: None,
