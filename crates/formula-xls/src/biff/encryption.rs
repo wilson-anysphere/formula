@@ -327,8 +327,16 @@ where
 
             cipher(block_index, block_offset, chunk)?;
 
-            encrypted_pos = encrypted_pos.saturating_add(chunk_len);
-            local = local.saturating_add(chunk_len);
+            encrypted_pos = encrypted_pos.checked_add(chunk_len).ok_or_else(|| {
+                DecryptError::InvalidFilePass(
+                    "encrypted position overflow while decrypting workbook stream".to_string(),
+                )
+            })?;
+            local = local.checked_add(chunk_len).ok_or_else(|| {
+                DecryptError::InvalidFilePass(
+                    "local record offset overflow while decrypting workbook stream".to_string(),
+                )
+            })?;
         }
 
         // `local` must advance exactly to the payload end.
@@ -485,7 +493,7 @@ fn apply_xor_obfuscation_in_place(
 
     let mut offset = encrypted_start;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             // Some writers may include trailing padding bytes after the final EOF record. Those
             // bytes are not part of any record payload and should be ignored rather than treated
@@ -522,7 +530,9 @@ fn apply_xor_obfuscation_in_place(
         for b in data.iter_mut() {
             let ks = xor_array[pos % xor_array.len()] ^ key_bytes[pos % 2];
             *b ^= ks;
-            pos = pos.saturating_add(1);
+            pos = pos.checked_add(1).ok_or_else(|| {
+                DecryptError::InvalidFilePass("XOR position overflow while decrypting".to_string())
+            })?;
         }
 
         offset = data_end;
@@ -692,7 +702,7 @@ fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
             out[index] = xor_ror(XOR_PAD_ARRAY[0], key_high);
         }
 
-        index = index.saturating_sub(1);
+        index -= 1;
 
         if !password.is_empty() && index < out.len() {
             let password_last = password[password.len() - 1];
@@ -701,12 +711,15 @@ fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
     }
 
     while index > 0 {
-        index = index.saturating_sub(1);
+        index -= 1;
         if index < password.len() {
             out[index] = xor_ror(password[index], key_high);
         }
 
-        index = index.saturating_sub(1);
+        if index == 0 {
+            break;
+        }
+        index -= 1;
         if index < password.len() {
             out[index] = xor_ror(password[index], key_low);
         }
@@ -786,7 +799,7 @@ fn decrypt_payloads_after_filepass_xor_method1(
 ) -> Result<(), DecryptError> {
     let mut offset = start_offset;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             // Some writers include trailing padding bytes after the final EOF record. Those bytes
             // are not part of any record header/payload and should be ignored.
@@ -1070,7 +1083,7 @@ fn decrypt_biff8_rc4_standard(
     // Decrypt record payloads after FILEPASS.
     let mut offset = encrypted_start;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             // Some writers include trailing padding bytes after the final EOF record. Those bytes
             // are not part of any record header/payload and should be ignored.
@@ -1123,7 +1136,7 @@ fn collect_payload_ranges_after_offset(
     let mut offset = start_offset;
     let mut pos = 0usize;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             return Err(DecryptError::InvalidFilePass(
                 "truncated BIFF record header while scanning payload ranges".to_string(),
@@ -1149,7 +1162,9 @@ fn collect_payload_ranges_after_offset(
             ));
         }
         ranges.push((data_start..data_end, pos));
-        pos = pos.saturating_add(len);
+        pos = pos.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("payload position overflow while scanning ranges".to_string())
+        })?;
         offset = data_end;
     }
     Ok((ranges, pos))
@@ -2242,7 +2257,7 @@ mod tests {
     ) -> Result<(), DecryptError> {
         let mut offset = start_offset;
         while offset < workbook_stream.len() {
-            let remaining = workbook_stream.len().saturating_sub(offset);
+            let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
             if remaining < 4 {
                 // Some writers include trailing padding bytes after the final EOF record. Those bytes
                 // are not part of any record header/payload and should be ignored.

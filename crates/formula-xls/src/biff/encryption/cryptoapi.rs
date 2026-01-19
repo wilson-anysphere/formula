@@ -89,7 +89,9 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, DecryptError> {
 
 fn utf16le_bytes(password: &str) -> Zeroizing<Vec<u8>> {
     let mut out = Zeroizing::new(Vec::new());
-    let _ = out.try_reserve(password.len().saturating_mul(2));
+    if let Some(cap) = password.len().checked_mul(2) {
+        let _ = out.try_reserve(cap);
+    }
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
@@ -229,7 +231,7 @@ fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
     while n > 0 {
         let take = n.min(scratch.len());
         rc4.apply_keystream(&mut scratch[..take]);
-        n = n.saturating_sub(take);
+        n -= take;
     }
 }
 
@@ -263,9 +265,15 @@ fn decrypt_range_by_offset(
         };
         rc4.apply_keystream(chunk);
 
-        stream_pos = stream_pos.saturating_add(take);
-        pos = pos.saturating_add(take);
-        remaining = remaining.saturating_sub(take);
+        let Some(next_stream_pos) = stream_pos.checked_add(take) else {
+            return;
+        };
+        stream_pos = next_stream_pos;
+        let Some(next_pos) = pos.checked_add(take) else {
+            return;
+        };
+        pos = next_pos;
+        remaining -= take;
     }
 }
 
@@ -872,11 +880,11 @@ impl PayloadRc4 {
                 self.rekey();
             }
 
-            let remaining_in_block = super::RC4_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+            let remaining_in_block = super::RC4_BLOCK_SIZE - self.pos_in_block;
             let chunk_len = data.len().min(remaining_in_block);
             let (chunk, rest) = data.split_at_mut(chunk_len);
             self.rc4.apply_keystream(chunk);
-            self.pos_in_block = self.pos_in_block.saturating_add(chunk_len);
+            self.pos_in_block += chunk_len;
             data = rest;
         }
     }
@@ -933,7 +941,7 @@ fn decrypt_cryptoapi_standard(
     // Decrypt record payload bytes after FILEPASS using the record-payload-only stream model.
     let mut offset = encrypted_start;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             // Some writers may include trailing padding bytes after the final EOF record.
             break;
@@ -986,7 +994,7 @@ fn decrypt_cryptoapi_legacy(
     let mut stream_pos: usize = encrypted_start;
 
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len().saturating_sub(offset);
+        let remaining = workbook_stream.len().checked_sub(offset).unwrap_or(0);
         if remaining < 4 {
             break;
         }
@@ -1476,7 +1484,7 @@ mod tests {
         let mut offset = encrypted_start;
         let mut stream_pos = encrypted_start;
         while offset < encrypted.len() {
-            let remaining = encrypted.len().saturating_sub(offset);
+            let remaining = encrypted.len().checked_sub(offset).unwrap_or(0);
             if remaining < 4 {
                 break;
             }
@@ -1644,7 +1652,7 @@ mod tests {
         let mut offset = encrypted_start;
         let mut stream_pos = encrypted_start;
         while offset < encrypted.len() {
-            let remaining = encrypted.len().saturating_sub(offset);
+            let remaining = encrypted.len().checked_sub(offset).unwrap_or(0);
             if remaining < 4 {
                 break;
             }
