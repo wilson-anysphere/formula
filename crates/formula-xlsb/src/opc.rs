@@ -117,6 +117,10 @@ fn max_xlsb_package_bytes() -> u64 {
         .unwrap_or(MAX_XLSB_PACKAGE_BYTES)
 }
 
+fn max_plus_one(max: u64) -> u64 {
+    max.checked_add(1).unwrap_or(u64::MAX)
+}
+
 fn xlsb_package_too_large_error(size: u64, max: u64) -> ParseError {
     ParseError::Io(io::Error::new(
         io::ErrorKind::InvalidData,
@@ -276,7 +280,7 @@ impl XlsbWorkbook {
             file.seek(SeekFrom::Start(0))?;
 
             let mut ole_bytes = Vec::new();
-            file.take(max.saturating_add(1)).read_to_end(&mut ole_bytes)?;
+            file.take(max_plus_one(max)).read_to_end(&mut ole_bytes)?;
             if ole_bytes.len() as u64 > max {
                 return Err(xlsb_package_too_large_error(ole_bytes.len() as u64, max));
             }
@@ -341,7 +345,7 @@ impl XlsbWorkbook {
         reader.seek(SeekFrom::Start(0))?;
 
         let mut bytes = Vec::new();
-        reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+        reader.take(max_plus_one(max)).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > max {
             return Err(xlsb_package_too_large_error(bytes.len() as u64, max));
         }
@@ -564,7 +568,7 @@ impl XlsbWorkbook {
                 max,
             });
         }
-        let mut sheet = sheet.take(max.saturating_add(1));
+        let mut sheet = sheet.take(max_plus_one(max));
 
         let parsed = parse_sheet(
             &mut sheet,
@@ -577,7 +581,7 @@ impl XlsbWorkbook {
         if sheet.limit() == 0 {
             return Err(ParseError::PartTooLarge {
                 part: meta.part_path.clone(),
-                size: max.saturating_add(1),
+                size: max_plus_one(max),
                 max,
             });
         }
@@ -662,7 +666,7 @@ impl XlsbWorkbook {
                 max,
             });
         }
-        let mut sheet = sheet.take(max.saturating_add(1));
+        let mut sheet = sheet.take(max_plus_one(max));
 
         let parsed = parse_sheet_stream(
             &mut sheet,
@@ -676,7 +680,7 @@ impl XlsbWorkbook {
         if sheet.limit() == 0 {
             return Err(ParseError::PartTooLarge {
                 part: meta.part_path.clone(),
-                size: max.saturating_add(1),
+                size: max_plus_one(max),
                 max,
             });
         }
@@ -1284,12 +1288,12 @@ impl XlsbWorkbook {
                     max: max_part,
                 });
             }
-            let mut limited = entry.take(max_part.saturating_add(1));
+            let mut limited = entry.take(max_plus_one(max_part));
             let parsed = sheet_cell_records_streaming(&mut limited, &targets);
             if limited.limit() == 0 {
                 return Err(ParseError::PartTooLarge {
                     part: sheet_part.clone(),
-                    size: max_part.saturating_add(1),
+                    size: max_plus_one(max_part),
                     max: max_part,
                 });
             }
@@ -1590,12 +1594,12 @@ impl XlsbWorkbook {
                         max: max_part,
                     });
                 }
-                let mut limited = entry.take(max_part.saturating_add(1));
+                let mut limited = entry.take(max_plus_one(max_part));
                 let parsed = sheet_cell_records_streaming(&mut limited, &targets);
                 if limited.limit() == 0 {
                     return Err(ParseError::PartTooLarge {
                         part: sheet_part.clone(),
-                        size: max_part.saturating_add(1),
+                        size: max_plus_one(max_part),
                         max: max_part,
                     });
                 }
@@ -1966,7 +1970,7 @@ impl XlsbWorkbook {
                         max: max_part,
                     });
                 }
-                let mut limited = entry.take(max_part.saturating_add(1));
+                let mut limited = entry.take(max_plus_one(max_part));
                 let copied = io::copy(&mut limited, &mut zip_writer)?;
                 if copied > max_part {
                     return Err(ParseError::PartTooLarge {
@@ -2053,12 +2057,12 @@ impl XlsbWorkbook {
                             max: max_part,
                         });
                     }
-                    let mut limited = entry.take(max_part.saturating_add(1));
+                    let mut limited = entry.take(max_plus_one(max_part));
                     let result = stream_override(stream_part, &mut limited, &mut sink);
                     if limited.limit() == 0 {
                         return Err(ParseError::PartTooLarge {
                             part: stream_part.clone(),
-                            size: max_part.saturating_add(1),
+                            size: max_plus_one(max_part),
                             max: max_part,
                         });
                     }
@@ -2194,12 +2198,12 @@ impl XlsbWorkbook {
                                 max: max_part,
                             });
                         }
-                        let mut limited = entry.take(max_part.saturating_add(1));
+                        let mut limited = entry.take(max_plus_one(max_part));
                         let result = stream_override(&name, &mut limited, &mut writer);
                         if limited.limit() == 0 {
                             return Err(ParseError::PartTooLarge {
                                 part: name,
-                                size: max_part.saturating_add(1),
+                                size: max_plus_one(max_part),
                                 max: max_part,
                             });
                         }
@@ -2222,7 +2226,7 @@ impl XlsbWorkbook {
                             max: max_part,
                         });
                     }
-                    let mut limited = entry.take(max_part.saturating_add(1));
+                    let mut limited = entry.take(max_plus_one(max_part));
                     let copied = io::copy(&mut limited, &mut writer)?;
                     if copied > max_part {
                         return Err(ParseError::PartTooLarge {
@@ -2579,12 +2583,12 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
                     max,
                 });
             }
-            let mut limited = wb.take(max.saturating_add(1));
+            let mut limited = wb.take(max_plus_one(max));
             let parsed = parse_workbook(&mut limited, &workbook_rels, options.decode_formulas);
             if limited.limit() == 0 {
                 return Err(ParseError::PartTooLarge {
                     part: workbook_part.clone(),
-                    size: max.saturating_add(1),
+                    size: max_plus_one(max),
                     max,
                 });
             }
@@ -2644,12 +2648,12 @@ fn parse_xlsb_from_zip<R: Read + Seek>(
                                 max,
                             });
                         }
-                        let mut limited = sst.take(max.saturating_add(1));
+                        let mut limited = sst.take(max_plus_one(max));
                         let parsed = parse_shared_strings(&mut limited);
                         if limited.limit() == 0 {
                             return Err(ParseError::PartTooLarge {
                                 part: part.to_string(),
-                                size: max.saturating_add(1),
+                                size: max_plus_one(max),
                                 max,
                             });
                         }
@@ -3831,7 +3835,7 @@ fn read_zip_entry<R: Read + Seek>(
 
         // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read,
         // and by making growth allocation-fallible (avoid abort-on-OOM).
-        let mut reader = entry.take(max.saturating_add(1));
+        let mut reader = entry.take(max_plus_one(max));
         let mut buf = [0u8; 8192];
         loop {
             let n = reader.read(&mut buf)?;
@@ -3885,9 +3889,8 @@ fn insert_preserved_part(
         .map(|v| v.len() as u64)
         .unwrap_or(0);
 
-    let next_total = preserved_total_bytes
-        .saturating_sub(old_len)
-        .saturating_add(new_len);
+    let base = preserved_total_bytes.checked_sub(old_len).unwrap_or(u64::MAX);
+    let next_total = base.checked_add(new_len).unwrap_or(u64::MAX);
     if next_total > max_total {
         return Err(ParseError::PreservedPartsTooLarge {
             total: next_total,

@@ -380,7 +380,7 @@ impl ZipInflateBudget {
     }
 
     pub(crate) fn consume(&mut self, _part: &str, bytes: u64) -> Result<(), XlsxError> {
-        self.used_bytes = self.used_bytes.saturating_add(bytes);
+        self.used_bytes = self.used_bytes.checked_add(bytes).unwrap_or(u64::MAX);
         if self.used_bytes > self.max_total_bytes {
             return Err(XlsxError::PackageTooLarge {
                 total: self.used_bytes,
@@ -420,6 +420,10 @@ fn read_zip_file_bytes_with_optional_budget(
     max_part_bytes: u64,
     mut budget: Option<&mut ZipInflateBudget>,
 ) -> Result<Vec<u8>, XlsxError> {
+    fn add_or_max(a: u64, b: u64) -> u64 {
+        a.checked_add(b).unwrap_or(u64::MAX)
+    }
+
     let declared_size = file.size();
     let used_before = budget.as_ref().map(|b| b.used_bytes()).unwrap_or(0);
     let remaining_total = budget
@@ -432,7 +436,7 @@ fn read_zip_file_bytes_with_optional_budget(
     if budget.is_some() && effective_max == 0 {
         let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
         return Err(XlsxError::PackageTooLarge {
-            total: used_before.saturating_add(1),
+            total: add_or_max(used_before, 1),
             max: max_total,
         });
     }
@@ -448,7 +452,7 @@ fn read_zip_file_bytes_with_optional_budget(
     if limit_is_total && declared_size > effective_max {
         let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
         return Err(XlsxError::PackageTooLarge {
-            total: used_before.saturating_add(declared_size),
+            total: add_or_max(used_before, declared_size),
             max: max_total,
         });
     }
@@ -456,7 +460,8 @@ fn read_zip_file_bytes_with_optional_budget(
     // Don't trust ZIP metadata alone. Guard against incorrect/forged size fields by limiting reads
     // to `effective_max + 1` and erroring if we see more than `effective_max` bytes.
     let mut buf = Vec::new();
-    let mut reader = file.take(effective_max.saturating_add(1));
+    let read_limit = effective_max.checked_add(1).unwrap_or(u64::MAX);
+    let mut reader = file.take(read_limit);
     reader.read_to_end(&mut buf)?;
 
     let observed = buf.len() as u64;
@@ -464,7 +469,7 @@ fn read_zip_file_bytes_with_optional_budget(
         if limit_is_total {
             let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
             return Err(XlsxError::PackageTooLarge {
-                total: used_before.saturating_add(observed),
+                total: add_or_max(used_before, observed),
                 max: max_total,
             });
         }
