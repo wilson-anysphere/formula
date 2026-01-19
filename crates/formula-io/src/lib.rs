@@ -79,7 +79,7 @@ pub(crate) fn parse_encrypted_package_original_size(encrypted_package: &[u8]) ->
     }
     let mut prefix = [0u8; 8];
     prefix.copy_from_slice(&encrypted_package[..8]);
-    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+    let ciphertext_len = (encrypted_package.len() - 8) as u64;
     Some(parse_encrypted_package_size_prefix_bytes(prefix, Some(ciphertext_len)))
 }
 
@@ -419,7 +419,7 @@ impl std::fmt::Debug for SaveOptions {
 const DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE: u64 = 1024 * 1024 * 1024; // 1GiB
 
 fn default_offcrypto_max_output_size_u64(encrypted_package_len: u64) -> u64 {
-    let scaled = encrypted_package_len.saturating_mul(4);
+    let scaled = encrypted_package_len.checked_mul(4).unwrap_or(u64::MAX);
     scaled.min(DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE)
 }
 
@@ -440,7 +440,9 @@ fn encrypted_package_plaintext_len_is_plausible(plaintext_len: u64, ciphertext_l
     // Also apply a conservative absolute cap so we don't attempt to open extremely large encrypted
     // packages (which would require holding decrypted ZIP bytes in memory in some paths, or at
     // least incur very expensive IO).
-    let encrypted_package_len = ciphertext_len.saturating_add(8);
+    let Some(encrypted_package_len) = ciphertext_len.checked_add(8) else {
+        return false;
+    };
     plaintext_len <= default_offcrypto_max_output_size_u64(encrypted_package_len)
 }
 
@@ -472,7 +474,7 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
             (UTF_16BE, &prefix[2..])
         };
         // UTF-16 requires an even number of bytes; ignore a trailing odd byte in the preview.
-        let rest = &rest[..rest.len().saturating_sub(rest.len() % 2)];
+        let rest = &rest[..rest.len() - (rest.len() % 2)];
         let (cow, _) = encoding.decode_without_bom_handling(rest);
         return looks_like_text_csv_str(cow.as_ref());
     }
@@ -482,7 +484,7 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
         // Best-effort: handle UTF-16 inputs that lack a BOM by detecting the "ASCII UTF-16" NUL
         // byte pattern and running heuristics on a decoded preview instead of rejecting as binary.
         if let Some(encoding) = detect_utf16_bomless_encoding(prefix) {
-            let prefix = &prefix[..prefix.len().saturating_sub(prefix.len() % 2)];
+            let prefix = &prefix[..prefix.len() - (prefix.len() % 2)];
             let (cow, _) = encoding.decode_without_bom_handling(prefix);
             return looks_like_text_csv_str(cow.as_ref());
         }
@@ -561,9 +563,10 @@ fn detect_utf16_bomless_encoding(prefix: &[u8]) -> Option<&'static encoding_rs::
         }
     }
 
-    if odd_zero > even_zero.saturating_mul(3) {
+    // Counters are bounded by `TEXT_SNIFF_LEN`, so `* 3` cannot overflow.
+    if odd_zero > even_zero * 3 {
         Some(UTF_16LE)
-    } else if even_zero > odd_zero.saturating_mul(3) {
+    } else if even_zero > odd_zero * 3 {
         Some(UTF_16BE)
     } else {
         None
@@ -3678,10 +3681,10 @@ fn decrypt_encrypted_ooxml_package(
         // Treat malformed Agile descriptors as unsupported encryption (not a wrong password).
         let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| unsupported())?;
         let mut normalized_info = Vec::new();
-        if normalized_info
-            .try_reserve_exact(8usize.saturating_add(xml.len()))
-            .is_err()
-        {
+        let Some(cap) = 8usize.checked_add(xml.len()) else {
+            return Err(Error::AllocationFailure("open_workbook agile normalized EncryptionInfo"));
+        };
+        if normalized_info.try_reserve_exact(cap).is_err() {
             return Err(Error::AllocationFailure("open_workbook agile normalized EncryptionInfo"));
         }
         normalized_info.extend_from_slice(encryption_info.get(..8).ok_or_else(unsupported)?);
@@ -4427,7 +4430,10 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
         if stream.read_exact(&mut header).is_err() {
             return false;
         }
-        scanned = scanned.saturating_add(4);
+        scanned = match scanned.checked_add(4) {
+            Some(v) => v,
+            None => return false,
+        };
 
         let record_id = u16::from_le_bytes([header[0], header[1]]);
         let len = u16::from_le_bytes([header[2], header[3]]) as usize;
@@ -4463,7 +4469,10 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
                 remaining -= to_read;
             }
         }
-        scanned = scanned.saturating_add(len);
+        scanned = match scanned.checked_add(len) {
+            Some(v) => v,
+            None => break,
+        };
         if scanned >= MAX_SCAN_BYTES {
             break;
         }
@@ -4507,7 +4516,10 @@ fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::See
         if stream.read_exact(&mut header).is_err() {
             return None;
         }
-        scanned = scanned.saturating_add(4);
+        scanned = match scanned.checked_add(4) {
+            Some(v) => v,
+            None => return None,
+        };
 
         let record_id = u16::from_le_bytes([header[0], header[1]]);
         let len = u16::from_le_bytes([header[2], header[3]]) as usize;
@@ -4581,7 +4593,10 @@ fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::See
                 remaining -= to_read;
             }
         }
-        scanned = scanned.saturating_add(len);
+        scanned = match scanned.checked_add(len) {
+            Some(v) => v,
+            None => break,
+        };
         if scanned >= MAX_SCAN_BYTES {
             break;
         }

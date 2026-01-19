@@ -188,7 +188,7 @@ fn parse_utf16le_xml(bytes: &[u8]) -> Result<String, String> {
         bytes = &bytes[2..];
     }
     // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
-    bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+    bytes = &bytes[..bytes.len() - (bytes.len() % 2)];
 
     let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
     let mut xml = cow.into_owned();
@@ -205,7 +205,8 @@ fn parse_utf16le_xml(bytes: &[u8]) -> Result<String, String> {
 fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     let len_bytes: [u8; 4] = payload.get(0..4)?.try_into().ok()?;
     let len = u32::from_le_bytes(len_bytes) as usize;
-    if len == 0 || len > payload.len().saturating_sub(4) {
+    let max_len = payload.len().checked_sub(4)?;
+    if len == 0 || len > max_len {
         return None;
     }
     let end = 4usize.checked_add(len)?;

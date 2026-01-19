@@ -169,7 +169,7 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             self.ensure_segment_cached(segment_index)?;
 
             let seg_plain_len = self.cached_segment_plain_len;
-            let available = seg_plain_len.saturating_sub(segment_offset);
+            let available = seg_plain_len.checked_sub(segment_offset).unwrap_or(0);
             if available == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
