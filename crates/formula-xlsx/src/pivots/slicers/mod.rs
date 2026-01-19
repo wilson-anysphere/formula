@@ -1147,7 +1147,12 @@ fn patch_timeline_selection_xml(
                 }
 
                 writer.write_event(Event::End(e.to_owned()))?;
-                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Err(XlsxError::Invalid(
+                        "timeline selection XML depth underflow".to_string(),
+                    ));
+                }
+                depth -= 1;
             }
             Event::Eof => break,
             other => writer.write_event(other.into_owned())?,

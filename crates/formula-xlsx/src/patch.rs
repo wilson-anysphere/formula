@@ -1395,9 +1395,19 @@ fn parse_cols_attribute_map_from_reader<R: std::io::BufRead>(
                 }
             }
             Event::End(e) => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 && local_name(e.name().as_ref()) == b"cols" {
-                    break;
+                if depth == 0 {
+                    return Err(XlsxError::Invalid(
+                        "unexpected end tag while parsing <cols> section".to_string(),
+                    ));
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if local_name(e.name().as_ref()) == b"cols" {
+                        break;
+                    }
+                    return Err(XlsxError::Invalid(
+                        "unexpected end tag while parsing <cols> section".to_string(),
+                    ));
                 }
             }
             _ => {}
@@ -1865,9 +1875,19 @@ fn patch_row<R: std::io::BufRead>(
                                 inner_events.push(Event::Empty(inner.into_owned()));
                             }
                             Event::End(inner) => {
-                                depth = depth.saturating_sub(1);
-                                if depth == 0 && local_name(inner.name().as_ref()) == b"c" {
-                                    break inner.into_owned();
+                                if depth == 0 {
+                                    return Err(XlsxError::Invalid(
+                                        "unexpected end tag while skipping patched cell".to_string(),
+                                    ));
+                                }
+                                depth -= 1;
+                                if depth == 0 {
+                                    if local_name(inner.name().as_ref()) == b"c" {
+                                        break inner.into_owned();
+                                    }
+                                    return Err(XlsxError::Invalid(
+                                        "unexpected end tag while skipping patched cell".to_string(),
+                                    ));
                                 }
                                 inner_events.push(Event::End(inner.into_owned()));
                             }
@@ -2495,7 +2515,9 @@ fn parse_existing_cell_semantics(
                 }
             }
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                if depth > 0 {
+                    depth -= 1;
+                }
             }
             _ => {}
         }
@@ -2546,7 +2568,7 @@ fn extract_element_text(
             Event::Start(_) => depth += 1,
             Event::Empty(_) => {}
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                depth = depth.checked_sub(1).unwrap_or(0);
                 if depth == 0 {
                     return Ok((out, idx + 1));
                 }
@@ -2605,7 +2627,7 @@ fn extract_inline_string_value(
                 }
             }
             Event::End(e) => {
-                depth = depth.saturating_sub(1);
+                depth = depth.checked_sub(1).unwrap_or(0);
                 if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"is") {
                     let plain = segments
                         .iter()
@@ -2664,7 +2686,7 @@ fn extract_inline_string_run(
                 depth += 1;
             }
             Event::End(e) => {
-                depth = depth.saturating_sub(1);
+                depth = depth.checked_sub(1).unwrap_or(0);
                 if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"r") {
                     return Ok(((text, style), idx + 1));
                 }
@@ -3048,7 +3070,11 @@ fn write_patched_cell_children(
                         break;
                     }
                 }
-                Event::End(_) => depth = depth.saturating_sub(1),
+                Event::End(_) => {
+                    if depth > 0 {
+                        depth -= 1;
+                    }
+                }
                 _ => {}
             }
         }
@@ -3244,7 +3270,11 @@ fn write_owned_subtree(
                 match &ev {
                     Event::Start(_) => depth += 1,
                     Event::End(_) => {
-                        depth = depth.saturating_sub(1);
+                        depth = depth.checked_sub(1).ok_or_else(|| {
+                            XlsxError::Invalid(
+                                "unexpected end event while writing owned subtree".to_string(),
+                            )
+                        })?;
                     }
                     _ => {}
                 }
@@ -3272,7 +3302,11 @@ fn skip_owned_subtree(events: &[Event<'static>], mut idx: usize) -> usize {
                 match &events[idx] {
                     Event::Start(_) => depth += 1,
                     Event::End(_) => {
-                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            idx += 1;
+                            break;
+                        }
+                        depth -= 1;
                         if depth == 0 {
                             idx += 1;
                             break;

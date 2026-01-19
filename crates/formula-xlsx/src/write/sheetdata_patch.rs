@@ -1724,7 +1724,11 @@ fn collect_full_element<R: std::io::BufRead>(
                 events.push(ev);
             }
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    events.push(ev);
+                    break;
+                }
+                depth -= 1;
                 events.push(ev);
                 if depth == 0 {
                     break;
@@ -2093,7 +2097,10 @@ fn extract_is_subtree(events: &[Event<'static>]) -> Option<Vec<Event<'static>>> 
                         match sub_ev {
                             Event::Start(_) => sub_depth += 1,
                             Event::End(_) => {
-                                sub_depth = sub_depth.saturating_sub(1);
+                                if sub_depth == 0 {
+                                    break;
+                                }
+                                sub_depth -= 1;
                                 if sub_depth == 0 {
                                     break;
                                 }
@@ -2112,7 +2119,11 @@ fn extract_is_subtree(events: &[Event<'static>]) -> Option<Vec<Event<'static>>> 
                     return Some(vec![ev.clone()]);
                 }
             }
-            Event::End(_) => depth = depth.saturating_sub(1),
+            Event::End(_) => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
             _ => {}
         }
     }
