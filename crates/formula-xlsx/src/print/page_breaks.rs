@@ -92,7 +92,7 @@ pub fn calculate_pages(
         manual_breaks
             .col_breaks_after
             .iter()
-            .map(|break_after| break_after.saturating_add(1)),
+            .filter_map(|break_after| break_after.checked_add(1)),
         DEFAULT_COL_WIDTH_POINTS,
     );
 
@@ -104,7 +104,7 @@ pub fn calculate_pages(
         manual_breaks
             .row_breaks_after
             .iter()
-            .map(|break_after| break_after.saturating_add(1)),
+            .filter_map(|break_after| break_after.checked_add(1)),
         DEFAULT_ROW_HEIGHT_POINTS,
     );
 
@@ -134,7 +134,7 @@ fn starts_to_segments(starts: &[u32], end_inclusive: u32) -> Vec<(u32, u32)> {
         let end = idx
             .checked_add(1)
             .and_then(|j| starts.get(j))
-            .map(|next| next.saturating_sub(1))
+            .map(|next| next.checked_sub(1).unwrap_or(0))
             .unwrap_or(end_inclusive);
         if *start <= end {
             segments.push((*start, end));

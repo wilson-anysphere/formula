@@ -1101,7 +1101,7 @@ fn excel_serial_to_pivot_datetime(serial: f64, date_system: DateSystem) -> Optio
 
     if seconds >= 86_400 {
         seconds = 0;
-        days = days.saturating_add(1);
+        days = days.checked_add(1)?;
     }
 
     let serial_days: i32 = days.try_into().ok()?;

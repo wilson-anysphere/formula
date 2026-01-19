@@ -189,7 +189,13 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
             Event::Start(e) => {
                 let name = e.local_name();
                 if let Some(depth) = skipping_cols_depth {
-                    skipping_cols_depth = Some(depth.saturating_add(1));
+                    let Some(next_depth) = depth.checked_add(1) else {
+                        return Err(OutlineXlsxError::InvalidAttr(
+                            "cols",
+                            "skipping depth overflow".to_string(),
+                        ));
+                    };
+                    skipping_cols_depth = Some(next_depth);
                 } else if name.as_ref() == b"cols" && !outline.cols.is_empty() {
                     // Replace the entire <cols> section.
                     let cols_name = e.name();

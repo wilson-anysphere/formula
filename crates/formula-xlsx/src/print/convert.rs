@@ -6,11 +6,11 @@ use super::{
 };
 
 fn one_based_to_zero_based(v: u32) -> u32 {
-    v.saturating_sub(1)
+    v.checked_sub(1).unwrap_or(0)
 }
 
 fn zero_based_to_one_based(v: u32) -> u32 {
-    v.saturating_add(1)
+    v.checked_add(1).unwrap_or(u32::MAX)
 }
 
 impl CellRange {
