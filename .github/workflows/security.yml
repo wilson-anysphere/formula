@@ -23,7 +23,7 @@ jobs:
     # over time, which can introduce unexpected breakages in security scanning workflows.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
         with:
           # Secret scanning uses gitleaks in git mode (bounded log opts) to avoid slow full-tree
           # scans once build output directories exist, but we still fetch full history to support
@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v4
         with:
           # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
           node-version: ${{ env.NODE_VERSION }}
@@ -96,7 +96,7 @@ jobs:
 
       - name: Upload consolidated security report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: security-report
           path: security-report

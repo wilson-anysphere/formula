@@ -74,7 +74,7 @@ jobs:
     # over time, which can introduce unexpected breakages in CI guard checks.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -95,7 +95,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || hashFiles('tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json') != '' }}
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
@@ -110,7 +110,7 @@ jobs:
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v5
         with:
           python-version: "3.11"
 
@@ -345,7 +345,7 @@ jobs:
 
       - name: Upload oracle dataset + reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: excel-oracle-artifacts
           path: |
@@ -354,7 +354,7 @@ jobs:
 
       - name: Upload excel-oracle summary (stable paths)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: excel-oracle-summary
           path: |

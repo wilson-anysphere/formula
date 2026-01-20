@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -74,12 +74,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -177,7 +177,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref }}
@@ -202,7 +202,7 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -396,7 +396,7 @@ jobs:
           Write-Host " - SDK ucrt/arm64: $sdkUcrtArm64"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
           python-version: "3.11"
 
@@ -483,7 +483,7 @@ jobs:
           cache-targets: "false"
 
       - name: Cache cargo target (release build artifacts)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: |
             # Avoid recursive `target/**/...` patterns here: Cargo target directories can be large,
@@ -563,7 +563,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cargo/bin/wasm-pack*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -573,7 +573,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -583,7 +583,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/Library/Caches/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -592,7 +592,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -618,7 +618,7 @@ jobs:
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cargo/bin/cargo-tauri*
           key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
@@ -642,7 +642,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cache/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -651,7 +651,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/Library/Caches/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -660,7 +660,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
           path: ${{ env.LOCALAPPDATA }}/tauri
@@ -684,7 +684,7 @@ jobs:
       - name: Restore Pyodide asset cache
         id: pyodide-cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -695,7 +695,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -704,7 +704,7 @@ jobs:
         # Only needed for the Windows ARM64 bundle job; set it immediately before the Tauri build so
         # earlier host-target `cargo install` steps (wasm-pack, tauri-cli) run in the default x64 environment.
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
-        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: amd64_arm64
 
@@ -740,7 +740,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-dist-assets-report-dry-run-${{ matrix.cache_target }}
           path: desktop-dist-assets-report.json
@@ -1096,7 +1096,7 @@ jobs:
 
       - name: Upload desktop bundles
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-bundles-dry-run-${{ matrix.cache_target }}
           if-no-files-found: warn
