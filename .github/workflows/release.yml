@@ -79,7 +79,7 @@ jobs:
     # See https://github.com/actions/runner-images for available images and deprecation notices.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: release workflow runner images are pinned (no *-latest)"
@@ -112,7 +112,7 @@ jobs:
       windows_timestamp_url: ${{ steps.params.outputs.windows_timestamp_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Compute release parameters
         id: params
@@ -220,7 +220,7 @@ jobs:
           fi
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -412,7 +412,7 @@ jobs:
 
     steps: &build_steps
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -438,7 +438,7 @@ jobs:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -456,7 +456,7 @@ jobs:
       - name: Restore Pyodide asset cache
         id: pyodide-cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -467,7 +467,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -673,7 +673,7 @@ jobs:
           Write-Host " - SDK ucrt/arm64: $sdkUcrtArm64"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
 
@@ -785,7 +785,7 @@ jobs:
           cache-on-failure: "true"
 
       - name: Cache cargo target (release build artifacts)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: |
             # Avoid recursive `target/**/...` patterns here: Cargo target directories can be large,
@@ -869,7 +869,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cargo/bin/wasm-pack*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -879,7 +879,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -892,7 +892,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/Library/Caches/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
@@ -902,7 +902,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
@@ -931,7 +931,7 @@ jobs:
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cargo/bin/cargo-tauri*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -957,7 +957,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/.cache/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -966,7 +966,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ~/Library/Caches/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -975,7 +975,7 @@ jobs:
 
       - name: Cache Tauri tooling downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
           path: ${{ env.LOCALAPPDATA }}/tauri
@@ -985,7 +985,7 @@ jobs:
 
       - name: Cache Tauri permission list (cargo tauri permission ls)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: target/ci/tauri-permission-ls.txt
           key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
@@ -1038,13 +1038,13 @@ jobs:
         if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true' && steps.tauri_release_macos.outcome == 'success'
         id: provenance_macos
         continue-on-error: true
-        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v1
         with:
           subject-path: ${{ join(fromJson(steps.tauri_release_macos.outputs.artifactPaths), '\n') }}
 
       - name: Upload provenance bundle (workflow artifact, macOS)
         if: steps.provenance_macos.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: ${{ steps.provenance_macos.outputs.bundle-path }}
@@ -1251,7 +1251,7 @@ jobs:
 
       - name: Upload debug symbol archives (macOS)
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
@@ -1371,7 +1371,7 @@ jobs:
         # earlier host-target `cargo install` steps (wasm-pack, tauri-cli) and the COI smoke check run
         # in the default x64 environment.
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
-        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: amd64_arm64
           sdk: ${{ steps.windows_arm64_toolchain.outputs.sdk_version }}
@@ -1426,13 +1426,13 @@ jobs:
         if: runner.os != 'macOS' && needs.preflight.outputs.upload == 'true' && steps.tauri_release_non_macos.outcome == 'success'
         id: provenance_non_macos
         continue-on-error: true
-        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v1
         with:
           subject-path: ${{ join(fromJson(steps.tauri_release_non_macos.outputs.artifactPaths), '\n') }}
 
       - name: Upload provenance bundle (workflow artifact)
         if: steps.provenance_non_macos.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: ${{ steps.provenance_non_macos.outputs.bundle-path }}
@@ -1564,7 +1564,7 @@ jobs:
 
       - name: Upload debug symbol archives (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
@@ -1606,7 +1606,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-dist-assets-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: desktop-dist-assets-report.json
@@ -1864,7 +1864,7 @@ jobs:
 
       - name: Upload desktop bundles (dry run)
         if: needs.preflight.outputs.upload != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-bundles-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           if-no-files-found: error
@@ -1882,7 +1882,7 @@ jobs:
 
       - name: Upload updater manifest artifact (per-platform)
         if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: updater-manifest-${{ matrix.cache_target }}
           path: updater-manifest/latest-${{ matrix.cache_target }}.json
@@ -2603,7 +2603,7 @@ jobs:
 
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           # Note: historical name; the report contains per-installer artifact sizes (DMG/MSI/AppImage/etc).
           name: desktop-bundle-size-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
@@ -2633,15 +2633,15 @@ jobs:
       actions: read
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Download per-platform updater manifests
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: updater-manifest-*
           path: updater-manifest
@@ -2668,10 +2668,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -3209,12 +3209,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Generate SBOM (SPDX JSON)
         id: generate_sbom
         continue-on-error: true
-        uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # v0
+        uses: anchore/sbom-action@62ad5284b8ced813296287a0b63906cb364b73ee # v0
         with:
           format: spdx-json
           output-file: sbom.spdx.json
@@ -3278,7 +3278,7 @@ jobs:
 
       - name: Upload SBOM (workflow artifact)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sbom-${{ needs.preflight.outputs.artifact_label }}
           path: sbom.spdx.json
@@ -3299,7 +3299,7 @@ jobs:
         if: needs.sbom.outputs.generated == 'true'
         id: download_sbom
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sbom-${{ needs.preflight.outputs.artifact_label }}
           path: .
@@ -3344,10 +3344,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 

@@ -29,15 +29,15 @@ jobs:
     # moves over time, which can unexpectedly break automation scripts.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
         with:
           python-version: "3.11"
 
       - name: Find related workflow runs (by head_sha)
         id: runs
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v7
         env:
           TARGET_SHA: ${{ github.event.inputs.sha }}
         with:
@@ -134,7 +134,7 @@ jobs:
       - name: Download corpus summary artifact
         if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.corpus_run_id != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
         with:
           name: corpus-public-summary
           path: artifacts/corpus
@@ -144,7 +144,7 @@ jobs:
       - name: Download corpus private summary artifact
         if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.corpus_run_id != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
         with:
           name: corpus-private-summary
           path: artifacts/corpus
@@ -155,7 +155,7 @@ jobs:
         if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' }}
         continue-on-error: true
         id: download_excel_summary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
         with:
           name: excel-oracle-summary
           path: artifacts/excel
@@ -165,7 +165,7 @@ jobs:
       - name: Download excel-oracle artifacts (fallback)
         if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' && steps.download_excel_summary.outcome == 'failure' }}
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
         with:
           name: excel-oracle-artifacts
           path: artifacts/excel
@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload unified scorecard
         if: ${{ steps.runs.outputs.generate == 'true' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: compat-scorecard
           path: |

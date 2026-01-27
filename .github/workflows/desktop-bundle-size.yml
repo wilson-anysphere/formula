@@ -59,7 +59,7 @@ jobs:
     # over time, which can cause unexpected workflow failures.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
@@ -84,7 +84,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
 
       - name: Setup pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
@@ -93,7 +93,7 @@ jobs:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v4
         with:
           # Keep Node pinned to the same major used by CI/release workflows.
           node-version: ${{ env.NODE_VERSION }}
@@ -133,7 +133,7 @@ jobs:
         run: git diff --exit-code
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
         with:
           python-version: "3.11"
 
@@ -169,7 +169,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: ~/.cargo/bin/wasm-pack
           # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-installed tools.
@@ -178,7 +178,7 @@ jobs:
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Cache wasm-pack tool downloads (Linux)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -206,7 +206,7 @@ jobs:
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: ~/.cargo/bin/cargo-tauri
           # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-installed tools.
@@ -231,7 +231,7 @@ jobs:
           fi
 
       - name: Cache Tauri tooling downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: ~/.cache/tauri
           key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
@@ -250,7 +250,7 @@ jobs:
       - name: Restore Pyodide asset cache
         id: pyodide-cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -261,7 +261,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/save@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -350,7 +350,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-dist-assets-report
           path: desktop-dist-assets-report.json
@@ -384,7 +384,7 @@ jobs:
 
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           # Note: historical name; the report contains per-installer artifact sizes (AppImage/DEB/RPM/etc).
           name: desktop-bundle-size-report
@@ -394,7 +394,7 @@ jobs:
       - name: Post bundle size report PR comment
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v7
         env:
           FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
