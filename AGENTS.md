@@ -5,4 +5,5 @@ The clone should support connecting to a wandb server and calling wandb.init() o
 The client app should support all features of weights and biases, and performantly render multiple line charts per run.
 It should work in a distributed training setup in a "baterries-included" manner and the python client should never crash the run or consume material resources on the same process.
 
+Use puppeteer or other software to test browser features.
 Include extensive testing.
