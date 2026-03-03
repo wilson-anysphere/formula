@@ -87,7 +87,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         shell: bash
@@ -99,7 +99,7 @@ jobs:
           version: 9.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -202,7 +202,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ~/.cargo/bin/wasm-pack*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -212,7 +212,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -222,7 +222,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ~/Library/Caches/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -231,7 +231,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -267,7 +267,7 @@ jobs:
       - name: Restore Pyodide asset cache
         id: pyodide-cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -278,7 +278,7 @@ jobs:
 
       - name: Save Pyodide asset cache
         if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
@@ -559,7 +559,7 @@ jobs:
 
       - name: Upload desktop perf artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: desktop-perf-${{ matrix.os }}
           if-no-files-found: warn
@@ -598,13 +598,13 @@ jobs:
       actions: read
     steps:
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Download per-OS perf artifacts
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           pattern: desktop-perf-*
           path: artifacts/desktop-perf
@@ -741,7 +741,7 @@ jobs:
 
       - name: Upload merged desktop perf metrics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: desktop-perf-platform-matrix
           if-no-files-found: warn
@@ -767,11 +767,11 @@ jobs:
     if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' && needs.merge.result == 'success'
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download merged perf summary artifact
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           name: desktop-perf-platform-matrix
           path: artifacts/desktop-perf-platform-matrix
@@ -802,7 +802,7 @@ jobs:
       - name: Publish benchmark results (non-gating)
         if: steps.bench.outputs.publish == 'true'
         continue-on-error: true
-        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
+        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
         with:
           tool: customSmallerIsBetter
           output-file-path: artifacts/desktop-perf-platform-matrix/merged/benchmark-results.desktop-perf-platform-matrix.json
