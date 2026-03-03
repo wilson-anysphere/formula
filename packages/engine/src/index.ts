@@ -47,6 +47,8 @@ export type {
   FormulaToken,
   FunctionContext,
   EngineInfoDto,
+  WorkbookInfoDto,
+  WorkbookSheetInfoDto,
   FormatRun,
   RpcMethod,
   WorkbookStyleDto,

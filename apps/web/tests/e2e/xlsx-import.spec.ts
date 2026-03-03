@@ -14,7 +14,7 @@ test("imports xlsx with formulas and evaluates dependent cells", async ({ page }
   const fileInput = page.getByTestId("xlsx-file-input");
   await fileInput.setInputFiles(fixturePath);
 
-  await expect(page.getByTestId("engine-status")).toContainText("imported xlsx", { timeout: 30_000 });
+  await expect(page.getByTestId("engine-status")).toContainText("imported formulas.xlsx", { timeout: 30_000 });
 
   const grid = page.getByTestId("canvas-grid-selection");
 

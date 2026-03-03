@@ -11,6 +11,11 @@ export const DEMO_WORKBOOK: EngineWorkbookJson = {
         C1: "hello",
       },
     },
+    Sheet2: {
+      cells: {
+        A1: "Hello from Sheet2",
+      },
+    },
   },
 };
 
