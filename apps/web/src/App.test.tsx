@@ -95,7 +95,15 @@ const mocks = vi.hoisted(() => {
     }),
     setCell: vi.fn(async () => {}),
     setRange: vi.fn(async () => {}),
-    recalculate: vi.fn(async () => [])
+    recalculate: vi.fn(async () => []),
+    getWorkbookInfo: vi.fn(async () => ({
+      path: null,
+      origin_path: null,
+      sheets: [
+        { id: "s1", name: "Sheet1", visibility: "visible" },
+        { id: "s2", name: "Sheet2", visibility: "visible" },
+      ],
+    })),
   };
 
   return { engine };
@@ -237,7 +245,7 @@ describe("App (web preview)", () => {
       await flushMicrotasks(10);
     });
 
-    expect(host.textContent).toContain("ready (B1=3)");
+    expect(host.textContent).toContain("Engine: ready");
     expect(mocks.engine.getRange).toHaveBeenCalled();
     expect(drawnText.some((call) => call.text === "3" && call.x > 100 && call.y > 21)).toBe(true);
     expect(drawnText.some((call) => call.text === "TRUE")).toBe(true);
@@ -246,5 +254,85 @@ describe("App (web preview)", () => {
       root.unmount();
     });
     host.remove();
+  }, 60_000);
+
+  it("uses actual sheet names from getWorkbookInfo after import", async () => {
+    // Simulate a workbook whose first sheet is "Data", not "Sheet1".
+    // Before the fix, the app hardcoded "Sheet1" which caused "missing sheet: Sheet1".
+    mocks.engine.getWorkbookInfo.mockResolvedValueOnce({
+      path: null,
+      origin_path: null,
+      sheets: [
+        { id: "s1", name: "Data", visibility: "visible" },
+        { id: "s2", name: "Summary", visibility: "visible" },
+      ],
+    });
+
+    const drawnText: Array<{ text: string; x: number; y: number }> = [];
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return createMock2dContext(this, drawnText);
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(App));
+    });
+
+    await act(async () => {
+      await flushMicrotasks(10);
+    });
+
+    expect(host.textContent).toContain("Engine: ready");
+    // The sheet selector should show "Data" (first sheet from workbook info).
+    const select = host.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+    expect(select).not.toBeNull();
+    const optionValues = Array.from(select!.options).map((o) => o.value);
+    expect(optionValues).toEqual(["Data", "Summary"]);
+    expect(select!.value).toBe("Data");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  }, 60_000);
+
+  it("falls back to DEFAULT_SHEETS when getWorkbookInfo is unavailable", async () => {
+    // Simulate an older engine build without getWorkbookInfo.
+    const originalFn = mocks.engine.getWorkbookInfo;
+    mocks.engine.getWorkbookInfo = undefined as any;
+
+    const drawnText: Array<{ text: string; x: number; y: number }> = [];
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return createMock2dContext(this, drawnText);
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(App));
+    });
+
+    await act(async () => {
+      await flushMicrotasks(10);
+    });
+
+    expect(host.textContent).toContain("Engine: ready");
+    const select = host.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+    expect(select).not.toBeNull();
+    // Fallback should use DEFAULT_SHEETS which is ["Sheet1"].
+    expect(select!.value).toBe("Sheet1");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+
+    // Restore the mock for other tests.
+    mocks.engine.getWorkbookInfo = originalFn;
   }, 60_000);
 });

@@ -5,6 +5,7 @@ import {
   type CellDataCompact,
   type CellScalar,
   type EngineClient,
+  type WorkbookInfoDto,
 } from "@formula/engine";
 import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
 import type { CellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
@@ -29,7 +30,25 @@ import { EngineCellProvider } from "./EngineCellProvider";
 import { isFormulaInput, parseCellScalarInput, scalarToDisplayString } from "./cellScalar";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
-const DEMO_SHEETS = ["Sheet1", "Sheet2"] as const;
+const DEFAULT_SHEETS = ["Sheet1"];
+
+/** Query the engine for visible sheet names, falling back to a sensible default. */
+async function getVisibleSheetNames(engine: EngineClient): Promise<string[]> {
+  try {
+    if (typeof engine.getWorkbookInfo === "function") {
+      const info: WorkbookInfoDto = await engine.getWorkbookInfo();
+      const visible = info.sheets
+        .filter((s) => s.visibility !== "hidden" && s.visibility !== "veryHidden")
+        .map((s) => s.name);
+      if (visible.length > 0) return visible;
+      // All sheets hidden — return all names so the user can at least see something.
+      if (info.sheets.length > 0) return info.sheets.map((s) => s.name);
+    }
+  } catch {
+    // Older engine builds may not support getWorkbookInfo — fall through.
+  }
+  return [...DEFAULT_SHEETS];
+}
 
 function readRootCssVar(name: string, fallback: string): string {
   if (typeof document === "undefined" || typeof getComputedStyle !== "function") return fallback;
@@ -47,7 +66,8 @@ function EngineDemoApp() {
   const [engineStatus, setEngineStatus] = useState("starting…");
   const engineRef = useRef<ReturnType<typeof createEngineClient> | null>(null);
   const [provider, setProvider] = useState<EngineCellProvider | null>(null);
-  const [activeSheet, setActiveSheet] = useState<(typeof DEMO_SHEETS)[number]>(DEMO_SHEETS[0]);
+  const [sheets, setSheets] = useState<string[]>(DEFAULT_SHEETS);
+  const [activeSheet, setActiveSheet] = useState<string>(DEFAULT_SHEETS[0]);
   const previousSheetRef = useRef<string | null>(null);
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
@@ -129,16 +149,20 @@ function EngineDemoApp() {
     grid?.focus({ preventScroll: true });
   };
 
+  const sheetsRef = useRef(sheets);
+  sheetsRef.current = sheets;
+
   const switchSheet = (delta: -1 | 1) => {
     const current = activeSheetRef.current;
-    const currentIndex = DEMO_SHEETS.findIndex((sheet) => sheet === current);
+    const list = sheetsRef.current;
+    const currentIndex = list.findIndex((sheet) => sheet === current);
     if (currentIndex < 0) {
-      setActiveSheet(DEMO_SHEETS[0]);
+      setActiveSheet(list[0]);
       queueMicrotask(() => focusGrid());
       return;
     }
-    const nextIndex = (currentIndex + delta + DEMO_SHEETS.length) % DEMO_SHEETS.length;
-    setActiveSheet(DEMO_SHEETS[nextIndex]);
+    const nextIndex = (currentIndex + delta + list.length) % list.length;
+    setActiveSheet(list[nextIndex]);
     queueMicrotask(() => focusGrid());
   };
 
@@ -206,7 +230,7 @@ function EngineDemoApp() {
     () => ({
       getSheet: (name: string) => {
         const trimmed = String(name ?? "").trim();
-        const candidates = DEMO_SHEETS;
+        const candidates = sheets;
         const resolved = candidates.find((s) => s.toLowerCase() === trimmed.toLowerCase());
         if (!resolved) {
           throw new Error(`Unknown sheet: ${name}`);
@@ -216,7 +240,7 @@ function EngineDemoApp() {
       getTable: () => null,
       getName: () => null,
     }),
-    [],
+    [sheets],
   );
 
   const goToSuggestion = useMemo(() => {
@@ -244,7 +268,7 @@ function EngineDemoApp() {
           if (!api) return;
 
           if (goToSuggestion.sheetName !== activeSheet) {
-            setActiveSheet(goToSuggestion.sheetName as (typeof DEMO_SHEETS)[number]);
+            setActiveSheet(goToSuggestion.sheetName);
           }
 
           const { range } = goToSuggestion;
@@ -584,13 +608,16 @@ function EngineDemoApp() {
       try {
         await engine.init();
         await engine.loadWorkbookFromJson(DEMO_WORKBOOK_JSON);
-        // Ensure there's a second sheet for the sheet selector demo.
-        await engine.setCell("A1", "Hello from Sheet2", "Sheet2");
         await engine.recalculate();
-        const b1 = await engine.getCell("B1");
+
+        const sheetNames = await getVisibleSheetNames(engine);
+        const firstSheet = sheetNames[0] ?? "Sheet1";
+
         if (!cancelled) {
-          setEngineStatus(`ready (B1=${b1.value === null ? "" : String(b1.value)})`);
-          setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: "Sheet1" }));
+          setSheets(sheetNames);
+          setActiveSheet(firstSheet);
+          setEngineStatus("ready");
+          setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: firstSheet }));
         }
       } catch (error) {
         if (!cancelled) {
@@ -1434,14 +1461,14 @@ function EngineDemoApp() {
             // Treat sheet switching as a navigation action: after the change, restore
             // focus to the grid so keyboard workflows (F2, typing, arrows) keep working.
             const nextSheet = e.target.value;
-            if (!DEMO_SHEETS.includes(nextSheet as (typeof DEMO_SHEETS)[number])) return;
-            setActiveSheet(nextSheet as (typeof DEMO_SHEETS)[number]);
+            if (!sheets.includes(nextSheet)) return;
+            setActiveSheet(nextSheet);
             queueMicrotask(() => focusGrid());
           }}
           style={{ padding: "4px 6px" }}
           disabled={!provider}
         >
-          {DEMO_SHEETS.map((sheet) => (
+          {sheets.map((sheet) => (
             <option key={sheet} value={sheet}>
               {sheet}
             </option>
@@ -1489,14 +1516,16 @@ function EngineDemoApp() {
               .then(async (buffer) => {
                 const bytes = new Uint8Array(buffer);
                 await engine.loadWorkbookFromXlsxBytes(bytes);
-                // Ensure there's still a Sheet2 option available for the demo selector.
-                await engine.setCell("A1", "Hello from Sheet2", "Sheet2");
                 await engine.recalculate();
-                const b1 = await engine.getCell("B1");
-                setEngineStatus(`ready (imported workbook; B1=${b1.value === null ? "" : String(b1.value)})`);
-                setActiveSheet("Sheet1");
+
+                const sheetNames = await getVisibleSheetNames(engine);
+                const firstSheet = sheetNames[0] ?? "Sheet1";
+
+                setSheets(sheetNames);
+                setActiveSheet(firstSheet);
                 previousSheetRef.current = null;
-                setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: "Sheet1" }));
+                setEngineStatus(`ready (imported ${file.name})`);
+                setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: firstSheet }));
               })
               .catch((error) => {
                 setEngineStatus(`error: ${error instanceof Error ? error.message : String(error)}`);
